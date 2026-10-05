@@ -55,8 +55,11 @@ names. Host- and vendor-specific behavior enters through these seams:
   explicit `base_url` (there is no default endpoint), takes optional
   `temperature`, and passes provider-specific request fields through
   `extra_body`. An integration adds its own kinds as `host_kinds`, a mapping
-  from kind name to factory. An unknown kind fails validation. No in-tree
-  integration registers a kind yet.
+  from kind name to factory. An unknown kind fails validation. The reference
+  adapters, the Claude Code gate and the Codex runner register
+  `decisions-api` (`src/nunchi/adapters/decisions_api.py`), a typed decision
+  model behind OpenRouter's Decisions API (`model`, optional `url`,
+  `api_key_env`).
 - `HostTextAttentionModel(complete, ...)` is for hosts whose completion
   returns text only, with no JSON-schema mode and no report of the served
   model, such as a mod running attention on the user's own plan (not built
@@ -167,25 +170,55 @@ another consumer's success.
 
 ## Attention judgment returned by the delegated model
 
-```json
-{
-  "disposition": "SUPPRESS",
-  "reasons": ["not relevant to this participant"],
-  "evidence_event_ids": ["discord:message:123"],
-  "legacy_verdict_confidences": {
-    "PASS": 0.91,
-    "ACK": 0.03,
-    "ASK": 0.02,
-    "SPEAK": 0.04
-  }
-}
-```
+Steps 1 and 2 of reading the room are fixed typed questions about the judged
+message (`src/nunchi/attention_questions.py`, Zoe, 2026-10-05, #94 step 4).
+Step 1 asks whether it is conversation that a participant like this one
+could take part in; a message addressed to someone else is still
+conversation. Step 2 asks who it is addressed to, whether it was already
+answered and by which message, whether its author is mid-thought, whether
+the participant has something to add, and which kinds of response could fit.
 
-The confidence vector is margin evidence, not a V1 lifecycle verdict.
-Uncertainty returns `DEFER`. `ACK` selects the core-configured lightweight
-reaction. Every judgment may include evidence-bound `attention_advice`, the
-model's reading of the room; it reaches the participant on WAKE and DEFER
-turns.
+There are two routes, and both produce the same answers:
+
+- **A chat model** answers all the questions as one JSON object, with up to
+  three notes on the room in its own words:
+
+  ```json
+  {
+    "conversation": 0.97,
+    "addressee": {"participant": 0.05, "room": 0.1, "someone_else": 0.8, "nobody": 0.05},
+    "answered": 0.1,
+    "answered_by": null,
+    "mid_thought": 0.05,
+    "adds_something": 0.7,
+    "move": {"speak": 0.3, "mhm": 0.0, "wait": 0.6, "stay_quiet": 0.1},
+    "notes": [{"note": "Zoe asked Castor, who has not answered yet.", "evidence_event_ids": ["discord:message:123"]}]
+  }
+  ```
+
+  Every yes/no answer is a probability. One written as `true`/`false`,
+  `"yes"`/`"no"`, or a `{"yes": p, "no": q}` split is read as the
+  probability it states; anything else malformed fails the judgment.
+
+- **A typed decision model** has an `answer(questions, state, timeout_seconds)`
+  method. It receives the questions and the conversation as a state document
+  (`attention_state`) and answers them natively, with probabilities. The
+  engine prefers it whenever a model has it.
+
+The core decides from the answers. A `conversation` below 0.5 selects
+`SUPPRESS`, and the margin valve widens a near call to `DEFER`. Otherwise
+the most likely move decides: `speak` wakes the participant, `mhm` selects
+`ACK` (a participant turn by default), and `wait` or `stay_quiet` defer to
+the participant with the reading. Ties go to the move that pays more
+attention. The participant then decides for itself. The decision records
+the answers (`answers`), short audit strings, and every message they cite.
+
+The reading of the room (`attention_advice`) is written from the answers.
+It holds the model's own notes, or notes rendered from its answers when it
+wrote none, and its last note is always the kinds of response that could
+fit, with their probabilities. It reaches the participant on WAKE and DEFER
+turns. A malformed answer fails the judgment and follows the error policy; a
+malformed note or a pointer to an unknown message is dropped on its own.
 
 ## Normal participant result
 

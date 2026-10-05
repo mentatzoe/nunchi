@@ -26,6 +26,7 @@ from evals.behavior.scene import (
     parse_scene,
 )
 from evals.behavior.score import cell, grade, visible_result
+from nunchi.attention_questions import answers_leaning
 from nunchi.observation import ObservationLimits
 
 
@@ -33,22 +34,12 @@ PARTICIPANTS = load_participants()
 
 
 def judgment(disposition, *, evidence=(), suppress_margin=True, reading=None):
-    confidences = {"PASS": 0.0, "ACK": 0.0, "ASK": 0.0, "SPEAK": 0.0}
-    if disposition == "SUPPRESS":
-        confidences["PASS"] = 1.0 if suppress_margin else 0.5
-    elif disposition == "ACK":
-        confidences["ACK"] = 1.0
-    else:
-        confidences["SPEAK"] = 1.0
-    result = {
-        "disposition": disposition,
-        "reasons": [f"fixture {disposition}"],
-        "evidence_event_ids": list(evidence),
-        "legacy_verdict_confidences": confidences,
-    }
-    if reading is not None:
-        result["attention_advice"] = [
-            {"note": reading, "evidence_event_ids": list(evidence)}
+    """Typed answers for one disposition; the model's note cites ``evidence``."""
+
+    result = answers_leaning(disposition, close=not suppress_margin)
+    if evidence:
+        result["notes"] = [
+            {"note": reading or f"fixture {disposition}", "evidence_event_ids": list(evidence)}
         ]
     return result
 
@@ -284,8 +275,11 @@ class JudgeMomentTests(unittest.TestCase):
         self.assertEqual([], model.projections)
 
     def test_cited_facts_follow_the_models_evidence(self):
+        # The judgment always cites the judged message (m1, in the first
+        # fact); the model's note cites n2 (the second).
         record, _ = self.judge("quiet-for-hours", 0, "WAKE", evidence=("n2",))
-        self.assertEqual([False, True], record["cited"])
+        self.assertEqual([True, True], record["cited"])
+        self.assertEqual(["m1", "n2"], record["decision"]["evidence_event_ids"])
 
     def test_provider_failure_wakes_and_is_recorded(self):
         class Broken(FixedModel):
@@ -394,7 +388,8 @@ class AgentTurnTests(unittest.TestCase):
 
     def test_the_record_says_how_the_agent_got_its_turn(self):
         record, _ = self.judge("story-across-messages", 2, "WAKE", speaks, reading="Zoe has finished her story")
-        self.assertEqual({"source": "WAKE", "reading_items": 1}, record["agent"]["attention"])
+        # The model's note, then the kinds of response that could fit.
+        self.assertEqual({"source": "WAKE", "reading_items": 2}, record["agent"]["attention"])
         self.assertEqual("WAKE", run.turn_source(record))
 
     def test_a_paired_turn_is_played_again_without_the_reading_and_never_sent(self):
@@ -420,7 +415,7 @@ class AgentTurnTests(unittest.TestCase):
         self.assertIsNone(unread["action"])
 
     def test_a_turn_without_a_reading_is_not_paired(self):
-        record, agent = self.judge("story-across-messages", 2, "WAKE", speaks, paired=True)
+        record, agent = self.judge("story-across-messages", 2, "WAKE", speaks, paired=True, reading_items=0)
         self.assertEqual(1, len(agent.turns))
         self.assertNotIn("without_reading", record["agent"])
 
@@ -608,17 +603,18 @@ class RunTests(unittest.TestCase):
         self.assertIn("HTTP 402 insufficient credits", summary)
 
     def test_a_rejected_reply_is_kept_with_its_reason(self):
-        class Uncited(FixedModel):
+        class OutOfRange(FixedModel):
             def judge(self, *, instructions, projection, timeout_seconds):
-                reply = judgment("WAKE", evidence=["not-in-the-snapshot"])
+                reply = judgment("WAKE")
+                reply["conversation"] = 1.5
                 return reply
 
         scene = scene_by_id("bot-status-report")
         job = run.Job(scene, 0, "vigil", "bad/model", 0)
-        record = run.judge_moment(job, lambda _: Uncited("WAKE"), timeout_seconds=5)
+        record = run.judge_moment(job, lambda _: OutOfRange("WAKE"), timeout_seconds=5)
         self.assertTrue(record["provider_error"])
-        self.assertEqual(["not-in-the-snapshot"], record["raw_reply"]["evidence_event_ids"])
-        self.assertEqual("model evidence must cite only supplied event IDs", record["invalid_reason"])
+        self.assertEqual(1.5, record["raw_reply"]["conversation"])
+        self.assertEqual("model answer conversation must be a probability within [0, 1]", record["invalid_reason"])
         summary = run.summarize(
             [scene], ["bad/model"], [record], [],
             {
@@ -627,7 +623,7 @@ class RunTests(unittest.TestCase):
                 "calls": 1, "provider_errors": 1, "command": "c",
             },
         )
-        self.assertIn("invalid reply: model evidence must cite only supplied event IDs", summary)
+        self.assertIn("invalid reply: model answer conversation must be a probability within [0, 1]", summary)
 
     def test_calls_to_one_model_are_capped(self):
         import threading

@@ -103,22 +103,23 @@ agent's side of the room:
 Moments that need a pause, such as "five minutes later, nobody has
 answered", have no route in today's V2 and are reported as not supported.
 
-## Jev
+## Two routes for attention
 
-Models named `typesafe/...` (for example `typesafe/jev-1.13`) go through
-OpenRouter's Decisions API instead of the chat endpoint (`jev.py`). Jev is a
-typed decision model: it answers questions about the conversation with
-probabilities, never text. This prototype asks it six questions about the
-judged message:
+Every attention model answers the same typed questions about the judged
+message (`src/nunchi/attention_questions.py`):
 
-- is it conversation;
+- is it conversation (step 1);
 - who is it addressed to;
-- has someone already answered it;
+- has someone already answered it, and with which message;
 - is the author mid-thought;
 - does the participant have something to add;
 - which move fits: speak, mhm, wait, or stay quiet.
 
-The most likely move decides the disposition, and the reading the agent sees
-is written from the answers. Step 4 of the plan on #94 replaces this
-prototype with typed questions that both Jev and an LLM answer. Each record
-keeps Jev's answers and the snapshot that served them under `model_response`.
+Chat models answer them as one JSON object through the OpenAI-compatible
+endpoint. Models named `typesafe/...` (for example `typesafe/jev-1.13`) are
+typed decision models: they go through OpenRouter's Decisions API
+(`src/nunchi/adapters/decisions_api.py`, `--jev-url`) and answer with
+probabilities, never text. The core decides from the answers either way, so
+a run compares the two routes on the same scenes. Each record keeps the
+answers under `decision.answers`, and a typed model's full response and the
+snapshot that served it under `model_response`.

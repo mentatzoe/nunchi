@@ -98,7 +98,7 @@ SCHEMA_FILES = {
 
 INTERFACE_VERSIONS = {
     "attention-request": ("I-010A", "AttentionRequestV2", 1),
-    "attention-decision": ("I-010B", "AttentionDecisionV2", 4),
+    "attention-decision": ("I-010B", "AttentionDecisionV2", 5),
     "participant-wake": ("I-010C", "ParticipantWakeV2", 3),
     "context-continuation": ("I-010D", "ContextContinuationV2", 1),
     "attention-receipt": ("I-010E", "AttentionReceiptV2", 3),
@@ -141,6 +141,28 @@ NON_FINITE_SENTINELS = {
 
 DISPOSITIONS = ("SUPPRESS", "ACK", "WAKE", "DEFER")
 VERDICT_KEYS = ("PASS", "ACK", "ASK", "SPEAK")
+# The typed answers behind every status-ok decision (@5, #94 step 4).
+ANSWER_YES_NO = ("conversation", "answered", "mid_thought", "adds_something")
+ANSWER_CHOICES = {
+    "addressee": ("participant", "room", "someone_else", "nobody"),
+    "move": ("speak", "mhm", "wait", "stay_quiet"),
+}
+ANSWER_KEYS = ANSWER_YES_NO + tuple(ANSWER_CHOICES)
+
+
+def make_answers(**overrides: Any) -> dict[str, Any]:
+    """Typed answers that lean toward speaking."""
+
+    answers: dict[str, Any] = {
+        "conversation": 0.95,
+        "addressee": {"participant": 0.8, "room": 0.1, "someone_else": 0.05, "nobody": 0.05},
+        "answered": 0.05,
+        "mid_thought": 0.05,
+        "adds_something": 0.8,
+        "move": {"speak": 0.7, "mhm": 0.1, "wait": 0.15, "stay_quiet": 0.05},
+    }
+    answers.update(overrides)
+    return answers
 WAKE_SOURCES = ("ACK", "WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS")
 ROUTING_VALVES = (
     "none",
@@ -1084,8 +1106,9 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
         "reasons",
         "evidence_event_ids",
         "classifier",
+        "answers",
     )
-    allowed = required + ("legacy_verdict_confidences", "attention_advice", "ack")
+    allowed = required + ("attention_advice", "ack")
     if not _check_closed_object(errors, "decision", doc, required, allowed):
         return list(errors)
     _check_nes(errors, "request_id", doc.get("request_id"))
@@ -1121,13 +1144,20 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
     if "classifier" in doc:
         _check_classifier_audit(errors, "classifier", doc["classifier"])
 
-    confidences = doc.get("legacy_verdict_confidences")
-    if "legacy_verdict_confidences" in doc and _check_closed_object(
-        errors, "legacy_verdict_confidences", confidences, VERDICT_KEYS, VERDICT_KEYS
+    answers = doc.get("answers")
+    if "answers" in doc and _check_closed_object(
+        errors, "answers", answers, ANSWER_KEYS, ANSWER_KEYS + ("answered_by",)
     ):
-        for key in VERDICT_KEYS:
-            if key in confidences:
-                _check_confidence(errors, f"legacy_verdict_confidences.{key}", confidences[key])
+        for key in ANSWER_YES_NO:
+            if key in answers:
+                _check_confidence(errors, f"answers.{key}", answers[key])
+        for key, options in ANSWER_CHOICES.items():
+            if key in answers and _check_closed_object(errors, f"answers.{key}", answers[key], options, options):
+                for option in options:
+                    if option in answers[key]:
+                        _check_confidence(errors, f"answers.{key}.{option}", answers[key][option])
+        if "answered_by" in answers:
+            _check_nes(errors, "answers.answered_by", answers["answered_by"])
 
     if "attention_advice" in doc:
         _check_attention_advice_list(errors, "attention_advice", doc["attention_advice"])
@@ -1152,17 +1182,6 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
     # when the classifier disposition is SUPPRESS while the routing audit
     # reports the margin active; it stays optional (and permitted) on WAKE,
     # DEFER, and a margin-retired SUPPRESS.
-    if (
-        classifier == "SUPPRESS"
-        and isinstance(routing, dict)
-        and routing.get("margin_status") == "active"
-        and "legacy_verdict_confidences" not in doc
-    ):
-        errors.add(
-            "legacy_verdict_confidences",
-            "required: a margin-active candidate SUPPRESS must carry the "
-            "legacy verdict confidence vector (FR-007)",
-        )
 
     # Closed ok-transition matrix: only declared classifier/effective pairs are
     # successful; every other pairing must take the operational-error path.
@@ -3126,7 +3145,7 @@ def make_decision_ok(
             "provider": "openrouter",
             "model": "test-model",
         },
-        "legacy_verdict_confidences": {"PASS": 0.05, "ACK": 0.1, "ASK": 0.15, "SPEAK": 0.7},
+        "answers": make_answers(),
     }
     if classifier == "ACK":
         doc["ack"] = {

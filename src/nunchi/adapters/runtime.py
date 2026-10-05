@@ -35,6 +35,7 @@ from ..participant import (
 from ..participant_model import OpenAICompatibleParticipant
 from ..pipeline import AsyncDeliveryLane, DeliveryOutcome, NunchiV2Pipeline
 from ..receipts import ReceiptJournal
+from .decisions_api import ATTENTION_KINDS
 from .v2 import NORMALIZERS
 
 
@@ -238,7 +239,7 @@ class ReferenceAdapterRuntime:
             raise ValidationError("adapter attention config must contain policy and model")
         policy = _policy(attention_raw["policy"])
         model = (
-            attention_model_from_config(attention_raw["model"])
+            attention_model_from_config(attention_raw["model"], host_kinds=ATTENTION_KINDS)
             if policy.preattention_enabled
             else None
         )

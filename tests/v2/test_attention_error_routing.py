@@ -11,6 +11,7 @@ from __future__ import annotations
 import threading
 import unittest
 
+from nunchi.attention_questions import ADDRESSEES, MOVES, QUESTION_IDS, answers_leaning, validate_answers
 from nunchi.attention import (
     ATTENTION_JUDGMENT_SCHEMA,
     AttentionCancelled,
@@ -83,19 +84,13 @@ class ProviderTextNeverSuppressesTests(unittest.TestCase):
             _RaisingModel(AttentionDeadlineExceeded("provider's own timeout"))
         )
 
-    def test_duplicate_evidence_is_a_provider_failure_not_a_crash(self) -> None:
-        def duplicated(projection):
-            trigger = projection["trigger_event_id"]
-            return {
-                "disposition": "SUPPRESS",
-                "reasons": ["duplicated citation"],
-                "evidence_event_ids": [trigger, trigger],
-                "legacy_verdict_confidences": {
-                    "PASS": 0.9, "ACK": 0.03, "ASK": 0.03, "SPEAK": 0.04
-                },
-            }
+    def test_a_malformed_answer_is_a_provider_failure_not_a_crash(self) -> None:
+        def out_of_range(projection):
+            answers = answers_leaning("SUPPRESS")
+            answers["conversation"] = 1.5
+            return answers
 
-        self.assert_wakes_on_provider_failure(_JudgmentModel(duplicated))
+        self.assert_wakes_on_provider_failure(_JudgmentModel(out_of_range))
 
 
 class EngineOwnedErrorsTests(unittest.TestCase):
@@ -124,13 +119,20 @@ class EngineOwnedErrorsTests(unittest.TestCase):
 
 
 class JudgmentSchemaMatchesValidatorTests(unittest.TestCase):
-    def test_schema_requires_the_non_empty_values_the_validator_requires(self) -> None:
+    def test_schema_asks_every_question_the_validator_requires(self) -> None:
         props = ATTENTION_JUDGMENT_SCHEMA["properties"]
-        self.assertEqual(1, props["reasons"]["items"]["minLength"])
-        self.assertEqual(1, props["evidence_event_ids"]["items"]["minLength"])
-        advice = props["attention_advice"]["items"]["properties"]
-        self.assertEqual(1, advice["note"]["minLength"])
-        self.assertEqual(1, advice["evidence_event_ids"]["minItems"])
+        self.assertEqual(list(QUESTION_IDS), ATTENTION_JUDGMENT_SCHEMA["required"])
+        for key in ("conversation", "answered", "mid_thought", "adds_something"):
+            self.assertEqual((0, 1), (props[key]["minimum"], props[key]["maximum"]))
+        self.assertEqual(list(ADDRESSEES), props["addressee"]["required"])
+        self.assertEqual(list(MOVES), props["move"]["required"])
+        notes = props["notes"]["items"]["properties"]
+        self.assertEqual(1, notes["note"]["minLength"])
+        self.assertEqual(1, notes["evidence_event_ids"]["minItems"])
+        # Every disposition's scripted answers pass the validator.
+        for disposition in ("WAKE", "ACK", "DEFER", "SUPPRESS"):
+            with self.subTest(disposition=disposition):
+                validate_answers(answers_leaning(disposition), event_ids={"e1"}, trigger_event_id="e1")
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -21,6 +21,7 @@ import unittest
 from unittest import mock
 
 from nunchi import cli
+from nunchi.attention_questions import answers_leaning
 from nunchi.attention import (
     AttentionEngine,
     AttentionModelSelection,
@@ -47,14 +48,7 @@ CHAT_PLATFORM_LABEL_FILES = {"conformance.py"}
 
 
 def _judgment(trigger: str, disposition: str = "WAKE") -> dict:
-    return {
-        "disposition": disposition,
-        "reasons": ["asked directly"],
-        "evidence_event_ids": [trigger],
-        "legacy_verdict_confidences": {
-            "PASS": 0.02, "ACK": 0.03, "ASK": 0.05, "SPEAK": 0.9
-        },
-    }
+    return answers_leaning(disposition)
 
 
 class CoreNamesNoHostVendorOrPlatformTests(unittest.TestCase):

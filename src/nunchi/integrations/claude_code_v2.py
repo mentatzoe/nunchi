@@ -38,6 +38,7 @@ import urllib.error
 
 from .. import __version__
 from ..ack import AckJournal, AckPolicy
+from ..adapters.decisions_api import ATTENTION_KINDS
 from ..adapters.runtime import load_pinned_config
 from ..attention import (
     AttentionEngine,
@@ -435,7 +436,7 @@ class ClaudeCodeRoomRuntime:
             raise ValidationError("Claude Code attention config is invalid")
         policy = AttentionPolicy(**attention_raw["policy"])
         model = (
-            attention_model_from_config(attention_raw["model"])
+            attention_model_from_config(attention_raw["model"], host_kinds=ATTENTION_KINDS)
             if policy.preattention_enabled
             else None
         )

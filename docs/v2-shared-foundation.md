@@ -14,7 +14,7 @@ The changed portable interfaces are:
 
 | Interface | Version | Change |
 |---|---:|---|
-| `I-010B AttentionDecisionV2` | `@4` | first-class `ACK`, ACK audit, and safe ACK-to-DEFER widening (@3); the reading of the room on every judgment (@4) |
+| `I-010B AttentionDecisionV2` | `@5` | first-class `ACK`, ACK audit, and safe ACK-to-DEFER widening (@3); the reading of the room on every judgment (@4); the model's typed answers in place of the legacy confidence vector (@5) |
 | `I-010C ParticipantWakeV2` | `@3` | `ACK` wake/effect source without a reading (@2); the reading on `DEFER` wakes and `judged_through_event_id` (@3) |
 | `I-010E AttentionReceiptV2` | `@3` | ACK disposition, authority audit, and ACK host source |
 | `I-030A AttentionEngineV2` | `@2` | shared ACK selection and capability/policy widening |
@@ -49,7 +49,9 @@ the core. `attention_model_from_config(config, host_kinds=...)` selects an
 implementation by `kind`; the default `openai-compatible` kind needs an
 explicit `base_url` (there is no vendor default endpoint) and passes any
 provider-specific request fields through `extra_body`. An integration adds its
-own kinds through `host_kinds`. `HostTextAttentionModel` serves hosts whose
+own kinds through `host_kinds`; the reference adapters, the Claude Code gate
+and the Codex runner add `decisions-api`, a typed decision model that answers
+the attention questions natively. `HostTextAttentionModel` serves hosts whose
 completion returns plain text, such as a mod running attention on the user's
 own plan (not built); `HostStructuredAttentionModel` serves hosts with structured
 completion and takes the host's denial check (`is_denial`, `denied_detail`)

@@ -161,7 +161,7 @@ A truthful attention request represents:
   to coverage plus expansion-capability booleans before that call. This is
   a runtime-adapter-only behavior, not a schema constraint.
 
-## I-010B AttentionDecisionV2@4
+## I-010B AttentionDecisionV2@5
 
 A tagged host-facing union on `status`:
 
@@ -170,8 +170,8 @@ A tagged host-facing union on `status`:
   required sibling `reasons` audit field (an array of audit strings,
   possibly empty, that never enters the participant turn and is never a
   member of the routing-audit object), `evidence_event_ids`, `classifier`
-  (`{name, provider?, model?}`), the optional conditional
-  `legacy_verdict_confidences` vector (FR-007, below), the optional
+  (`{name, provider?, model?}`), the required typed `answers` behind the
+  judgment (@5, below), the optional
   `attention_advice` reading of the room (an array of at most 4
   `{note, evidence_event_ids}` items with notes of at most 400 characters,
   allowed on every pair since @4), and an ACK-only authority audit. The declared
@@ -227,18 +227,23 @@ A tagged host-facing union on `status`:
 `@3` adds the ACK disposition, the two ACK transitions, capability-defer, and
 the ACK authority audit. These are additive product outcomes but a breaking
 closed-union change: `@2` consumers must upgrade before receiving ACK.
-- **`legacy_verdict_confidences` (FR-007, conditional)** — optional on
-  `status: ok` and required exactly when the classifier disposition is
-  `SUPPRESS` while the routing audit reports the margin `active`; a
-  margin-active candidate suppression without a valid vector does not
-  validate. A well-formed vector may accompany `WAKE`, `DEFER`, or a
-  margin-retired `SUPPRESS` without invalidating them. When present:
-  exactly the four keys `PASS`, `ACK`, `ASK`, `SPEAK`, each a finite
-  number in `[0, 1]`. The optional field, its exact four-key shape, and
-  this conditional requirement are fixed for the `@1` major version —
-  margin retirement flips only the reported margin status under later
-  evidence and is not a schema edit, while removing or reshaping the
-  field is a breaking `@2` edit.
+- **`answers` (@5)** — required on `status: ok` (Zoe, 2026-10-05, #94
+  step 4). The model answers fixed typed questions about the judged
+  message, and the core decides from them. Step 1: `conversation`, the
+  probability that it is conversation a participant like this one could take
+  part in; only a value below 0.5 selects `SUPPRESS`, and the margin valve
+  widens a near call to `DEFER`. Step 2: `addressee` (`participant`, `room`,
+  `someone_else`, `nobody`), `answered` and the optional `answered_by`
+  pointer to the supplied message that answered it, `mid_thought`,
+  `adds_something`, and `move` (`speak`, `mhm`, `wait`, `stay_quiet`): the
+  most likely move selects `WAKE`, `ACK`, or `DEFER` for wait and stay quiet,
+  with ties going to the move that pays more attention. Yes/no answers are
+  finite numbers in `[0, 1]`; a choice names exactly its options, each in
+  `[0, 1]`, normalized by the core to sum to 1. `answered_by` must name a
+  supplied event (runtime-adapter-only). The V1-era
+  `legacy_verdict_confidences` vector that `answers` replaces is no longer
+  allowed. A chat model answers the questions as one JSON object; a typed
+  decision model answers them natively; both produce the same `answers`.
 - **`status: bypass`** — exactly `cause: "preattention-disabled"` and
   `request_id`, nothing else. The full FR-005 exclusion set applies
   identically everywhere: no classifier/effective disposition, classifier
@@ -503,9 +508,8 @@ verbatim (FR-014, `REQ-AUTH-001` in the authority-conformance corpus):
 }
 ```
 
-A governed suppression (`status: ok`, `SUPPRESS -> SUPPRESS`; the margin
-is active, so the legacy vector is required per the conditional FR-007
-rule):
+A governed suppression (`status: ok`, `SUPPRESS -> SUPPRESS`; step 1 found
+the judged message is not conversation):
 
 ```json
 {
@@ -514,10 +518,17 @@ rule):
   "classifier_disposition": "SUPPRESS",
   "effective_disposition": "SUPPRESS",
   "routing_audit": {"valve": "none", "override_cause": "none", "margin_status": "active"},
-  "reasons": ["no direct address and no open question"],
+  "reasons": ["conversation 0.05", "addressee nobody 1.00", "move stay_quiet 0.90"],
   "evidence_event_ids": ["e1"],
   "classifier": {"name": "nunchi-classifier"},
-  "legacy_verdict_confidences": {"PASS": 0.8, "ACK": 0.1, "ASK": 0.05, "SPEAK": 0.05}
+  "answers": {
+    "conversation": 0.05,
+    "addressee": {"participant": 0.0, "room": 0.0, "someone_else": 0.0, "nobody": 1.0},
+    "answered": 0.0,
+    "mid_thought": 0.0,
+    "adds_something": 0.0,
+    "move": {"speak": 0.0, "mhm": 0.0, "wait": 0.1, "stay_quiet": 0.9}
+  }
 }
 ```
 
@@ -531,10 +542,17 @@ routing audit records its effective width):
   "classifier_disposition": "SUPPRESS",
   "effective_disposition": "DEFER",
   "routing_audit": {"valve": "margin-defer", "override_cause": "margin", "margin_status": "active", "effective_margin": 0.12},
-  "reasons": ["candidate suppression inside the protective margin"],
+  "reasons": ["conversation 0.47", "addressee nobody 0.60", "move stay_quiet 0.70"],
   "evidence_event_ids": ["e1"],
   "classifier": {"name": "nunchi-classifier"},
-  "legacy_verdict_confidences": {"PASS": 0.55, "ACK": 0.2, "ASK": 0.15, "SPEAK": 0.1}
+  "answers": {
+    "conversation": 0.47,
+    "addressee": {"participant": 0.1, "room": 0.2, "someone_else": 0.1, "nobody": 0.6},
+    "answered": 0.1,
+    "mid_thought": 0.1,
+    "adds_something": 0.2,
+    "move": {"speak": 0.1, "mhm": 0.05, "wait": 0.15, "stay_quiet": 0.7}
+  }
 }
 ```
 
@@ -570,11 +588,10 @@ A participant-silence receipt record (the S07 stream ends at this stage):
 ## Versioning and change control
 
 `@1` is the first V2 execution version. A breaking edit requires a version
-bump and re-verification of every consumer. The optional
-`legacy_verdict_confidences` field, its exact four-key shape, and its
-conditional margin-active-suppression requirement are permanent for `@1`
-(FR-007) — margin retirement flips only the reported `margin_status`, never
-the schema. Each runtime must pass its adapter against the same contract corpus
+bump and re-verification of every consumer. `I-010B@5` replaced the
+`legacy_verdict_confidences` vector, fixed for `@1` through `@4` (FR-007),
+with the required typed `answers`; margin retirement still flips only the
+reported `margin_status`, never the schema. Each runtime must pass its adapter against the same contract corpus
 before integration.
 Evidence for the contract runs lives at
 `evidence/v2/contract/attention-request.jsonl`,

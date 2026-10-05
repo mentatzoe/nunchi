@@ -16,6 +16,7 @@ import types
 import unittest
 from unittest import mock
 
+from nunchi.attention_questions import answers_leaning
 from nunchi.attention import (
     AttentionModelSelection,
     AttentionPolicy,
@@ -180,17 +181,8 @@ def judgment(
     *,
     pass_confidence: float = 0.01,
 ) -> dict:
-    return {
-        "disposition": disposition,
-        "reasons": ["test decision"],
-        "evidence_event_ids": [event_id],
-        "legacy_verdict_confidences": {
-            "PASS": pass_confidence,
-            "ACK": 0.01,
-            "ASK": 0.08,
-            "SPEAK": 0.9 if pass_confidence < 0.5 else 0.01,
-        },
-    }
+    # A suppression the model is unsure of is a near call the margin widens.
+    return answers_leaning(disposition, close=pass_confidence < 0.5)
 
 
 def room_config(
@@ -328,7 +320,7 @@ class HermesPortableTests(unittest.TestCase):
         self.assertEqual("test-provider", llm.calls[0]["provider"])
         self.assertEqual("test-model", llm.calls[0]["model"])
         self.assertIn(
-            "Uncertainty must return DEFER, never SUPPRESS",
+            'When unsure, answer high: a wrong "not conversation" hides the moment',
             llm.calls[0]["instructions"],
         )
 

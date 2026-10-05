@@ -66,6 +66,29 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- Attention reads the room as typed questions (#94, plan step 4; Zoe,
+  2026-10-05). Step 1 asks whether the judged message is conversation a
+  participant like this one could take part in; only a "no" suppresses, and
+  a message addressed to someone else is still conversation. Step 2 asks who
+  it is addressed to, whether it was answered and by which message, whether
+  its author is mid-thought, whether the participant has something to add,
+  and which kinds of response could fit. Speaking wakes the participant; a
+  mhm, waiting or staying quiet give it a turn with the reading, and it
+  decides. The reading is written from the answers and always ends with the
+  kinds of response that could fit and their probabilities. Two routes give
+  the same answers: a chat model answers the questions as JSON, and a typed
+  decision model answers them natively through the new `decisions-api`
+  attention kind (`src/nunchi/adapters/decisions_api.py`), registered by the
+  reference adapters, the Claude Code runner and the Codex runner.
+  `I-010B AttentionDecisionV2@5` records the typed `answers` and drops the
+  PASS/ACK/ASK/SPEAK `legacy_verdict_confidences` vector; every prompt,
+  schema, fixture, conformance scenario and contract case moved with it.
+  The behavior suite's Jev prototype is replaced by the adapter. The chat
+  prompt shows the answer shape with a number for each yes/no question, and
+  a yes/no answer written as `true`/`false`, `"yes"`/`"no"` or a
+  `{"yes", "no"}` split is read as the probability it states: in the first
+  behavior run every chat model wrote some answers that way, which failed
+  44% of chat-model judgments.
 - The agent sees the room as it is now, and looks again before speaking
   (#94, plan step 3; Zoe, 2026-10-05). The gate's context and the agent's
   own view are separate. During its turn the agent reads the live room:

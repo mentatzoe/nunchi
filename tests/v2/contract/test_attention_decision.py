@@ -1,26 +1,20 @@
-"""Contract tests for ``I-010B AttentionDecisionV2@4`` (slice 010, T003;
-reworked by T028 after rejection R2).
+"""Contract tests for ``I-010B AttentionDecisionV2@5`` (slice 010, T003;
+reworked by T028 after rejection R2; @5 for #94 step 4).
 
-This file supersedes, in writing, T003's original framing of
-"legacy-confidence-vector constraints on every ``status: ok`` decision":
-per the spec's 2026-07-17 clarification session (FR-005/FR-007 as landed at
-``89aef07``), the legacy verdict confidence vector is optional on
-``status: ok`` and required exactly when the classifier disposition is
-``SUPPRESS`` while the routing audit reports the margin ``active``. The red
-cases below — including the sentinel-decoded
-``"NaN"``/``"Infinity"``/``"-Infinity"`` non-finite ones — are keyed to that
-conditional FR-007 rule: a margin-active candidate ``SUPPRESS`` without a
-valid vector rejects, while ``WAKE``, ``DEFER``, and margin-retired
-``SUPPRESS`` decisions stay valid with or without a well-formed vector.
-Further red cases cover the closed FR-005 routing audit's cross-field rules
-(applied valve, override cause, margin status, effective margin exactly
-when the margin applied, trusted margin source only on a margin-applied
-decision), the sibling ok-branch ``reasons`` placement, the forbidden
-classifier fields on the ``preattention-disabled`` bypass branch (the full
-FR-005 exclusion set), and the FR-013 advice rules keyed to the classifier
-disposition (advice citing nonexistent event IDs is runtime-adapter-only).
-The corpus suite runs the ``evals/v2/contract/attention-decision`` corpus
-through both validators.
+@5 (Zoe, 2026-10-05) grounds every ``status: ok`` decision in the model's
+typed answers (``answers``): exactly the step 1 and step 2 questions, each a
+finite value in [0,1], choices naming exactly their options, and an optional
+``answered_by`` pointer. The V1-era legacy verdict confidence vector it
+replaces is no longer allowed. Red cases include the sentinel-decoded
+``"NaN"``/``"Infinity"``/``"-Infinity"`` non-finite answers. Further red
+cases cover the closed FR-005 routing audit's cross-field rules (applied
+valve, override cause, margin status, effective margin exactly when the
+margin applied, trusted margin source only on a margin-applied decision),
+the sibling ok-branch ``reasons`` placement, the forbidden classifier fields
+on the ``preattention-disabled`` bypass branch (the full FR-005 exclusion
+set), and the reading rules (advice citing nonexistent event IDs is
+runtime-adapter-only). The corpus suite runs the
+``evals/v2/contract/attention-decision`` corpus through both validators.
 """
 
 from __future__ import annotations
@@ -35,6 +29,7 @@ from tests.v2.contract.schema_helpers import (
     make_advice,
     make_decision_bypass,
     make_decision_error,
+    make_answers,
     make_decision_ok,
     make_request,
     make_routing,
@@ -221,102 +216,84 @@ class RoutingAuditCases(unittest.TestCase):
         assert_schema_verdict(self, "attention-decision", doc, "valid")
 
 
-class LegacyConfidenceCases(unittest.TestCase):
-    """FR-007 (conditional, superseding T003's every-ok-decision framing):
-    required exactly for a margin-active candidate ``SUPPRESS``; optional —
-    and permitted — on ``WAKE``, ``DEFER``, and margin-retired
-    ``SUPPRESS``; exactly four finite [0,1] keys when present."""
+class TypedAnswerCases(unittest.TestCase):
+    """@5 (Zoe, 2026-10-05, #94 step 4): every ok decision carries the
+    model's typed answers, exactly the questions with finite [0,1] values;
+    the V1-era legacy confidence vector is gone."""
 
-    @staticmethod
-    def _margin_active_suppression(**overrides):
-        return make_decision_ok("SUPPRESS", "SUPPRESS", "none", **overrides)
-
-    def test_margin_active_suppression_without_vector_rejects(self):
-        # The decisive R2 red case: a margin-active candidate SUPPRESS
-        # without the vector cannot validate.
-        doc = self._margin_active_suppression()
-        del doc["legacy_verdict_confidences"]
-        assert_schema_verdict(self, "attention-decision", doc, "invalid")
-
-    def test_wake_and_defer_without_the_optional_vector_stay_valid(self):
-        wake = make_decision_ok()
-        del wake["legacy_verdict_confidences"]
-        assert_schema_verdict(self, "attention-decision", wake, "valid")
-        defer = make_decision_ok("DEFER", "DEFER", "classifier-defer")
-        del defer["legacy_verdict_confidences"]
-        assert_schema_verdict(self, "attention-decision", defer, "valid")
-
-    def test_margin_retired_suppression_without_vector_stays_valid(self):
-        doc = self._margin_active_suppression()
-        doc["routing_audit"]["margin_status"] = "retired"
-        del doc["legacy_verdict_confidences"]
-        assert_schema_verdict(self, "attention-decision", doc, "valid")
-
-    def test_vector_presence_never_invalidates_an_ok_decision(self):
-        # CHK088: the permissive side — a well-formed vector may accompany
-        # WAKE, DEFER, or a margin-retired SUPPRESS.
-        retired = self._margin_active_suppression()
-        retired["routing_audit"]["margin_status"] = "retired"
+    def test_every_ok_decision_requires_answers(self):
         for doc in (
             make_decision_ok(),
             make_decision_ok("DEFER", "DEFER", "classifier-defer"),
-            retired,
+            make_decision_ok("SUPPRESS", "SUPPRESS", "none"),
+            make_decision_ok("SUPPRESS", "DEFER", "margin-defer"),
         ):
-            assert_schema_verdict(self, "attention-decision", doc, "valid")
+            with self.subTest(pair=(doc["classifier_disposition"], doc["effective_disposition"])):
+                assert_schema_verdict(self, "attention-decision", doc, "valid")
+                del doc["answers"]
+                assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
-    def test_margin_widened_suppression_requires_the_vector_too(self):
-        # SUPPRESS->DEFER via margin-defer implies margin active, so the
-        # candidate-SUPPRESS vector requirement applies.
-        doc = make_decision_ok("SUPPRESS", "DEFER", "margin-defer")
-        del doc["legacy_verdict_confidences"]
+    def test_the_legacy_vector_is_no_longer_allowed(self):
+        doc = make_decision_ok(legacy_verdict_confidences={"PASS": 0.05, "ACK": 0.1, "ASK": 0.15, "SPEAK": 0.7})
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
-    def test_missing_key_rejects(self):
-        doc = self._margin_active_suppression()
-        del doc["legacy_verdict_confidences"]["ASK"]
-        assert_schema_verdict(self, "attention-decision", doc, "invalid")
+    def test_a_missing_or_extra_question_rejects(self):
+        missing = make_decision_ok()
+        del missing["answers"]["mid_thought"]
+        extra = make_decision_ok()
+        extra["answers"]["obligation"] = 1.0
+        for doc in (missing, extra):
+            assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
-    def test_extra_key_rejects(self):
-        doc = self._margin_active_suppression()
-        doc["legacy_verdict_confidences"]["MUMBLE"] = 0.2
-        assert_schema_verdict(self, "attention-decision", doc, "invalid")
+    def test_a_choice_names_exactly_its_options(self):
+        missing = make_decision_ok()
+        del missing["answers"]["move"]["wait"]
+        extra = make_decision_ok()
+        extra["answers"]["addressee"]["everyone"] = 0.1
+        for doc in (missing, extra):
+            assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_out_of_range_values_reject(self):
         for value in (1.5, -0.1, 2, -1):
             with self.subTest(value=value):
-                doc = self._margin_active_suppression()
-                doc["legacy_verdict_confidences"]["SPEAK"] = value
+                doc = make_decision_ok()
+                doc["answers"]["conversation"] = value
+                assert_schema_verdict(self, "attention-decision", doc, "invalid")
+                doc = make_decision_ok()
+                doc["answers"]["move"]["speak"] = value
                 assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_boundary_values_are_on_scale(self):
-        doc = self._margin_active_suppression()
-        doc["legacy_verdict_confidences"] = {"PASS": 0, "ACK": 1, "ASK": 0.0, "SPEAK": 1.0}
+        doc = make_decision_ok(answers=make_answers(conversation=0, answered=1, mid_thought=0.0, adds_something=1.0))
         assert_schema_verdict(self, "attention-decision", doc, "valid")
 
-    def test_sentinel_decoded_non_finite_values_cannot_support_suppression(self):
+    def test_sentinel_decoded_non_finite_values_reject(self):
         # Strict JSON cannot carry non-finite literals; the corpus loader
         # decodes the reserved sentinel strings once, and both validators
-        # must reject the decoded value on the margin-active suppression
-        # where the vector is load-bearing (FR-007).
+        # must reject the decoded value.
         for sentinel in ("NaN", "Infinity", "-Infinity"):
             with self.subTest(sentinel=sentinel):
-                doc = self._margin_active_suppression()
-                doc["legacy_verdict_confidences"]["SPEAK"] = sentinel
+                doc = make_decision_ok("SUPPRESS", "SUPPRESS", "none")
+                doc["answers"]["conversation"] = sentinel
                 decoded = decode_non_finite(doc)
-                self.assertIsInstance(decoded["legacy_verdict_confidences"]["SPEAK"], float)
+                self.assertIsInstance(decoded["answers"]["conversation"], float)
                 assert_schema_verdict(self, "attention-decision", decoded, "invalid")
 
-    def test_malformed_present_vector_rejects_even_where_optional(self):
-        # Present-but-malformed evidence rejects on every ok decision, not
-        # only where the vector is required.
-        doc = make_decision_ok()
-        doc["legacy_verdict_confidences"]["PASS"] = True
-        assert_schema_verdict(self, "attention-decision", doc, "invalid")
+    def test_boolean_and_string_values_reject(self):
+        for value in (True, "0.5"):
+            with self.subTest(value=value):
+                doc = make_decision_ok()
+                doc["answers"]["answered"] = value
+                assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
-    def test_string_confidence_rejects(self):
-        doc = self._margin_active_suppression()
-        doc["legacy_verdict_confidences"]["ACK"] = "0.5"
-        assert_schema_verdict(self, "attention-decision", doc, "invalid")
+    def test_answered_by_names_one_message(self):
+        assert_schema_verdict(
+            self, "attention-decision", make_decision_ok(answers=make_answers(answered_by="e3")), "valid"
+        )
+        for value in ("", 3, None):
+            with self.subTest(value=value):
+                doc = make_decision_ok(answers=make_answers(answered_by=value))
+                assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
 
 class AdviceRuleCases(unittest.TestCase):
@@ -383,6 +360,7 @@ class BypassBranchCases(unittest.TestCase):
             "attention_advice": [make_advice()],
             "reasons": ["should not exist"],
             "legacy_verdict_confidences": {"PASS": 0.1, "ACK": 0.2, "ASK": 0.3, "SPEAK": 0.4},
+            "answers": make_answers(),
             "evidence_event_ids": ["e1"],
             "routing_audit": make_routing(),
         }

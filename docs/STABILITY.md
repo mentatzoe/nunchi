@@ -58,8 +58,12 @@ is stable or executable.
   `DEFER`, never to suppression, when the platform cannot attest the
   reaction. Bypass and operational error are distinct non-social
   statuses.
+- Attention is answered as fixed typed questions (steps 1 and 2 of reading
+  the room); the decision records the answers (`I-010B@5`). A chat model and
+  a typed decision model answer the same questions.
 - Attention model configuration selects its implementation with `kind`
-  (default `openai-compatible`). The `openai-compatible` attention model and
+  (default `openai-compatible`; the adapters and the Claude Code and Codex
+  runners add `decisions-api`). The `openai-compatible` attention model and
   the OpenAI-compatible participant model require an explicit `base_url`;
   there is no default endpoint, and a configuration without one fails
   validation. Operator profiles accept `kind` and an optional
