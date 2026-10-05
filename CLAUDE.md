@@ -34,6 +34,11 @@ The integration is a Claude Code mod plus one Python gate per room
 - Before changing the core, ask two questions: does this help an agent read
   the room across a multi-turn conversation, and does it stay agent- and
   provider-agnostic?
+- When recommending between options, lead with the one that makes the
+  conversation more social, even when it is the larger change, and state its
+  cost. If you catch yourself preferring an option because it is smaller or
+  fits today's contract, check it against `docs/behavior.md` first (Zoe,
+  2026-10-05; see `AGENTS.md`, Working style).
 - When briefing subagents, give them the goal of the task, not only the
   mechanism, and point them to `AGENTS.md` instead of restating it.
 - Say plainly when a review is a self-review.

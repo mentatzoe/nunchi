@@ -97,8 +97,13 @@ Code and reproducible behavior determine implementation truth. Specs under
 - Bugs in an implementation are bugs to repair, not proof that the approach
   cannot work. Test practical repairs and alternatives before declaring a
   fundamental blocker.
-- Reviews say plainly what breaks, whether it prevents the goal, and the
-  smallest concrete repair.
+- Recommend the option that produces the more social conversation, not the
+  smallest engineering change. Zoe, 2026-10-05: choosing the smallest change
+  is how the code drifted from the behavior. Give the engineering cost next
+  to the recommendation; between options that behave equally well, prefer
+  the simpler one.
+- Reviews say plainly what breaks, whether it prevents the goal, and a
+  concrete repair that produces the intended behavior.
 - Documentation and status reports lead with the truth: done, not done,
   working with a named limitation, or failed. Supporting detail follows.
 - Stay technical but concise. Prefer plain language; avoid jargon,
