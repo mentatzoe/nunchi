@@ -183,7 +183,9 @@ another consumer's success.
 
 The confidence vector is margin evidence, not a V1 lifecycle verdict.
 Uncertainty returns `DEFER`. `ACK` selects the core-configured lightweight
-reaction. Only WAKE may include evidence-bound `attention_advice`.
+reaction. Every judgment may include evidence-bound `attention_advice`, the
+model's reading of the room; it reaches the participant on WAKE and DEFER
+turns.
 
 ## Normal participant result
 
@@ -217,14 +219,38 @@ host rejects unknown versions, changed bindings, invisible origins or targets,
 malformed actions, stale opportunities, deadline overruns, and unavailable
 native capabilities. The participant cannot send directly.
 
+The envelope may come alone or in one Markdown code fence. Text after the
+closing fence is the model's own note, usually explaining a silence; it is
+dropped and never posted. Any other text beside the envelope is a malformed
+reply.
+
+## The participant's view of the room
+
+The gate's context and the participant's view are separate (Zoe, 2026-10-05,
+#94 step 3). During its own turn the participant reads the room as it is now
+through a host-mediated function: `before` (older messages), `after` (newer
+than a message), `around`, or `new` (what others posted since the turn
+began and it last looked). It reads the live retained log, never repeats an
+event the participant has seen, and holds each page to the continuation
+limits. It never fails the turn: nothing more, an evicted anchor, or the
+per-turn limit of three history pages comes back as a page with a short
+host-written `note`. Pages show messages only, never verdicts, and carry no
+handles or cursors. Before the first message, reply, or reaction goes out,
+the shared protocol and the Claude Code gate ask for `new` once; if others
+posted meanwhile, the action is held, the participant is shown their
+messages, and it sends, changes, or drops its action. Hermes does not offer
+the view yet.
+
+The host keeps one `RoomView` per turn. Its `fork()` gives a fresh view of
+the same turn, as if nothing had been read yet; the behavior suite uses it to
+play a turn again without the reading, and the host never dispatches a forked
+view's action.
+
 ## Continuation
 
-The request may contain a bound expiring continuation capability. It remains
-inside the host. The model sees only expansion availability booleans; the
-normal participant receives a mediated function. Returned pages omit handles,
-cursors, scope bindings, and expiry. Repeated requests use host-retained
-cursors, never repeat already delivered events, and stop after three pages per
-turn. Expired handles are pruned. A configured positive handle cap evicts the
+The attention request may contain a bound expiring continuation capability.
+It remains inside the host. The attention model sees only expansion
+availability booleans. Expired handles are pruned. A configured positive handle cap evicts the
 oldest remaining authority only when reserving capacity for a newly issued
 handle; fetching never revokes a known unexpired handle as a capacity side
 effect. The wake refresh does not mint a second discarded capability.

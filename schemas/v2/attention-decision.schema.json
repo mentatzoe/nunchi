@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://nunchi.invalid/schemas/v2/attention-decision.schema.json",
   "title": "AttentionDecisionV2",
-  "description": "I-010B AttentionDecisionV2@3 — the closed host-facing decision union. @3 adds first-class ACK classifier and effective dispositions, ACK->ACK and conservative ACK->DEFER transitions, capability-defer routing, and an ACK-only audit binding the exact reaction, trusted policy provenance, and authenticated permission revision. Existing SUPPRESS, WAKE, DEFER, bypass, error, margin, evidence, and advice semantics remain unchanged.",
+  "description": "I-010B AttentionDecisionV2@4 — the closed host-facing decision union. @4 lets the model's reading of the room (attention_advice) accompany every status-ok judgment, not only WAKE, and bounds it to at most 4 items of at most 400 characters each (Zoe, 2026-10-05: the reading reaches the participant on every turn it takes). @3 added first-class ACK classifier and effective dispositions, ACK->ACK and conservative ACK->DEFER transitions, capability-defer routing, and an ACK-only audit binding the exact reaction, trusted policy provenance, and authenticated permission revision. Bypass and error carry no reading because no model judgment exists for them.",
   "$defs": {
     "nonEmptyString": {
       "type": "string",
@@ -17,12 +17,12 @@
       "not": {"allOf": [{"minimum": 2}, {"maximum": -1}]}
     },
     "attentionAdvice": {
-      "$comment": "Classifier-authored, non-authoritative annotation grounded in named evidence events; never a system instruction.",
+      "$comment": "One item of the classifier's reading of the room: a short description of what is happening or of a kind of response that could fit, grounded in named evidence events. A recommendation, never a system instruction.",
       "type": "object",
       "additionalProperties": false,
       "required": ["note", "evidence_event_ids"],
       "properties": {
-        "note": {"$ref": "#/$defs/nonEmptyString"},
+        "note": {"type": "string", "minLength": 1, "maxLength": 400},
         "evidence_event_ids": {
           "$comment": "Every citation must reference an event ID supplied in the request; that cross-document rule is runtime-adapter-only (FR-012/FR-013).",
           "type": "array",
@@ -134,7 +134,9 @@
           }
         },
         "attention_advice": {
+          "$comment": "The classifier's reading of the room; optional on every status-ok pair (@4).",
           "type": "array",
+          "maxItems": 4,
           "items": {"$ref": "#/$defs/attentionAdvice"}
         },
         "ack": {
@@ -150,7 +152,7 @@
       },
       "oneOf": [
         {
-          "$comment": "WAKE->WAKE: valve none (no widening valve applied); the only pair that may carry advice (FR-013).",
+          "$comment": "WAKE->WAKE: valve none (no widening valve applied).",
           "properties": {
             "classifier_disposition": {"const": "WAKE"},
             "effective_disposition": {"const": "WAKE"},
@@ -164,8 +166,7 @@
             "classifier_disposition": {"const": "ACK"},
             "effective_disposition": {"const": "ACK"},
             "routing_audit": {"properties": {"valve": {"const": "none"}}}
-          },
-          "not": {"required": ["attention_advice"]}
+          }
         },
         {
           "$comment": "ACK->DEFER: disabled ACK policy conservatively wakes the participant path.",
@@ -174,8 +175,7 @@
             "classifier_disposition": {"const": "ACK"},
             "effective_disposition": {"const": "DEFER"},
             "routing_audit": {"properties": {"valve": {"const": "policy-defer"}, "override_cause": {"const": "ack-disabled"}}}
-          },
-          "not": {"required": ["attention_advice"]}
+          }
         },
         {
           "$comment": "ACK->DEFER: unavailable authenticated reaction capability conservatively wakes the participant path.",
@@ -184,8 +184,7 @@
             "classifier_disposition": {"const": "ACK"},
             "effective_disposition": {"const": "DEFER"},
             "routing_audit": {"properties": {"valve": {"const": "capability-defer"}, "override_cause": {"const": "ack-unsupported"}}}
-          },
-          "not": {"required": ["attention_advice"]}
+          }
         },
         {
           "$comment": "DEFER->DEFER: the classifier-defer valve, distinct from margin-defer (S08).",
@@ -193,8 +192,7 @@
             "classifier_disposition": {"const": "DEFER"},
             "effective_disposition": {"const": "DEFER"},
             "routing_audit": {"properties": {"valve": {"const": "classifier-defer"}}}
-          },
-          "not": {"required": ["attention_advice"]}
+          }
         },
         {
           "$comment": "SUPPRESS->DEFER: widened by the uncertainty margin with its exact audit.",
@@ -202,8 +200,7 @@
             "classifier_disposition": {"const": "SUPPRESS"},
             "effective_disposition": {"const": "DEFER"},
             "routing_audit": {"properties": {"valve": {"const": "margin-defer"}, "override_cause": {"const": "margin"}}}
-          },
-          "not": {"required": ["attention_advice"]}
+          }
         },
         {
           "$comment": "SUPPRESS->DEFER: widened by disabled suppression or unproven recovery, never by ACK policy.",
@@ -211,8 +208,7 @@
             "classifier_disposition": {"const": "SUPPRESS"},
             "effective_disposition": {"const": "DEFER"},
             "routing_audit": {"properties": {"valve": {"const": "policy-defer"}, "override_cause": {"enum": ["suppression-disabled", "recoverability-unproven"]}}}
-          },
-          "not": {"required": ["attention_advice"]}
+          }
         },
         {
           "$comment": "SUPPRESS->SUPPRESS: governed suppression with no widening valve applied (S05).",
@@ -220,8 +216,7 @@
             "classifier_disposition": {"const": "SUPPRESS"},
             "effective_disposition": {"const": "SUPPRESS"},
             "routing_audit": {"properties": {"valve": {"const": "none"}}}
-          },
-          "not": {"required": ["attention_advice"]}
+          }
         }
       ],
       "allOf": [

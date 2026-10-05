@@ -451,6 +451,12 @@ def _ack_audit(value: Any, path: str = "ack") -> Mapping[str, Any]:
     return doc
 
 
+# The reading attention gives the participant: a few short notes, each
+# pointing to the messages it comes from.
+READING_MAX_ITEMS = 4
+READING_NOTE_MAX_CHARS = 400
+
+
 def _advice(
     value: Any,
     event_ids: set[str] | None,
@@ -458,6 +464,8 @@ def _advice(
 ) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         _fail(path, "must be an array")
+    if len(value) > READING_MAX_ITEMS:
+        _fail(path, f"has more than {READING_MAX_ITEMS} items")
     result = []
     for index, raw in enumerate(value):
         item = _closed(
@@ -466,6 +474,8 @@ def _advice(
             required=("note", "evidence_event_ids"),
         )
         _nes(item["note"], f"{path}[{index}].note")
+        if len(item["note"]) > READING_NOTE_MAX_CHARS:
+            _fail(f"{path}[{index}].note", f"is longer than {READING_NOTE_MAX_CHARS} characters")
         citations = _string_list(
             item["evidence_event_ids"],
             f"{path}[{index}].evidence_event_ids",
@@ -576,8 +586,8 @@ def validate_attention_decision(
                 ):
                     _fail(f"decision.legacy_verdict_confidences.{key}", "must be finite within [0, 1]")
         if "attention_advice" in checked:
-            if pair != ("WAKE", "WAKE", "none"):
-                _fail("decision.attention_advice", "is allowed only for WAKE")
+            # The model's reading of the room may accompany any judgment; it
+            # reaches the participant only on a turn it takes (WAKE or DEFER).
             _advice(checked["attention_advice"], event_ids, "decision.attention_advice")
         if classifier_disposition == "ACK":
             if "ack" not in checked:
@@ -616,13 +626,15 @@ def validate_participant_wake(value: Any) -> dict[str, Any]:
         doc["attention"],
         "wake.attention",
         required=("source",),
-        optional=("advice", "evidence_event_ids"),
+        optional=("advice", "evidence_event_ids", "judged_through_event_id"),
     )
     source = attention["source"]
     if source not in WAKE_SOURCES:
         _fail("wake.attention.source", "has an unsupported wake source")
     event_ids = {event["id"] for event in doc["events"]}
-    if source == "WAKE":
+    if source in ("WAKE", "DEFER"):
+        # A turn the participant takes after a model judgment carries that
+        # judgment's reading of the room.
         if "advice" in attention:
             _advice(attention["advice"], event_ids, "wake.attention.advice")
         if "evidence_event_ids" in attention:
@@ -633,8 +645,17 @@ def validate_participant_wake(value: Any) -> dict[str, Any]:
             )
             if set(citations) - event_ids:
                 _fail("wake.attention.evidence_event_ids", "contains an unknown event ID")
-    elif "advice" in attention or "evidence_event_ids" in attention:
-        _fail("wake.attention", "DEFER, error fallback, and bypass must be advice-free")
+        if "judged_through_event_id" in attention:
+            if "advice" not in attention:
+                _fail("wake.attention.judged_through_event_id", "is allowed only with a reading")
+            _nes(attention["judged_through_event_id"], "wake.attention.judged_through_event_id")
+            if attention["judged_through_event_id"] not in event_ids:
+                _fail("wake.attention.judged_through_event_id", "must name an event in the wake")
+    elif {"advice", "evidence_event_ids", "judged_through_event_id"} & set(attention):
+        _fail(
+            "wake.attention",
+            "ACK, error fallback, and bypass carry no reading",
+        )
     return deepcopy(dict(doc))
 
 

@@ -114,7 +114,7 @@ class LateAckTests(unittest.TestCase):
                 time.sleep(0.4)
                 return super().dispatch(action=action, wake=wake)
 
-        pipeline, _, _, receipts = fx.foundation(
+        pipeline, _, _, receipts = fx.nod_foundation(
             model=fx.FixtureModel("ACK"),
             transport=SlowTransport(capability=capability),
             participant_timeout_seconds=0.2,

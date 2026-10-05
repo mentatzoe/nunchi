@@ -1,0 +1,78 @@
+{
+  "id": "never-mind-while-composing",
+  "title": "The asker says never mind while the agent is composing an answer it knows",
+  "source": "docs/behavior.md (looking again before speaking, #94 step 3)",
+  "review": "draft: written for plan step 3; ranges need Zoe's review",
+  "platform": "discord",
+  "participants": [
+    "vigil"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "v1",
+      "author": "vigil",
+      "at": "-3h",
+      "text": "I moved the gateway retry settings into gateway/config.toml, under [retry], so they live next to the timeouts."
+    },
+    {
+      "id": "q1",
+      "author": "zoe",
+      "at": "0s",
+      "mentions": [
+        "vigil"
+      ],
+      "text": "Vigil, where did we put the retry settings for the gateway?"
+    },
+    {
+      "id": "n1",
+      "author": "zoe",
+      "text": "never mind, found them in gateway/config.toml"
+    }
+  ],
+  "moments": [
+    {
+      "label": "Zoe finds it herself while Vigil is composing",
+      "event": "q1",
+      "during_turn": [
+        "n1"
+      ],
+      "step1": "pass",
+      "notice": [
+        {
+          "fact": "Vigil moved the retry settings and said where",
+          "events": [
+            "v1"
+          ]
+        },
+        {
+          "fact": "Zoe asked Vigil directly",
+          "events": [
+            "q1"
+          ]
+        },
+        {
+          "fact": "Zoe found the answer herself before Vigil replied",
+          "events": [
+            "n1"
+          ]
+        }
+      ],
+      "fitting": [
+        "stay_quiet",
+        "mhm"
+      ],
+      "misses": [
+        {
+          "move": "speak",
+          "why": "Zoe already found it; answering talks past her"
+        }
+      ]
+    }
+  ]
+}

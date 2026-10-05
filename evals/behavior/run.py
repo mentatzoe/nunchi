@@ -57,6 +57,7 @@ from nunchi.participant_model import OpenAICompatibleParticipant
 from nunchi.pipeline import NunchiV2Pipeline
 from nunchi.receipts import ReceiptJournal
 
+from . import jev
 from .scene import SCENES, Moment, Scene, load_scenes, parse_offset, profile_sha256
 from .score import cell, collective_silence, grade, pile_on, visible_result
 
@@ -68,6 +69,7 @@ DEFAULT_MODELS = (
     "anthropic/claude-haiku-4.5",
     "z-ai/glm-5.3-flash",
     "deepseek/deepseek-v4.1-flash",
+    "typesafe/jev-1.13",
 )
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_KEY_ENV = "NUNCHI_OPENROUTER"
@@ -78,7 +80,7 @@ AGENT_TIMEOUT_SECONDS = 90.0
 
 
 class OfflineModel:
-    """Always wakes; checks the plumbing without a network."""
+    """Always wakes with a one-line reading; checks the plumbing without a network."""
 
     name = "participant-attention"
     provider = "offline"
@@ -92,6 +94,9 @@ class OfflineModel:
             "reasons": ["offline dry run"],
             "evidence_event_ids": [projection["trigger_event_id"]],
             "legacy_verdict_confidences": {"PASS": 0, "ACK": 0, "ASK": 0, "SPEAK": 1},
+            "attention_advice": [
+                {"note": "offline dry run", "evidence_event_ids": [projection["trigger_event_id"]]}
+            ],
         }
 
 
@@ -105,6 +110,7 @@ class RecordingModel:
         self.model_id = inner.model_id
         self.raw: Any = None
         self.error: str | None = None
+        self.raw_reply: Any = None
         self.latency_ms: int | None = None
 
     def judge(self, **kwargs: Any) -> Mapping[str, Any]:
@@ -114,6 +120,7 @@ class RecordingModel:
             return self.raw
         except BaseException as exc:
             self.error = _describe_error(exc)
+            self.raw_reply = _raw_reply(self.inner)
             raise
         finally:
             self.latency_ms = int((time.monotonic() - started) * 1000)
@@ -131,26 +138,96 @@ class OfflineAgent:
 
 
 class RecordingAgent:
-    """Pass-through for the simulated agent that keeps its action and any error."""
+    """Pass-through for the simulated agent that keeps what it saw and did.
 
-    def __init__(self, inner: Any) -> None:
+    It keeps the wake's attention block, every context page the agent asked
+    for, its action, and any error. With ``paired``, a turn whose wake
+    carries a reading is played a second time on the same wake with the
+    reading removed and the source kept. That second action is recorded and
+    graded but never dispatched, so each turn shows what the reading changed
+    at the same moment.
+    """
+
+    def __init__(
+        self,
+        inner: Any,
+        *,
+        paired: bool = False,
+        arrive: Callable[[], None] | None = None,
+    ) -> None:
         self.inner = inner
+        self.paired = paired
+        # Messages that arrive while the agent is composing its turn.
+        self.arrive = arrive
         self.called = False
         self.action: Any = None
         self.error: str | None = None
+        self.raw_reply: Any = None
         self.latency_ms: int | None = None
+        self.attention: Mapping[str, Any] | None = None
+        self.expansions: list[dict[str, Any]] = []
+        self.without_reading: dict[str, Any] | None = None
 
-    def run_protocol(self, **kwargs: Any) -> Any:
+    def run_protocol(self, *, wake: Mapping[str, Any], expand: Any, **kwargs: Any) -> Any:
         self.called = True
+        self.attention = deepcopy(dict(wake.get("attention", {})))
+        if self.arrive is not None:
+            arrive, self.arrive = self.arrive, None
+            arrive()
         started = time.monotonic()
         try:
-            self.action = self.inner.run_protocol(**kwargs)
-            return self.action
+            self.action = self.inner.run_protocol(
+                wake=wake, expand=self._recorded(expand, "with reading"), **kwargs
+            )
         except BaseException as exc:
             self.error = _describe_error(exc)
+            self.raw_reply = _raw_reply(self.inner)
             raise
         finally:
             self.latency_ms = int((time.monotonic() - started) * 1000)
+        if self.paired and self.attention.get("advice"):
+            self.without_reading = self._play_without_reading(wake, expand, kwargs)
+        return self.action
+
+    def _play_without_reading(
+        self, wake: Mapping[str, Any], expand: Any, kwargs: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        bare = deepcopy(dict(wake))
+        bare["attention"] = {"source": wake["attention"]["source"]}
+        # The second play gets its own fresh view of the same turn. Sharing the
+        # first play's view would hide what that play already read, including
+        # a message that arrived mid-turn.
+        fork = getattr(getattr(expand, "__self__", None), "fork", None)
+        if callable(fork):
+            expand = fork().expand
+        played: dict[str, Any] = {}
+        started = time.monotonic()
+        try:
+            played["action"] = self.inner.run_protocol(
+                wake=bare, expand=self._recorded(expand, "without reading"), **kwargs
+            )
+        except Exception as exc:
+            # The paired turn is a measurement; it never changes the real one.
+            played["error"] = _describe_error(exc)
+            raw = _raw_reply(self.inner)
+            if raw is not None:
+                played["raw_reply"] = raw
+        played["latency_ms"] = int((time.monotonic() - started) * 1000)
+        return played
+
+    def _recorded(self, expand: Any, arm: str) -> Callable[..., Any]:
+        def recorded(**request: Any) -> Any:
+            entry: dict[str, Any] = {"arm": arm, "request": dict(request)}
+            self.expansions.append(entry)
+            try:
+                page = expand(**request)
+            except Exception as exc:
+                entry["error"] = _describe_error(exc)
+                raise
+            entry["events"] = len(page.get("events", ())) if isinstance(page, Mapping) else None
+            return page
+
+        return recorded
 
 
 class RecordingEngine(AttentionEngine):
@@ -199,6 +276,17 @@ def agent_move(calls: list[Mapping[str, Any]]) -> str:
     return "stay_quiet"
 
 
+def _attention_summary(attention: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """What the agent was told about attention: the source and the reading's size."""
+
+    if attention is None:
+        return None
+    return {
+        "source": attention.get("source"),
+        "reading_items": len(attention.get("advice", ())),
+    }
+
+
 def _describe_error(exc: BaseException) -> str:
     text = f"{type(exc).__name__}: {exc}"
     cause = exc.__cause__
@@ -228,9 +316,18 @@ def invalid_reason(raw: Any, event_ids: set[str]) -> str:
 
 
 def openai_compatible_factory(
-    *, api_key: str, base_url: str, temperature: float | None
+    *,
+    api_key: str,
+    base_url: str,
+    temperature: float | None,
+    jev_url: str = jev.DEFAULT_DECISIONS_URL,
 ) -> ModelFactory:
+    """Build each attention model: Jev through the Decisions API, any other
+    model through the OpenAI-compatible chat endpoint."""
+
     def build(model_id: str) -> Any:
+        if jev.is_jev(model_id):
+            return jev.JevAttentionModel(model=model_id, api_key=api_key, url=jev_url)
         return OpenAICompatibleAttentionModel(
             model=model_id,
             api_key=api_key,
@@ -242,11 +339,36 @@ def openai_compatible_factory(
     return build
 
 
+class RecordingParticipant(OpenAICompatibleParticipant):
+    """The simulated agent, keeping its latest raw reply.
+
+    When the turn protocol rejects a reply, the record carries that reply so
+    the failure can be read, as it does for attention's rejected replies.
+    """
+
+    last_reply: Any = None
+
+    def _invoke(self, protocol: Any) -> Any:
+        self.last_reply = None
+        self.last_reply = super()._invoke(protocol)
+        return self.last_reply
+
+
+RAW_REPLY_MAX_CHARS = 4000
+
+
+def _raw_reply(agent: Any) -> Any:
+    reply = getattr(agent, "last_reply", None)
+    if isinstance(reply, str) and len(reply) > RAW_REPLY_MAX_CHARS:
+        return reply[:RAW_REPLY_MAX_CHARS] + "…"
+    return reply
+
+
 def openai_compatible_agent_factory(
     *, api_key: str, base_url: str, model: str
 ) -> AgentFactory:
     def build(profile: ParticipantProfile) -> Any:
-        return OpenAICompatibleParticipant(
+        return RecordingParticipant(
             profile=profile,
             model=model,
             api_key=api_key,
@@ -318,6 +440,10 @@ def judge_moment(
     *,
     timeout_seconds: float,
     agent_factory: AgentFactory | None = None,
+    ack: str = "agent",
+    paired: bool = False,
+    reading_items: int = 4,
+    reading_chars: int = 400,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Run one moment through the production pipeline and grade what the room saw.
@@ -325,7 +451,10 @@ def judge_moment(
     Observation, attention, the participant host, and ACK are Nunchi's own.
     With an agent factory, a model plays the woken agent's turn through the
     shared participant protocol; without one, a woken agent counts as
-    "agent decides".
+    "agent decides". By default (``ack="agent"``) Nunchi never nods itself:
+    an ACK judgment gives the agent a turn, and any "mhm" is the agent's own.
+    ``ack="nunchi"`` turns Nunchi's own nod back on. With ``paired``, a turn
+    that carried a reading is also played without it.
     """
 
     scene, moment, participant = job.scene, job.moment, job.participant
@@ -373,17 +502,47 @@ def judge_moment(
     receipts = ReceiptJournal()
     observation = ObservationProvider(binding, receipts=receipts)
     transport = EvalTransport()
-    ack_policy = AckPolicy(reaction=ACK_REACTION)
-    model = RecordingModel(factory(job.model))
+    ack_policy = AckPolicy(reaction=ACK_REACTION, enabled=ack == "nunchi")
+    inner = factory(job.model)
+    bind_profile = getattr(inner, "bind_profile", None)
+    if callable(bind_profile):
+        # A typed decision model gets the participant's own instructions.
+        bind_profile(profile)
+    if isinstance(inner, jev.JevAttentionModel):
+        inner.max_notes = reading_items
+    model = RecordingModel(inner)
     engine = RecordingEngine(
         profile=profile,
         model=model,
-        policy=AttentionPolicy(timeout_seconds=timeout_seconds),
+        policy=AttentionPolicy(
+            timeout_seconds=timeout_seconds,
+            reading_items=reading_items,
+            reading_note_chars=reading_chars,
+        ),
         receipts=receipts,
         ack_policy=ack_policy,
         reaction_capability_provider=transport.reaction_capability,
     )
-    agent = RecordingAgent(agent_factory(profile)) if agent_factory is not None else None
+    def arrive() -> None:
+        # The scene's mid-turn messages reach the room after the wake was
+        # built, so only looking again shows them to the agent.
+        for event_id in moment.during_turn:
+            raw = scene.events[scene.event_index(event_id)]
+            observation.observe(
+                delivery_id=f"d-{raw['id']}",
+                event=canonical_event(raw, at=datetime.now(timezone.utc)),
+                actors=_event_actors(scene, raw),
+            )
+
+    agent = (
+        RecordingAgent(
+            agent_factory(profile),
+            paired=paired,
+            arrive=arrive if moment.during_turn else None,
+        )
+        if agent_factory is not None
+        else None
+    )
     scheduler = ConversationOpportunityScheduler(f"{participant}:eval:{scene.id}")
     host = ParticipantTurnHost(
         observation=observation,
@@ -391,7 +550,8 @@ def judge_moment(
         transport=transport,
         scheduler=scheduler,
         receipts=receipts,
-        participant_timeout_seconds=timeout_seconds + AGENT_TIMEOUT_SECONDS,
+        # A paired turn plays the agent twice before the real action is sent.
+        participant_timeout_seconds=timeout_seconds + AGENT_TIMEOUT_SECONDS * (2 if paired else 1),
         ack_policy=ack_policy,
     )
     pipeline = NunchiV2Pipeline(
@@ -456,14 +616,40 @@ def judge_moment(
         record["agent"] = {
             "action": agent.action,
             "latency_ms": agent.latency_ms,
+            "attention": _attention_summary(agent.attention),
         }
+        if agent.expansions:
+            record["agent"]["expansions"] = agent.expansions
+        looked_again = [
+            entry
+            for entry in agent.expansions
+            if entry["arm"] == "with reading" and entry["request"].get("direction") == "new"
+        ]
+        if looked_again:
+            # How many new messages the agent was shown before it posted.
+            record["agent"]["looked_again"] = sum(entry.get("events") or 0 for entry in looked_again)
         if failed:
             provider_error = True
             record["agent"]["error"] = agent.error or transport_result.detail
+            if agent.raw_reply is not None:
+                record["agent"]["raw_reply"] = agent.raw_reply
         else:
             result = agent_move(transport.calls)
             by = "agent"
+        if agent.without_reading is not None:
+            unread = dict(agent.without_reading)
+            if "error" not in unread:
+                action = unread.get("action")
+                unread["move"] = agent_move([action] if action else [])
+                unread["grade"] = grade(moment, unread["move"], attention=attention)["visible"]
+            record["agent"]["without_reading"] = unread
 
+    response = getattr(inner, "last_response", None)
+    if isinstance(response, Mapping):
+        # The typed answers behind the judgment, and the snapshot that served them.
+        record["model_response"] = {
+            key: response[key] for key in ("model", "answers", "usage") if key in response
+        }
     evidence = set(decision.get("evidence_event_ids", []))
     record.update(
         result=result,
@@ -543,6 +729,99 @@ def _git(*args: str) -> str | None:
         return None
 
 
+def turn_source(record: Mapping[str, Any]) -> str:
+    """How the agent got its turn: the wake source, and for DEFER, why."""
+
+    source = ((record.get("agent") or {}).get("attention") or {}).get("source") or "unknown"
+    if source != "DEFER":
+        return source
+    decision = record.get("decision", {})
+    judged = decision.get("classifier_disposition", "?")
+    valve = decision.get("routing_audit", {}).get("valve", "?")
+    return "DEFER (model)" if judged == "DEFER" else f"{judged} widened to DEFER ({valve})"
+
+
+def _agent_turn_sections(records: list[dict[str, Any]], *, paired: bool) -> list[str]:
+    turns = [record for record in records if "agent" in record]
+    lines = [
+        "",
+        "## What the agent saw",
+        "",
+        "Every agent turn by how it got its turn. *Reading* counts turns whose wake",
+        "carried attention's reading.",
+        "",
+        "| Wake | Turns | Reading | Spoke | Quiet | Mhm | Fits | Miss | Errors |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    by_source: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for record in turns:
+        by_source[turn_source(record)].append(record)
+    for source in sorted(by_source):
+        mine = by_source[source]
+        moves = Counter(record["result"] for record in mine if record.get("by") == "agent")
+        grades = Counter(record["grade"]["visible"] for record in mine if record.get("by") == "agent")
+        lines.append(
+            f"| {source} | {len(mine)} | "
+            f"{sum(1 for record in mine if (record['agent'].get('attention') or {}).get('reading_items'))} | "
+            f"{moves['speak']} | {moves['stay_quiet']} | {moves['mhm']} | {grades['fits']} | {grades['miss']} | "
+            f"{sum(1 for record in mine if 'error' in record['agent'])} |"
+        )
+    looked = [record for record in turns if record["agent"].get("looked_again")]
+    if looked:
+        moves = Counter(record["result"] for record in looked)
+        lines += [
+            "",
+            f"In {len(looked)} turn(s) others posted while the agent was composing, and it was "
+            f"shown their messages before posting: it then spoke {moves['speak']}, stayed quiet "
+            f"{moves['stay_quiet']}, and nodded {moves['mhm']} time(s).",
+        ]
+    if not paired:
+        return lines
+    pairs = [
+        record
+        for record in turns
+        if record.get("by") == "agent"
+        and "grade" in (record["agent"].get("without_reading") or {})
+    ]
+    lines += [
+        "",
+        "## The reading, paired",
+        "",
+        "Each turn that carried a reading was played again on the same wake without it.",
+        "The second move is graded but never sent.",
+        "",
+        "| Wake | Pairs | Fits with / without | Miss with / without | Spoke with / without | Move changed |",
+        "|---|---|---|---|---|---|",
+    ]
+    if not pairs:
+        return lines[:-2] + ["No agent turn carried a reading."]
+    by_source = defaultdict(list)
+    for record in pairs:
+        by_source[turn_source(record)].append(record)
+    for source in sorted(by_source):
+        mine = by_source[source]
+        unread = [record["agent"]["without_reading"] for record in mine]
+        lines.append(
+            "| {} | {} | {} / {} | {} / {} | {} / {} | {} |".format(
+                source,
+                len(mine),
+                sum(1 for record in mine if record["grade"]["visible"] == "fits"),
+                sum(1 for item in unread if item["grade"] == "fits"),
+                sum(1 for record in mine if record["grade"]["visible"] == "miss"),
+                sum(1 for item in unread if item["grade"] == "miss"),
+                sum(1 for record in mine if record["result"] == "speak"),
+                sum(1 for item in unread if item["move"] == "speak"),
+                sum(1 for record, item in zip(mine, unread) if record["result"] != item["move"]),
+            )
+        )
+    failed = sum(
+        1 for record in turns if "error" in (record["agent"].get("without_reading") or {})
+    )
+    if failed:
+        lines += ["", f"{failed} paired turn(s) without the reading failed and are left out."]
+    return lines
+
+
 def summarize(
     scenes: list[Scene],
     models: list[str],
@@ -559,8 +838,25 @@ def summarize(
         f"- Runs per moment: {meta['runs']}; temperature: {meta['temperature']}; endpoint: {meta['base_url']}",
         f"- Scenes: {len(scenes)}; attention calls: {meta['calls']}; agent turns: {meta.get('agent_calls', 0)}; provider errors: {meta['provider_errors']}",
         f"- Command: `{meta['command']}`",
+        f"- Reading: "
+        + (
+            f"up to {meta.get('reading_items', 4)} note{'' if meta.get('reading_items', 4) == 1 else 's'} "
+            f"of up to {meta.get('reading_chars', 400)} characters"
+            if meta.get("reading_items", 4)
+            else "none asked for"
+        ),
         "",
     ]
+    if meta.get("agent_model"):
+        lines[-1:-1] = [
+            "- Mhm: "
+            + (
+                "the agent's own; an ACK judgment gives the agent a turn"
+                if meta.get("ack") == "agent"
+                else "sent by Nunchi on an ACK judgment"
+            )
+            + ("; each turn with a reading is also played without it" if meta.get("paired") else ""),
+        ]
     if meta.get("agent_model"):
         lines += [
             f"Each moment runs through Nunchi's pipeline. When attention wakes the agent,",
@@ -633,6 +929,8 @@ def summarize(
                 int(statistics.median(latencies)) if latencies else "-",
             )
         )
+    if meta.get("agent_model"):
+        lines += _agent_turn_sections(records, paired=bool(meta.get("paired")))
     if together:
         lines += ["", "## Collective checks", ""]
         for item in together:
@@ -696,6 +994,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scenes", default="all", help="all, behavior, litmus, a litmus category, or scene ids/prefixes")
     parser.add_argument("--out", default="behavior-eval-out")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    parser.add_argument(
+        "--jev-url",
+        default=jev.DEFAULT_DECISIONS_URL,
+        help="Decisions API endpoint for typesafe/ models",
+    )
     parser.add_argument("--key-env", default=DEFAULT_KEY_ENV)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--timeout", type=float, default=30.0)
@@ -711,6 +1014,29 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="model that plays the woken agent's turn; empty grades attention alone",
     )
+    parser.add_argument(
+        "--ack",
+        choices=("agent", "nunchi"),
+        default="agent",
+        help="who sends the mhm on an ACK judgment: the agent in its own turn (the default), or Nunchi itself",
+    )
+    parser.add_argument(
+        "--paired",
+        action="store_true",
+        help="also play each agent turn that carried a reading without it, on the same wake",
+    )
+    parser.add_argument(
+        "--reading-items",
+        type=int,
+        default=4,
+        help="ask attention for at most this many reading notes (0 asks for none)",
+    )
+    parser.add_argument(
+        "--reading-chars",
+        type=int,
+        default=400,
+        help="ask for reading notes of at most this many characters (40 to 400)",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args(argv)
@@ -724,6 +1050,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.runs < 1 or args.workers < 1 or args.per_model < 1:
         parser.error("--runs, --workers and --per-model must be positive")
+    if args.paired and not args.agent_model:
+        parser.error("--paired needs --agent-model")
+    try:
+        AttentionPolicy(reading_items=args.reading_items, reading_note_chars=args.reading_chars)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     agent_factory: AgentFactory | None = None
     if args.dry_run:
@@ -737,7 +1069,10 @@ def main(argv: list[str] | None = None) -> int:
         if not api_key:
             parser.error(f"set {args.key_env} to the provider key, or use --dry-run")
         factory = openai_compatible_factory(
-            api_key=api_key, base_url=args.base_url, temperature=args.temperature
+            api_key=api_key,
+            base_url=args.base_url,
+            temperature=args.temperature,
+            jev_url=args.jev_url,
         )
         if args.agent_model:
             agent_factory = openai_compatible_agent_factory(
@@ -750,7 +1085,14 @@ def main(argv: list[str] | None = None) -> int:
     def run_job(job: Job) -> dict[str, Any]:
         with slots[job.model]:
             return judge_moment(
-                job, factory, timeout_seconds=args.timeout, agent_factory=agent_factory
+                job,
+                factory,
+                timeout_seconds=args.timeout,
+                agent_factory=agent_factory,
+                ack=args.ack,
+                paired=args.paired,
+                reading_items=args.reading_items,
+                reading_chars=args.reading_chars,
             )
 
     started = datetime.now(timezone.utc)
@@ -774,12 +1116,17 @@ def main(argv: list[str] | None = None) -> int:
         "command": " ".join(["python3 -m evals.behavior.run", *(argv if argv is not None else sys.argv[1:])]),
         "models": models,
         "agent_model": (DRY_RUN_AGENT if args.dry_run else args.agent_model) if args.agent_model else None,
+        "ack": args.ack,
+        "paired": args.paired,
+        "reading_items": args.reading_items,
+        "reading_chars": args.reading_chars,
         "runs": args.runs,
         "temperature": None if args.dry_run else args.temperature,
         "timeout_seconds": args.timeout,
         "workers": args.workers,
         "per_model": args.per_model,
         "base_url": "offline" if args.dry_run else args.base_url,
+        "jev_url": args.jev_url if not args.dry_run and any(jev.is_jev(model) for model in models) else None,
         "key_env": None if args.dry_run else args.key_env,
         "scenes": [scene.id for scene in scenes],
         "calls": sum(1 for record in records if record["result"] != "unsupported" and "decision" in record),

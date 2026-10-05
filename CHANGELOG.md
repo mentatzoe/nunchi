@@ -25,8 +25,17 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   reason, and calls to one model at a time are capped. Each moment runs
   through Nunchi's pipeline; with `--agent-model`, a model plays the woken
   agent's turn through the shared participant protocol, its move is graded,
-  and pile-ons are reported. The manual `behavior-eval` workflow runs it
-  through OpenRouter.
+  and pile-ons are reported. Each agent turn records how it got its turn
+  and what reading came with it, and keeps a reply the turn protocol
+  rejects. `--paired` plays every turn that carried a
+  reading a second time on the same wake without it, graded but never sent,
+  so a run shows what the reading changed. `--ack agent` turns off Nunchi's
+  own nod, so an ACK judgment gives the agent a turn and any "mhm" is its
+  own. Models named `typesafe/...` go to Jev, a typed decision model, through
+  OpenRouter's Decisions API: a prototype route that answers six typed
+  questions about the judged message and writes the agent's reading from
+  them, so Jev's speed and fit can be compared with the LLM routes. The
+  manual `behavior-eval` workflow runs it through OpenRouter, Jev included.
 - Shared V2 runtime: canonical bounded observation and continuation,
   participant-shaped attention, a coalescing opportunity scheduler (one active
   opportunity plus the newest pending event), participant wake and silence,
@@ -57,6 +66,43 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- The agent sees the room as it is now, and looks again before speaking
+  (#94, plan step 3; Zoe, 2026-10-05). The gate's context and the agent's
+  own view are separate. During its turn the agent reads the live room:
+  older messages, newer ones, or `new` for what others posted since it last
+  looked, including messages that arrived after its turn began. Its history
+  never fails the turn: "nothing more", a message no longer retained, or
+  the per-turn limit comes back as a short note; in the first baseline with
+  the agent simulated, 10 of 19 failed agent turns were history requests in
+  a short room. Before
+  the first message, reply, or reaction goes out, the shared protocol and
+  the Claude Code gate look again once; if others posted a message
+  meanwhile, the action is held and the agent is shown it, then sends,
+  changes, or drops its action. Hermes does not offer this yet. The behavior suite adds
+  messages that arrive mid-turn (`during_turn`) and two draft scenes.
+- Attention's reading of the room reaches the agent on every turn it takes
+  (#94, plan step 2). The attention model gives a short reading with every
+  judgment: what is happening, with pointers to the messages, and the kinds
+  of response that could fit, each with a reason, never an order. The
+  reading now goes with DEFER turns as well as WAKE, including ACK and
+  suppression widened to DEFER. A bad or empty reading no longer throws
+  away the judgment: in the last baseline, 27 judgments failed only
+  because of their reading, 24 of them empty. Bad items are dropped one by
+  one, and the reading is bounded to 4 notes of at most 400 characters.
+  When the agent's fresh window has lost a message an item cites, only that
+  item is dropped, and `judged_through_event_id` tells the agent the newest
+  message the reading saw. The turn prompts frame the reading as a
+  recommendation with reasons. Contracts: `I-010B AttentionDecisionV2@4`,
+  `I-010C ParticipantWakeV2@3`. The reading's length is attention policy:
+  `reading_items` (0 to 4, default 4) and `reading_note_chars` (40 to 400,
+  default 400) set the prompt and cap what reaches the agent, so a shorter
+  reading can trade detail for speed; the behavior suite's
+  `--reading-items` and `--reading-chars` compare lengths.
+- The agent sends its own "mhm" by default (Zoe, 2026-10-05). The ACK policy
+  is off by default, so an ACK judgment gives the agent a turn, with the
+  reading saying why a nod could fit, instead of Nunchi adding 👂 itself.
+  `ack.enabled: true` turns Nunchi's nod back on until step 7 of the plan
+  removes it. The behavior suite's `--ack` defaults to `agent` to match.
 - `main` is the V2 working branch; `integration/v2` is retired. CI and the
   Hermes host-contract workflow run on pushes to `main` and on PRs into it
   (#88).
@@ -93,6 +139,25 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Fixed
 
+- The behavior suite's paired play, the same turn without the reading, now
+  gets its own fresh view of the room. Since #109 it shared the first play's
+  view, which never repeats what it has shown, so the second play could not
+  see a message that arrived mid-turn or history the first play had read.
+  Paired results from runs on #109 through #112 are biased against the play
+  without the reading wherever the agent looked at the room. The host's
+  per-turn view is now a `RoomView` with a `fork()` for such replays.
+- A participant reply in a code fence followed by the model's own note is
+  now read as the fenced envelope; the note is dropped and never posted.
+  Before, the whole turn failed. In a behavior run after #94 step 2, 16 of
+  18 rejected agent replies were a valid fenced silence followed by an
+  explanation of why the agent stayed quiet. Any other text beside the
+  envelope is still a malformed reply.
+- The OpenAI-compatible participant used by the reference adapters now
+  sends the action schema its prompt promises, bound to the turn's exact
+  binding. Before, the prompt said "matching the supplied action schema" but
+  no schema was sent, so models had to guess the envelope: in the first
+  behavior run with a simulated agent, 763 of 809 agent turns were rejected
+  for an envelope that didn't match.
 - The manual `live-smoke` workflow works again. Its model config lacked the
   now-required `base_url`, so every run failed before calling a model. It now
   calls a current model (chosen at dispatch) through OpenRouter with the

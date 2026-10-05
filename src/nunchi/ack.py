@@ -27,7 +27,7 @@ except ImportError:  # pragma: no cover - durable ACK is supported on POSIX host
 
 @dataclass(frozen=True)
 class AckPolicy:
-    enabled: bool = True
+    enabled: bool = False
     reaction: str = "👂"
     provenance: str = "trusted:ack-policy/default@1"
 

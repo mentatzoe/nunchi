@@ -26,7 +26,7 @@ SCENARIOS = {
     "ack-unsupported": "unsupported ACK widens safely to the participant DEFER path",
     "wake-contribution": "WAKE followed by one host-owned contribution",
     "wake-silence": "WAKE followed by participant silence",
-    "classifier-defer": "direct model DEFER wakes advice-free",
+    "classifier-defer": "direct model DEFER wakes with the model's reading",
     "margin-defer": "uncertain SUPPRESS becomes audited margin DEFER",
     "bypass": "trusted preattention bypass invokes zero classifier calls",
     "error-fallback": "provider error wakes under explicit default policy",
@@ -67,6 +67,12 @@ class _Model:
             "reasons": ["offline lifecycle fixture"],
             "evidence_event_ids": [projection["trigger_event_id"]],
             "legacy_verdict_confidences": vector,
+            "attention_advice": [
+                {
+                    "note": "Offline reading of the room.",
+                    "evidence_event_ids": [projection["trigger_event_id"]],
+                }
+            ],
         }
 
 
@@ -121,7 +127,10 @@ def run_scenario(scenario: str) -> dict:
         scheduler = ConversationOpportunityScheduler("conformance:42")
         transport = _Transport(reactions_supported=scenario != "ack-unsupported")
 
-        def participant(**_):
+        readings: list[bool] = []
+
+        def participant(*, wake, **_):
+            readings.append("advice" in wake["attention"])
             if scenario == "wake-silence":
                 return None
             return {
@@ -232,6 +241,13 @@ def run_scenario(scenario: str) -> dict:
                 ["observation", "attention"],
             ),
         }[scenario]
+        # A turn the participant takes after a model judgment carries its
+        # reading; bypass and error fallback have no judgment to read from.
+        expected_readings = (
+            []
+            if expected[1] == 0
+            else [scenario not in ("bypass", "error-fallback")]
+        )
         observed = (
             opportunity.effective_disposition,
             host.invocation_count,
@@ -250,7 +266,11 @@ def run_scenario(scenario: str) -> dict:
         return {
             "schema_version": 2,
             "scenario": scenario,
-            "status": "pass" if observed == expected and ack_native_ok else "fail",
+            "status": (
+                "pass"
+                if observed == expected and ack_native_ok and readings == expected_readings
+                else "fail"
+            ),
             "observed": {
                 "effective_disposition": opportunity.effective_disposition,
                 "classifier_calls": model.calls,
@@ -260,12 +280,14 @@ def run_scenario(scenario: str) -> dict:
                     action["kind"] for action in transport.actions
                 ],
                 "receipt_stages": stages,
+                "participant_readings": readings,
             },
             "expected": {
                 "effective_disposition": expected[0],
                 "participant_invocations": expected[1],
                 "transport_calls": expected[2],
                 "receipt_stages": expected[3],
+                "participant_readings": expected_readings,
             },
         }
 

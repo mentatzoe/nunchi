@@ -31,6 +31,9 @@ from .v2_contracts import (
 )
 
 _MAX_CONTEXT_EXPANSIONS = 3
+# How often a turn may ask what others posted since it last looked: the
+# shared protocol asks once before the first post, and the participant may ask.
+_MAX_NEW_CHECKS = 8
 
 
 class ParticipantError(NunchiError):
@@ -386,23 +389,128 @@ def build_participant_wake(
         )
     }
     attention: dict[str, Any] = {"source": source}
-    if source == "WAKE":
+    if source in ("WAKE", "DEFER") and checked_decision["status"] == "ok":
+        # The turn carries the model's reading of the room. The wake is built
+        # fresh, so an item whose messages have left the window is dropped on
+        # its own; the reading never stops the turn.
         event_ids = {event["id"] for event in wake["events"]}
-        raw_advice = checked_decision.get("attention_advice")
-        if raw_advice and all(
-            set(item["evidence_event_ids"]).issubset(event_ids)
-            for item in raw_advice
-        ):
-            attention["advice"] = deepcopy(raw_advice)
+        reading = [
+            deepcopy(item)
+            for item in checked_decision.get("attention_advice", ())
+            if set(item["evidence_event_ids"]).issubset(event_ids)
+        ]
+        if reading:
+            attention["advice"] = reading
             attention["evidence_event_ids"] = sorted(
-                {
-                    event_id
-                    for item in raw_advice
-                    for event_id in item["evidence_event_ids"]
-                }
+                {event_id for item in reading for event_id in item["evidence_event_ids"]}
             )
+            # The newest message attention saw, so the participant can tell
+            # which messages arrived after the reading was written.
+            judged_through = checked_request["events"][-1]["id"]
+            if judged_through in event_ids:
+                attention["judged_through_event_id"] = judged_through
     wake["attention"] = attention
     return validate_participant_wake(wake)
+
+
+class RoomView:
+    """The participant's own view of the room for one turn.
+
+    It reads the live log, so it shows messages that arrived after the turn
+    began, and it never fails the turn: nothing more, an evicted anchor or the
+    per-turn limit come back as a page with a note. It never repeats an event
+    it has shown, and every event it has shown may be an action's origin or
+    target. ``guard`` raises when the turn is cancelled or out of time.
+    """
+
+    def __init__(
+        self,
+        observation: ObservationProvider,
+        wake: Mapping[str, Any],
+        *,
+        turn_began: int,
+        guard: Callable[[], None],
+    ) -> None:
+        self._observation = observation
+        self._wake = wake
+        self._turn_began = turn_began
+        self._guard = guard
+        self.expansion_calls = 0
+        self.new_checks = 0
+        self._limit_noted = False
+        self.seen_event_ids: set[str] = {event["id"] for event in wake["events"]}
+
+    def fork(self) -> "RoomView":
+        """A fresh view of the same turn, as if nothing had been read yet.
+
+        For replaying a turn, as the behavior suite does to play it again
+        without the reading. Its actions are never dispatched.
+        """
+
+        return RoomView(
+            self._observation,
+            self._wake,
+            turn_began=self._turn_began,
+            guard=self._guard,
+        )
+
+    def expand(
+        self,
+        *,
+        direction: str,
+        anchor_event_id: str | None = None,
+        max_events: int = 12,
+        max_bytes: int = 16_384,
+    ) -> Mapping[str, Any]:
+        self._guard()
+        if direction == "new":
+            if self.new_checks >= _MAX_NEW_CHECKS:
+                raise ParticipantError("look-again call cap exceeded")
+            self.new_checks += 1
+        else:
+            if self.expansion_calls >= _MAX_CONTEXT_EXPANSIONS:
+                if self._limit_noted:
+                    raise ParticipantError("context expansion call cap exceeded")
+                self._limit_noted = True
+                return {
+                    "request_id": self._wake["request_id"],
+                    "room_id": self._observation.binding.room_id,
+                    "direction": direction,
+                    "actors": {},
+                    "events": [],
+                    "has_next_page": False,
+                    "note": (
+                        "You have looked at the room's history "
+                        f"{_MAX_CONTEXT_EXPANSIONS} times this turn, the limit. "
+                        "Act on what you have seen."
+                    ),
+                }
+            self.expansion_calls += 1
+        if isinstance(max_events, bool) or not isinstance(max_events, int):
+            max_events = 12
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int):
+            max_bytes = 16_384
+        page = dict(
+            self._observation.read_room(
+                direction=direction,
+                anchor_event_id=(
+                    None
+                    if direction == "new"
+                    else anchor_event_id or self._wake["trigger_event_id"]
+                ),
+                seen_event_ids=frozenset(self.seen_event_ids),
+                since_arrival=self._turn_began,
+                max_events=max_events,
+                max_bytes=max_bytes,
+            )
+        )
+        self.seen_event_ids.update(
+            event["id"]
+            for event in page.get("events", ())
+            if isinstance(event, Mapping) and isinstance(event.get("id"), str)
+        )
+        page["request_id"] = self._wake["request_id"]
+        return page
 
 
 class ParticipantTurnHost:
@@ -700,69 +808,24 @@ class ParticipantTurnHost:
         if time.monotonic() >= effective_deadline:
             self.scheduler.expire(token)
             return TransportResult("failed", "host total deadline exceeded")
+        # Taken before the wake is built: anything that arrives after this and
+        # is not in the wake is new to the participant.
+        turn_began = self.observation.arrival_mark()
         wake = self._make_wake(checked_request, checked_decision)
         if wake is None:
             return None
         if time.monotonic() >= effective_deadline:
             self.scheduler.expire(token)
             return TransportResult("failed", "host total deadline exceeded")
-        host_continuation = request.get("continuation")
-        expansion_calls = 0
-        expansion_cursors: dict[tuple[str, str], str] = {}
-        expanded_event_ids: set[str] = set()
-
-        def expand(
-            *,
-            direction: str,
-            anchor_event_id: str | None = None,
-            max_events: int = 12,
-            max_bytes: int = 16_384,
-        ) -> Mapping[str, Any]:
-            nonlocal expansion_calls
+        def guard() -> None:
             if token.cancel_event.is_set() or not self.scheduler.is_current(token):
                 raise ParticipantError("context expansion cancelled")
             if time.monotonic() >= effective_deadline:
                 self.scheduler.expire(token)
                 raise ParticipantError("context expansion deadline exceeded")
-            if not host_continuation:
-                raise ParticipantError("context expansion is unavailable")
-            if expansion_calls >= _MAX_CONTEXT_EXPANSIONS:
-                raise ParticipantError("context expansion call cap exceeded")
-            fetch: dict[str, Any] = {
-                "request_id": wake["request_id"],
-                "handle_id": host_continuation["handle_id"],
-                "direction": direction,
-                "max_events": max_events,
-                "max_bytes": max_bytes,
-            }
-            if anchor_event_id is not None:
-                fetch["anchor_event_id"] = anchor_event_id
-            anchor = anchor_event_id or wake["trigger_event_id"]
-            cursor_key = (direction, anchor)
-            cursor = expansion_cursors.pop(cursor_key, None)
-            if cursor is not None:
-                fetch["cursor"] = cursor
-            expansion_calls += 1
-            page = dict(
-                self.observation.fetch_context(
-                    fetch,
-                    host_context=host_continuation["bound_to"],
-                )
-            )
-            expanded_event_ids.update(
-                event["id"]
-                for event in page.get("events", ())
-                if isinstance(event, Mapping)
-                and isinstance(event.get("id"), str)
-            )
-            next_cursor = page.pop("next_cursor", None)
-            if next_cursor is not None:
-                expansion_cursors[cursor_key] = next_cursor
-            # Capability material never crosses the host/participant boundary.
-            page.pop("handle_id", None)
-            page.pop("continuity_scope_id", None)
-            page["has_next_page"] = next_cursor is not None
-            return page
+
+        view = RoomView(self.observation, wake, turn_began=turn_began, guard=guard)
+        expand = view.expand
 
         result_queue: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
 
@@ -809,7 +872,7 @@ class ParticipantTurnHost:
                 return
             self._append_host_receipt(
                 wake,
-                expansion_calls=expansion_calls,
+                expansion_calls=view.expansion_calls + view.new_checks,
                 outcome=outcome,
             )
             host_receipt_persisted = True
@@ -858,8 +921,7 @@ class ParticipantTurnHost:
             settle_host("unknown")
             return None
 
-        visible_event_ids = {event["id"] for event in wake["events"]}
-        visible_event_ids.update(expanded_event_ids)
+        visible_event_ids = set(view.seen_event_ids)
         if action["origin_event_id"] not in visible_event_ids:
             settle_host("unknown")
             return TransportResult("failed", "action origin is absent from participant facts")

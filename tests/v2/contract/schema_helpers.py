@@ -98,8 +98,8 @@ SCHEMA_FILES = {
 
 INTERFACE_VERSIONS = {
     "attention-request": ("I-010A", "AttentionRequestV2", 1),
-    "attention-decision": ("I-010B", "AttentionDecisionV2", 3),
-    "participant-wake": ("I-010C", "ParticipantWakeV2", 2),
+    "attention-decision": ("I-010B", "AttentionDecisionV2", 4),
+    "participant-wake": ("I-010C", "ParticipantWakeV2", 3),
     "context-continuation": ("I-010D", "ContextContinuationV2", 1),
     "attention-receipt": ("I-010E", "AttentionReceiptV2", 3),
     "privileged-action-authorization": (
@@ -912,6 +912,8 @@ def _check_attention_advice(errors: _Errors, path: str, value: Any) -> None:
         return
     if "note" in value:
         _check_nes(errors, f"{path}.note", value["note"])
+        if isinstance(value["note"], str) and len(value["note"]) > 400:
+            errors.add(f"{path}.note", "must be at most 400 characters")
     if "evidence_event_ids" in value:
         cited = value["evidence_event_ids"]
         if not isinstance(cited, list) or len(cited) < 1:
@@ -925,6 +927,8 @@ def _check_attention_advice_list(errors: _Errors, path: str, value: Any) -> None
     if not isinstance(value, list):
         errors.add(path, "must be an array of attention-advice objects")
         return
+    if len(value) > 4:
+        errors.add(path, "must have at most 4 items")
     for index, advice in enumerate(value):
         _check_attention_advice(errors, f"{path}[{index}]", advice)
 
@@ -942,24 +946,18 @@ def _check_classifier_audit(errors: _Errors, path: str, value: Any) -> None:
 
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
-# The closed ok-transition matrix (FR-006) with each pair's allowed valves
-# and whether the pair may carry advice (FR-013: classifier WAKE only).
+# The closed ok-transition matrix (FR-006) with each pair's allowed valves.
+# Every pair may carry the classifier's reading of the room (@4).
 # WAKE->WAKE and SUPPRESS->SUPPRESS carry valve "none" (no widening valve
 # applied); valve/override-cause/margin cross-field legality is enforced
 # separately by the routing-audit rules (FR-005).
 _OK_TRANSITIONS = {
-    ("WAKE", "WAKE"): {"valves": ("none",), "advice": True},
-    ("ACK", "ACK"): {"valves": ("none",), "advice": False},
-    ("ACK", "DEFER"): {
-        "valves": ("policy-defer", "capability-defer"),
-        "advice": False,
-    },
-    ("DEFER", "DEFER"): {"valves": ("classifier-defer",), "advice": False},
-    ("SUPPRESS", "DEFER"): {
-        "valves": ("margin-defer", "policy-defer"),
-        "advice": False,
-    },
-    ("SUPPRESS", "SUPPRESS"): {"valves": ("none",), "advice": False},
+    ("WAKE", "WAKE"): {"valves": ("none",)},
+    ("ACK", "ACK"): {"valves": ("none",)},
+    ("ACK", "DEFER"): {"valves": ("policy-defer", "capability-defer")},
+    ("DEFER", "DEFER"): {"valves": ("classifier-defer",)},
+    ("SUPPRESS", "DEFER"): {"valves": ("margin-defer", "policy-defer")},
+    ("SUPPRESS", "SUPPRESS"): {"valves": ("none",)},
 }
 
 
@@ -1204,11 +1202,6 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
                     "SUPPRESS policy widening must name suppression-disabled "
                     "or recoverability-unproven",
                 )
-            if not rule["advice"] and "attention_advice" in doc:
-                errors.add(
-                    "attention_advice",
-                    "only allowed when the classifier disposition is WAKE (FR-013)",
-                )
     return list(errors)
 
 
@@ -1278,7 +1271,11 @@ def validate_participant_wake(doc: Any) -> list[str]:
     attention = doc.get("attention")
     source = None
     if "attention" in doc and _check_closed_object(
-        errors, "attention", attention, ("source",), ("source", "advice", "evidence_event_ids")
+        errors,
+        "attention",
+        attention,
+        ("source",),
+        ("source", "advice", "evidence_event_ids", "judged_through_event_id"),
     ):
         source = attention.get("source")
         if "source" in attention:
@@ -1292,11 +1289,16 @@ def validate_participant_wake(doc: Any) -> list[str]:
             else:
                 for index, event_id in enumerate(cited):
                     _check_nes(errors, f"attention.evidence_event_ids[{index}]", event_id)
-        if source != "WAKE" and ("advice" in attention or "evidence_event_ids" in attention):
+        if "judged_through_event_id" in attention:
+            _check_nes(errors, "attention.judged_through_event_id", attention["judged_through_event_id"])
+            if "advice" not in attention:
+                errors.add("attention.judged_through_event_id", "only allowed with a reading")
+        reading = {"advice", "evidence_event_ids", "judged_through_event_id"} & set(attention)
+        if source not in ("WAKE", "DEFER") and reading:
             errors.add(
                 "attention.advice",
-                "only allowed when source is 'WAKE' (FR-013): DEFER, "
-                "ERROR_FALLBACK, and PREATTENTION_BYPASS wakes are advice-free",
+                "only allowed when source is 'WAKE' or 'DEFER' (@3): ACK, "
+                "ERROR_FALLBACK, and PREATTENTION_BYPASS wakes carry no reading",
             )
     return list(errors)
 

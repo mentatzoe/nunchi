@@ -680,6 +680,9 @@ class HermesRoomConfig:
     limits: ObservationLimits
     participant_timeout_seconds: float
     participant_max_expansions: int
+    # Nunchi's own nod is off by default: an ACK judgment gives the
+    # participant a turn and any "mhm" is its own (Zoe, 2026-10-05).
+    ack: AckPolicy = AckPolicy()
 
 
 @dataclass(frozen=True)
@@ -765,6 +768,7 @@ def _load_room(value: Any, *, index: int) -> HermesRoomConfig:
     room = _closed(
         value,
         required={"binding", "profile", "attention", "limits", "participant"},
+        optional={"ack"},
         label=f"rooms[{index}]",
     )
     binding_raw = _closed(
@@ -906,6 +910,15 @@ def _load_room(value: Any, *, index: int) -> HermesRoomConfig:
         or not 0 <= expansions <= 8
     ):
         raise ValidationError("participant max_expansions must be within [0, 8]")
+    try:
+        ack = AckPolicy(**dict(_closed(
+            room.get("ack", {}),
+            required=set(),
+            optional={"enabled", "reaction"},
+            label=f"rooms[{index}].ack",
+        )))
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"Hermes ACK policy is invalid: {exc}") from exc
     return HermesRoomConfig(
         binding=binding,
         profile=profile,
@@ -914,6 +927,7 @@ def _load_room(value: Any, *, index: int) -> HermesRoomConfig:
         limits=limits,
         participant_timeout_seconds=float(timeout),
         participant_max_expansions=expansions,
+        ack=ack,
     )
 
 
@@ -1410,7 +1424,7 @@ class _RoomRuntime:
             "Hermes V2 room state directory",
         )
         receipts = ReceiptJournal(self.directory / "receipts.jsonl")
-        self.ack_policy = AckPolicy()
+        self.ack_policy = config.ack
         self.ack_journal = AckJournal(self.directory / "ack.jsonl")
         self._ack_cache_lock = threading.Lock()
         self._ack_capability: ReactionCapability = UNAVAILABLE_REACTION_CAPABILITY

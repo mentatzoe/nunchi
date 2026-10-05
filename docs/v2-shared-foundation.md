@@ -14,8 +14,8 @@ The changed portable interfaces are:
 
 | Interface | Version | Change |
 |---|---:|---|
-| `I-010B AttentionDecisionV2` | `@3` | first-class `ACK`, ACK audit, and safe ACK-to-DEFER widening |
-| `I-010C ParticipantWakeV2` | `@2` | advice-free `ACK` wake/effect source |
+| `I-010B AttentionDecisionV2` | `@4` | first-class `ACK`, ACK audit, and safe ACK-to-DEFER widening (@3); the reading of the room on every judgment (@4) |
+| `I-010C ParticipantWakeV2` | `@3` | `ACK` wake/effect source without a reading (@2); the reading on `DEFER` wakes and `judged_through_event_id` (@3) |
 | `I-010E AttentionReceiptV2` | `@3` | ACK disposition, authority audit, and ACK host source |
 | `I-030A AttentionEngineV2` | `@2` | shared ACK selection and capability/policy widening |
 | `I-040A ParticipantTurnHostV2` | `@2` | one core-owned participant protocol and durable ACK commit path |
@@ -26,8 +26,11 @@ parser, bounded expansion state, and authority binding. The request binds the
 exact request, participant, actor, platform, room, continuity scope, trigger,
 opportunity generation, lifecycle, deadline, and permission revision. A model
 result must copy that protocol and binding exactly around one action. Unknown
-versions, changed bindings, invisible origins/targets, exceeded permissions,
-and excess expansion reject before an effect.
+versions, changed bindings, invisible origins/targets, and exceeded
+permissions reject before an effect. Asking for room history never fails the
+turn: past the limit the participant is told so once, and only asking again
+fails it. Before its first post or reaction the protocol looks again for what
+others posted meanwhile, once.
 
 The Codex runner supplies only its isolated native model invocation, session
 continuity, cancellation, and result extraction. The Claude Code gate supplies
@@ -60,10 +63,14 @@ out of the shared core.
 ## Core outcomes
 
 - `SUPPRESS` ends at attention. There is no participant or native call.
-- `ACK` adds the configured reaction (default `👂`) to the exact trigger and
-  does not run the full participant.
+- `ACK` gives the participant a normal turn by default: the ACK policy is
+  off, so it widens to `DEFER` and any "mhm" is the participant's own
+  (Zoe, 2026-10-05). With `ack.enabled: true`, Nunchi instead adds the
+  configured reaction (default `👂`) to the exact trigger and does not run
+  the full participant.
 - `WAKE` runs one normal participant turn through the shared protocol.
-- `DEFER` runs that same normal participant path without fabricated advice.
+- `DEFER` runs that same normal participant path, with the model's reading
+  of the room when the judgment gave one.
 - Disabled ACK or absent/unauthenticated native reaction capability converts
   `ACK` to `DEFER`, with the exact policy or capability cause in receipts.
 

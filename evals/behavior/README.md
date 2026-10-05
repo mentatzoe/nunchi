@@ -24,7 +24,9 @@ format is in `scene.py`.
 
 Every scene starts as a draft (`"review": "draft: …"`):
 
-- `scenes/behavior/` holds the eight scenes from `docs/behavior.md`.
+- `scenes/behavior/` holds the eight scenes from `docs/behavior.md`, plus
+  two where a message arrives while the agent is composing
+  (`answered-while-composing`, `never-mind-while-composing`).
 - `scenes/litmus/` holds 57 scenes converted from the V1 litmus corpus by
   `litmus.py`. Their ranges come from V1 verdicts, and their `review` field
   quotes the V1 rationale. They have no notice facts yet.
@@ -70,11 +72,53 @@ participant host and the transport.
   mhm, and silence is staying quiet (which also fits where waiting does).
   Without it, the run counts the moment as "agent decides".
 
+A moment's `during_turn` messages reach the room after the agent's turn
+began, so the agent sees them only by looking at the room again; each
+record says how many new messages it was shown before posting.
+
 Step 1 is graded on attention alone. Scenes with several participants can
 check for collective silence and for pile-ons, where everyone speaks at
 once. The `behavior-eval` workflow uses `anthropic/claude-haiku-4.5` as the
 agent by default; one fixed agent model keeps differences between runs down
 to attention.
 
+Each agent turn records how the agent got it (a wake, or a defer and why)
+and whether attention's reading came with it. When the turn protocol rejects
+the agent's reply, the record keeps that reply under `raw_reply`, so the
+failure can be read. Two options measure the
+agent's side of the room:
+
+- `--paired` plays every turn that carried a reading a second time, on the
+  same wake without the reading, with its own fresh view of the room. That
+  second move is graded but never sent, so the summary shows what the
+  reading changed at the same moment.
+- `--reading-items` and `--reading-chars` set how long a reading attention
+  is asked for: at most 4 notes of at most 400 characters by default, and
+  `--reading-items 0` asks for none. Shorter readings answer faster; the
+  paired arm shows what each length changes.
+- `--ack` says who sends the "mhm". The default, `agent`, matches Nunchi's
+  default: an ACK judgment gives the agent a turn, and any "mhm" is its
+  own. `--ack nunchi` turns Nunchi's own nod back on, for comparison.
+
 Moments that need a pause, such as "five minutes later, nobody has
 answered", have no route in today's V2 and are reported as not supported.
+
+## Jev
+
+Models named `typesafe/...` (for example `typesafe/jev-1.13`) go through
+OpenRouter's Decisions API instead of the chat endpoint (`jev.py`). Jev is a
+typed decision model: it answers questions about the conversation with
+probabilities, never text. This prototype asks it six questions about the
+judged message:
+
+- is it conversation;
+- who is it addressed to;
+- has someone already answered it;
+- is the author mid-thought;
+- does the participant have something to add;
+- which move fits: speak, mhm, wait, or stay quiet.
+
+The most likely move decides the disposition, and the reading the agent sees
+is written from the answers. Step 4 of the plan on #94 replaces this
+prototype with typed questions that both Jev and an LLM answer. Each record
+keeps Jev's answers and the snapshot that served them under `model_response`.

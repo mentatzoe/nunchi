@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010B AttentionDecisionV2@3`` (slice 010, T003;
+"""Contract tests for ``I-010B AttentionDecisionV2@4`` (slice 010, T003;
 reworked by T028 after rejection R2).
 
 This file supersedes, in writing, T003's original framing of
@@ -320,25 +320,33 @@ class LegacyConfidenceCases(unittest.TestCase):
 
 
 class AdviceRuleCases(unittest.TestCase):
-    """FR-013: advice is keyed to classifier disposition ``WAKE`` and every
-    citation must reference a request-supplied event ID."""
+    """@4: the classifier's reading of the room may accompany every ok
+    judgment, at most 4 items of at most 400 characters, and every citation
+    must reference a request-supplied event ID."""
 
     def test_wake_with_grounded_advice_is_valid(self):
         doc = make_decision_ok(attention_advice=[make_advice()])
         assert_schema_verdict(self, "attention-decision", doc, "valid")
 
-    def test_advice_on_classifier_defer_rejects(self):
+    def test_a_reading_on_classifier_defer_is_valid(self):
         doc = make_decision_ok("DEFER", "DEFER", "classifier-defer", attention_advice=[make_advice()])
-        assert_schema_verdict(self, "attention-decision", doc, "invalid")
+        assert_schema_verdict(self, "attention-decision", doc, "valid")
 
-    def test_advice_on_suppression_rejects(self):
+    def test_a_reading_on_suppression_is_valid(self):
         doc = make_decision_ok("SUPPRESS", "SUPPRESS", "none", attention_advice=[make_advice()])
-        assert_schema_verdict(self, "attention-decision", doc, "invalid")
+        assert_schema_verdict(self, "attention-decision", doc, "valid")
 
-    def test_advice_on_widened_defer_rejects(self):
-        # The key is the classifier disposition, not the effective one.
+    def test_a_reading_on_widened_defer_is_valid(self):
         doc = make_decision_ok("SUPPRESS", "DEFER", "margin-defer", attention_advice=[make_advice()])
-        assert_schema_verdict(self, "attention-decision", doc, "invalid")
+        assert_schema_verdict(self, "attention-decision", doc, "valid")
+
+    def test_a_reading_is_bounded(self):
+        many = make_decision_ok(attention_advice=[make_advice()] * 5)
+        assert_schema_verdict(self, "attention-decision", many, "invalid")
+        advice = make_advice()
+        advice["note"] = "x" * 401
+        long = make_decision_ok(attention_advice=[advice])
+        assert_schema_verdict(self, "attention-decision", long, "invalid")
 
     def test_advice_without_citations_rejects(self):
         doc = make_decision_ok(attention_advice=[{"note": "ungrounded", "evidence_event_ids": []}])

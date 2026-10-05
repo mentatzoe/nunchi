@@ -9,6 +9,7 @@ runs, not here.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import io
 import json
 import os
 from pathlib import Path
@@ -25,12 +26,13 @@ from evals.behavior.scene import (
     parse_scene,
 )
 from evals.behavior.score import cell, grade, visible_result
+from nunchi.observation import ObservationLimits
 
 
 PARTICIPANTS = load_participants()
 
 
-def judgment(disposition, *, evidence=(), suppress_margin=True):
+def judgment(disposition, *, evidence=(), suppress_margin=True, reading=None):
     confidences = {"PASS": 0.0, "ACK": 0.0, "ASK": 0.0, "SPEAK": 0.0}
     if disposition == "SUPPRESS":
         confidences["PASS"] = 1.0 if suppress_margin else 0.5
@@ -38,12 +40,17 @@ def judgment(disposition, *, evidence=(), suppress_margin=True):
         confidences["ACK"] = 1.0
     else:
         confidences["SPEAK"] = 1.0
-    return {
+    result = {
         "disposition": disposition,
         "reasons": [f"fixture {disposition}"],
         "evidence_event_ids": list(evidence),
         "legacy_verdict_confidences": confidences,
     }
+    if reading is not None:
+        result["attention_advice"] = [
+            {"note": reading, "evidence_event_ids": list(evidence)}
+        ]
+    return result
 
 
 class FixedModel:
@@ -52,16 +59,21 @@ class FixedModel:
     name = "participant-attention"
     provider = "fixture"
 
-    def __init__(self, disposition, *, evidence=(), model_id="fixture/model"):
+    def __init__(self, disposition, *, evidence=(), model_id="fixture/model", reading=None):
         self.disposition = disposition
         self.evidence = evidence
         self.model_id = model_id
+        self.reading = reading
         self.projections = []
 
     def judge(self, *, instructions, projection, timeout_seconds):
         self.projections.append(projection)
         evidence = [item for item in self.evidence if item in {event["id"] for event in projection["events"]}]
-        return judgment(self.disposition, evidence=evidence or [projection["trigger_event_id"]])
+        return judgment(
+            self.disposition,
+            evidence=evidence or [projection["trigger_event_id"]],
+            reading=self.reading,
+        )
 
 
 def scene_by_id(scene_id):
@@ -103,6 +115,21 @@ class SceneFileTests(unittest.TestCase):
         ):
             self.assertIn(expected, ids)
         self.assertEqual(57, sum(1 for scene in scenes if scene.id.startswith("litmus-")))
+
+    def test_every_fact_to_notice_is_inside_the_observation_window(self):
+        # A fact older than the window never reaches attention or the agent,
+        # so a moment that asks for it measures nothing.
+        limit = ObservationLimits().snapshot_age_seconds
+        for scene in load_scenes():
+            offsets = {event["id"]: parse_offset(event["at"]) for event in scene.events if event.get("at")}
+            for moment in scene.moments:
+                if moment.event not in offsets:
+                    continue
+                for fact in moment.notice:
+                    for event_id in fact.get("events", ()):
+                        if event_id in offsets:
+                            with self.subTest(scene=scene.id, event=event_id):
+                                self.assertLess(offsets[event_id] - offsets[moment.event], limit)
 
     def test_offsets(self):
         self.assertEqual(0, parse_offset("0s"))
@@ -202,11 +229,11 @@ class GradeTests(unittest.TestCase):
 
 
 class JudgeMomentTests(unittest.TestCase):
-    def judge(self, scene_id, moment, disposition, **kwargs):
+    def judge(self, scene_id, moment, disposition, *, ack="agent", **kwargs):
         model = FixedModel(disposition, **kwargs)
         scene = scene_by_id(scene_id)
         job = run.Job(scene, moment, scene.participants[0], "fixture/model", 0)
-        record = run.judge_moment(job, lambda _: model, timeout_seconds=5)
+        record = run.judge_moment(job, lambda _: model, timeout_seconds=5, ack=ack)
         return record, model
 
     def test_suppress_at_the_end_of_the_story_is_a_miss(self):
@@ -219,11 +246,16 @@ class JudgeMomentTests(unittest.TestCase):
         _, model = self.judge("story-across-messages", 0, "ACK")
         self.assertEqual(["s1", "s2"], [event["id"] for event in model.projections[0]["events"]])
 
-    def test_ack_goes_through_the_capability_and_counts_as_mhm(self):
-        record, _ = self.judge("story-across-messages", 0, "ACK")
-        self.assertEqual("mhm", record["result"])
+    def test_nunchis_own_ack_goes_through_the_capability_and_counts_as_mhm(self):
+        record, _ = self.judge("story-across-messages", 0, "ACK", ack="nunchi")
+        self.assertEqual(("mhm", "nunchi"), (record["result"], record["by"]))
         self.assertEqual("ACK", record["decision"]["effective_disposition"])
         self.assertEqual("fits", record["grade"]["visible"])
+
+    def test_by_default_an_ack_is_the_agents_turn(self):
+        record, _ = self.judge("story-across-messages", 0, "ACK")
+        self.assertEqual(("woken", "DEFER"), (record["result"], record["decision"]["effective_disposition"]))
+        self.assertEqual("policy-defer", record["decision"]["routing_audit"]["valve"])
 
     def test_late_judgment_sees_the_answer(self):
         _, model = self.judge("answered-by-someone-else", 0, "WAKE")
@@ -305,15 +337,16 @@ def fails(wake):
 class AgentTurnTests(unittest.TestCase):
     """A model plays the woken agent through Nunchi's own host and transport."""
 
-    def judge(self, scene_id, moment, disposition, act):
-        agent = FakeAgent(act)
+    def judge(self, scene_id, moment, disposition, act, *, reading=None, agent=None, **kwargs):
+        agent = agent or FakeAgent(act)
         scene = scene_by_id(scene_id)
         job = run.Job(scene, moment, scene.participants[0], "fixture/model", 0)
         record = run.judge_moment(
             job,
-            lambda _: FixedModel(disposition),
+            lambda _: FixedModel(disposition, reading=reading),
             timeout_seconds=5,
             agent_factory=lambda profile: agent,
+            **kwargs,
         )
         return record, agent
 
@@ -337,8 +370,8 @@ class AgentTurnTests(unittest.TestCase):
         self.assertEqual(("mhm", "agent"), (record["result"], record["by"]))
         self.assertEqual("fits", record["grade"]["visible"])
 
-    def test_nunchis_ack_never_reaches_the_agent(self):
-        record, agent = self.judge("story-across-messages", 0, "ACK", speaks)
+    def test_nunchis_own_ack_never_reaches_the_agent(self):
+        record, agent = self.judge("story-across-messages", 0, "ACK", speaks, ack="nunchi")
         self.assertEqual(("mhm", "nunchi"), (record["result"], record["by"]))
         self.assertEqual([], agent.turns)
         self.assertNotIn("agent", record)
@@ -358,6 +391,138 @@ class AgentTurnTests(unittest.TestCase):
     def test_waiting_is_satisfied_by_staying_quiet(self):
         record, _ = self.judge("addressee-first", 0, "WAKE", stays_silent)
         self.assertEqual("fits", record["grade"]["visible"])
+
+    def test_the_record_says_how_the_agent_got_its_turn(self):
+        record, _ = self.judge("story-across-messages", 2, "WAKE", speaks, reading="Zoe has finished her story")
+        self.assertEqual({"source": "WAKE", "reading_items": 1}, record["agent"]["attention"])
+        self.assertEqual("WAKE", run.turn_source(record))
+
+    def test_a_paired_turn_is_played_again_without_the_reading_and_never_sent(self):
+        def speaks_only_with_a_reading(wake):
+            return speaks(wake) if wake["attention"].get("advice") else None
+
+        record, agent = self.judge(
+            "story-across-messages",
+            2,
+            "WAKE",
+            speaks_only_with_a_reading,
+            reading="Zoe has finished her story and asked for the next step",
+            paired=True,
+        )
+        self.assertEqual(("speak", "agent", "fits"), (record["result"], record["by"], record["grade"]["visible"]))
+        self.assertEqual(2, len(agent.turns))
+        with_reading, without_reading = (wake for wake, _ in agent.turns)
+        self.assertIn("advice", with_reading["attention"])
+        self.assertEqual({"source": "WAKE"}, without_reading["attention"])
+        self.assertEqual(with_reading["events"], without_reading["events"])
+        unread = record["agent"]["without_reading"]
+        self.assertEqual(("stay_quiet", "miss"), (unread["move"], unread["grade"]))
+        self.assertIsNone(unread["action"])
+
+    def test_a_turn_without_a_reading_is_not_paired(self):
+        record, agent = self.judge("story-across-messages", 2, "WAKE", speaks, paired=True)
+        self.assertEqual(1, len(agent.turns))
+        self.assertNotIn("without_reading", record["agent"])
+
+    def test_a_failed_paired_turn_never_changes_the_real_one(self):
+        class FailsSecondTime(FakeAgent):
+            def run_protocol(self, *, wake, opportunity, expand, cancel):
+                if self.turns:
+                    raise RuntimeError("agent provider HTTP 429")
+                return super().run_protocol(wake=wake, opportunity=opportunity, expand=expand, cancel=cancel)
+
+        record, _ = self.judge(
+            "story-across-messages", 2, "WAKE", speaks, reading="finished", paired=True, agent=FailsSecondTime(speaks)
+        )
+        self.assertEqual(("speak", "agent"), (record["result"], record["by"]))
+        self.assertFalse(record["provider_error"])
+        self.assertIn("HTTP 429", record["agent"]["without_reading"]["error"])
+
+    def test_a_reply_the_protocol_rejects_is_kept(self):
+        reply = '{"kind": "silence"}\n{"kind": "silence"}'
+        payload = json.dumps({"choices": [{"message": {"content": reply}}]}).encode()
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        scene = scene_by_id("story-across-messages")
+        job = run.Job(scene, 2, scene.participants[0], "fixture/model", 0)
+        agents = run.openai_compatible_agent_factory(api_key="k", base_url=run.DEFAULT_BASE_URL, model="fixture/agent")
+        with mock.patch("urllib.request.urlopen", lambda request, timeout: Response(payload)):
+            record = run.judge_moment(
+                job, lambda _: FixedModel("WAKE"), timeout_seconds=5, agent_factory=agents
+            )
+        self.assertTrue(record["provider_error"])
+        self.assertIn("not valid JSON", record["agent"]["error"])
+        self.assertEqual(reply, record["agent"]["raw_reply"])
+
+    def test_the_agent_sends_its_own_mhm_when_nunchi_does_not(self):
+        record, agent = self.judge("story-across-messages", 0, "ACK", reacts, ack="agent")
+        self.assertEqual(("mhm", "agent", "fits"), (record["result"], record["by"], record["grade"]["visible"]))
+        self.assertEqual(1, len(agent.turns))
+        self.assertEqual("DEFER", record["agent"]["attention"]["source"])
+        self.assertEqual("ACK widened to DEFER (policy-defer)", run.turn_source(record))
+
+    def test_a_message_that_arrives_mid_turn_is_seen_by_looking_again(self):
+        class LooksAgain(FakeAgent):
+            def run_protocol(self, *, wake, opportunity, expand, cancel):
+                self.turns.append((wake, opportunity))
+                page = expand(direction="new", max_events=12, max_bytes=16_384)
+                self.shown = [event["id"] for event in page["events"]]
+                return None if self.shown else speaks(wake)
+
+        agent = LooksAgain(None)
+        record, _ = self.judge("never-mind-while-composing", 0, "WAKE", None, agent=agent)
+        wake, _ = agent.turns[0]
+        self.assertNotIn("n1", [event["id"] for event in wake["events"]])
+        self.assertEqual(["n1"], agent.shown)
+        self.assertEqual(1, record["agent"]["looked_again"])
+        self.assertEqual(("stay_quiet", "fits"), (record["result"], record["grade"]["visible"]))
+
+    def test_the_paired_play_gets_its_own_view_of_the_turn(self):
+        # The second play must see what the first play saw, including the
+        # message that arrived mid-turn, or the pair measures the view, not
+        # the reading.
+        class ReadsAll(FakeAgent):
+            def run_protocol(self, *, wake, opportunity, expand, cancel):
+                self.turns.append((wake, opportunity))
+                history = expand(direction="before", max_events=12, max_bytes=16_384)
+                new = expand(direction="new", max_events=12, max_bytes=16_384)
+                self.shown.append(
+                    ([event["id"] for event in history["events"]], [event["id"] for event in new["events"]])
+                )
+                return None if new["events"] else speaks(wake)
+
+        agent = ReadsAll(None)
+        agent.shown = []
+        record, _ = self.judge(
+            "never-mind-while-composing", 0, "WAKE", None, reading="Zoe asked Vigil directly", paired=True, agent=agent
+        )
+        self.assertEqual(2, len(agent.turns))
+        self.assertEqual(agent.shown[0], agent.shown[1])
+        self.assertEqual(["n1"], agent.shown[1][1])
+        self.assertEqual(("stay_quiet", "fits"), (record["agent"]["without_reading"]["move"], record["agent"]["without_reading"]["grade"]))
+
+    def test_context_requests_are_recorded(self):
+        class Looks(FakeAgent):
+            def run_protocol(self, *, wake, opportunity, expand, cancel):
+                try:
+                    expand(direction="before", max_events=5, max_bytes=4096)
+                except Exception:
+                    pass
+                return None
+
+        record, _ = self.judge("story-across-messages", 2, "WAKE", None, agent=Looks(None))
+        (entry,) = record["agent"]["expansions"]
+        self.assertEqual("with reading", entry["arm"])
+        self.assertEqual("before", entry["request"]["direction"])
+        # Today a short room has nothing more to fetch, so the request fails;
+        # either way the record keeps what the agent asked and what it got.
+        self.assertTrue("error" in entry or "events" in entry)
 
 
 class RunTests(unittest.TestCase):
@@ -389,7 +554,7 @@ class RunTests(unittest.TestCase):
 
     def test_scene_selection(self):
         scenes = load_scenes()
-        self.assertEqual(8, len(run.select_scenes(scenes, "behavior")))
+        self.assertEqual(10, len(run.select_scenes(scenes, "behavior")))
         self.assertEqual(57, len(run.select_scenes(scenes, "litmus")))
         self.assertEqual(5, len(run.select_scenes(scenes, "tool-chrome")))
         self.assertEqual(["did-you-see"], [scene.id for scene in run.select_scenes(scenes, "did-you-see")])
@@ -495,6 +660,47 @@ class RunTests(unittest.TestCase):
         self.assertEqual(0, code)
         self.assertEqual(2, meta["per_model"])
         self.assertEqual({"a/model": 2, "b/model": 2}, peak)
+
+    def test_a_paired_run_reports_the_reading_and_who_nods(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch("sys.stdout"):
+                code = run.main(
+                    [
+                        "--dry-run",
+                        "--agent-model", "x",
+                        "--paired",
+                        "--ack", "agent",
+                        "--scenes", "story-across-messages",
+                        "--runs", "1",
+                        "--out", directory,
+                    ]
+                )
+            summary = (Path(directory) / "summary.md").read_text(encoding="utf-8")
+            meta = json.loads((Path(directory) / "run.json").read_text(encoding="utf-8"))
+        self.assertEqual(0, code)
+        self.assertEqual(("agent", True), (meta["ack"], meta["paired"]))
+        self.assertIn("- Mhm: the agent's own", summary)
+        self.assertIn("## What the agent saw", summary)
+        self.assertIn("| WAKE | 3 | 1 / 1 | 2 / 2 | 3 / 3 | 0 |", summary)
+
+    def test_the_reading_length_reaches_attention_and_the_record(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch("sys.stdout"):
+                code = run.main(
+                    ["--dry-run", "--scenes", "story-across-messages", "--runs", "1",
+                     "--reading-items", "1", "--reading-chars", "80", "--out", directory]
+                )
+            summary = (Path(directory) / "summary.md").read_text(encoding="utf-8")
+            meta = json.loads((Path(directory) / "run.json").read_text(encoding="utf-8"))
+        self.assertEqual(0, code)
+        self.assertEqual((1, 80), (meta["reading_items"], meta["reading_chars"]))
+        self.assertIn("- Reading: up to 1 note of up to 80 characters", summary)
+        with mock.patch("sys.stderr"), self.assertRaises(SystemExit):
+            run.main(["--dry-run", "--reading-items", "5"])
+
+    def test_pairing_needs_an_agent(self):
+        with mock.patch("sys.stderr"), self.assertRaises(SystemExit):
+            run.main(["--dry-run", "--paired"])
 
     def test_a_dry_run_can_simulate_the_agent(self):
         with tempfile.TemporaryDirectory() as directory, mock.patch("sys.stdout"):

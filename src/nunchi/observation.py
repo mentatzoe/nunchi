@@ -307,6 +307,10 @@ class ObservationProvider:
         self._reserved_replays: set[tuple[str, str]] = set()
         self._committed_replays: set[tuple[str, str]] = set()
         self._continuations: dict[str, _ContinuationState] = {}
+        # Arrival order of retained events in this process, so a turn can ask
+        # what arrived after it began even when timestamps put an event earlier.
+        self._arrival_seq = 0
+        self._arrival_by_id: dict[str, int] = {}
         self._restart_gap = False
         self._retention_evicted_before = False
         self._lock = threading.RLock()
@@ -653,6 +657,8 @@ class ObservationProvider:
                     insert_at = index
                     break
         self._events.insert(insert_at, retained)
+        self._arrival_seq += 1
+        self._arrival_by_id[event["id"]] = self._arrival_seq
         for actor_id, actor in checked_actors.items():
             self._actors[actor_id] = _merged_actor(self._actors.get(actor_id), actor)
         self._trim_retention()
@@ -661,6 +667,7 @@ class ObservationProvider:
         while len(self._events) > self.limits.retention_events:
             removed = self._events.popleft()
             self._delivery_by_event.pop(removed["id"], None)
+            self._arrival_by_id.pop(removed["id"], None)
             self._retention_evicted_before = True
         while (
             self._events
@@ -668,6 +675,7 @@ class ObservationProvider:
         ):
             removed = self._events.popleft()
             self._delivery_by_event.pop(removed["id"], None)
+            self._arrival_by_id.pop(removed["id"], None)
             self._retention_evicted_before = True
         referenced = {self.binding.actor_id}
         for event in self._events:
@@ -1214,6 +1222,130 @@ class ObservationProvider:
             if next_cursor is not None:
                 page["next_cursor"] = next_cursor
             return page
+
+    def arrival_mark(self) -> int:
+        """The arrival position now; events that arrive later are newer than it."""
+
+        with self._lock:
+            return self._arrival_seq
+
+    def read_room(
+        self,
+        *,
+        direction: str,
+        anchor_event_id: str | None,
+        seen_event_ids: set[str] | frozenset[str],
+        since_arrival: int,
+        max_events: int,
+        max_bytes: int,
+    ) -> dict[str, Any]:
+        """One bounded page of the room as it is now, for a participant's turn.
+
+        It reads the live retained log, so it can show messages that arrived
+        after the turn began. It never repeats an event the participant has
+        already seen, so asking again pages further. ``new`` returns events by
+        others that arrived after ``since_arrival``. A page that cannot be
+        served carries a host-written ``note`` instead of failing the turn.
+        The page shows messages only, never verdicts about them.
+        """
+
+        if direction not in ("before", "after", "around", "new"):
+            return self._room_note(direction, "Unknown direction: use before, after, around or new.")
+        max_events = max(1, min(int(max_events), self.limits.continuation_events))
+        max_bytes = max(1, min(int(max_bytes), self.limits.continuation_bytes))
+        with self._lock:
+            events = list(self._events)
+            if direction == "new":
+                candidates = [
+                    index
+                    for index, event in enumerate(events)
+                    if self._arrival_by_id.get(event["id"], 0) > since_arrival
+                    and event.get("author_id") != self.binding.actor_id
+                ]
+            else:
+                positions = {event["id"]: index for index, event in enumerate(events)}
+                if anchor_event_id not in positions:
+                    return self._room_note(
+                        direction,
+                        "That message is no longer in the room's retained history.",
+                        anchor_event_id=anchor_event_id,
+                    )
+                anchor = positions[anchor_event_id]
+                if direction == "before":
+                    candidates = list(range(anchor - 1, -1, -1))
+                elif direction == "after":
+                    candidates = list(range(anchor + 1, len(events)))
+                else:
+                    candidates = sorted(
+                        (index for index in range(len(events)) if index != anchor),
+                        key=lambda index: (abs(index - anchor), index),
+                    )
+            candidates = [
+                index for index in candidates if events[index]["id"] not in seen_event_ids
+            ]
+            selected: list[int] = []
+            truncated_by: set[str] = set()
+            for index in candidates:
+                if len(selected) >= max_events:
+                    truncated_by.add("events")
+                    break
+                proposed = [events[item] for item in sorted([*selected, index])]
+                proposed_actors, _ = _context_actors(proposed, self._actors)
+                if _context_byte_count(proposed, proposed_actors) > max_bytes:
+                    truncated_by.add("bytes")
+                    break
+                selected.append(index)
+            page_events = [deepcopy(events[index]) for index in sorted(selected)]
+            page_actors, _ = _context_actors(page_events, self._actors)
+            more = len(selected) < len(candidates)
+            page: dict[str, Any] = {
+                "room_id": self.binding.room_id,
+                "direction": direction,
+                "actors": deepcopy(page_actors),
+                "events": page_events,
+                "has_next_page": more,
+                "coverage": {
+                    "truncated_by": sorted(truncated_by),
+                    "has_gaps": self._restart_gap,
+                    "has_restart_gap": self._restart_gap,
+                    "continuity": self._continuity,
+                },
+            }
+            if direction != "new":
+                page["anchor_event_id"] = anchor_event_id
+            if not page_events:
+                page["note"] = {
+                    "before": (
+                        "No older messages are retained."
+                        if self._retention_evicted_before
+                        else "There are no older messages."
+                    ),
+                    "after": "Nothing newer yet.",
+                    "around": "Nothing else near that message.",
+                    "new": "Nobody else has posted since you last looked.",
+                }[direction]
+            elif direction == "before" and not more and self._retention_evicted_before:
+                page["note"] = "Older messages than these are no longer retained."
+            return page
+
+    def _room_note(
+        self,
+        direction: str,
+        note: str,
+        *,
+        anchor_event_id: str | None = None,
+    ) -> dict[str, Any]:
+        page: dict[str, Any] = {
+            "room_id": self.binding.room_id,
+            "direction": direction,
+            "actors": {},
+            "events": [],
+            "has_next_page": False,
+            "note": note,
+        }
+        if anchor_event_id is not None:
+            page["anchor_event_id"] = anchor_event_id
+        return page
 
     def resolve_event(self, event_id: str) -> dict[str, Any] | None:
         with self._lock:
