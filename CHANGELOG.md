@@ -65,6 +65,20 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- The agent sees the room as it is now, and looks again before speaking
+  (#94, plan step 3; Zoe, 2026-10-05). The gate's context and the agent's
+  own view are separate. During its turn the agent reads the live room:
+  older messages, newer ones, or `new` for what others posted since it last
+  looked, including messages that arrived after its turn began. Its history
+  never fails the turn: "nothing more", a message no longer retained, or
+  the per-turn limit comes back as a short note; in the first baseline with
+  the agent simulated, 10 of 19 failed agent turns were history requests in
+  a short room. Before
+  the first message, reply, or reaction goes out, the shared protocol and
+  the Claude Code gate look again once; if others posted a message
+  meanwhile, the action is held and the agent is shown it, then sends,
+  changes, or drops its action. Hermes does not offer this yet. The behavior suite adds
+  messages that arrive mid-turn (`during_turn`) and two draft scenes.
 - Attention's reading of the room reaches the agent on every turn it takes
   (#94, plan step 2). The attention model gives a short reading with every
   judgment: what is happening, with pointers to the messages, and the kinds

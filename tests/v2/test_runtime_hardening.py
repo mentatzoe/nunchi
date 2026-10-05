@@ -549,7 +549,7 @@ class HostMediationTests(unittest.TestCase):
         attempts = []
 
         def participant(*, wake, expand, **_):
-            for _ in range(4):
+            for _ in range(5):
                 attempts.append(
                     expand(
                         direction="before",
@@ -584,7 +584,11 @@ class HostMediationTests(unittest.TestCase):
         )
         opportunity = outcome.opportunities[0]
         self.assertEqual("failed", opportunity.transport.delivery)
-        self.assertEqual(3, len(attempts))
+        # Three pages, then one note that the limit is reached; only asking
+        # again after the note fails the turn.
+        self.assertEqual(4, len(attempts))
+        self.assertEqual([], attempts[3]["events"])
+        self.assertIn("the limit", attempts[3]["note"])
         self.assertEqual([], transport.calls)
         stream = receipts.records(opportunity.request_id)
         self.assertEqual(3, stream[2]["body"]["expansion_calls"])

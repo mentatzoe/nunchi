@@ -334,6 +334,11 @@ class ParticipantProtocolTests(unittest.TestCase):
             )
             self.assertFalse(done)
             self.assertIsNone(action)
+        # Past the limit the participant is told so once, without failing
+        # the turn; asking again after that fails it.
+        done, action = self.protocol.consume(expansion, expand=lambda **_: {"events": []})
+        self.assertEqual((False, None), (done, action))
+        self.assertIn("the limit", self.protocol.pages[-1]["note"])
         with self.assertRaises(ParticipantModelError):
             self.protocol.consume(expansion, expand=lambda **_: {"events": []})
         self.assertEqual(3, len(calls))

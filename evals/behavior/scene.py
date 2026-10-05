@@ -32,7 +32,9 @@ carries no timestamp.
 
 A moment judges either an event (`event`, optionally `seen_through` a later
 event when the judgment happens after more messages arrived) or a pause
-(`pause_after` an event, for `pause`). `step1` is what the conservative
+(`pause_after` an event, for `pause`). `during_turn` lists later events that
+arrive while the woken agent is composing its turn: they are not in its
+wake, but it can see them by looking again before it posts. `step1` is what the conservative
 first step should do: `pass`, `suppress`, or `either`. `together` on a scene
 with several participants names collective checks: `not-all-quiet`
 (collective silence) and `no-pile-on` (everyone speaking at once).
@@ -82,6 +84,7 @@ class Moment:
     label: str
     event: str | None
     seen_through: str | None
+    during_turn: tuple[str, ...]
     pause_after: str | None
     pause_seconds: int | None
     step1: str
@@ -135,7 +138,7 @@ def _moment(raw: Mapping[str, Any], index: int, scene_id: str, event_ids: list[s
     where = f"moment {index + 1}"
     _require(isinstance(raw, Mapping), scene_id, f"{where} must be an object")
     allowed = {
-        "label", "event", "seen_through", "pause_after", "pause",
+        "label", "event", "seen_through", "during_turn", "pause_after", "pause",
         "step1", "notice", "fitting", "misses",
     }
     _require(not set(raw) - allowed, scene_id, f"{where} has unknown fields {sorted(set(raw) - allowed)}")
@@ -158,7 +161,17 @@ def _moment(raw: Mapping[str, Any], index: int, scene_id: str, event_ids: list[s
                 scene_id,
                 f"{where}: seen_through must not precede the judged event",
             )
-    else:
+    during_turn = raw.get("during_turn", [])
+    _require(isinstance(during_turn, list), scene_id, f"{where}: during_turn must be a list")
+    if during_turn:
+        _require(event is not None, scene_id, f"{where}: a pause has no during_turn")
+        last = event_ids.index(seen_through or event)
+        _require(
+            all(item in event_ids and event_ids.index(item) > last for item in during_turn),
+            scene_id,
+            f"{where}: during_turn must name events after the moment",
+        )
+    if event is None:
         _require(pause_after in event_ids, scene_id, f"{where}: unknown pause_after")
         _require(seen_through is None, scene_id, f"{where}: a pause has no seen_through")
         pause_seconds = parse_offset("-" + str(raw.get("pause", "")).lstrip("-"))
@@ -203,6 +216,7 @@ def _moment(raw: Mapping[str, Any], index: int, scene_id: str, event_ids: list[s
         label=label,
         event=event,
         seen_through=seen_through,
+        during_turn=tuple(during_turn),
         pause_after=pause_after,
         pause_seconds=pause_seconds,
         step1=step1,

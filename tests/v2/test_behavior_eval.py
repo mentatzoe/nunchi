@@ -428,6 +428,22 @@ class AgentTurnTests(unittest.TestCase):
         self.assertEqual("DEFER", record["agent"]["attention"]["source"])
         self.assertEqual("ACK widened to DEFER (policy-defer)", run.turn_source(record))
 
+    def test_a_message_that_arrives_mid_turn_is_seen_by_looking_again(self):
+        class LooksAgain(FakeAgent):
+            def run_protocol(self, *, wake, opportunity, expand, cancel):
+                self.turns.append((wake, opportunity))
+                page = expand(direction="new", max_events=12, max_bytes=16_384)
+                self.shown = [event["id"] for event in page["events"]]
+                return None if self.shown else speaks(wake)
+
+        agent = LooksAgain(None)
+        record, _ = self.judge("never-mind-while-composing", 0, "WAKE", None, agent=agent)
+        wake, _ = agent.turns[0]
+        self.assertNotIn("n1", [event["id"] for event in wake["events"]])
+        self.assertEqual(["n1"], agent.shown)
+        self.assertEqual(1, record["agent"]["looked_again"])
+        self.assertEqual(("stay_quiet", "fits"), (record["result"], record["grade"]["visible"]))
+
     def test_context_requests_are_recorded(self):
         class Looks(FakeAgent):
             def run_protocol(self, *, wake, opportunity, expand, cancel):
@@ -475,7 +491,7 @@ class RunTests(unittest.TestCase):
 
     def test_scene_selection(self):
         scenes = load_scenes()
-        self.assertEqual(8, len(run.select_scenes(scenes, "behavior")))
+        self.assertEqual(10, len(run.select_scenes(scenes, "behavior")))
         self.assertEqual(57, len(run.select_scenes(scenes, "litmus")))
         self.assertEqual(5, len(run.select_scenes(scenes, "tool-chrome")))
         self.assertEqual(["did-you-see"], [scene.id for scene in run.select_scenes(scenes, "did-you-see")])

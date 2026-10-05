@@ -146,9 +146,17 @@ class RecordingAgent:
     at the same moment.
     """
 
-    def __init__(self, inner: Any, *, paired: bool = False) -> None:
+    def __init__(
+        self,
+        inner: Any,
+        *,
+        paired: bool = False,
+        arrive: Callable[[], None] | None = None,
+    ) -> None:
         self.inner = inner
         self.paired = paired
+        # Messages that arrive while the agent is composing its turn.
+        self.arrive = arrive
         self.called = False
         self.action: Any = None
         self.error: str | None = None
@@ -160,6 +168,9 @@ class RecordingAgent:
     def run_protocol(self, *, wake: Mapping[str, Any], expand: Any, **kwargs: Any) -> Any:
         self.called = True
         self.attention = deepcopy(dict(wake.get("attention", {})))
+        if self.arrive is not None:
+            arrive, self.arrive = self.arrive, None
+            arrive()
         started = time.monotonic()
         try:
             self.action = self.inner.run_protocol(
@@ -474,8 +485,25 @@ def judge_moment(
         ack_policy=ack_policy,
         reaction_capability_provider=transport.reaction_capability,
     )
+    def arrive() -> None:
+        # The scene's mid-turn messages reach the room after the wake was
+        # built, so only looking again shows them to the agent.
+        for event_id in moment.during_turn:
+            raw = scene.events[scene.event_index(event_id)]
+            observation.observe(
+                delivery_id=f"d-{raw['id']}",
+                event=canonical_event(raw, at=datetime.now(timezone.utc)),
+                actors=_event_actors(scene, raw),
+            )
+
     agent = (
-        RecordingAgent(agent_factory(profile), paired=paired) if agent_factory is not None else None
+        RecordingAgent(
+            agent_factory(profile),
+            paired=paired,
+            arrive=arrive if moment.during_turn else None,
+        )
+        if agent_factory is not None
+        else None
     )
     scheduler = ConversationOpportunityScheduler(f"{participant}:eval:{scene.id}")
     host = ParticipantTurnHost(
@@ -554,6 +582,14 @@ def judge_moment(
         }
         if agent.expansions:
             record["agent"]["expansions"] = agent.expansions
+        looked_again = [
+            entry
+            for entry in agent.expansions
+            if entry["arm"] == "with reading" and entry["request"].get("direction") == "new"
+        ]
+        if looked_again:
+            # How many new messages the agent was shown before it posted.
+            record["agent"]["looked_again"] = sum(entry.get("events") or 0 for entry in looked_again)
         if failed:
             provider_error = True
             record["agent"]["error"] = agent.error or transport_result.detail
@@ -690,6 +726,15 @@ def _agent_turn_sections(records: list[dict[str, Any]], *, paired: bool) -> list
             f"{moves['speak']} | {moves['stay_quiet']} | {moves['mhm']} | {grades['fits']} | {grades['miss']} | "
             f"{sum(1 for record in mine if 'error' in record['agent'])} |"
         )
+    looked = [record for record in turns if record["agent"].get("looked_again")]
+    if looked:
+        moves = Counter(record["result"] for record in looked)
+        lines += [
+            "",
+            f"In {len(looked)} turn(s) others posted while the agent was composing, and it was "
+            f"shown their messages before posting: it then spoke {moves['speak']}, stayed quiet "
+            f"{moves['stay_quiet']}, and nodded {moves['mhm']} time(s).",
+        ]
     if not paired:
         return lines
     pairs = [

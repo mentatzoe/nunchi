@@ -292,6 +292,11 @@ pair that capability authorizes — a `oneOf` over two bare shapes with no
   `coverage`, and optional opaque `next_cursor` (absent means the binding
   is exhausted).
 
+Since 2026-10-05 (#94 step 3) the participant's own turn no longer fetches
+through this interface: it reads the live room through the host's view
+(see `docs/platform-v2.md`, "The participant's view of the room"), and the
+continuation capability serves the attention request's availability flags.
+
 Handles, cursors, and fetch credentials are host-only and forbidden from
 the classifier projection; the classifier sees coverage and expansion
 capability booleans only (FR-004/FR-009). A fetch request carries no

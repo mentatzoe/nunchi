@@ -154,6 +154,7 @@ class _Turn:
         self.expand = expand
         self.cancel = cancel
         self.visible_event_ids = {event["id"] for event in request["wake"]["events"]}
+        self.looked_again = False
         self.lock = threading.Lock()
         self.turn_id: str | None = None
         self.turn_ids: set[str] = set()
@@ -393,6 +394,9 @@ class GatedParticipant:
             refusal = self.guard.refusal(action)
             if refusal is not None:
                 return False, refusal
+            held = self._look_again(turn, action)
+            if held is not None:
+                return True, held
             turn.action = action
             turn.action_ready.set()
         if not turn.outcome_ready.wait(self.result_wait_seconds):
@@ -400,6 +404,39 @@ class GatedParticipant:
                 "The room has not confirmed this action yet. Do not repeat it."
             )
         return _describe(turn.outcome)
+
+    def _look_again(self, turn: _Turn, action: Mapping[str, Any]) -> str | None:
+        """Before the first post or reaction, show what others said meanwhile.
+
+        The action is held once when others posted while the session was
+        composing; the session then decides again. A failed check never
+        blocks the action.
+        """
+
+        if turn.looked_again or action["kind"] not in ("message", "reply", "reaction"):
+            return None
+        turn.looked_again = True
+        try:
+            page = dict(turn.expand(direction="new", max_events=12, max_bytes=16_384))
+        except NunchiError:
+            return None
+        events = [
+            event
+            for event in page.get("events", ())
+            if isinstance(event, Mapping) and isinstance(event.get("id"), str)
+        ]
+        turn.visible_event_ids.update(event["id"] for event in events)
+        # Only another person's message holds the post; a new reaction alone
+        # does not change what the room needs.
+        messages = [event for event in events if event.get("type") == "message"]
+        if not messages:
+            return None
+        return (
+            f"Not posted yet: {len(messages)} new message(s) arrived while you were "
+            "composing. Call the tool again to send it as it is or changed, or "
+            "end your turn to stay silent.\n"
+            + json.dumps(page, sort_keys=True, ensure_ascii=False)
+        )
 
     def _context(self, turn: _Turn, arguments: Any) -> tuple[bool, str]:
         if turn.action is not None:

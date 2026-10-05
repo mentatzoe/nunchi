@@ -24,7 +24,9 @@ format is in `scene.py`.
 
 Every scene starts as a draft (`"review": "draft: …"`):
 
-- `scenes/behavior/` holds the eight scenes from `docs/behavior.md`.
+- `scenes/behavior/` holds the eight scenes from `docs/behavior.md`, plus
+  two where a message arrives while the agent is composing
+  (`answered-while-composing`, `never-mind-while-composing`).
 - `scenes/litmus/` holds 57 scenes converted from the V1 litmus corpus by
   `litmus.py`. Their ranges come from V1 verdicts, and their `review` field
   quotes the V1 rationale. They have no notice facts yet.
@@ -69,6 +71,10 @@ participant host and the transport.
   move is graded: a message or reply is speaking, its own reaction is an
   mhm, and silence is staying quiet (which also fits where waiting does).
   Without it, the run counts the moment as "agent decides".
+
+A moment's `during_turn` messages reach the room after the agent's turn
+began, so the agent sees them only by looking at the room again; each
+record says how many new messages it was shown before posting.
 
 Step 1 is graded on attention alone. Scenes with several participants can
 check for collective silence and for pile-ons, where everyone speaks at

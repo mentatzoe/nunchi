@@ -26,8 +26,11 @@ parser, bounded expansion state, and authority binding. The request binds the
 exact request, participant, actor, platform, room, continuity scope, trigger,
 opportunity generation, lifecycle, deadline, and permission revision. A model
 result must copy that protocol and binding exactly around one action. Unknown
-versions, changed bindings, invisible origins/targets, exceeded permissions,
-and excess expansion reject before an effect.
+versions, changed bindings, invisible origins/targets, and exceeded
+permissions reject before an effect. Asking for room history never fails the
+turn: past the limit the participant is told so once, and only asking again
+fails it. Before its first post or reaction the protocol looks again for what
+others posted meanwhile, once.
 
 The Codex runner supplies only its isolated native model invocation, session
 continuity, cancellation, and result extraction. The Claude Code gate supplies
