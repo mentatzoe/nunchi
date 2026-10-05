@@ -589,6 +589,13 @@ class NunchiOnInstalledHostNormalTurn(_Base):
         )
         self.assertTrue(outcome["approve_admitted"])
         self.assertIn("done after approval", self.deliveries())
+        # Exactly once: one tool request, one approved execution, one reply.
+        self.assertEqual(2, len(turns), self.server.bodies())
+        results = [m for m in turns[1]["messages"] if m.get("role") == "tool"]
+        self.assertEqual(1, len(results), results)
+        result = json.loads(results[0]["content"])
+        self.assertEqual(0, result.get("exit_code"), result)
+        self.assertIn("approved by the user", json.dumps(result))
         self._assert_tool_probe()
         self.assertFalse(target.exists(), "approved native command did not execute")
 
