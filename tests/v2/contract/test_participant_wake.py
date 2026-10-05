@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010C ParticipantWakeV2@2`` (slice 010, T004).
+"""Contract tests for ``I-010C ParticipantWakeV2@3`` (slice 010, T004).
 
 Red cases cover the wake sources, advice-free ``PREATTENTION_BYPASS``
 (010-Preattention-bypass), the FR-013 advice-source violations (advice on
@@ -57,7 +57,8 @@ class WakeSourceCases(unittest.TestCase):
 
 
 class WakeAdviceCases(unittest.TestCase):
-    """FR-013: advice appears only on ``source: WAKE`` packets."""
+    """@3: the reading appears only on ``WAKE`` and ``DEFER`` packets, the
+    turns a participant takes after a model judgment."""
 
     def test_wake_source_with_advice_is_valid(self):
         doc = make_wake("WAKE", advice=[make_advice()])
@@ -68,9 +69,17 @@ class WakeAdviceCases(unittest.TestCase):
         doc = make_wake("PREATTENTION_BYPASS", advice=[make_advice()])
         assert_schema_verdict(self, "participant-wake", doc, "invalid")
 
-    def test_defer_wake_is_advice_free(self):
+    def test_defer_wake_carries_the_reading(self):
         doc = make_wake("DEFER", advice=[make_advice()])
-        assert_schema_verdict(self, "participant-wake", doc, "invalid")
+        assert_schema_verdict(self, "participant-wake", doc, "valid")
+
+    def test_judged_through_dates_a_reading_and_needs_one(self):
+        dated = make_wake("DEFER", advice=[make_advice()])
+        dated["attention"]["judged_through_event_id"] = dated["trigger_event_id"]
+        assert_schema_verdict(self, "participant-wake", dated, "valid")
+        undated = make_wake("DEFER")
+        undated["attention"]["judged_through_event_id"] = undated["trigger_event_id"]
+        assert_schema_verdict(self, "participant-wake", undated, "invalid")
 
     def test_error_fallback_wake_is_advice_free(self):
         doc = make_wake("ERROR_FALLBACK", advice=[make_advice()])

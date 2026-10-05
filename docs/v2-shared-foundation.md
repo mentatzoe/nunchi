@@ -14,8 +14,8 @@ The changed portable interfaces are:
 
 | Interface | Version | Change |
 |---|---:|---|
-| `I-010B AttentionDecisionV2` | `@3` | first-class `ACK`, ACK audit, and safe ACK-to-DEFER widening |
-| `I-010C ParticipantWakeV2` | `@2` | advice-free `ACK` wake/effect source |
+| `I-010B AttentionDecisionV2` | `@4` | first-class `ACK`, ACK audit, and safe ACK-to-DEFER widening (@3); the reading of the room on every judgment (@4) |
+| `I-010C ParticipantWakeV2` | `@3` | `ACK` wake/effect source without a reading (@2); the reading on `DEFER` wakes and `judged_through_event_id` (@3) |
 | `I-010E AttentionReceiptV2` | `@3` | ACK disposition, authority audit, and ACK host source |
 | `I-030A AttentionEngineV2` | `@2` | shared ACK selection and capability/policy widening |
 | `I-040A ParticipantTurnHostV2` | `@2` | one core-owned participant protocol and durable ACK commit path |
@@ -63,7 +63,8 @@ out of the shared core.
 - `ACK` adds the configured reaction (default `👂`) to the exact trigger and
   does not run the full participant.
 - `WAKE` runs one normal participant turn through the shared protocol.
-- `DEFER` runs that same normal participant path without fabricated advice.
+- `DEFER` runs that same normal participant path, with the model's reading
+  of the room when the judgment gave one.
 - Disabled ACK or absent/unauthenticated native reaction capability converts
   `ACK` to `DEFER`, with the exact policy or capability cause in receipts.
 
