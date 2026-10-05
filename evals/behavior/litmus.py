@@ -8,8 +8,8 @@ never overwrites an existing scene unless asked with `--force`.
 
 Conversion rules, all drafts:
 
-- V1 verdicts map to moves: PASS to stay quiet, ACK to mhm, ASK to ask,
-  SPEAK to contribute. The mapped moves fit.
+- V1 verdicts map to moves: PASS to stay quiet, ACK to mhm, ASK and SPEAK
+  to speak (asking is one way to speak). The mapped moves fit.
 - Where V1 expected only SPEAK or ASK, staying quiet and a nod alone are
   clear misses.
 - Step 1 passes everything except the participant's own echo (suppress) and
@@ -36,7 +36,7 @@ from .scene import SCENES, load_participants, parse_scene
 FIXTURES = Path(__file__).resolve().parents[1] / "verdict_suite" / "fixtures"
 OUT = SCENES / "litmus"
 SKIP = {"contract"}
-MOVE = {"PASS": "stay_quiet", "ACK": "mhm", "ASK": "ask", "SPEAK": "contribute"}
+MOVE = {"PASS": "stay_quiet", "ACK": "mhm", "ASK": "speak", "SPEAK": "speak"}
 HUMANS = {"zoe", "tpm", "mira", "mallory"}
 _MENTION = re.compile(r"<@!?(\d+)>")
 _PLATFORM = {"discord-channel": "discord", "issue-thread": "issue-thread"}

@@ -39,8 +39,7 @@
       "event": "rogue-msg-1",
       "step1": "pass",
       "fitting": [
-        "contribute",
-        "ask"
+        "speak"
       ],
       "misses": [
         {

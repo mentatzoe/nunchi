@@ -24,9 +24,7 @@
         {"fact": "Castor already answered Sam's question", "events": ["q1", "a1"]}
       ],
       "fitting": ["stay_quiet", "mhm"],
-      "misses": [
-        {"move": "ask", "why": "nothing is left to clarify; Castor answered"}
-      ]
+      "misses": []
     }
   ]
 }

@@ -81,7 +81,7 @@ def minimal(**changes):
             {"id": "m1", "author": "zoe", "at": "-1m", "text": "Hi"},
             {"id": "m2", "author": "zoe", "at": "0s", "text": "Vigil?", "mentions": ["vigil"]},
         ],
-        "moments": [{"event": "m2", "step1": "pass", "fitting": ["contribute"]}],
+        "moments": [{"event": "m2", "step1": "pass", "fitting": ["speak"]}],
     }
     raw.update(changes)
     return raw
@@ -120,14 +120,14 @@ class SceneFileTests(unittest.TestCase):
                     {
                         "event": "m2",
                         "step1": "pass",
-                        "fitting": ["contribute"],
-                        "misses": [{"move": "contribute", "why": "x"}],
+                        "fitting": ["speak"],
+                        "misses": [{"move": "speak", "why": "x"}],
                     }
                 ]
             },
             "event and pause": {
                 "moments": [
-                    {"event": "m2", "pause_after": "m2", "pause": "5m", "step1": "pass", "fitting": ["contribute"]}
+                    {"event": "m2", "pause_after": "m2", "pause": "5m", "step1": "pass", "fitting": ["speak"]}
                 ]
             },
             "pointer to nothing": {
@@ -135,7 +135,7 @@ class SceneFileTests(unittest.TestCase):
                     {
                         "event": "m2",
                         "step1": "pass",
-                        "fitting": ["contribute"],
+                        "fitting": ["speak"],
                         "notice": [{"fact": "x", "events": ["m9"]}],
                     }
                 ]
@@ -415,8 +415,18 @@ class LitmusConversionTests(unittest.TestCase):
         scene = self.convert("addressing", "a-mention-snowflake-direct")
         self.assertEqual(["vigil"], scene["events"][-1]["mentions"])
         moment = scene["moments"][0]
-        self.assertEqual(["contribute"], moment["fitting"])
+        self.assertEqual(["speak"], moment["fitting"])
         self.assertEqual({"stay_quiet", "mhm"}, {miss["move"] for miss in moment["misses"]})
+
+    def test_a_v1_ask_is_speaking(self):
+        # Zoe, 2026-10-05: ASK is too specific; speaking covers asking.
+        scene = self.convert("multica", "m-baseline-ask-ambiguous")
+        self.assertEqual(["speak"], scene["moments"][0]["fitting"])
+        with self.assertRaises(SceneError):
+            parse_scene(
+                minimal(moments=[{"event": "m2", "step1": "pass", "fitting": ["ask"]}]),
+                participants=PARTICIPANTS,
+            )
 
     def test_own_echo_under_an_alias_is_the_participant(self):
         scene = self.convert("addressing", "a-self-echo-alias-author")

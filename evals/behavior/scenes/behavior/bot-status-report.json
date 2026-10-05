@@ -26,7 +26,7 @@
       "fitting": ["stay_quiet"],
       "misses": [
         {"move": "mhm", "why": "nodding at a bot's status line is noise"},
-        {"move": "contribute", "why": "nobody asked anything; restating a passing build is noise"}
+        {"move": "speak", "why": "nobody asked anything; restating a passing build is noise"}
       ]
     }
   ]

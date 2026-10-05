@@ -19,7 +19,7 @@
   },
   "events": [
     {
-      "id": "ask",
+      "id": "request",
       "author": "zoe",
       "at": "-31m",
       "mentions": [
@@ -223,20 +223,19 @@
         {
           "fact": "Zoe asked Vigil about the cache hit rate 30 messages ago",
           "events": [
-            "ask"
+            "request"
           ]
         },
         {
           "fact": "\"That\" refers to the cache question; nothing since was for Vigil",
           "events": [
-            "ask",
+            "request",
             "follow"
           ]
         }
       ],
       "fitting": [
-        "contribute",
-        "ask"
+        "speak"
       ],
       "misses": [
         {

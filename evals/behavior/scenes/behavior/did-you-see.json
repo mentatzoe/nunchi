@@ -24,7 +24,7 @@
         {"fact": "Vigil only nodded at Zoe's proposal and never replied", "events": ["z1", "r1"]},
         {"fact": "Zoe is asking Vigil directly for a response", "events": ["z2"]}
       ],
-      "fitting": ["contribute", "ask"],
+      "fitting": ["speak"],
       "misses": [
         {"move": "stay_quiet", "why": "Zoe asked Vigil directly after getting only a nod"},
         {"move": "mhm", "why": "another nod ignores the question"}

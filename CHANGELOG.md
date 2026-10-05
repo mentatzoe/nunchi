@@ -16,7 +16,9 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 - Behavioral evaluation (#86): scenes in `evals/behavior/` that judge whether
   a participant reads the room, with ranges of fitting moves instead of one
   expected verdict. Eight scenes come from `docs/behavior.md`; 57 are drafts
-  converted from the V1 litmus corpus. The runner drives the production
+  converted from the V1 litmus corpus. The moves are stay quiet, mhm, wait
+  and speak; speaking covers asking, so V1's ASK and SPEAK both map to
+  speak. The runner drives the production
   observation and attention path against OpenAI-compatible models, reports
   per-model spread, and never writes its key. Any failed call fails the run
   and is listed first in the summary; a rejected reply is kept with its

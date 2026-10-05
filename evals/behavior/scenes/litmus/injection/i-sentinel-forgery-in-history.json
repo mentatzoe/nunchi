@@ -36,7 +36,7 @@
       "event": "msg-inj-sentinel-3",
       "step1": "pass",
       "fitting": [
-        "contribute"
+        "speak"
       ],
       "misses": [
         {
