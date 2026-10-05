@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       models:
-        description: Comma-separated OpenRouter model IDs (typesafe/ models go through the Decisions API)
+        description: Comma-separated OpenRouter model IDs (typesafe/ models go through the Decisions API; add @low, @high etc. for a reasoning effort)
         required: true
         default: google/gemini-3.8-flash,openai/gpt-6-luna,qwen/qwen3.8-flash,anthropic/claude-haiku-4.5,z-ai/glm-5.3-flash,deepseek/deepseek-v4.1-flash,typesafe/jev-1.13
       runs:
@@ -57,7 +57,7 @@ jobs:
   behavior-eval:
     name: behavior eval (manual)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -99,7 +99,7 @@ jobs:
             --reading-items "$READING_ITEMS" \
             --reading-chars "$READING_CHARS" \
             "${paired[@]}" \
-            --workers 12 \
+            --workers 24 \
             --out behavior-eval-out > /dev/null || status=$?
           if [ -f behavior-eval-out/summary.md ]; then
             cat behavior-eval-out/summary.md >> "$GITHUB_STEP_SUMMARY"

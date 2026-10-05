@@ -507,6 +507,9 @@ class OpenAICompatibleAttentionModel:
         self._url = base_url.rstrip("/") + "/chat/completions"
         self._temperature = temperature
         self._extra_body = deepcopy(extra)
+        # The provider's last full response, for audits and evaluations: the
+        # served model and its token usage, when the endpoint reports them.
+        self.last_response: Mapping[str, Any] | None = None
 
     @classmethod
     def from_trusted_config(cls, config: Mapping[str, Any]) -> "OpenAICompatibleAttentionModel":
@@ -564,6 +567,7 @@ class OpenAICompatibleAttentionModel:
         }
         if self._temperature is not None:
             body["temperature"] = self._temperature
+        self.last_response = None
         request = urllib.request.Request(
             self._url,
             data=json.dumps(body).encode("utf-8"),
@@ -580,6 +584,8 @@ class OpenAICompatibleAttentionModel:
             raise AttentionError(f"attention provider returned HTTP {exc.code}") from exc
         except (urllib.error.URLError, socket.timeout, OSError, json.JSONDecodeError) as exc:
             raise AttentionError("attention provider request failed") from exc
+        if isinstance(payload, Mapping):
+            self.last_response = payload
         try:
             content = payload["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:

@@ -216,6 +216,46 @@ class ParticipantProtocolTests(unittest.TestCase):
         )
         self.assertEqual(1, len(bodies))
 
+    def test_extra_request_fields_are_configured_and_the_response_is_kept(self):
+        for reserved in ("model", "messages", "response_format", "temperature"):
+            with self.subTest(reserved=reserved), self.assertRaises(ValidationError):
+                OpenAICompatibleParticipant(
+                    profile=PROFILE,
+                    model="any/model",
+                    api_key="k",
+                    base_url="http://localhost:1/v1",
+                    extra_body={reserved: "x"},
+                )
+        participant = OpenAICompatibleParticipant.from_trusted_config(
+            profile=PROFILE,
+            config={
+                "model": "any/model",
+                "base_url": "http://localhost:1/v1",
+                "extra_body": {"reasoning": {"effort": "low"}},
+            },
+            environment={"NUNCHI_PARTICIPANT_API_KEY": "k"},
+        )
+        sent = []
+        payload = {"choices": [{"message": {"content": "{}"}}], "usage": {"cost": 0.001}}
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def urlopen(request, timeout):
+            sent.append(json.loads(request.data))
+            return Response(json.dumps(payload).encode())
+
+        protocol = ParticipantTurnProtocol(profile=PROFILE, wake=wake(), opportunity=opportunity())
+        with mock.patch("urllib.request.urlopen", urlopen):
+            self.assertEqual("{}", participant._invoke(protocol))
+        self.assertEqual({"effort": "low"}, sent[0]["reasoning"])
+        self.assertEqual("any/model", sent[0]["model"])
+        self.assertEqual({"cost": 0.001}, participant.last_response["usage"])
+
     def test_a_note_after_the_fenced_reply_is_dropped(self):
         # Models sometimes explain a silence after the closing fence (#94).
         envelope = json.dumps(self.envelope({"kind": "silence"}), indent=2)

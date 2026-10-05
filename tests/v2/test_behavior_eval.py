@@ -716,6 +716,150 @@ class RunTests(unittest.TestCase):
                 run.main(["--scenes", "bot-status-report", "--out", "unused"])
 
 
+class Response(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class FakeProvider:
+    """An OpenRouter-shaped endpoint for attention and the agent, with usage.
+
+    Attention gets typed answers; the agent stays silent. Every reply reports
+    tokens, cost and the provider that served it.
+    """
+
+    def __init__(self, disposition="WAKE"):
+        self.disposition = disposition
+        self.bodies = []
+
+    def __call__(self, request, timeout):
+        body = json.loads(request.data)
+        self.bodies.append(body)
+        system, user = body["messages"][0]["content"], body["messages"][1]["content"]
+        if "answer typed questions about the judged message" in system:
+            content = json.dumps(answers_leaning(self.disposition))
+            usage = {
+                "prompt_tokens": 1200,
+                "completion_tokens": 300,
+                "completion_tokens_details": {"reasoning_tokens": 220},
+                "cost": 0.0004,
+            }
+        else:
+            turn = json.loads(user)["participant_turn"]
+            content = json.dumps(
+                {"protocol": turn["protocol"], "binding": turn["binding"], "action": {"kind": "silence"}}
+            )
+            usage = {"prompt_tokens": 3000, "completion_tokens": 40, "cost": 0.0031}
+        payload = {
+            "model": body["model"] + "-20260901",
+            "provider": "FixtureCloud",
+            "choices": [{"message": {"content": content}}],
+            "usage": usage,
+        }
+        return Response(json.dumps(payload).encode())
+
+
+class UsageTests(unittest.TestCase):
+    """Cost and tokens per call, and a reasoning effort per model (#86)."""
+
+    def test_a_model_label_may_carry_a_reasoning_effort(self):
+        self.assertEqual(("deepseek/deepseek-v4.1-flash", None), run.model_spec("deepseek/deepseek-v4.1-flash"))
+        self.assertEqual(("deepseek/deepseek-v4.1-flash", "low"), run.model_spec("deepseek/deepseek-v4.1-flash@low"))
+        for bad in ("a/model@fast", "@low", "typesafe/jev-1.13@low"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                run.model_spec(bad)
+        with mock.patch.dict(os.environ, {"NUNCHI_OPENROUTER": "k"}), mock.patch("sys.stderr"):
+            with self.assertRaises(SystemExit):
+                run.main(["--models", "a/model@fast", "--scenes", "bot-status-report"])
+
+    def test_the_request_asks_for_cost_and_the_effort(self):
+        provider = FakeProvider()
+        factory = run.openai_compatible_factory(api_key="k", base_url=run.DEFAULT_BASE_URL, temperature=0)
+        scene = scene_by_id("bot-status-report")
+        with mock.patch("urllib.request.urlopen", provider):
+            run.judge_moment(run.Job(scene, 0, "vigil", "x/model@low", 0), factory, timeout_seconds=5)
+            run.judge_moment(run.Job(scene, 0, "vigil", "x/model", 0), factory, timeout_seconds=5)
+        with_effort, default = provider.bodies
+        self.assertEqual("x/model", with_effort["model"])
+        self.assertEqual({"effort": "low"}, with_effort["reasoning"])
+        self.assertEqual({"include": True}, with_effort["usage"])
+        self.assertNotIn("reasoning", default)
+        other = run.openai_compatible_factory(api_key="k", base_url="http://localhost:1/v1", temperature=0)
+        with mock.patch("urllib.request.urlopen", provider):
+            run.judge_moment(run.Job(scene, 0, "vigil", "x/model@high", 0), other, timeout_seconds=5)
+        self.assertEqual("high", provider.bodies[-1]["reasoning_effort"])
+        self.assertNotIn("usage", provider.bodies[-1])
+
+    def test_attention_and_agent_usage_are_recorded(self):
+        provider = FakeProvider("WAKE")
+        factory = run.openai_compatible_factory(api_key="k", base_url=run.DEFAULT_BASE_URL, temperature=0)
+        agents = run.openai_compatible_agent_factory(api_key="k", base_url=run.DEFAULT_BASE_URL, model="fixture/agent")
+        scene = scene_by_id("story-across-messages")
+        job = run.Job(scene, 2, scene.participants[0], "x/model@low", 0)
+        with mock.patch("urllib.request.urlopen", provider):
+            record = run.judge_moment(job, factory, timeout_seconds=5, agent_factory=agents, paired=True)
+        self.assertEqual(
+            {
+                "model": "x/model-20260901",
+                "provider": "FixtureCloud",
+                "prompt_tokens": 1200,
+                "completion_tokens": 300,
+                "reasoning_tokens": 220,
+                "cost": 0.0004,
+            },
+            record["attention_usage"],
+        )
+        self.assertEqual(
+            {"calls": 1, "prompt_tokens": 3000, "completion_tokens": 40, "cost": 0.0031, "providers": ["FixtureCloud"]},
+            record["agent"]["usage"],
+        )
+        self.assertEqual(0.0031, record["agent"]["without_reading"]["usage"]["cost"])
+        self.assertEqual({"include": True}, provider.bodies[1]["usage"])
+
+        summary = run.summarize(
+            [scene], ["x/model@low"], [record], [],
+            {
+                "started_at": "s", "finished_at": "f", "git_sha": "x", "git_dirty": False,
+                "nunchi_version": "v", "runs": 1, "temperature": 0, "base_url": "u",
+                "calls": 1, "provider_errors": 0, "command": "c",
+            },
+        )
+        self.assertIn(
+            "| `x/model@low` | 1/1 | 1200 / 300 / 220 | $0.0004 | $0.0031 | $0.0035 | $0.0031 | FixtureCloud (1) |",
+            summary,
+        )
+        self.assertIn("Reported cost of the whole run: $0.0066", summary)
+
+    def test_a_typed_decision_reports_its_usage_too(self):
+        self.assertEqual(
+            {"model": "typesafe/jev-1.13-20260917", "prompt_tokens": 1191, "completion_tokens": 166, "cost": 5e-05},
+            run.call_usage(
+                {
+                    "model": "typesafe/jev-1.13-20260917",
+                    "answers": {},
+                    "usage": {"cost": 5e-05, "input_tokens": 1191, "output_tokens": 166},
+                }
+            ),
+        )
+        self.assertEqual({}, run.call_usage(None))
+
+    def test_no_usage_means_no_cost_section(self):
+        scene = scene_by_id("bot-status-report")
+        record = run.judge_moment(run.Job(scene, 0, "vigil", "fixture/model", 0), lambda _: FixedModel("WAKE"), timeout_seconds=5)
+        summary = run.summarize(
+            [scene], ["fixture/model"], [record], [],
+            {
+                "started_at": "s", "finished_at": "f", "git_sha": "x", "git_dirty": False,
+                "nunchi_version": "v", "runs": 1, "temperature": 0, "base_url": "u",
+                "calls": 1, "provider_errors": 0, "command": "c",
+            },
+        )
+        self.assertNotIn("## Cost and tokens", summary)
+
+
 class LitmusConversionTests(unittest.TestCase):
     def convert(self, category, name):
         fixture = json.loads((litmus.FIXTURES / category / f"{name}.json").read_text())

@@ -978,6 +978,7 @@ class OpenAICompatibleParticipant:
         provider: str = "openai-compatible",
         timeout_seconds: float = 60,
         max_expansions: int = DEFAULT_MAX_EXPANSIONS,
+        extra_body: Mapping[str, Any] | None = None,
     ) -> None:
         for name, value in (
             ("model", model),
@@ -987,6 +988,14 @@ class OpenAICompatibleParticipant:
         ):
             if not isinstance(value, str) or not value:
                 raise ValidationError(f"participant model {name} must be non-empty")
+        if extra_body is not None and not isinstance(extra_body, Mapping):
+            raise ValidationError("participant model extra_body must be an object")
+        extra = dict(extra_body or {})
+        reserved = {"model", "messages", "response_format", "temperature"} & set(extra)
+        if reserved:
+            raise ValidationError(
+                f"participant model extra_body cannot override {sorted(reserved)}"
+            )
         if (
             isinstance(timeout_seconds, bool)
             or not isinstance(timeout_seconds, (int, float))
@@ -1000,6 +1009,10 @@ class OpenAICompatibleParticipant:
         self.max_expansions = max_expansions
         self._api_key = api_key
         self._url = base_url.rstrip("/") + "/chat/completions"
+        self._extra_body = deepcopy(extra)
+        # The provider's last full response, for audits and evaluations: the
+        # served model and its token usage, when the endpoint reports them.
+        self.last_response: Mapping[str, Any] | None = None
 
     def _prompt(self) -> str:
         return participant_turn_prompt(self.profile)
@@ -1019,6 +1032,7 @@ class OpenAICompatibleParticipant:
             "api_key_env",
             "timeout_seconds",
             "max_expansions",
+            "extra_body",
         }
         if set(config) - allowed:
             raise ValidationError("participant model config has unexpected fields")
@@ -1041,10 +1055,13 @@ class OpenAICompatibleParticipant:
             provider=config.get("provider", "openai-compatible"),
             timeout_seconds=config.get("timeout_seconds", 60),
             max_expansions=config.get("max_expansions", DEFAULT_MAX_EXPANSIONS),
+            extra_body=config.get("extra_body"),
         )
 
     def _invoke(self, protocol: ParticipantTurnProtocol) -> Any:
+        self.last_response = None
         body = {
+            **deepcopy(self._extra_body),
             "model": self.model,
             "messages": [
                 {"role": "system", "content": protocol.instructions},
@@ -1078,6 +1095,8 @@ class OpenAICompatibleParticipant:
             raise ParticipantModelError(f"participant provider HTTP {exc.code}: {detail}") from exc
         except (urllib.error.URLError, socket.timeout, OSError, json.JSONDecodeError) as exc:
             raise ParticipantModelError(f"participant provider failed: {exc}") from exc
+        if isinstance(payload, dict):
+            self.last_response = payload
         if isinstance(payload, dict) and "choices" in payload:
             try:
                 return payload["choices"][0]["message"]["content"]

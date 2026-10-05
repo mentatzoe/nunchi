@@ -175,6 +175,14 @@ class RecordingAgent:
         self.attention: Mapping[str, Any] | None = None
         self.expansions: list[dict[str, Any]] = []
         self.without_reading: dict[str, Any] | None = None
+        self.usage: dict[str, Any] | None = None
+
+    def _usage_since(self, start: int) -> dict[str, Any] | None:
+        log = getattr(self.inner, "usage_log", None)
+        return usage_total(log[start:]) if isinstance(log, list) else None
+
+    def _calls_so_far(self) -> int:
+        return len(getattr(self.inner, "usage_log", None) or ())
 
     def run_protocol(self, *, wake: Mapping[str, Any], expand: Any, **kwargs: Any) -> Any:
         self.called = True
@@ -183,6 +191,7 @@ class RecordingAgent:
             arrive, self.arrive = self.arrive, None
             arrive()
         started = time.monotonic()
+        first_call = self._calls_so_far()
         try:
             self.action = self.inner.run_protocol(
                 wake=wake, expand=self._recorded(expand, "with reading"), **kwargs
@@ -193,6 +202,7 @@ class RecordingAgent:
             raise
         finally:
             self.latency_ms = int((time.monotonic() - started) * 1000)
+            self.usage = self._usage_since(first_call)
         if self.paired and self.attention.get("advice"):
             self.without_reading = self._play_without_reading(wake, expand, kwargs)
         return self.action
@@ -210,6 +220,7 @@ class RecordingAgent:
             expand = fork().expand
         played: dict[str, Any] = {}
         started = time.monotonic()
+        first_call = self._calls_so_far()
         try:
             played["action"] = self.inner.run_protocol(
                 wake=bare, expand=self._recorded(expand, "without reading"), **kwargs
@@ -221,6 +232,9 @@ class RecordingAgent:
             if raw is not None:
                 played["raw_reply"] = raw
         played["latency_ms"] = int((time.monotonic() - started) * 1000)
+        usage = self._usage_since(first_call)
+        if usage is not None:
+            played["usage"] = usage
         return played
 
     def _recorded(self, expand: Any, arm: str) -> Callable[..., Any]:
@@ -325,6 +339,70 @@ def invalid_reason(raw: Any, event_ids: set[str], trigger_event_id: str) -> str:
 
 TYPED_DECISION_PREFIX = "typesafe/"
 
+# A chat model may carry a reasoning effort after "@", for example
+# "deepseek/deepseek-v4.1-flash@low", so one run can compare efforts side by
+# side. Without one, the provider's default applies. Which efforts a model
+# accepts is the provider's to say; a refused effort fails that model's calls.
+REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
+def model_spec(label: str) -> tuple[str, str | None]:
+    """Split a model label into the provider's model id and a reasoning effort."""
+
+    model_id, at, effort = label.partition("@")
+    if not model_id:
+        raise ValueError(f"model {label!r} has no id")
+    if not at:
+        return model_id, None
+    if effort not in REASONING_EFFORTS:
+        raise ValueError(f"model {label!r}: reasoning effort must be one of {', '.join(REASONING_EFFORTS)}")
+    if is_typed_decision_model(model_id):
+        raise ValueError(f"model {label!r}: a typed decision model takes no reasoning effort")
+    return model_id, effort
+
+
+def _count(value: Any) -> float | int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value:
+        return None
+    return value
+
+
+def call_usage(response: Any) -> dict[str, Any]:
+    """Tokens, cost, and the serving provider of one model call, when reported.
+
+    Reads the OpenAI-compatible shape (``prompt_tokens``, ``completion_tokens``,
+    ``completion_tokens_details.reasoning_tokens``) and the Decisions API shape
+    (``input_tokens``, ``output_tokens``); ``cost`` is the provider's own figure.
+    """
+
+    if not isinstance(response, Mapping):
+        return {}
+    usage = response.get("usage") if isinstance(response.get("usage"), Mapping) else {}
+    details = usage.get("completion_tokens_details")
+    entry = {
+        "model": response.get("model") if isinstance(response.get("model"), str) else None,
+        "provider": response.get("provider") if isinstance(response.get("provider"), str) else None,
+        "prompt_tokens": _count(usage.get("prompt_tokens", usage.get("input_tokens"))),
+        "completion_tokens": _count(usage.get("completion_tokens", usage.get("output_tokens"))),
+        "reasoning_tokens": _count(details.get("reasoning_tokens")) if isinstance(details, Mapping) else None,
+        "cost": _count(usage.get("cost")),
+    }
+    return {key: value for key, value in entry.items() if value is not None}
+
+
+def usage_total(calls: list[Mapping[str, Any]]) -> dict[str, Any]:
+    """The usage of several calls added up, with the providers that served them."""
+
+    total: dict[str, Any] = {"calls": len(calls)}
+    for key in ("prompt_tokens", "completion_tokens", "reasoning_tokens", "cost"):
+        values = [call[key] for call in calls if key in call]
+        if values:
+            total[key] = round(sum(values), 8) if key == "cost" else sum(values)
+    providers = sorted({call["provider"] for call in calls if "provider" in call})
+    if providers:
+        total["providers"] = providers
+    return total
+
 
 def is_typed_decision_model(model_id: str) -> bool:
     return model_id.startswith(TYPED_DECISION_PREFIX) or model_id.startswith("~" + TYPED_DECISION_PREFIX)
@@ -341,15 +419,28 @@ def openai_compatible_factory(
     such as Jev) through the Decisions API, any other model through the
     OpenAI-compatible chat endpoint. Both answer the same typed questions."""
 
-    def build(model_id: str) -> Any:
+    openrouter = "openrouter.ai" in base_url
+
+    def build(label: str) -> Any:
+        model_id, effort = model_spec(label)
         if is_typed_decision_model(model_id):
             return DecisionsAttentionModel(model=model_id, api_key=api_key, url=jev_url)
+        extra: dict[str, Any] = {}
+        if openrouter:
+            # OpenRouter reports each call's cost only when asked.
+            extra["usage"] = {"include": True}
+        if effort is not None:
+            if openrouter:
+                extra["reasoning"] = {"effort": effort}
+            else:
+                extra["reasoning_effort"] = effort
         return OpenAICompatibleAttentionModel(
             model=model_id,
             api_key=api_key,
             base_url=base_url,
-            provider="openrouter" if "openrouter.ai" in base_url else "openai-compatible",
+            provider="openrouter" if openrouter else "openai-compatible",
             temperature=temperature,
+            extra_body=extra or None,
         )
 
     return build
@@ -364,10 +455,19 @@ class RecordingParticipant(OpenAICompatibleParticipant):
 
     last_reply: Any = None
 
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        # One entry per model call, in order; the agent splits it by play.
+        self.usage_log: list[dict[str, Any]] = []
+
     def _invoke(self, protocol: Any) -> Any:
         self.last_reply = None
-        self.last_reply = super()._invoke(protocol)
-        return self.last_reply
+        try:
+            self.last_reply = super()._invoke(protocol)
+            return self.last_reply
+        finally:
+            if self.last_response is not None:
+                self.usage_log.append(call_usage(self.last_response))
 
 
 RAW_REPLY_MAX_CHARS = 4000
@@ -384,13 +484,15 @@ def openai_compatible_agent_factory(
     *, api_key: str, base_url: str, model: str
 ) -> AgentFactory:
     def build(profile: ParticipantProfile) -> Any:
+        openrouter = "openrouter.ai" in base_url
         return RecordingParticipant(
             profile=profile,
             model=model,
             api_key=api_key,
             base_url=base_url,
-            provider="openrouter" if "openrouter.ai" in base_url else "openai-compatible",
+            provider="openrouter" if openrouter else "openai-compatible",
             timeout_seconds=AGENT_TIMEOUT_SECONDS / 2,
+            extra_body={"usage": {"include": True}} if openrouter else None,
         )
 
     return build
@@ -628,6 +730,8 @@ def judge_moment(
             "latency_ms": agent.latency_ms,
             "attention": _attention_summary(agent.attention),
         }
+        if agent.usage is not None:
+            record["agent"]["usage"] = agent.usage
         if agent.expansions:
             record["agent"]["expansions"] = agent.expansions
         looked_again = [
@@ -656,10 +760,14 @@ def judge_moment(
 
     response = getattr(inner, "last_response", None)
     if isinstance(response, Mapping):
-        # The typed answers behind the judgment, and the snapshot that served them.
-        record["model_response"] = {
-            key: response[key] for key in ("model", "answers", "usage") if key in response
-        }
+        if "answers" in response:
+            # The typed answers behind the judgment, and the snapshot that served them.
+            record["model_response"] = {
+                key: response[key] for key in ("model", "answers", "usage") if key in response
+            }
+        usage = call_usage(response)
+        if usage:
+            record["attention_usage"] = usage
     evidence = set(decision.get("evidence_event_ids", []))
     record.update(
         result=result,
@@ -832,6 +940,70 @@ def _agent_turn_sections(records: list[dict[str, Any]], *, paired: bool) -> list
     return lines
 
 
+def _cost(value: float) -> str:
+    return f"${value:.4f}"
+
+
+def _cost_section(models: list[str], records: list[dict[str, Any]]) -> list[str]:
+    """What each route cost and how many tokens it used, as the providers reported."""
+
+    def agent_usage(record: Mapping[str, Any], arm: str) -> Mapping[str, Any]:
+        agent = record.get("agent") or {}
+        usage = (agent.get("without_reading") or {}).get("usage") if arm == "paired" else agent.get("usage")
+        return usage or {}
+
+    if not any(record.get("attention_usage") or agent_usage(record, "turn") for record in records):
+        return []
+    lines = [
+        "",
+        "## Cost and tokens",
+        "",
+        "As each provider reported it. A call that failed or timed out reports",
+        "nothing, so it is not counted. *Per moment* is attention plus the agent's",
+        "real turn, over every moment of that route; the paired play is a",
+        "measurement and is listed apart.",
+        "",
+        "| Model | Attention calls reported / moments | Median tokens in / out / reasoning | Attention cost | Agent turns' cost | Per moment | Paired play cost | Providers |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    totals = Counter()
+    for model in models:
+        mine = [record for record in records if record["model"] == model and record["result"] != "unsupported"]
+        calls = [record["attention_usage"] for record in mine if record.get("attention_usage")]
+
+        def median(key: str) -> str:
+            values = [call[key] for call in calls if key in call]
+            return str(int(statistics.median(values))) if values else "-"
+
+        attention = sum(call.get("cost", 0) for call in calls)
+        turns = sum(agent_usage(record, "turn").get("cost", 0) for record in mine)
+        paired = sum(agent_usage(record, "paired").get("cost", 0) for record in mine)
+        totals.update(attention=attention, turns=turns, paired=paired)
+        providers = Counter(call["provider"] for call in calls if "provider" in call)
+        lines.append(
+            "| `{}` | {}/{} | {} / {} / {} | {} | {} | {} | {} | {} |".format(
+                model,
+                len(calls),
+                len(mine),
+                median("prompt_tokens"),
+                median("completion_tokens"),
+                median("reasoning_tokens"),
+                _cost(attention),
+                _cost(turns),
+                _cost((attention + turns) / len(mine)) if mine else "-",
+                _cost(paired),
+                ", ".join(f"{name} ({count})" for name, count in providers.most_common(3)) or "-",
+            )
+        )
+    lines += [
+        "",
+        f"Reported cost of the whole run: {_cost(totals['attention'] + totals['turns'] + totals['paired'])}"
+        f" (attention {_cost(totals['attention'])}, agent turns {_cost(totals['turns'])},"
+        f" paired play {_cost(totals['paired'])}).",
+    ]
+    return lines
+
+
 def summarize(
     scenes: list[Scene],
     models: list[str],
@@ -939,6 +1111,7 @@ def summarize(
                 int(statistics.median(latencies)) if latencies else "-",
             )
         )
+    lines += _cost_section(models, records)
     if meta.get("agent_model"):
         lines += _agent_turn_sections(records, paired=bool(meta.get("paired")))
     if together:
@@ -1075,6 +1248,11 @@ def main(argv: list[str] | None = None) -> int:
             agent_factory = lambda profile: OfflineAgent()  # noqa: E731
     else:
         models = [item.strip() for item in args.models.split(",") if item.strip()]
+        for model in models:
+            try:
+                model_spec(model)
+            except ValueError as exc:
+                parser.error(str(exc))
         api_key = os.environ.get(args.key_env)
         if not api_key:
             parser.error(f"set {args.key_env} to the provider key, or use --dry-run")
@@ -1125,6 +1303,7 @@ def main(argv: list[str] | None = None) -> int:
         "python": platform.python_version(),
         "command": " ".join(["python3 -m evals.behavior.run", *(argv if argv is not None else sys.argv[1:])]),
         "models": models,
+        "reasoning_efforts": {model: model_spec(model)[1] for model in models if model_spec(model)[1]},
         "agent_model": (DRY_RUN_AGENT if args.dry_run else args.agent_model) if args.agent_model else None,
         "ack": args.ack,
         "paired": args.paired,

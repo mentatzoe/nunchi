@@ -178,6 +178,7 @@ class DecisionsAttentionModel:
         state: Mapping[str, Any],
         timeout_seconds: float,
     ) -> Mapping[str, Any]:
+        self.last_response = None
         request_questions, pointers = decisions_questions(questions, state)
         body = {"model": self.model_id, "state": dict(state), "questions": request_questions}
         request = urllib.request.Request(

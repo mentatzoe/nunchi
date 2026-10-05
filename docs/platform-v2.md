@@ -60,6 +60,12 @@ names. Host- and vendor-specific behavior enters through these seams:
   `decisions-api` (`src/nunchi/adapters/decisions_api.py`), a typed decision
   model behind OpenRouter's Decisions API (`model`, optional `url`,
   `api_key_env`).
+- The OpenAI-compatible participant model (`OpenAICompatibleParticipant`,
+  `nunchi.participant_model`) takes the same optional `extra_body`, for
+  example a provider's reasoning setting. It, the OpenAI-compatible attention
+  model and the `decisions-api` model keep the provider's last response as
+  `last_response`, so an audit or evaluation can read the served model and
+  its token usage.
 - `HostTextAttentionModel(complete, ...)` is for hosts whose completion
   returns text only, with no JSON-schema mode and no report of the served
   model, such as a mod running attention on the user's own plan (not built
