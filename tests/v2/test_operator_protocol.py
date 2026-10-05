@@ -31,10 +31,12 @@ from nunchi.operator import (
 from nunchi.participant_model import (
     PARTICIPANT_TURN_PROTOCOL,
     PARTICIPANT_TURN_PROTOCOL_VERSION,
+    OpenAICompatibleParticipant,
     ParticipantModelError,
     ParticipantTurnProtocol,
     parse_participant_action,
     participant_action_schema,
+    participant_turn_text,
 )
 
 
@@ -135,6 +137,84 @@ class ParticipantProtocolTests(unittest.TestCase):
                 visible_event_ids={"e1"},
             ),
         )
+
+    def test_instructions_supply_the_action_schema_they_promise(self):
+        # The prompt says "matching the supplied action schema"; every runner
+        # must then supply it, bound to this turn's exact binding.
+        marker = "(JSON Schema; the protocol and binding values are fixed):\n"
+        for text in (
+            self.protocol.instructions,
+            participant_turn_text(PROFILE, self.protocol.request).split("\n\n<nunchi_participant_turn_v1>")[0],
+        ):
+            with self.subTest(text=text[:40]):
+                schema = json.loads(text.split(marker, 1)[1])
+                self.assertEqual(participant_action_schema(self.protocol.request["binding"]), schema)
+
+    def test_a_model_that_follows_the_supplied_schema_is_accepted(self):
+        bodies = []
+
+        class Endpoint(ThreadingHTTPServer):
+            pass
+
+        from http.server import BaseHTTPRequestHandler
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                bodies.append(body)
+                system = body["messages"][0]["content"]
+                schema = json.loads(system.split("binding values are fixed):\n", 1)[1])
+                properties = schema["properties"]
+                envelope = {
+                    "protocol": {
+                        name: rule["const"]
+                        for name, rule in properties["protocol"]["properties"].items()
+                    },
+                    "binding": {
+                        name: rule["const"]
+                        for name, rule in properties["binding"]["properties"].items()
+                    },
+                    "action": {
+                        "kind": "reply",
+                        "origin_event_id": "e1",
+                        "target_event_id": "e1",
+                        "text": "Looking now.",
+                    },
+                }
+                reply = json.dumps(
+                    {"choices": [{"message": {"content": json.dumps(envelope)}}]}
+                ).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(reply)))
+                self.end_headers()
+                self.wfile.write(reply)
+
+            def log_message(self, *args):
+                pass
+
+        server = Endpoint(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        participant = OpenAICompatibleParticipant(
+            profile=PROFILE,
+            model="any/model",
+            api_key="test-key",
+            base_url=f"http://127.0.0.1:{server.server_address[1]}/v1",
+        )
+        action = participant.run_protocol(
+            wake=wake(),
+            opportunity=opportunity(),
+            expand=None,
+            cancel=threading.Event(),
+        )
+        self.assertEqual(
+            {"kind": "reply", "origin_event_id": "e1", "target_event_id": "e1", "text": "Looking now."},
+            action,
+        )
+        self.assertEqual(1, len(bodies))
 
     def test_unknown_version_and_every_stale_binding_are_rejected(self):
         unknown = self.envelope({"kind": "silence"})

@@ -304,6 +304,30 @@ def participant_turn_prompt(profile: ParticipantProfile) -> str:
     )
 
 
+def participant_turn_instructions(
+    profile: ParticipantProfile,
+    request: Mapping[str, Any],
+) -> str:
+    """The turn prompt plus the action schema it promises, bound to this turn.
+
+    The binding values are constants in the schema, so a model only has to
+    copy what it is shown.
+    """
+
+    schema = json.dumps(
+        participant_action_schema(request["binding"]),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return (
+        participant_turn_prompt(profile)
+        + "\n\nAction schema for this turn (JSON Schema; the protocol and "
+        "binding values are fixed):\n"
+        + schema
+    )
+
+
 def participant_turn_input(
     request: Mapping[str, Any],
     pages: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...] = (),
@@ -342,7 +366,10 @@ def participant_turn_text(
         separators=(",", ":"),
         ensure_ascii=False,
     )
-    return participant_turn_prompt(profile) + f"\n\n<nunchi_participant_turn_v1>{document}</nunchi_participant_turn_v1>"
+    return (
+        participant_turn_instructions(profile, request)
+        + f"\n\n<nunchi_participant_turn_v1>{document}</nunchi_participant_turn_v1>"
+    )
 
 
 def _decode_json(value: Any) -> Any:
@@ -495,7 +522,7 @@ class ParticipantTurnProtocol:
 
     @property
     def instructions(self) -> str:
-        return participant_turn_prompt(self.profile)
+        return participant_turn_instructions(self.profile, self.request)
 
     @property
     def input_document(self) -> dict[str, Any]:
