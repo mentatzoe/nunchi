@@ -241,6 +241,11 @@ posted meanwhile, the action is held, the participant is shown their
 messages, and it sends, changes, or drops its action. Hermes does not offer
 the view yet.
 
+The host keeps one `RoomView` per turn. Its `fork()` gives a fresh view of
+the same turn, as if nothing had been read yet; the behavior suite uses it to
+play a turn again without the reading, and the host never dispatches a forked
+view's action.
+
 ## Continuation
 
 The attention request may contain a bound expiring continuation capability.

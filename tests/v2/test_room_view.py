@@ -14,6 +14,7 @@ from copy import deepcopy
 import unittest
 
 from nunchi.observation import ObservationLimits
+from nunchi.participant import RoomView
 from nunchi.participant_model import (
     ParticipantTurnProtocol,
     participant_tool_turn_prompt,
@@ -84,6 +85,20 @@ class ReadRoomTests(unittest.TestCase):
         mark = self.observation.arrival_mark()
         observe(self.pipeline, "late", timestamp="2000-01-01T00:00:00.000Z")
         self.assertEqual(["late"], self.ids(self.read("new", anchor=None, since_arrival=mark)))
+
+    def test_a_forked_view_reads_the_same_turn_afresh(self):
+        mark = self.observation.arrival_mark()
+        observe(self.pipeline, "e6")
+        wake = {"request_id": "r1", "trigger_event_id": "e3", "events": [{"id": "e3"}]}
+        view = RoomView(self.observation, wake, turn_began=mark, guard=lambda: None)
+        self.assertEqual(["e6"], self.ids(view.expand(direction="new")))
+        self.assertEqual(["e1", "e2"], self.ids(view.expand(direction="before")))
+        self.assertEqual(([], 1, 1), (view.expand(direction="new")["events"], view.expansion_calls, view.new_checks - 1))
+        fork = view.fork()
+        self.assertEqual((0, 0, {"e3"}), (fork.expansion_calls, fork.new_checks, fork.seen_event_ids))
+        self.assertEqual(["e6"], self.ids(fork.expand(direction="new")))
+        self.assertEqual(["e1", "e2"], self.ids(fork.expand(direction="before")))
+        self.assertIn("e6", view.seen_event_ids)
 
     def test_a_page_never_fails(self):
         self.assertIn("no longer in the room's retained history", self.read("before", anchor="gone")["note"])

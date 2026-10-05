@@ -89,8 +89,9 @@ failure can be read. Two options measure the
 agent's side of the room:
 
 - `--paired` plays every turn that carried a reading a second time, on the
-  same wake without the reading. That second move is graded but never sent,
-  so the summary shows what the reading changed at the same moment.
+  same wake without the reading, with its own fresh view of the room. That
+  second move is graded but never sent, so the summary shows what the
+  reading changed at the same moment.
 - `--reading-items` and `--reading-chars` set how long a reading attention
   is asked for: at most 4 notes of at most 400 characters by default, and
   `--reading-items 0` asks for none. Shorter readings answer faster; the

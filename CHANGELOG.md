@@ -139,6 +139,13 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Fixed
 
+- The behavior suite's paired play, the same turn without the reading, now
+  gets its own fresh view of the room. Since #109 it shared the first play's
+  view, which never repeats what it has shown, so the second play could not
+  see a message that arrived mid-turn or history the first play had read.
+  Paired results from runs on #109 through #112 are biased against the play
+  without the reading wherever the agent looked at the room. The host's
+  per-turn view is now a `RoomView` with a `fork()` for such replays.
 - A participant reply in a code fence followed by the model's own note is
   now read as the fenced envelope; the note is dropped and never posted.
   Before, the whole turn failed. In a behavior run after #94 step 2, 16 of
