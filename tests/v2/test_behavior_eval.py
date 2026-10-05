@@ -26,6 +26,7 @@ from evals.behavior.scene import (
     parse_scene,
 )
 from evals.behavior.score import cell, grade, visible_result
+from nunchi.observation import ObservationLimits
 
 
 PARTICIPANTS = load_participants()
@@ -114,6 +115,21 @@ class SceneFileTests(unittest.TestCase):
         ):
             self.assertIn(expected, ids)
         self.assertEqual(57, sum(1 for scene in scenes if scene.id.startswith("litmus-")))
+
+    def test_every_fact_to_notice_is_inside_the_observation_window(self):
+        # A fact older than the window never reaches attention or the agent,
+        # so a moment that asks for it measures nothing.
+        limit = ObservationLimits().snapshot_age_seconds
+        for scene in load_scenes():
+            offsets = {event["id"]: parse_offset(event["at"]) for event in scene.events if event.get("at")}
+            for moment in scene.moments:
+                if moment.event not in offsets:
+                    continue
+                for fact in moment.notice:
+                    for event_id in fact.get("events", ()):
+                        if event_id in offsets:
+                            with self.subTest(scene=scene.id, event=event_id):
+                                self.assertLess(offsets[event_id] - offsets[moment.event], limit)
 
     def test_offsets(self):
         self.assertEqual(0, parse_offset("0s"))

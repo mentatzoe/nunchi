@@ -17,8 +17,8 @@
     {
       "id": "v1",
       "author": "vigil",
-      "at": "-1d",
-      "text": "Heads up: the gateway's TLS certificate expires tonight at 23:00 UTC. Deploys after that will fail the handshake until it's rotated."
+      "at": "-3h",
+      "text": "Heads up: the gateway's TLS certificate expired at 23:00 UTC last night. Anything deployed since then fails the handshake until it's rotated."
     },
     {
       "id": "q1",
@@ -44,7 +44,7 @@
       "step1": "pass",
       "notice": [
         {
-          "fact": "Vigil warned yesterday that the gateway certificate would expire",
+          "fact": "Vigil said earlier that the gateway certificate had expired",
           "events": [
             "v1"
           ]
