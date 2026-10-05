@@ -219,6 +219,11 @@ host rejects unknown versions, changed bindings, invisible origins or targets,
 malformed actions, stale opportunities, deadline overruns, and unavailable
 native capabilities. The participant cannot send directly.
 
+The envelope may come alone or in one Markdown code fence. Text after the
+closing fence is the model's own note, usually explaining a silence; it is
+dropped and never posted. Any other text beside the envelope is a malformed
+reply.
+
 ## The participant's view of the room
 
 The gate's context and the participant's view are separate (Zoe, 2026-10-05,

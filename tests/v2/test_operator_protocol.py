@@ -216,6 +216,34 @@ class ParticipantProtocolTests(unittest.TestCase):
         )
         self.assertEqual(1, len(bodies))
 
+    def test_a_note_after_the_fenced_reply_is_dropped(self):
+        # Models sometimes explain a silence after the closing fence (#94).
+        envelope = json.dumps(self.envelope({"kind": "silence"}), indent=2)
+        reply = "```json\n" + envelope + "\n```\n\nI don't know where those settings live, so I'm staying quiet."
+        self.assertEqual((True, None), self.protocol.consume(reply, expand=None))
+
+    def test_a_fence_inside_the_text_is_kept(self):
+        action = {"kind": "message", "origin_event_id": "e1", "text": "Try:\n```sh\nmake test\n```"}
+        fenced = "```json\n" + json.dumps(self.envelope(action)) + "\n```\nA code block answers it."
+        for reply in (fenced, json.dumps(self.envelope(action))):
+            with self.subTest(reply=reply[:8]):
+                self.assertEqual(
+                    action,
+                    parse_participant_action(reply, request=self.protocol.request, visible_event_ids={"e1"}),
+                )
+
+    def test_anything_else_beside_the_reply_is_still_rejected(self):
+        envelope = json.dumps(self.envelope({"kind": "silence"}))
+        for reply in (
+            envelope + "\nI'm staying quiet.",
+            "```json\n" + envelope + "\nI'm staying quiet.\n```",
+            "```json\n" + envelope + "\n" + envelope + "\n```",
+            "I'm staying quiet.\n```json\n" + envelope + "\n```",
+        ):
+            with self.subTest(reply=reply[-30:]):
+                with self.assertRaisesRegex(ParticipantModelError, "not valid JSON"):
+                    self.protocol.consume(reply, expand=None)
+
     def test_unknown_version_and_every_stale_binding_are_rejected(self):
         unknown = self.envelope({"kind": "silence"})
         unknown["protocol"]["version"] += 1

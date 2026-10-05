@@ -390,19 +390,31 @@ def participant_turn_text(
 
 
 def _decode_json(value: Any) -> Any:
+    """Decode the model's reply: one JSON value, alone or in a code fence.
+
+    Models sometimes explain their choice after the closing fence, most often
+    when they stay silent. That note is the model's own and is never posted,
+    so it is dropped rather than failing the turn. The fenced value itself is
+    still parsed exactly and validated like any other reply.
+    """
+
     if not isinstance(value, str):
         return value
     text = value.strip()
-    if text.startswith("```"):
-        text = text[3:]
-        if text[:4].lower() == "json":
-            text = text[4:]
-        if text.rstrip().endswith("```"):
-            text = text.rstrip()[:-3]
     try:
-        return json.loads(text.strip())
+        if not text.startswith("```"):
+            return json.loads(text)
+        body = text[3:]
+        if body[:4].lower() == "json":
+            body = body[4:]
+        body = body.lstrip()
+        decoded, end = json.JSONDecoder().raw_decode(body)
     except json.JSONDecodeError as exc:
         raise ParticipantModelError("participant response is not valid JSON") from exc
+    rest = body[end:].lstrip()
+    if rest and not rest.startswith("```"):
+        raise ParticipantModelError("participant response is not valid JSON")
+    return decoded
 
 
 def _validate_inner_action(action: Any) -> dict[str, Any]:
