@@ -131,6 +131,11 @@ class AttentionPolicy:
     provenance: str = "trusted:attention-policy/default@1"
     timeout_seconds: float = 30.0
     error_action: str = "WAKE"
+    # How much reading of the room to ask for: at most this many notes, each
+    # at most this many characters (0 notes asks for none). Bounded by the
+    # contract's 4 notes of 400 characters.
+    reading_items: int = READING_MAX_ITEMS
+    reading_note_chars: int = READING_NOTE_MAX_CHARS
 
     def __post_init__(self) -> None:
         for name in (
@@ -158,6 +163,13 @@ class AttentionPolicy:
             raise ValueError("timeout_seconds must be positive and finite")
         if self.error_action not in ("WAKE", "NO_WAKE"):
             raise ValueError("error_action must be WAKE or NO_WAKE")
+        for name, low, high in (
+            ("reading_items", 0, READING_MAX_ITEMS),
+            ("reading_note_chars", 40, READING_NOTE_MAX_CHARS),
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+                raise ValueError(f"{name} must be an integer within [{low}, {high}]")
         if not self.provenance or not self.margin_source:
             raise ValueError("policy provenance must be non-empty")
 
@@ -278,8 +290,17 @@ ATTENTION_JUDGMENT_SCHEMA: dict[str, Any] = {
 }
 
 
-def participant_attention_prompt(profile: ParticipantProfile) -> str:
-    """Return the shared V2 instructions for a participant's attention model."""
+def participant_attention_prompt(
+    profile: ParticipantProfile,
+    *,
+    reading_items: int = READING_MAX_ITEMS,
+    reading_note_chars: int = READING_NOTE_MAX_CHARS,
+) -> str:
+    """Return the shared V2 instructions for a participant's attention model.
+
+    ``reading_items`` and ``reading_note_chars`` set how long a reading of
+    the room to ask for; no notes asks for none.
+    """
     return (
         "You are the delegated pre-attention of exactly one conversation "
         f"participant ({profile.participant_id}). Use that participant's "
@@ -301,12 +322,20 @@ def participant_attention_prompt(profile: ParticipantProfile) -> str:
         "Return one closed JSON object with disposition SUPPRESS, ACK, WAKE, or "
         "DEFER; reasons as an array of short audit strings; "
         "evidence_event_ids naming only supplied events; "
-        "attention_advice; and legacy_verdict_confidences with exactly "
-        "PASS, ACK, ASK, SPEAK finite values in [0,1].\n\n"
-        "attention_advice is your reading of the room for the participant, "
-        "given with every disposition: an array of at most "
-        f"{READING_MAX_ITEMS} {{note, evidence_event_ids}} items, each note one "
-        f"or two short sentences (at most {READING_NOTE_MAX_CHARS} characters) "
+        + ("attention_advice; " if reading_items else "")
+        + "and legacy_verdict_confidences with exactly "
+        "PASS, ACK, ASK, SPEAK finite values in [0,1]."
+        + (_reading_prompt(reading_items, reading_note_chars) if reading_items else "")
+    )
+
+
+def _reading_prompt(items: int, chars: int) -> str:
+    length = "one or two short sentences" if chars >= 200 else "one short sentence"
+    return (
+        "\n\nattention_advice is your reading of the room for the participant, "
+        f"given with every disposition: an array of at most {items} "
+        f"{{note, evidence_event_ids}} item{'s' if items != 1 else ''}, each note "
+        f"{length} (at most {chars} characters) "
         "citing the supplied events it comes from. Describe what is happening, "
         "for example: someone is mid-story and has not asked anything yet; a "
         "question is addressed to someone else; another participant already "
@@ -636,6 +665,8 @@ def _validate_model_judgment(
     raw: Any,
     *,
     event_ids: set[str],
+    reading_items: int = READING_MAX_ITEMS,
+    reading_note_chars: int = READING_NOTE_MAX_CHARS,
 ) -> dict[str, Any]:
     if not isinstance(raw, Mapping):
         raise AttentionError("model judgment must be an object")
@@ -684,26 +715,38 @@ def _validate_model_judgment(
         ):
             raise AttentionError(f"model confidence {name} is not finite within [0,1]")
     checked = deepcopy(dict(raw))
-    reading = _grounded_reading(checked.pop("attention_advice", None), event_ids)
+    reading = _grounded_reading(
+        checked.pop("attention_advice", None),
+        event_ids,
+        max_items=reading_items,
+        max_chars=reading_note_chars,
+    )
     if reading:
         checked["attention_advice"] = reading
     return checked
 
 
-def _grounded_reading(raw: Any, event_ids: set[str]) -> list[dict[str, Any]]:
+def _grounded_reading(
+    raw: Any,
+    event_ids: set[str],
+    *,
+    max_items: int = READING_MAX_ITEMS,
+    max_chars: int = READING_NOTE_MAX_CHARS,
+) -> list[dict[str, Any]]:
     """Keep the usable items of the model's reading of the room.
 
     A bad reading never discards a valid judgment: an empty or malformed
     reading counts as none, and each item that is malformed or cites an event
-    the model was not given is dropped on its own. A note longer than the
-    bound is cut; a repeated citation is kept once.
+    the model was not given is dropped on its own. Items past the configured
+    count are dropped, a note longer than the configured length is cut, and a
+    repeated citation is kept once.
     """
 
     if not isinstance(raw, list):
         return []
     reading = []
     for item in raw:
-        if len(reading) == READING_MAX_ITEMS:
+        if len(reading) >= max_items:
             break
         if not isinstance(item, Mapping) or set(item) != {"note", "evidence_event_ids"}:
             continue
@@ -719,7 +762,7 @@ def _grounded_reading(raw: Any, event_ids: set[str]) -> list[dict[str, Any]]:
             continue
         reading.append(
             {
-                "note": note.strip()[:READING_NOTE_MAX_CHARS],
+                "note": note.strip()[:max_chars],
                 "evidence_event_ids": list(dict.fromkeys(cited)),
             }
         )
@@ -828,7 +871,11 @@ class AttentionEngine:
         def invoke() -> None:
             try:
                 result = self.model.judge(
-                    instructions=participant_attention_prompt(self.profile),
+                    instructions=participant_attention_prompt(
+                        self.profile,
+                        reading_items=self.policy.reading_items,
+                        reading_note_chars=self.policy.reading_note_chars,
+                    ),
                     projection=projection,
                     timeout_seconds=provider_timeout,
                 )
@@ -914,7 +961,12 @@ class AttentionEngine:
                 cancel=cancel,
                 deadline=deadline,
             )
-            judgment = _validate_model_judgment(raw, event_ids=event_ids)
+            judgment = _validate_model_judgment(
+                raw,
+                event_ids=event_ids,
+                reading_items=self.policy.reading_items,
+                reading_note_chars=self.policy.reading_note_chars,
+            )
         except HostAttentionPermissionError as exc:
             # The host refused before any model ran, so no classifier audit.
             return self._error(

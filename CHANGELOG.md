@@ -30,7 +30,11 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   reading a second time on the same wake without it, graded but never sent,
   so a run shows what the reading changed. `--ack agent` turns off Nunchi's
   own nod, so an ACK judgment gives the agent a turn and any "mhm" is its
-  own. The manual `behavior-eval` workflow runs it through OpenRouter.
+  own. Models named `typesafe/...` go to Jev, a typed decision model, through
+  OpenRouter's Decisions API: a prototype route that answers six typed
+  questions about the judged message and writes the agent's reading from
+  them, so Jev's speed and fit can be compared with the LLM routes. The
+  manual `behavior-eval` workflow runs it through OpenRouter, Jev included.
 - Shared V2 runtime: canonical bounded observation and continuation,
   participant-shaped attention, a coalescing opportunity scheduler (one active
   opportunity plus the newest pending event), participant wake and silence,
@@ -74,7 +78,11 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   item is dropped, and `judged_through_event_id` tells the agent the newest
   message the reading saw. The turn prompts frame the reading as a
   recommendation with reasons. Contracts: `I-010B AttentionDecisionV2@4`,
-  `I-010C ParticipantWakeV2@3`.
+  `I-010C ParticipantWakeV2@3`. The reading's length is attention policy:
+  `reading_items` (0 to 4, default 4) and `reading_note_chars` (40 to 400,
+  default 400) set the prompt and cap what reaches the agent, so a shorter
+  reading can trade detail for speed; the behavior suite's
+  `--reading-items` and `--reading-chars` compare lengths.
 - The agent sends its own "mhm" by default (Zoe, 2026-10-05). The ACK policy
   is off by default, so an ACK judgment gives the agent a turn, with the
   reading saying why a nod could fit, instead of Nunchi adding 👂 itself.

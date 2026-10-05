@@ -83,9 +83,33 @@ agent's side of the room:
 - `--paired` plays every turn that carried a reading a second time, on the
   same wake without the reading. That second move is graded but never sent,
   so the summary shows what the reading changed at the same moment.
+- `--reading-items` and `--reading-chars` set how long a reading attention
+  is asked for: at most 4 notes of at most 400 characters by default, and
+  `--reading-items 0` asks for none. Shorter readings answer faster; the
+  paired arm shows what each length changes.
 - `--ack` says who sends the "mhm". The default, `agent`, matches Nunchi's
   default: an ACK judgment gives the agent a turn, and any "mhm" is its
   own. `--ack nunchi` turns Nunchi's own nod back on, for comparison.
 
 Moments that need a pause, such as "five minutes later, nobody has
 answered", have no route in today's V2 and are reported as not supported.
+
+## Jev
+
+Models named `typesafe/...` (for example `typesafe/jev-1.13`) go through
+OpenRouter's Decisions API instead of the chat endpoint (`jev.py`). Jev is a
+typed decision model: it answers questions about the conversation with
+probabilities, never text. This prototype asks it six questions about the
+judged message:
+
+- is it conversation;
+- who is it addressed to;
+- has someone already answered it;
+- is the author mid-thought;
+- does the participant have something to add;
+- which move fits: speak, mhm, wait, or stay quiet.
+
+The most likely move decides the disposition, and the reading the agent sees
+is written from the answers. Step 4 of the plan on #94 replaces this
+prototype with typed questions that both Jev and an LLM answer. Each record
+keeps Jev's answers and the snapshot that served them under `model_response`.

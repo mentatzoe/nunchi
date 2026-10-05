@@ -57,6 +57,7 @@ from nunchi.participant_model import OpenAICompatibleParticipant
 from nunchi.pipeline import NunchiV2Pipeline
 from nunchi.receipts import ReceiptJournal
 
+from . import jev
 from .scene import SCENES, Moment, Scene, load_scenes, parse_offset, profile_sha256
 from .score import cell, collective_silence, grade, pile_on, visible_result
 
@@ -68,6 +69,7 @@ DEFAULT_MODELS = (
     "anthropic/claude-haiku-4.5",
     "z-ai/glm-5.3-flash",
     "deepseek/deepseek-v4.1-flash",
+    "typesafe/jev-1.13",
 )
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_KEY_ENV = "NUNCHI_OPENROUTER"
@@ -290,9 +292,18 @@ def invalid_reason(raw: Any, event_ids: set[str]) -> str:
 
 
 def openai_compatible_factory(
-    *, api_key: str, base_url: str, temperature: float | None
+    *,
+    api_key: str,
+    base_url: str,
+    temperature: float | None,
+    jev_url: str = jev.DEFAULT_DECISIONS_URL,
 ) -> ModelFactory:
+    """Build each attention model: Jev through the Decisions API, any other
+    model through the OpenAI-compatible chat endpoint."""
+
     def build(model_id: str) -> Any:
+        if jev.is_jev(model_id):
+            return jev.JevAttentionModel(model=model_id, api_key=api_key, url=jev_url)
         return OpenAICompatibleAttentionModel(
             model=model_id,
             api_key=api_key,
@@ -382,6 +393,8 @@ def judge_moment(
     agent_factory: AgentFactory | None = None,
     ack: str = "agent",
     paired: bool = False,
+    reading_items: int = 4,
+    reading_chars: int = 400,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Run one moment through the production pipeline and grade what the room saw.
@@ -441,11 +454,22 @@ def judge_moment(
     observation = ObservationProvider(binding, receipts=receipts)
     transport = EvalTransport()
     ack_policy = AckPolicy(reaction=ACK_REACTION, enabled=ack == "nunchi")
-    model = RecordingModel(factory(job.model))
+    inner = factory(job.model)
+    bind_profile = getattr(inner, "bind_profile", None)
+    if callable(bind_profile):
+        # A typed decision model gets the participant's own instructions.
+        bind_profile(profile)
+    if isinstance(inner, jev.JevAttentionModel):
+        inner.max_notes = reading_items
+    model = RecordingModel(inner)
     engine = RecordingEngine(
         profile=profile,
         model=model,
-        policy=AttentionPolicy(timeout_seconds=timeout_seconds),
+        policy=AttentionPolicy(
+            timeout_seconds=timeout_seconds,
+            reading_items=reading_items,
+            reading_note_chars=reading_chars,
+        ),
         receipts=receipts,
         ack_policy=ack_policy,
         reaction_capability_provider=transport.reaction_capability,
@@ -544,6 +568,12 @@ def judge_moment(
                 unread["grade"] = grade(moment, unread["move"], attention=attention)["visible"]
             record["agent"]["without_reading"] = unread
 
+    response = getattr(inner, "last_response", None)
+    if isinstance(response, Mapping):
+        # The typed answers behind the judgment, and the snapshot that served them.
+        record["model_response"] = {
+            key: response[key] for key in ("model", "answers", "usage") if key in response
+        }
     evidence = set(decision.get("evidence_event_ids", []))
     record.update(
         result=result,
@@ -723,6 +753,13 @@ def summarize(
         f"- Runs per moment: {meta['runs']}; temperature: {meta['temperature']}; endpoint: {meta['base_url']}",
         f"- Scenes: {len(scenes)}; attention calls: {meta['calls']}; agent turns: {meta.get('agent_calls', 0)}; provider errors: {meta['provider_errors']}",
         f"- Command: `{meta['command']}`",
+        f"- Reading: "
+        + (
+            f"up to {meta.get('reading_items', 4)} note{'' if meta.get('reading_items', 4) == 1 else 's'} "
+            f"of up to {meta.get('reading_chars', 400)} characters"
+            if meta.get("reading_items", 4)
+            else "none asked for"
+        ),
         "",
     ]
     if meta.get("agent_model"):
@@ -872,6 +909,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scenes", default="all", help="all, behavior, litmus, a litmus category, or scene ids/prefixes")
     parser.add_argument("--out", default="behavior-eval-out")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    parser.add_argument(
+        "--jev-url",
+        default=jev.DEFAULT_DECISIONS_URL,
+        help="Decisions API endpoint for typesafe/ models",
+    )
     parser.add_argument("--key-env", default=DEFAULT_KEY_ENV)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--timeout", type=float, default=30.0)
@@ -898,6 +940,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="also play each agent turn that carried a reading without it, on the same wake",
     )
+    parser.add_argument(
+        "--reading-items",
+        type=int,
+        default=4,
+        help="ask attention for at most this many reading notes (0 asks for none)",
+    )
+    parser.add_argument(
+        "--reading-chars",
+        type=int,
+        default=400,
+        help="ask for reading notes of at most this many characters (40 to 400)",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args(argv)
@@ -913,6 +967,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--runs, --workers and --per-model must be positive")
     if args.paired and not args.agent_model:
         parser.error("--paired needs --agent-model")
+    try:
+        AttentionPolicy(reading_items=args.reading_items, reading_note_chars=args.reading_chars)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     agent_factory: AgentFactory | None = None
     if args.dry_run:
@@ -926,7 +984,10 @@ def main(argv: list[str] | None = None) -> int:
         if not api_key:
             parser.error(f"set {args.key_env} to the provider key, or use --dry-run")
         factory = openai_compatible_factory(
-            api_key=api_key, base_url=args.base_url, temperature=args.temperature
+            api_key=api_key,
+            base_url=args.base_url,
+            temperature=args.temperature,
+            jev_url=args.jev_url,
         )
         if args.agent_model:
             agent_factory = openai_compatible_agent_factory(
@@ -945,6 +1006,8 @@ def main(argv: list[str] | None = None) -> int:
                 agent_factory=agent_factory,
                 ack=args.ack,
                 paired=args.paired,
+                reading_items=args.reading_items,
+                reading_chars=args.reading_chars,
             )
 
     started = datetime.now(timezone.utc)
@@ -970,12 +1033,15 @@ def main(argv: list[str] | None = None) -> int:
         "agent_model": (DRY_RUN_AGENT if args.dry_run else args.agent_model) if args.agent_model else None,
         "ack": args.ack,
         "paired": args.paired,
+        "reading_items": args.reading_items,
+        "reading_chars": args.reading_chars,
         "runs": args.runs,
         "temperature": None if args.dry_run else args.temperature,
         "timeout_seconds": args.timeout,
         "workers": args.workers,
         "per_model": args.per_model,
         "base_url": "offline" if args.dry_run else args.base_url,
+        "jev_url": args.jev_url if not args.dry_run and any(jev.is_jev(model) for model in models) else None,
         "key_env": None if args.dry_run else args.key_env,
         "scenes": [scene.id for scene in scenes],
         "calls": sum(1 for record in records if record["result"] != "unsupported" and "decision" in record),

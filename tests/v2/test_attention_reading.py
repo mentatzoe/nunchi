@@ -12,6 +12,7 @@ import unittest
 from nunchi.ack import AckPolicy, ReactionCapability
 from nunchi.attention import (
     ATTENTION_JUDGMENT_SCHEMA,
+    AttentionPolicy,
     participant_attention_prompt,
 )
 from nunchi.observation import ObservationLimits
@@ -197,6 +198,54 @@ class ReadingTests(unittest.TestCase):
         self.assertNotIn("o1", [event["id"] for event in wake["events"]])
         self.assertEqual([note("Zoe asked Vigil directly.", "e1")], wake["attention"]["advice"])
         self.assertEqual("e1", wake["attention"]["judged_through_event_id"])
+
+
+class ReadingLengthTests(unittest.TestCase):
+    """Zoe, 2026-10-05: the reading's length is configurable, to weigh it
+    against latency and fit."""
+
+    def test_the_policy_bounds_the_length(self):
+        self.assertEqual((4, 400), (AttentionPolicy().reading_items, AttentionPolicy().reading_note_chars))
+        AttentionPolicy(reading_items=0, reading_note_chars=40)
+        for bad in ({"reading_items": 5}, {"reading_items": -1}, {"reading_items": True},
+                    {"reading_note_chars": 39}, {"reading_note_chars": 401}, {"reading_note_chars": 120.0}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                AttentionPolicy(**bad)
+
+    def test_the_prompt_asks_for_the_configured_length(self):
+        profile = foundation()[0].attention.profile
+        short = participant_attention_prompt(profile, reading_items=2, reading_note_chars=160)
+        self.assertIn("at most 2 {note, evidence_event_ids} items", short)
+        self.assertIn("one short sentence (at most 160 characters)", short)
+        single = participant_attention_prompt(profile, reading_items=1, reading_note_chars=300)
+        self.assertIn("at most 1 {note, evidence_event_ids} item,", single)
+        none = participant_attention_prompt(profile, reading_items=0)
+        self.assertNotIn("attention_advice", none)
+
+    def test_the_engine_keeps_the_reading_within_the_configured_length(self):
+        reading = [note(f"Observation {index}: " + "y" * 120, "e1") for index in range(4)]
+        wakes = []
+        model = ReadingModel("WAKE", reading)
+        pipeline, _, _, _ = foundation(
+            model=model,
+            participant=lambda **turn: wakes.append(turn["wake"]) or None,
+            policy=AttentionPolicy(reading_items=2, reading_note_chars=60),
+        )
+        deliver(pipeline, "e1")
+        advice = wakes[0]["attention"]["advice"]
+        self.assertEqual(2, len(advice))
+        self.assertTrue(all(len(item["note"]) <= 60 for item in advice))
+        self.assertIn("at most 2", model.calls[0][0])
+
+    def test_no_reading_asked_means_none_delivered(self):
+        wakes = []
+        pipeline, _, _, _ = foundation(
+            model=ReadingModel("WAKE", [note("Zoe asked Vigil directly.", "e1")]),
+            participant=lambda **turn: wakes.append(turn["wake"]) or None,
+            policy=AttentionPolicy(reading_items=0),
+        )
+        deliver(pipeline, "e1")
+        self.assertEqual({"source": "WAKE"}, wakes[0]["attention"])
 
 
 class ReadingPromptTests(unittest.TestCase):

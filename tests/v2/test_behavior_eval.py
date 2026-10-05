@@ -604,6 +604,21 @@ class RunTests(unittest.TestCase):
         self.assertIn("## What the agent saw", summary)
         self.assertIn("| WAKE | 3 | 1 / 1 | 2 / 2 | 3 / 3 | 0 |", summary)
 
+    def test_the_reading_length_reaches_attention_and_the_record(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch("sys.stdout"):
+                code = run.main(
+                    ["--dry-run", "--scenes", "story-across-messages", "--runs", "1",
+                     "--reading-items", "1", "--reading-chars", "80", "--out", directory]
+                )
+            summary = (Path(directory) / "summary.md").read_text(encoding="utf-8")
+            meta = json.loads((Path(directory) / "run.json").read_text(encoding="utf-8"))
+        self.assertEqual(0, code)
+        self.assertEqual((1, 80), (meta["reading_items"], meta["reading_chars"]))
+        self.assertIn("- Reading: up to 1 note of up to 80 characters", summary)
+        with mock.patch("sys.stderr"), self.assertRaises(SystemExit):
+            run.main(["--dry-run", "--reading-items", "5"])
+
     def test_pairing_needs_an_agent(self):
         with mock.patch("sys.stderr"), self.assertRaises(SystemExit):
             run.main(["--dry-run", "--paired"])
