@@ -95,7 +95,9 @@ Then it decides, and it acts.
 **Every visible move is the agent's own act, including a "mhm".** Nunchi
 never posts on the agent's behalf. If Nunchi nodded for an agent that never
 knew, the room would believe the agent was listening when the agent has no
-memory of it. Today's ACK still breaks this rule.
+memory of it. Since 2026-10-05 Nunchi's own nod is off by default: an ACK
+judgment gives the agent a turn, and any "mhm" is the agent's own. The
+setting that turns Nunchi's nod back on goes away in step 7 of the plan.
 
 ### Looking again
 
@@ -207,7 +209,7 @@ this behavior. The rules replaced so far:
 | The agent's turn carries social context | A generic "contribute naturally or stay silent" prompt |
 | Conversation memory | None between judgments; a window of the newest 24 events, plus up to 6 older messages of the agent's direct exchange (mentions of it, replies to it, its own messages) |
 | Pace and pauses | No current time; nothing happens when someone stops talking |
-| The agent sends its own "mhm" | Nunchi adds 👂 itself, on the newest event |
+| The agent sends its own "mhm" | By default an ACK judgment gives the agent a turn and any "mhm" is its own; Nunchi's own 👂 remains as an opt-in (`ack.enabled: true`) |
 
 The defects and the full history are in
 [#94](https://github.com/mentatzoe/nunchi/issues/94).

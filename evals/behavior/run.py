@@ -380,7 +380,7 @@ def judge_moment(
     *,
     timeout_seconds: float,
     agent_factory: AgentFactory | None = None,
-    ack: str = "nunchi",
+    ack: str = "agent",
     paired: bool = False,
     now: datetime | None = None,
 ) -> dict[str, Any]:
@@ -389,9 +389,10 @@ def judge_moment(
     Observation, attention, the participant host, and ACK are Nunchi's own.
     With an agent factory, a model plays the woken agent's turn through the
     shared participant protocol; without one, a woken agent counts as
-    "agent decides". With ``ack="agent"``, Nunchi never nods itself: an ACK
-    judgment gives the agent a turn, and any "mhm" is the agent's own. With
-    ``paired``, a turn that carried a reading is also played without it.
+    "agent decides". By default (``ack="agent"``) Nunchi never nods itself:
+    an ACK judgment gives the agent a turn, and any "mhm" is the agent's own.
+    ``ack="nunchi"`` turns Nunchi's own nod back on. With ``paired``, a turn
+    that carried a reading is also played without it.
     """
 
     scene, moment, participant = job.scene, job.moment, job.participant
@@ -888,9 +889,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--ack",
-        choices=("nunchi", "agent"),
-        default="nunchi",
-        help="who sends the mhm on an ACK judgment: Nunchi itself, or the agent in its own turn",
+        choices=("agent", "nunchi"),
+        default="agent",
+        help="who sends the mhm on an ACK judgment: the agent in its own turn (the default), or Nunchi itself",
     )
     parser.add_argument(
         "--paired",

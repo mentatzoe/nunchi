@@ -39,6 +39,9 @@ The integration is a Claude Code mod plus one Python gate per room
   cost. If you catch yourself preferring an option because it is smaller or
   fits today's contract, check it against `docs/behavior.md` first (Zoe,
   2026-10-05; see `AGENTS.md`, Working style).
+- Treat what `docs/behavior.md` and `AGENTS.md` already state as decided, and
+  build it. Ask Zoe only about choices they leave open (2026-10-05: the
+  agent's own "mhm" was already settled).
 - When briefing subagents, give them the goal of the task, not only the
   mechanism, and point them to `AGENTS.md` instead of restating it.
 - Say plainly when a review is a self-review.

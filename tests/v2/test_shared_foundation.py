@@ -218,6 +218,17 @@ def foundation(
     return pipeline, model, transport, receipts
 
 
+def nod_foundation(**kwargs):
+    """A foundation with Nunchi's own nod turned on.
+
+    The nod is off by default since 2026-10-05 (the agent sends its own
+    "mhm"); tests of the nod's mechanics opt in until step 7 removes it.
+    """
+
+    kwargs.setdefault("ack_policy", AckPolicy(enabled=True))
+    return foundation(**kwargs)
+
+
 class ObservationTests(unittest.TestCase):
     def test_attention_engine_owns_the_exact_model_prompt(self):
         pipeline, model, _, _ = foundation()
@@ -2049,7 +2060,7 @@ class AckOutcomeTests(unittest.TestCase):
     def test_ack_emits_one_exact_reaction_without_running_participant(self):
         participant_calls = []
         transport = RecordingTransport(capability=self.capability())
-        pipeline, _, _, receipts = foundation(
+        pipeline, _, _, receipts = nod_foundation(
             model=FixtureModel("ACK"),
             participant=lambda **kwargs: participant_calls.append(kwargs),
             transport=transport,
@@ -2094,7 +2105,7 @@ class AckOutcomeTests(unittest.TestCase):
                 "ack-disabled",
             ),
             (
-                AckPolicy(),
+                AckPolicy(enabled=True),
                 UNAVAILABLE_REACTION_CAPABILITY,
                 "capability-defer",
                 "ack-unsupported",
@@ -2104,7 +2115,7 @@ class AckOutcomeTests(unittest.TestCase):
             with self.subTest(cause=cause):
                 participant_calls = []
                 transport = RecordingTransport(capability=capability)
-                pipeline, _, _, receipts = foundation(
+                pipeline, _, _, receipts = nod_foundation(
                     model=FixtureModel("ACK"),
                     participant=lambda **kwargs: participant_calls.append(kwargs),
                     transport=transport,
@@ -2148,7 +2159,7 @@ class AckOutcomeTests(unittest.TestCase):
             with self.subTest(anchor=anchor["type"]):
                 participant_calls = []
                 transport = RecordingTransport(capability=self.capability())
-                pipeline, _, _, receipts = foundation(
+                pipeline, _, _, receipts = nod_foundation(
                     model=FixtureModel("ACK"),
                     participant=lambda **kwargs: participant_calls.append(kwargs),
                     transport=transport,
@@ -2220,7 +2231,7 @@ class AckOutcomeTests(unittest.TestCase):
             b"y" * 32,
         )
         participant_calls = []
-        pipeline, _, _, receipts = foundation(
+        pipeline, _, _, receipts = nod_foundation(
             model=FixtureModel("ACK"),
             participant=lambda **kwargs: participant_calls.append(kwargs),
             transport=transport,
@@ -2276,7 +2287,7 @@ class AckOutcomeTests(unittest.TestCase):
 
         transport._request = request
         participant_calls = []
-        pipeline, _, _, receipts = foundation(
+        pipeline, _, _, receipts = nod_foundation(
             model=FixtureModel("ACK"),
             participant=lambda **kwargs: participant_calls.append(kwargs),
             transport=transport,
@@ -2306,7 +2317,7 @@ class AckOutcomeTests(unittest.TestCase):
                 return {"supported": True}
 
         transport = MalformedCapabilityTransport()
-        pipeline, _, _, receipts = foundation(
+        pipeline, _, _, receipts = nod_foundation(
             model=FixtureModel("ACK"),
             participant=lambda **kwargs: participant_calls.append(kwargs),
             transport=transport,
@@ -2327,7 +2338,7 @@ class AckOutcomeTests(unittest.TestCase):
     def test_ack_settlement_failure_after_dispatch_still_writes_transport_receipt(self):
         journal = AckJournal()
         transport = RecordingTransport(capability=self.capability())
-        pipeline, _, _, receipts = foundation(
+        pipeline, _, _, receipts = nod_foundation(
             model=FixtureModel("ACK"),
             transport=transport,
             ack_journal=journal,
@@ -2357,7 +2368,7 @@ class AckOutcomeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             journal_path = Path(directory) / "ack.jsonl"
             transport = RecordingTransport(capability=self.capability())
-            first, _, _, _ = foundation(
+            first, _, _, _ = nod_foundation(
                 model=FixtureModel("ACK"),
                 transport=transport,
                 ack_journal=AckJournal(journal_path),
@@ -2367,7 +2378,7 @@ class AckOutcomeTests(unittest.TestCase):
                 event=message("e-stable"),
                 actors={"human:zoe": {"kind": "human"}},
             )
-            restored, _, _, _ = foundation(
+            restored, _, _, _ = nod_foundation(
                 model=FixtureModel("ACK"),
                 transport=transport,
                 ack_journal=AckJournal(journal_path),
@@ -2383,7 +2394,7 @@ class AckOutcomeTests(unittest.TestCase):
             shared_journal = AckJournal(Path(directory) / "concurrent.jsonl")
             concurrent_transport = RecordingTransport(capability=self.capability())
             pipelines = [
-                foundation(
+                nod_foundation(
                     model=FixtureModel("ACK"),
                     transport=concurrent_transport,
                     ack_journal=shared_journal,
@@ -2442,7 +2453,7 @@ class AckOutcomeTests(unittest.TestCase):
                     return self.capability
 
         transport = ChangingTransport(capability=self.capability("cap:v2"))
-        pipeline, _, _, receipts = foundation(
+        pipeline, _, _, receipts = nod_foundation(
             model=FixtureModel("ACK"),
             transport=transport,
         )
@@ -2478,7 +2489,7 @@ class AckOutcomeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             journal = AckJournal(Path(directory) / "cancelled.jsonl")
             transport = BlockingCapabilityTransport(self.capability())
-            pipeline, _, _, _ = foundation(
+            pipeline, _, _, _ = nod_foundation(
                 model=FixtureModel("ACK"),
                 transport=transport,
                 ack_journal=journal,
@@ -2520,7 +2531,7 @@ class AckOutcomeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             journal = AckJournal(Path(directory) / "last-moment.jsonl")
             transport = LastMomentChangeTransport(capability=self.capability("cap:v2"))
-            pipeline, _, _, _ = foundation(
+            pipeline, _, _, _ = nod_foundation(
                 model=FixtureModel("ACK"),
                 transport=transport,
                 ack_journal=journal,

@@ -83,9 +83,9 @@ agent's side of the room:
 - `--paired` plays every turn that carried a reading a second time, on the
   same wake without the reading. That second move is graded but never sent,
   so the summary shows what the reading changed at the same moment.
-- `--ack agent` turns off Nunchi's own nod. An ACK judgment then gives the
-  agent a turn, and any "mhm" is the agent's own. The default, `nunchi`,
-  is today's behavior.
+- `--ack` says who sends the "mhm". The default, `agent`, matches Nunchi's
+  default: an ACK judgment gives the agent a turn, and any "mhm" is its
+  own. `--ack nunchi` turns Nunchi's own nod back on, for comparison.
 
 Moments that need a pause, such as "five minutes later, nobody has
 answered", have no route in today's V2 and are reported as not supported.

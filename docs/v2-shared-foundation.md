@@ -60,8 +60,11 @@ out of the shared core.
 ## Core outcomes
 
 - `SUPPRESS` ends at attention. There is no participant or native call.
-- `ACK` adds the configured reaction (default `👂`) to the exact trigger and
-  does not run the full participant.
+- `ACK` gives the participant a normal turn by default: the ACK policy is
+  off, so it widens to `DEFER` and any "mhm" is the participant's own
+  (Zoe, 2026-10-05). With `ack.enabled: true`, Nunchi instead adds the
+  configured reaction (default `👂`) to the exact trigger and does not run
+  the full participant.
 - `WAKE` runs one normal participant turn through the shared protocol.
 - `DEFER` runs that same normal participant path, with the model's reading
   of the room when the judgment gave one.

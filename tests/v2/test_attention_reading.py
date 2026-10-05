@@ -9,13 +9,19 @@ from __future__ import annotations
 
 import unittest
 
+from nunchi.ack import AckPolicy, ReactionCapability
 from nunchi.attention import (
     ATTENTION_JUDGMENT_SCHEMA,
     participant_attention_prompt,
 )
 from nunchi.observation import ObservationLimits
 from nunchi.participant_model import participant_tool_turn_prompt, participant_turn_prompt
-from tests.v2.test_shared_foundation import FixtureModel, foundation, message
+from tests.v2.test_shared_foundation import (
+    FixtureModel,
+    RecordingTransport,
+    foundation,
+    message,
+)
 
 
 CONFIDENCES = {
@@ -123,6 +129,27 @@ class ReadingTests(unittest.TestCase):
         opportunity, wakes, _ = self.turn(ReadingModel("ACK", reading))
         self.assertEqual("DEFER", opportunity.effective_disposition)
         self.assertEqual(reading, wakes[0]["attention"]["advice"])
+
+    def test_by_default_the_agent_sends_its_own_mhm(self):
+        # Zoe, 2026-10-05: every visible move is the agent's own. Even where
+        # the platform could take Nunchi's nod, an ACK judgment is the
+        # agent's turn, with the reading saying why a nod could fit.
+        self.assertFalse(AckPolicy().enabled)
+        transport = RecordingTransport(
+            capability=ReactionCapability(
+                supported=True,
+                authenticated=True,
+                operations=("add",),
+                reactions=("👂",),
+                permissions_revision="test:v1",
+            )
+        )
+        reading = [note("Zoe shared an update; a quick mhm could show Vigil is following.", "e1")]
+        opportunity, wakes, _ = self.turn(ReadingModel("ACK", reading), transport=transport)
+        self.assertEqual("DEFER", opportunity.effective_disposition)
+        self.assertEqual("DEFER", wakes[0]["attention"]["source"])
+        self.assertEqual(reading, wakes[0]["attention"]["advice"])
+        self.assertEqual([], transport.calls)
 
     def test_a_suppressed_moment_reaches_no_one(self):
         opportunity, wakes, _ = self.turn(ReadingModel("SUPPRESS", [note("Addressed to Castor.", "e1")]))

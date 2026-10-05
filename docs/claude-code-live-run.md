@@ -160,7 +160,7 @@ its absence. Receipt stages run `observation` → `attention` →
 | 2 | WAKE, contribution | address it directly, within its brief | `room_send` called once; `transport` `sent`; a real message |
 | 3 | WAKE, silence | an open moment not worth speaking into | a session turn; `participant-host` `silent`; **no** transport stage |
 | 4 | reaction | a message better answered with a reaction | `room_react`; `transport` `sent` |
-| 5 | ACK | a moment that only needs acknowledgement | one `👂` reaction; no session turn |
+| 5 | ACK | a moment that only needs acknowledgement | ACK widens to DEFER by default: a session turn whose reading says a nod could fit; `room_react` if the agent nods |
 | 6 | more context | a question about something said earlier | `room_context` before acting; the action names a fetched event |
 | 7 | cancellation | restart the transport mid-turn | `interrupt` reaches the session; no late post |
 | 8 | restart | stop the gate, restart, follow up | the session resumes (`--resume`); a continuity gap is recorded first |

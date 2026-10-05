@@ -29,13 +29,13 @@ on:
         required: false
         default: anthropic/claude-haiku-4.5
       ack:
-        description: Who sends the mhm on an ACK judgment (nunchi, or agent for the agent's own turn)
+        description: Who sends the mhm on an ACK judgment (agent, the default, or nunchi for Nunchi's own nod)
         required: true
-        default: nunchi
+        default: agent
         type: choice
         options:
-          - nunchi
           - agent
+          - nunchi
       paired:
         description: Also play each agent turn that carried a reading without it (needs agent_model)
         required: true

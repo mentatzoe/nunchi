@@ -75,6 +75,11 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   message the reading saw. The turn prompts frame the reading as a
   recommendation with reasons. Contracts: `I-010B AttentionDecisionV2@4`,
   `I-010C ParticipantWakeV2@3`.
+- The agent sends its own "mhm" by default (Zoe, 2026-10-05). The ACK policy
+  is off by default, so an ACK judgment gives the agent a turn, with the
+  reading saying why a nod could fit, instead of Nunchi adding 👂 itself.
+  `ack.enabled: true` turns Nunchi's nod back on until step 7 of the plan
+  removes it. The behavior suite's `--ack` defaults to `agent` to match.
 - `main` is the V2 working branch; `integration/v2` is retired. CI and the
   Hermes host-contract workflow run on pushes to `main` and on PRs into it
   (#88).

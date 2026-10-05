@@ -84,9 +84,10 @@ Other platforms stay outside Nunchi and use stock Hermes behavior.
 When Nunchi admits a configured turn, stock Hermes keeps its participant
 prompt, main model, memory, post-invocation reactions, cancellation, delivery,
 and platform adapter behind Nunchi's shared core and effect guards. A model
-ACK adds one native reaction when the authenticated Discord or Telegram
-adapter attests permission for that emoji; otherwise it widens to DEFER.
-See the [ACK verification record](verification/2026-10-02-hermes-ack.md).
+ACK gives the participant a turn (DEFER), so any reaction is the
+participant's own; Nunchi's own nod is off by default since 2026-10-05.
+The [ACK verification record](verification/2026-10-02-hermes-ack.md) covers
+Nunchi's own nod as verified on 2026-10-02, before it was turned off.
 Hermes tools retain native authority, with durable at-most-once
 invocation claims and cooperative cancellation; see the
 [native-tool verification record](verification/2026-10-02-native-tools.md).
