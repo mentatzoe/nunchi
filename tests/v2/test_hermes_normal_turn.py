@@ -103,6 +103,7 @@ class _Base(unittest.TestCase):
     enable_nunchi = False
     trust_nunchi_llm = False
     nunchi_timeout_seconds = 20.0
+    nunchi_ack_enabled: bool | None = None
     _room_counter = 0
 
     @classmethod
@@ -152,7 +153,13 @@ class _Base(unittest.TestCase):
         self.host = sup.ProbeHost(home=self.home, client=self.client)
 
     def _load_nunchi(self, *, timeout_seconds: float) -> None:
-        sup.write_nunchi_config(self.home, room_id=str(self.room), bot_user_id=BOT, timeout_seconds=timeout_seconds)
+        sup.write_nunchi_config(
+            self.home,
+            room_id=str(self.room),
+            bot_user_id=BOT,
+            timeout_seconds=timeout_seconds,
+            ack_enabled=self.nunchi_ack_enabled,
+        )
         self.loaded = sup.load_nunchi_via_plugin_manager()
         self.assertIsNone(
             self.loaded["state"]["error"],
@@ -659,11 +666,41 @@ class NunchiOnInstalledHostNormalTurn(_Base):
         self.assertNotIn(("transport", "sent"), stages, stages)
 
 
-class NunchiAttentionAck(_Base):
-    """Native attention ACK on the installed host. Not a participant turn."""
+class NunchiAttentionAckDefault(_Base):
+    """By default an ACK judgment is the participant's own turn (Zoe, 2026-10-05)."""
 
     enable_nunchi = True
     trust_nunchi_llm = True
+
+    def setUp(self) -> None:
+        super().setUp()
+        os.environ["DISCORD_REACTIONS"] = "false"
+        self.client.reaction_started = threading.Event()
+        self.client.reaction_hold = None
+
+    def test_ack_gives_the_participant_a_turn_and_nunchi_adds_no_reaction(self) -> None:
+        self.server.script(self.attend("ACK"), {"content": "participant's own turn"})
+        message = self.human("just letting you know the deploy finished")
+        _deliver_and_settle(self.host, message)
+        self.assertEqual([], [item for item in message.reactions if item == ("add", "👂")])
+        self.assertEqual(1, len(self.model_turns()), "ACK widens to DEFER and runs the participant")
+        attention = [r for r in self.receipts() if r.get("stage") == "attention"]
+        self.assertTrue(attention)
+        body = attention[-1]["body"]
+        self.assertEqual("DEFER", body.get("effective_disposition"))
+        self.assertEqual("ack-disabled", body.get("routing_audit", {}).get("override_cause"))
+
+
+class NunchiAttentionAck(_Base):
+    """Nunchi's own nod on the installed host, turned on in the room's config.
+
+    Off by default since 2026-10-05; these tests cover the opt-in until step 7
+    of #94 removes it. Not a participant turn.
+    """
+
+    enable_nunchi = True
+    trust_nunchi_llm = True
+    nunchi_ack_enabled = True
 
     def setUp(self) -> None:
         super().setUp()

@@ -85,7 +85,8 @@ When Nunchi admits a configured turn, stock Hermes keeps its participant
 prompt, main model, memory, post-invocation reactions, cancellation, delivery,
 and platform adapter behind Nunchi's shared core and effect guards. A model
 ACK gives the participant a turn (DEFER), so any reaction is the
-participant's own; Nunchi's own nod is off by default since 2026-10-05.
+participant's own; Nunchi's own nod is off by default since 2026-10-05. A
+room can turn it back on with `"ack": {"enabled": true}` in its config.
 The [ACK verification record](verification/2026-10-02-hermes-ack.md) covers
 Nunchi's own nod as verified on 2026-10-02, before it was turned off.
 Hermes tools retain native authority, with durable at-most-once

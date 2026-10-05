@@ -5486,6 +5486,29 @@ class GatewayRunner:
                 hermes_profile="default",
             )
             self.assertEqual("discord", loaded.rooms[0].binding.platform)
+            # The participant sends its own "mhm" unless the room turns
+            # Nunchi's nod on.
+            self.assertFalse(loaded.rooms[0].ack.enabled)
+            document["rooms"][0]["ack"] = {"enabled": True}
+            nodding = json.dumps(document).encode()
+            path.write_bytes(nodding)
+            self.assertTrue(
+                hermes_v2.load_pinned_config(
+                    path,
+                    expected_sha256=hashlib.sha256(nodding).hexdigest(),
+                    hermes_profile="default",
+                ).rooms[0].ack.enabled
+            )
+            document["rooms"][0]["ack"] = {"enabled": True, "unknown": 1}
+            unknown = json.dumps(document).encode()
+            path.write_bytes(unknown)
+            with self.assertRaisesRegex(Exception, "ack has a missing or unexpected field"):
+                hermes_v2.load_pinned_config(
+                    path,
+                    expected_sha256=hashlib.sha256(unknown).hexdigest(),
+                    hermes_profile="default",
+                )
+            path.write_bytes(raw)
             path.write_text("{}")
             with self.assertRaisesRegex(Exception, "pinned digest"):
                 hermes_v2.load_pinned_config(
