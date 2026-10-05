@@ -30,7 +30,7 @@ from evals.behavior.score import cell, grade, visible_result
 PARTICIPANTS = load_participants()
 
 
-def judgment(disposition, *, evidence=(), suppress_margin=True):
+def judgment(disposition, *, evidence=(), suppress_margin=True, reading=None):
     confidences = {"PASS": 0.0, "ACK": 0.0, "ASK": 0.0, "SPEAK": 0.0}
     if disposition == "SUPPRESS":
         confidences["PASS"] = 1.0 if suppress_margin else 0.5
@@ -38,12 +38,17 @@ def judgment(disposition, *, evidence=(), suppress_margin=True):
         confidences["ACK"] = 1.0
     else:
         confidences["SPEAK"] = 1.0
-    return {
+    result = {
         "disposition": disposition,
         "reasons": [f"fixture {disposition}"],
         "evidence_event_ids": list(evidence),
         "legacy_verdict_confidences": confidences,
     }
+    if reading is not None:
+        result["attention_advice"] = [
+            {"note": reading, "evidence_event_ids": list(evidence)}
+        ]
+    return result
 
 
 class FixedModel:
@@ -52,16 +57,21 @@ class FixedModel:
     name = "participant-attention"
     provider = "fixture"
 
-    def __init__(self, disposition, *, evidence=(), model_id="fixture/model"):
+    def __init__(self, disposition, *, evidence=(), model_id="fixture/model", reading=None):
         self.disposition = disposition
         self.evidence = evidence
         self.model_id = model_id
+        self.reading = reading
         self.projections = []
 
     def judge(self, *, instructions, projection, timeout_seconds):
         self.projections.append(projection)
         evidence = [item for item in self.evidence if item in {event["id"] for event in projection["events"]}]
-        return judgment(self.disposition, evidence=evidence or [projection["trigger_event_id"]])
+        return judgment(
+            self.disposition,
+            evidence=evidence or [projection["trigger_event_id"]],
+            reading=self.reading,
+        )
 
 
 def scene_by_id(scene_id):
@@ -305,15 +315,16 @@ def fails(wake):
 class AgentTurnTests(unittest.TestCase):
     """A model plays the woken agent through Nunchi's own host and transport."""
 
-    def judge(self, scene_id, moment, disposition, act):
-        agent = FakeAgent(act)
+    def judge(self, scene_id, moment, disposition, act, *, reading=None, agent=None, **kwargs):
+        agent = agent or FakeAgent(act)
         scene = scene_by_id(scene_id)
         job = run.Job(scene, moment, scene.participants[0], "fixture/model", 0)
         record = run.judge_moment(
             job,
-            lambda _: FixedModel(disposition),
+            lambda _: FixedModel(disposition, reading=reading),
             timeout_seconds=5,
             agent_factory=lambda profile: agent,
+            **kwargs,
         )
         return record, agent
 
@@ -358,6 +369,76 @@ class AgentTurnTests(unittest.TestCase):
     def test_waiting_is_satisfied_by_staying_quiet(self):
         record, _ = self.judge("addressee-first", 0, "WAKE", stays_silent)
         self.assertEqual("fits", record["grade"]["visible"])
+
+    def test_the_record_says_how_the_agent_got_its_turn(self):
+        record, _ = self.judge("story-across-messages", 2, "WAKE", speaks, reading="Zoe has finished her story")
+        self.assertEqual({"source": "WAKE", "reading_items": 1}, record["agent"]["attention"])
+        self.assertEqual("WAKE", run.turn_source(record))
+
+    def test_a_paired_turn_is_played_again_without_the_reading_and_never_sent(self):
+        def speaks_only_with_a_reading(wake):
+            return speaks(wake) if wake["attention"].get("advice") else None
+
+        record, agent = self.judge(
+            "story-across-messages",
+            2,
+            "WAKE",
+            speaks_only_with_a_reading,
+            reading="Zoe has finished her story and asked for the next step",
+            paired=True,
+        )
+        self.assertEqual(("speak", "agent", "fits"), (record["result"], record["by"], record["grade"]["visible"]))
+        self.assertEqual(2, len(agent.turns))
+        with_reading, without_reading = (wake for wake, _ in agent.turns)
+        self.assertIn("advice", with_reading["attention"])
+        self.assertEqual({"source": "WAKE"}, without_reading["attention"])
+        self.assertEqual(with_reading["events"], without_reading["events"])
+        unread = record["agent"]["without_reading"]
+        self.assertEqual(("stay_quiet", "miss"), (unread["move"], unread["grade"]))
+        self.assertIsNone(unread["action"])
+
+    def test_a_turn_without_a_reading_is_not_paired(self):
+        record, agent = self.judge("story-across-messages", 2, "WAKE", speaks, paired=True)
+        self.assertEqual(1, len(agent.turns))
+        self.assertNotIn("without_reading", record["agent"])
+
+    def test_a_failed_paired_turn_never_changes_the_real_one(self):
+        class FailsSecondTime(FakeAgent):
+            def run_protocol(self, *, wake, opportunity, expand, cancel):
+                if self.turns:
+                    raise RuntimeError("agent provider HTTP 429")
+                return super().run_protocol(wake=wake, opportunity=opportunity, expand=expand, cancel=cancel)
+
+        record, _ = self.judge(
+            "story-across-messages", 2, "WAKE", speaks, reading="finished", paired=True, agent=FailsSecondTime(speaks)
+        )
+        self.assertEqual(("speak", "agent"), (record["result"], record["by"]))
+        self.assertFalse(record["provider_error"])
+        self.assertIn("HTTP 429", record["agent"]["without_reading"]["error"])
+
+    def test_the_agent_sends_its_own_mhm_when_nunchi_does_not(self):
+        record, agent = self.judge("story-across-messages", 0, "ACK", reacts, ack="agent")
+        self.assertEqual(("mhm", "agent", "fits"), (record["result"], record["by"], record["grade"]["visible"]))
+        self.assertEqual(1, len(agent.turns))
+        self.assertEqual("DEFER", record["agent"]["attention"]["source"])
+        self.assertEqual("ACK widened to DEFER (policy-defer)", run.turn_source(record))
+
+    def test_context_requests_are_recorded(self):
+        class Looks(FakeAgent):
+            def run_protocol(self, *, wake, opportunity, expand, cancel):
+                try:
+                    expand(direction="before", max_events=5, max_bytes=4096)
+                except Exception:
+                    pass
+                return None
+
+        record, _ = self.judge("story-across-messages", 2, "WAKE", None, agent=Looks(None))
+        (entry,) = record["agent"]["expansions"]
+        self.assertEqual("with reading", entry["arm"])
+        self.assertEqual("before", entry["request"]["direction"])
+        # Today a short room has nothing more to fetch, so the request fails;
+        # either way the record keeps what the agent asked and what it got.
+        self.assertTrue("error" in entry or "events" in entry)
 
 
 class RunTests(unittest.TestCase):
@@ -495,6 +576,32 @@ class RunTests(unittest.TestCase):
         self.assertEqual(0, code)
         self.assertEqual(2, meta["per_model"])
         self.assertEqual({"a/model": 2, "b/model": 2}, peak)
+
+    def test_a_paired_run_reports_the_reading_and_who_nods(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch("sys.stdout"):
+                code = run.main(
+                    [
+                        "--dry-run",
+                        "--agent-model", "x",
+                        "--paired",
+                        "--ack", "agent",
+                        "--scenes", "story-across-messages",
+                        "--runs", "1",
+                        "--out", directory,
+                    ]
+                )
+            summary = (Path(directory) / "summary.md").read_text(encoding="utf-8")
+            meta = json.loads((Path(directory) / "run.json").read_text(encoding="utf-8"))
+        self.assertEqual(0, code)
+        self.assertEqual(("agent", True), (meta["ack"], meta["paired"]))
+        self.assertIn("- Mhm: the agent's own", summary)
+        self.assertIn("## What the agent saw", summary)
+        self.assertIn("| WAKE | 3 | 1 / 1 | 2 / 2 | 3 / 3 | 0 |", summary)
+
+    def test_pairing_needs_an_agent(self):
+        with mock.patch("sys.stderr"), self.assertRaises(SystemExit):
+            run.main(["--dry-run", "--paired"])
 
     def test_a_dry_run_can_simulate_the_agent(self):
         with tempfile.TemporaryDirectory() as directory, mock.patch("sys.stdout"):
