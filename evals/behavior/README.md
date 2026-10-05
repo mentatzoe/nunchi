@@ -129,7 +129,9 @@ snapshot that served it under `model_response`.
 A chat model's name may end in `@` and a reasoning effort (`none`,
 `minimal`, `low`, `medium`, `high`, `xhigh` or `max`), for example
 `deepseek/deepseek-v4.1-flash@low`. On OpenRouter it is sent as
-`reasoning.effort`, elsewhere as `reasoning_effort`. Without one, the
+`reasoning.effort`, elsewhere as `reasoning_effort`. `@off` turns reasoning
+off (`reasoning.enabled: false`), for models that take only on/off or a token
+budget, such as Qwen3.8 Flash, which ignored `@low` in run 20. Without one, the
 provider's default applies, and several models reason by default: OpenRouter
 lists DeepSeek V4.1 Flash at `high` and GLM 5.3 Flash at `max`. Listing a
 model with and without an effort compares them in one run; tables show the
@@ -141,4 +143,6 @@ provider reported: `attention_usage` for the attention call, and
 `agent.usage` and `agent.without_reading.usage` for the agent's real and
 paired plays (tokens in and out, reasoning tokens, cost, and the provider
 that served it). The summary adds a cost and tokens table per model. A call
-that failed or timed out reports nothing, so it is not counted.
+that failed or timed out reports nothing, so it is not counted. The agent's
+calls ask for at most 4096 output tokens; without a cap, OpenRouter reserves
+the model's whole output limit against the balance on every call.

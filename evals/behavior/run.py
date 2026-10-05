@@ -341,9 +341,14 @@ TYPED_DECISION_PREFIX = "typesafe/"
 
 # A chat model may carry a reasoning effort after "@", for example
 # "deepseek/deepseek-v4.1-flash@low", so one run can compare efforts side by
-# side. Without one, the provider's default applies. Which efforts a model
-# accepts is the provider's to say; a refused effort fails that model's calls.
-REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+# side. Without one, the provider's default applies. "off" turns reasoning
+# off, for models that take only on/off or a token budget (OpenRouter lists
+# Qwen3.8 Flash so). Which efforts a model accepts is the provider's to say;
+# a refused effort fails that model's calls.
+REASONING_EFFORTS = ("off", "none", "minimal", "low", "medium", "high", "xhigh", "max")
+# The agent's replies are short JSON. Without a cap, OpenRouter reserves the
+# model's whole output limit against the credit balance on every call.
+AGENT_MAX_TOKENS = 4096
 
 
 def model_spec(label: str) -> tuple[str, str | None]:
@@ -429,11 +434,10 @@ def openai_compatible_factory(
         if openrouter:
             # OpenRouter reports each call's cost only when asked.
             extra["usage"] = {"include": True}
-        if effort is not None:
-            if openrouter:
-                extra["reasoning"] = {"effort": effort}
-            else:
-                extra["reasoning_effort"] = effort
+        if effort is not None and openrouter:
+            extra["reasoning"] = {"enabled": False} if effort == "off" else {"effort": effort}
+        elif effort is not None:
+            extra["reasoning_effort"] = "none" if effort == "off" else effort
         return OpenAICompatibleAttentionModel(
             model=model_id,
             api_key=api_key,
@@ -492,7 +496,7 @@ def openai_compatible_agent_factory(
             base_url=base_url,
             provider="openrouter" if openrouter else "openai-compatible",
             timeout_seconds=AGENT_TIMEOUT_SECONDS / 2,
-            extra_body={"usage": {"include": True}} if openrouter else None,
+            extra_body={"max_tokens": AGENT_MAX_TOKENS, **({"usage": {"include": True}} if openrouter else {})},
         )
 
     return build

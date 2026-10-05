@@ -71,8 +71,9 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   served it, for attention and for the agent's real and paired plays, with a
   cost and tokens table in the summary. A chat model's name may carry a
   reasoning effort (`deepseek/deepseek-v4.1-flash@low`), so one run compares
-  efforts. The OpenAI-compatible participant model takes `extra_body`, and the
-  OpenAI-compatible models keep their provider's last response.
+  efforts; `@off` turns reasoning off. The agent's calls cap their output at
+  4096 tokens. The OpenAI-compatible participant model takes `extra_body`, and
+  the OpenAI-compatible models keep their provider's last response.
 - Attention reads the room as typed questions (#94, plan step 4; Zoe,
   2026-10-05). Step 1 asks whether the judged message is conversation a
   participant like this one could take part in; only a "no" suppresses, and

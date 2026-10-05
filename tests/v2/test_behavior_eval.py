@@ -792,6 +792,12 @@ class UsageTests(unittest.TestCase):
             run.judge_moment(run.Job(scene, 0, "vigil", "x/model@high", 0), other, timeout_seconds=5)
         self.assertEqual("high", provider.bodies[-1]["reasoning_effort"])
         self.assertNotIn("usage", provider.bodies[-1])
+        # Reasoning off, for models that take only on/off or a token budget.
+        with mock.patch("urllib.request.urlopen", provider):
+            run.judge_moment(run.Job(scene, 0, "vigil", "x/model@off", 0), factory, timeout_seconds=5)
+            run.judge_moment(run.Job(scene, 0, "vigil", "x/model@off", 0), other, timeout_seconds=5)
+        self.assertEqual({"enabled": False}, provider.bodies[-2]["reasoning"])
+        self.assertEqual("none", provider.bodies[-1]["reasoning_effort"])
 
     def test_attention_and_agent_usage_are_recorded(self):
         provider = FakeProvider("WAKE")
@@ -818,6 +824,8 @@ class UsageTests(unittest.TestCase):
         )
         self.assertEqual(0.0031, record["agent"]["without_reading"]["usage"]["cost"])
         self.assertEqual({"include": True}, provider.bodies[1]["usage"])
+        # The agent caps its output, so the provider never reserves its whole limit.
+        self.assertEqual(run.AGENT_MAX_TOKENS, provider.bodies[1]["max_tokens"])
 
         summary = run.summarize(
             [scene], ["x/model@low"], [record], [],
