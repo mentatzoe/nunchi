@@ -31,6 +31,7 @@ import platform
 import statistics
 import subprocess
 import sys
+import threading
 import time
 from typing import Any, Callable, Mapping
 import urllib.error
@@ -39,9 +40,11 @@ from nunchi import __version__
 from nunchi.ack import AckPolicy, ReactionCapability
 from nunchi.attention import (
     AttentionEngine,
+    AttentionError,
     AttentionPolicy,
     OpenAICompatibleAttentionModel,
     ParticipantProfile,
+    _validate_model_judgment,
 )
 from nunchi.observation import ObservationProvider, ParticipantBinding
 from nunchi.receipts import ReceiptJournal
@@ -121,6 +124,16 @@ def _describe_error(exc: BaseException) -> str:
 
 
 ModelFactory = Callable[[str], Any]
+
+
+def invalid_reason(raw: Any, event_ids: set[str]) -> str:
+    """Why the engine rejected a reply that the model did return."""
+
+    try:
+        _validate_model_judgment(raw, event_ids=event_ids)
+    except AttentionError as exc:
+        return str(exc)
+    return "the decision failed the attention contract check"
 
 
 def openai_compatible_factory(
@@ -270,6 +283,14 @@ def judge_moment(job: Job, factory: ModelFactory, *, timeout_seconds: float, now
     )
     decision = engine.judge(request)
     outcome = visible_result(decision)
+    rejected = decision.get("error", {}).get("code") == "provider-failure"
+    if rejected and model.raw is not None:
+        # The model answered but the engine rejected the reply; keep it so the
+        # failure can be diagnosed.
+        record["raw_reply"] = model.raw
+        record["invalid_reason"] = invalid_reason(
+            model.raw, {event["id"] for event in request["events"]}
+        )
     evidence = set(decision.get("evidence_event_ids", []))
     record.update(
         result=outcome,
@@ -383,7 +404,12 @@ def summarize(
             mine = [record for record in failed if record["model"] == model]
             if mine:
                 engine_error = mine[0].get("decision", {}).get("error", {})
-                first = mine[0].get("error") or engine_error.get("detail") or "unknown"
+                first = (
+                    mine[0].get("error")
+                    or (mine[0].get("invalid_reason") and f"invalid reply: {mine[0]['invalid_reason']}")
+                    or engine_error.get("detail")
+                    or "unknown"
+                )
                 first = first.replace("|", "/").replace("\n", " ")
                 lines.append(f"| `{model}` | {len(mine)} | {first[:300]} |")
         lines.append("")
@@ -477,6 +503,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument(
+        "--per-model",
+        type=int,
+        default=3,
+        help="at most this many calls to one model at a time (rate limits)",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args(argv)
@@ -488,8 +520,8 @@ def main(argv: list[str] | None = None) -> int:
         for scene in scenes:
             print(f"{scene.id:48} {len(scene.moments)} moment(s)  {scene.review[:40]}")
         return 0
-    if args.runs < 1 or args.workers < 1:
-        parser.error("--runs and --workers must be positive")
+    if args.runs < 1 or args.workers < 1 or args.per_model < 1:
+        parser.error("--runs, --workers and --per-model must be positive")
 
     if args.dry_run:
         models = [DRY_RUN_MODEL]
@@ -504,9 +536,15 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     jobs = plan(scenes, models, args.runs)
+    slots = {model: threading.Semaphore(args.per_model) for model in models}
+
+    def run_job(job: Job) -> dict[str, Any]:
+        with slots[job.model]:
+            return judge_moment(job, factory, timeout_seconds=args.timeout)
+
     started = datetime.now(timezone.utc)
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        records = list(pool.map(lambda job: judge_moment(job, factory, timeout_seconds=args.timeout), jobs))
+        records = list(pool.map(run_job, jobs))
     finished = datetime.now(timezone.utc)
 
     out = Path(args.out)
@@ -527,6 +565,8 @@ def main(argv: list[str] | None = None) -> int:
         "runs": args.runs,
         "temperature": None if args.dry_run else args.temperature,
         "timeout_seconds": args.timeout,
+        "workers": args.workers,
+        "per_model": args.per_model,
         "base_url": "offline" if args.dry_run else args.base_url,
         "key_env": None if args.dry_run else args.key_env,
         "scenes": [scene.id for scene in scenes],
