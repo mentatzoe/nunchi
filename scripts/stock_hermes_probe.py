@@ -16,7 +16,7 @@ from unittest import mock
 LANES = {
     "contract": (["tests.v2.test_hermes_installed_contract"], 4),
     "normal-attention": (["tests.v2.test_hermes_normal_turn",
-                          "tests.v2.test_hermes_attention_setup_installed"], 32),
+                          "tests.v2.test_hermes_attention_setup_installed"], 33),
     "startup-single": (["tests.v2.test_hermes_startup_installed"], 1),
     "startup-multiplex": (["tests.v2.test_hermes_startup_installed"], 1),
 }
