@@ -347,7 +347,10 @@ def participant_attention_prompt(
     for key in QUESTION_IDS:
         question = questions[key]
         if question["kind"] == "yes_no":
-            text = f"{question['ask']} Yes: {question['yes']} No: {question['no']}"
+            text = (
+                f"{question['ask']} The probability of yes. Near 1: {question['yes']} "
+                f"Near 0: {question['no']}"
+            )
         elif question["kind"] == "choice":
             text = (
                 f"{question['ask']} Give a probability for each of: "
@@ -381,11 +384,27 @@ def participant_attention_prompt(
         f"{profile.instructions}\n\n"
         "Questions. Give every probability as a number from 0 to 1.\n"
         + "\n".join(lines)
-        + "\n\nReturn one closed JSON object with exactly the fields "
-        + ", ".join(QUESTION_IDS)
-        + (", and notes." if notes > 0 else ".")
+        + "\n\nReturn one closed JSON object of this shape, where each p is a number "
+        'from 0 to 1, never true, false, "yes", or "no":\n'
+        + _answers_shape(questions, notes=notes > 0)
         + (_reading_prompt(notes, reading_note_chars, called) if notes > 0 else "")
     )
+
+
+def _answers_shape(questions: Mapping[str, Mapping[str, Any]], *, notes: bool) -> str:
+    fields = []
+    for key in QUESTION_IDS:
+        question = questions[key]
+        if question["kind"] == "yes_no":
+            value = "p"
+        elif question["kind"] == "choice":
+            value = "{" + ", ".join(f'"{option}": p' for option in question["options"]) + "}"
+        else:
+            value = '"<message id>" or null'
+        fields.append(f'"{key}": {value}')
+    if notes:
+        fields.append('"notes": [...]')
+    return "{" + ", ".join(fields) + "}"
 
 
 def _reading_prompt(items: int, chars: int, called: str) -> str:

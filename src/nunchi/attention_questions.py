@@ -240,6 +240,27 @@ def _probability(value: Any, label: str) -> float:
     return round(float(value), 4)
 
 
+_YES_NO_WORDS = {"yes": 1.0, "true": 1.0, "no": 0.0, "false": 0.0}
+
+
+def _yes_no(value: Any, label: str) -> float:
+    """The probability of yes.
+
+    Chat models asked for a probability sometimes write a yes/no answer as a
+    boolean, a word, or a ``{"yes", "no"}`` split. Each states its answer
+    unambiguously, so it is read as that probability rather than failing the
+    whole judgment. Anything else must be a probability.
+    """
+
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    if isinstance(value, str) and value.strip().lower() in _YES_NO_WORDS:
+        return _YES_NO_WORDS[value.strip().lower()]
+    if isinstance(value, Mapping) and set(value) == {"yes", "no"}:
+        return _distribution(value, ("yes", "no"), label)["yes"]
+    return _probability(value, label)
+
+
 def _distribution(value: Any, options: tuple[str, ...], label: str) -> dict[str, float]:
     if not isinstance(value, Mapping) or set(value) - set(options):
         raise ValueError(f"answer {label} must give probabilities for {', '.join(options)}")
@@ -259,10 +280,11 @@ def validate_answers(
 ) -> dict[str, Any]:
     """Check one set of typed answers and return it in the core's shape.
 
-    Raises ``ValueError`` when an answer is missing or malformed. A choice
-    is normalized to sum to 1. A pointer to a message the model was not
-    given, or to the judged message itself, is dropped on its own rather
-    than failing the judgment.
+    Raises ``ValueError`` when an answer is missing or malformed. A yes/no
+    answer written as a boolean, a word, or a yes/no split is read as the
+    probability it states. A choice is normalized to sum to 1. A pointer to
+    a message the model was not given, or to the judged message itself, is
+    dropped on its own rather than failing the judgment.
     """
 
     if not isinstance(raw, Mapping):
@@ -271,11 +293,11 @@ def validate_answers(
     if required - set(raw) or set(raw) - set(QUESTION_IDS):
         raise ValueError("answers have a missing or unexpected question")
     answers: dict[str, Any] = {
-        "conversation": _probability(raw["conversation"], "conversation"),
+        "conversation": _yes_no(raw["conversation"], "conversation"),
         "addressee": _distribution(raw["addressee"], ADDRESSEES, "addressee"),
-        "answered": _probability(raw["answered"], "answered"),
-        "mid_thought": _probability(raw["mid_thought"], "mid_thought"),
-        "adds_something": _probability(raw["adds_something"], "adds_something"),
+        "answered": _yes_no(raw["answered"], "answered"),
+        "mid_thought": _yes_no(raw["mid_thought"], "mid_thought"),
+        "adds_something": _yes_no(raw["adds_something"], "adds_something"),
         "move": _distribution(raw["move"], MOVES, "move"),
     }
     pointer = raw.get("answered_by")

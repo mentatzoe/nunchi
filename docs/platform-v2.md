@@ -196,6 +196,10 @@ There are two routes, and both produce the same answers:
   }
   ```
 
+  Every yes/no answer is a probability. One written as `true`/`false`,
+  `"yes"`/`"no"`, or a `{"yes": p, "no": q}` split is read as the
+  probability it states; anything else malformed fails the judgment.
+
 - **A typed decision model** has an `answer(questions, state, timeout_seconds)`
   method. It receives the questions and the conversation as a state document
   (`attention_state`) and answers them natively, with probabilities. The

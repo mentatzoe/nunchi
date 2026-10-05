@@ -74,6 +74,21 @@ class ValidationTests(unittest.TestCase):
             with self.subTest(pointer=pointer):
                 self.assertNotIn("answered_by", self.check(leaning(answered_by=pointer)))
 
+    def test_a_plainly_stated_yes_or_no_is_read_as_its_probability(self):
+        # Chat models asked for a probability sometimes answer a yes/no
+        # question as a boolean, a word, or a yes/no split (#114 run).
+        for written, expected in (
+            (True, 1.0),
+            (False, 0.0),
+            ("no", 0.0),
+            (" Yes ", 1.0),
+            ({"yes": 0.2, "no": 0.6}, 0.25),
+            ({"yes": 0, "no": 0}, 0.5),
+        ):
+            with self.subTest(written=written):
+                result = self.check(leaning(answered=written, conversation=written))
+                self.assertEqual((expected, expected), (result["answered"], result["conversation"]))
+
     def test_malformed_answers_are_rejected(self):
         missing = leaning()
         del missing["mid_thought"]
@@ -85,9 +100,11 @@ class ValidationTests(unittest.TestCase):
             extra,
             leaning(conversation=1.5),
             leaning(conversation=-0.1),
-            leaning(conversation=True),
             leaning(conversation=math.nan),
             leaning(adds_something="high"),
+            leaning(answered={"probability": 0.9}),
+            leaning(answered={"yes": 0.7}),
+            leaning(answered={"yes": 2, "no": 0}),
             leaning(move=[0.7, 0.3]),
             leaning(move={"speak": 1, "shout": 0}),
             leaning(answered_by=7),
@@ -186,6 +203,8 @@ class RouteTests(unittest.TestCase):
             self.assertIn(f"- {key}: ", prompt)
         self.assertIn('wrong "not conversation" hides the moment', prompt)
         self.assertIn("This holds whoever it is addressed to.", prompt)
+        self.assertIn('"answered": p, "answered_by": "<message id>" or null', prompt)
+        self.assertIn('never true, false, "yes", or "no"', prompt)
 
 
 class ContractTests(unittest.TestCase):
