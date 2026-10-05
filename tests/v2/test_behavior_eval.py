@@ -9,6 +9,7 @@ runs, not here.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import io
 import json
 import os
 from pathlib import Path
@@ -420,6 +421,28 @@ class AgentTurnTests(unittest.TestCase):
         self.assertEqual(("speak", "agent"), (record["result"], record["by"]))
         self.assertFalse(record["provider_error"])
         self.assertIn("HTTP 429", record["agent"]["without_reading"]["error"])
+
+    def test_a_reply_the_protocol_rejects_is_kept(self):
+        reply = '{"kind": "silence"}\n{"kind": "silence"}'
+        payload = json.dumps({"choices": [{"message": {"content": reply}}]}).encode()
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        scene = scene_by_id("story-across-messages")
+        job = run.Job(scene, 2, scene.participants[0], "fixture/model", 0)
+        agents = run.openai_compatible_agent_factory(api_key="k", base_url=run.DEFAULT_BASE_URL, model="fixture/agent")
+        with mock.patch("urllib.request.urlopen", lambda request, timeout: Response(payload)):
+            record = run.judge_moment(
+                job, lambda _: FixedModel("WAKE"), timeout_seconds=5, agent_factory=agents
+            )
+        self.assertTrue(record["provider_error"])
+        self.assertIn("not valid JSON", record["agent"]["error"])
+        self.assertEqual(reply, record["agent"]["raw_reply"])
 
     def test_the_agent_sends_its_own_mhm_when_nunchi_does_not(self):
         record, agent = self.judge("story-across-messages", 0, "ACK", reacts, ack="agent")

@@ -26,7 +26,8 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   through Nunchi's pipeline; with `--agent-model`, a model plays the woken
   agent's turn through the shared participant protocol, its move is graded,
   and pile-ons are reported. Each agent turn records how it got its turn
-  and what reading came with it. `--paired` plays every turn that carried a
+  and what reading came with it, and keeps a reply the turn protocol
+  rejects. `--paired` plays every turn that carried a
   reading a second time on the same wake without it, graded but never sent,
   so a run shows what the reading changed. `--ack agent` turns off Nunchi's
   own nod, so an ACK judgment gives the agent a turn and any "mhm" is its

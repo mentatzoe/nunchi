@@ -110,6 +110,7 @@ class RecordingModel:
         self.model_id = inner.model_id
         self.raw: Any = None
         self.error: str | None = None
+        self.raw_reply: Any = None
         self.latency_ms: int | None = None
 
     def judge(self, **kwargs: Any) -> Mapping[str, Any]:
@@ -119,6 +120,7 @@ class RecordingModel:
             return self.raw
         except BaseException as exc:
             self.error = _describe_error(exc)
+            self.raw_reply = _raw_reply(self.inner)
             raise
         finally:
             self.latency_ms = int((time.monotonic() - started) * 1000)
@@ -160,6 +162,7 @@ class RecordingAgent:
         self.called = False
         self.action: Any = None
         self.error: str | None = None
+        self.raw_reply: Any = None
         self.latency_ms: int | None = None
         self.attention: Mapping[str, Any] | None = None
         self.expansions: list[dict[str, Any]] = []
@@ -178,6 +181,7 @@ class RecordingAgent:
             )
         except BaseException as exc:
             self.error = _describe_error(exc)
+            self.raw_reply = _raw_reply(self.inner)
             raise
         finally:
             self.latency_ms = int((time.monotonic() - started) * 1000)
@@ -199,6 +203,9 @@ class RecordingAgent:
         except Exception as exc:
             # The paired turn is a measurement; it never changes the real one.
             played["error"] = _describe_error(exc)
+            raw = _raw_reply(self.inner)
+            if raw is not None:
+                played["raw_reply"] = raw
         played["latency_ms"] = int((time.monotonic() - started) * 1000)
         return played
 
@@ -326,11 +333,36 @@ def openai_compatible_factory(
     return build
 
 
+class RecordingParticipant(OpenAICompatibleParticipant):
+    """The simulated agent, keeping its latest raw reply.
+
+    When the turn protocol rejects a reply, the record carries that reply so
+    the failure can be read, as it does for attention's rejected replies.
+    """
+
+    last_reply: Any = None
+
+    def _invoke(self, protocol: Any) -> Any:
+        self.last_reply = None
+        self.last_reply = super()._invoke(protocol)
+        return self.last_reply
+
+
+RAW_REPLY_MAX_CHARS = 4000
+
+
+def _raw_reply(agent: Any) -> Any:
+    reply = getattr(agent, "last_reply", None)
+    if isinstance(reply, str) and len(reply) > RAW_REPLY_MAX_CHARS:
+        return reply[:RAW_REPLY_MAX_CHARS] + "…"
+    return reply
+
+
 def openai_compatible_agent_factory(
     *, api_key: str, base_url: str, model: str
 ) -> AgentFactory:
     def build(profile: ParticipantProfile) -> Any:
-        return OpenAICompatibleParticipant(
+        return RecordingParticipant(
             profile=profile,
             model=model,
             api_key=api_key,
@@ -593,6 +625,8 @@ def judge_moment(
         if failed:
             provider_error = True
             record["agent"]["error"] = agent.error or transport_result.detail
+            if agent.raw_reply is not None:
+                record["agent"]["raw_reply"] = agent.raw_reply
         else:
             result = agent_move(transport.calls)
             by = "agent"
