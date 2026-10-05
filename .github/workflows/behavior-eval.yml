@@ -24,6 +24,10 @@ on:
         description: Sampling temperature (production uses 0)
         required: true
         default: "0"
+      agent_model:
+        description: Model that plays the woken agent's turn (empty grades attention alone)
+        required: false
+        default: anthropic/claude-haiku-4.5
 
 permissions:
   contents: read
@@ -47,6 +51,7 @@ jobs:
           RUNS: ${{ inputs.runs }}
           SCENES: ${{ inputs.scenes }}
           TEMPERATURE: ${{ inputs.temperature }}
+          AGENT_MODEL: ${{ inputs.agent_model }}
         run: |
           if [ -z "$NUNCHI_OPENROUTER" ]; then
             echo "::error::The NUNCHI_OPENROUTER secret is not set."
@@ -60,6 +65,7 @@ jobs:
             --runs "$RUNS" \
             --scenes "$SCENES" \
             --temperature "$TEMPERATURE" \
+            --agent-model "$AGENT_MODEL" \
             --workers 12 \
             --out behavior-eval-out > /dev/null || status=$?
           if [ -f behavior-eval-out/summary.md ]; then

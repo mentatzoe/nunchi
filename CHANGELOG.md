@@ -22,8 +22,11 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   observation and attention path against OpenAI-compatible models, reports
   per-model spread, and never writes its key. Any failed call fails the run
   and is listed first in the summary; a rejected reply is kept with its
-  reason, and calls to one model at a time are capped. The manual `behavior-eval` workflow
-  runs it through OpenRouter.
+  reason, and calls to one model at a time are capped. Each moment runs
+  through Nunchi's pipeline; with `--agent-model`, a model plays the woken
+  agent's turn through the shared participant protocol, its move is graded,
+  and pile-ons are reported. The manual `behavior-eval` workflow runs it
+  through OpenRouter.
 - Shared V2 runtime: canonical bounded observation and continuation,
   participant-shaped attention, a coalescing opportunity scheduler (one active
   opportunity plus the newest pending event), participant wake and silence,

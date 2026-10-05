@@ -57,14 +57,24 @@ count as a woken agent. When a model answers but its reply is rejected,
 caps how many calls go to one model at once, to stay under rate limits. The manual `behavior-eval` GitHub workflow runs
 the same command with the `NUNCHI_OPENROUTER` repository secret.
 
-## What today's V2 can show
+## What a run grades
 
-Today's V2 makes one attention decision per moment:
+Each moment runs through Nunchi's own pipeline: observation, attention, the
+participant host and the transport.
 
-- **Suppress** counts as staying quiet.
+- **Suppress** counts as staying quiet, decided by attention.
 - **ACK** counts as an mhm that Nunchi sent.
-- **Wake** or **defer** means the agent decides. Its own move is not
-  simulated yet.
+- **Wake** or **defer** gives the agent a turn. With `--agent-model`, that
+  model plays the turn through the shared participant protocol, and its
+  move is graded: a message or reply is speaking, its own reaction is an
+  mhm, and silence is staying quiet (which also fits where waiting does).
+  Without it, the run counts the moment as "agent decides".
+
+Step 1 is graded on attention alone. Scenes with several participants can
+check for collective silence and for pile-ons, where everyone speaks at
+once. The `behavior-eval` workflow uses `anthropic/claude-haiku-4.5` as the
+agent by default; one fixed agent model keeps differences between runs down
+to attention.
 
 Moments that need a pause, such as "five minutes later, nobody has
 answered", have no route in today's V2 and are reported as not supported.

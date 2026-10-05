@@ -1,23 +1,27 @@
-"""Grade what today's V2 did at a moment.
+"""Grade what the room saw at a moment.
 
-Today's V2 makes one attention decision, so the visible result of a moment
-is one of:
+Attention first decides one of:
 
 - `stay_quiet`: attention suppressed it, or the transport kept the
   participant's own event from waking it;
 - `mhm`: attention chose ACK and Nunchi reacted for the agent;
-- `woken`: the agent got a turn and decides itself (WAKE, DEFER, or a
-  provider error under the default wake-on-error policy);
+- `woken`: the agent got a turn (WAKE, DEFER, or a provider error under the
+  default wake-on-error policy);
 - `unsupported`: today's V2 has no route for this moment (a pause).
+
+When the agent's turn is simulated, a woken agent's own move replaces
+`woken`: `speak` (a message or reply), `mhm` (its own reaction),
+`stay_quiet` (it chose silence), or `other` (anything else, such as a
+privileged proposal).
 
 Each run gets two grades:
 
-- `visible`: `fits`, `miss`, or `unlisted` for a quiet or mhm result;
-  `agent-decides` for a woken one, since the agent's own move is not
-  simulated yet.
-- `step1`: `ok`, `over-suppress` (suppressed something step 1 must pass, so
-  the agent never saw it), or `over-wake` (woke for something step 1 may
-  suppress, which costs one turn).
+- `visible`: `fits`, `miss`, or `unlisted` for the move the room saw;
+  `agent-decides` when the agent was woken but not simulated. Staying quiet
+  also fits where waiting does, since nothing looks again yet.
+- `step1`: from attention alone. `ok`, `over-suppress` (suppressed something
+  step 1 must pass, so the agent never saw it), or `over-wake` (woke for
+  something step 1 may suppress, which costs one turn).
 """
 
 from __future__ import annotations
@@ -46,18 +50,21 @@ def visible_result(decision: Mapping[str, Any] | None, *, transport_self: bool =
     return "woken"
 
 
-def grade(moment: Moment, result: str) -> dict[str, str]:
+def grade(moment: Moment, result: str, *, attention: str | None = None) -> dict[str, str]:
+    """Grade the move the room saw (`result`) and what attention did."""
+
+    attention = attention or result
     if result == "unsupported":
         return {"visible": "unsupported", "step1": "unsupported"}
     if result == "woken":
         visible = "agent-decides"
-    elif result in moment.fitting:
+    elif result in moment.fitting or (result == "stay_quiet" and "wait" in moment.fitting):
         visible = "fits"
     elif moment.miss_reason(result) is not None:
         visible = "miss"
     else:
         visible = "unlisted"
-    if result == "stay_quiet":
+    if attention == "stay_quiet":
         step1 = "over-suppress" if moment.step1 == "pass" else "ok"
     else:
         step1 = "over-wake" if moment.step1 == "suppress" else "ok"
@@ -70,25 +77,43 @@ def collective_silence(results: list[str]) -> bool:
     return bool(results) and all(result == "stay_quiet" for result in results)
 
 
-SYMBOL = {
-    "stay_quiet": "Q",
-    "mhm": "M",
-    "woken": "W",
-    "unsupported": "-",
-}
+def pile_on(results: list[str]) -> bool:
+    """Every participant spoke at the same moment, where one voice was enough."""
+
+    return len(results) > 1 and all(result == "speak" for result in results)
+
+
+def symbol(item: Mapping[str, Any]) -> str:
+    """One letter for one run.
+
+    Q quiet by attention, q quiet by the agent's choice, M Nunchi's mhm,
+    m the agent's own mhm, S the agent spoke, O another agent action,
+    W woken (agent not simulated), E an error, - not supported today.
+    """
+
+    if item.get("provider_error"):
+        return "E"
+    result, by = item["result"], item.get("by")
+    if result == "unsupported":
+        return "-"
+    if result == "woken":
+        return "W"
+    if result == "stay_quiet":
+        return "q" if by == "agent" else "Q"
+    if result == "mhm":
+        return "m" if by == "agent" else "M"
+    if result == "speak":
+        return "S"
+    return "O"
 
 
 def cell(results: list[dict[str, Any]]) -> str:
-    """Compact per-run outcomes for one moment and one model, such as "QQW!".
+    """Compact per-run outcomes for one moment and one model, such as "QqS!".
 
-    Q quiet, M mhm, W woken, E provider error (woken), - unsupported; a
-    trailing "!" marks a clear miss in any run, "?" an unlisted move.
+    A trailing "!" marks a clear miss in any run, "?" an unlisted move.
     """
 
-    letters = []
-    for item in results:
-        letters.append("E" if item.get("provider_error") else SYMBOL[item["result"]])
-    text = "".join(letters)
+    text = "".join(symbol(item) for item in results)
     grades = {item["grade"]["visible"] for item in results}
     if "miss" in grades:
         text += "!"
