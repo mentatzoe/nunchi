@@ -2,7 +2,7 @@
   "id": "two-agents-one-question",
   "title": "Two agents about to answer the same question",
   "source": "docs/behavior.md",
-  "review": "draft: written from docs/behavior.md; ranges need Zoe's review. Today's V2 can only show collective silence here; a pile-on needs the agent's own move.",
+  "review": "draft: written from docs/behavior.md; ranges need Zoe's review. A pile-on shows only when the agent's turn is simulated.",
   "platform": "discord",
   "participants": ["vigil", "castor"],
   "actors": {
@@ -24,5 +24,5 @@
       "misses": []
     }
   ],
-  "together": ["not-all-quiet"]
+  "together": ["not-all-quiet", "no-pile-on"]
 }

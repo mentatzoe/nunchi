@@ -34,8 +34,8 @@ A moment judges either an event (`event`, optionally `seen_through` a later
 event when the judgment happens after more messages arrived) or a pause
 (`pause_after` an event, for `pause`). `step1` is what the conservative
 first step should do: `pass`, `suppress`, or `either`. `together` on a scene
-with several participants names collective checks, for now only
-`not-all-quiet`.
+with several participants names collective checks: `not-all-quiet`
+(collective silence) and `no-pile-on` (everyone speaking at once).
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ from typing import Any, Mapping
 
 MOVES = ("stay_quiet", "mhm", "wait", "speak")
 STEP1 = ("pass", "either", "suppress")
-TOGETHER = ("not-all-quiet",)
+TOGETHER = ("not-all-quiet", "no-pile-on")
 ACTOR_KINDS = ("human", "bot", "system", "unknown")
 
 ROOT = Path(__file__).resolve().parent

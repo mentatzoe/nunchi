@@ -268,6 +268,98 @@ class JudgeMomentTests(unittest.TestCase):
         self.assertIn("boom", record["error"])
 
 
+class FakeAgent:
+    """Plays the woken agent's turn with a fixed act and keeps what it was given."""
+
+    def __init__(self, act):
+        self.act = act
+        self.turns = []
+
+    def run_protocol(self, *, wake, opportunity, expand, cancel):
+        self.turns.append((wake, opportunity))
+        return self.act(wake)
+
+
+def speaks(wake):
+    return {"kind": "message", "origin_event_id": wake["trigger_event_id"], "text": "Here's what I'd do."}
+
+
+def stays_silent(wake):
+    return None
+
+
+def reacts(wake):
+    return {
+        "kind": "reaction",
+        "origin_event_id": wake["trigger_event_id"],
+        "target_event_id": wake["trigger_event_id"],
+        "reaction": "👍",
+        "operation": "add",
+    }
+
+
+def fails(wake):
+    raise RuntimeError("agent provider HTTP 429")
+
+
+class AgentTurnTests(unittest.TestCase):
+    """A model plays the woken agent through Nunchi's own host and transport."""
+
+    def judge(self, scene_id, moment, disposition, act):
+        agent = FakeAgent(act)
+        scene = scene_by_id(scene_id)
+        job = run.Job(scene, moment, scene.participants[0], "fixture/model", 0)
+        record = run.judge_moment(
+            job,
+            lambda _: FixedModel(disposition),
+            timeout_seconds=5,
+            agent_factory=lambda profile: agent,
+        )
+        return record, agent
+
+    def test_speaking_at_the_end_of_the_story_fits(self):
+        record, agent = self.judge("story-across-messages", 2, "WAKE", speaks)
+        self.assertEqual(("speak", "agent"), (record["result"], record["by"]))
+        self.assertEqual({"visible": "fits", "step1": "ok"}, record["grade"])
+        wake, opportunity = agent.turns[0]
+        self.assertEqual("s5", wake["trigger_event_id"])
+        self.assertEqual(["message", "reply", "reaction"], opportunity["permissions"]["ordinary_actions"])
+
+    def test_speaking_mid_story_is_a_miss_and_silence_fits(self):
+        spoke, _ = self.judge("story-across-messages", 0, "WAKE", speaks)
+        self.assertEqual("miss", spoke["grade"]["visible"])
+        quiet, _ = self.judge("story-across-messages", 0, "WAKE", stays_silent)
+        self.assertEqual(("stay_quiet", "agent"), (quiet["result"], quiet["by"]))
+        self.assertEqual({"visible": "fits", "step1": "ok"}, quiet["grade"])
+
+    def test_the_agents_own_reaction_is_its_mhm(self):
+        record, _ = self.judge("story-across-messages", 0, "WAKE", reacts)
+        self.assertEqual(("mhm", "agent"), (record["result"], record["by"]))
+        self.assertEqual("fits", record["grade"]["visible"])
+
+    def test_nunchis_ack_never_reaches_the_agent(self):
+        record, agent = self.judge("story-across-messages", 0, "ACK", speaks)
+        self.assertEqual(("mhm", "nunchi"), (record["result"], record["by"]))
+        self.assertEqual([], agent.turns)
+        self.assertNotIn("agent", record)
+
+    def test_suppression_never_reaches_the_agent(self):
+        record, agent = self.judge("story-across-messages", 2, "SUPPRESS", speaks)
+        self.assertEqual(("stay_quiet", "attention"), (record["result"], record["by"]))
+        self.assertEqual({"visible": "miss", "step1": "over-suppress"}, record["grade"])
+        self.assertEqual([], agent.turns)
+
+    def test_a_failed_agent_turn_is_an_error(self):
+        record, _ = self.judge("story-across-messages", 2, "WAKE", fails)
+        self.assertTrue(record["provider_error"])
+        self.assertEqual("woken", record["result"])
+        self.assertIn("HTTP 429", record["agent"]["error"])
+
+    def test_waiting_is_satisfied_by_staying_quiet(self):
+        record, _ = self.judge("addressee-first", 0, "WAKE", stays_silent)
+        self.assertEqual("fits", record["grade"]["visible"])
+
+
 class RunTests(unittest.TestCase):
     def test_collective_silence_is_reported(self):
         scene = scene_by_id("two-agents-one-question")
@@ -278,7 +370,20 @@ class RunTests(unittest.TestCase):
             {"scene": scene.id, "moment": 0, "model": "m", "run": 1, "result": "woken"},
         ]
         self.assertEqual(
-            [{"scene": scene.id, "moment": 0, "model": "m", "run": 0}],
+            [{"scene": scene.id, "moment": 0, "model": "m", "run": 0, "kind": "collective silence"}],
+            run.together_findings([scene], records),
+        )
+
+    def test_a_pile_on_is_reported(self):
+        scene = scene_by_id("two-agents-one-question")
+        records = [
+            {"scene": scene.id, "moment": 0, "model": "m", "run": 0, "result": "speak"},
+            {"scene": scene.id, "moment": 0, "model": "m", "run": 0, "result": "speak"},
+            {"scene": scene.id, "moment": 0, "model": "m", "run": 1, "result": "speak"},
+            {"scene": scene.id, "moment": 0, "model": "m", "run": 1, "result": "stay_quiet"},
+        ]
+        self.assertEqual(
+            [{"scene": scene.id, "moment": 0, "model": "m", "run": 0, "kind": "pile-on"}],
             run.together_findings([scene], records),
         )
 
@@ -334,7 +439,7 @@ class RunTests(unittest.TestCase):
             summary = (Path(directory) / "summary.md").read_text(encoding="utf-8")
         self.assertEqual(1, code)
         self.assertLess(summary.index("## Provider errors"), summary.index("## Per model"))
-        self.assertIn("1 of 1 calls failed", summary)
+        self.assertIn("1 of 1 runs had a failed attention or agent call", summary)
         self.assertIn("HTTP 402 insufficient credits", summary)
 
     def test_a_rejected_reply_is_kept_with_its_reason(self):
@@ -390,6 +495,18 @@ class RunTests(unittest.TestCase):
         self.assertEqual(0, code)
         self.assertEqual(2, meta["per_model"])
         self.assertEqual({"a/model": 2, "b/model": 2}, peak)
+
+    def test_a_dry_run_can_simulate_the_agent(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch("sys.stdout"):
+            code = run.main([
+                "--dry-run", "--runs", "1", "--scenes", "two-agents-one-question",
+                "--agent-model", "any", "--out", directory,
+            ])
+            meta = json.loads((Path(directory) / "run.json").read_text())
+            summary = (Path(directory) / "summary.md").read_text()
+        self.assertEqual(0, code)
+        self.assertEqual(run.DRY_RUN_AGENT, meta["agent_model"])
+        self.assertIn("pile-on: two-agents-one-question", summary)
 
     def test_a_live_run_needs_the_key(self):
         with mock.patch.dict(os.environ, {}, clear=True), mock.patch("sys.stderr"):
