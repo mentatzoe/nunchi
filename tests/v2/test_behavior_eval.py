@@ -337,6 +337,60 @@ class RunTests(unittest.TestCase):
         self.assertIn("1 of 1 calls failed", summary)
         self.assertIn("HTTP 402 insufficient credits", summary)
 
+    def test_a_rejected_reply_is_kept_with_its_reason(self):
+        class Uncited(FixedModel):
+            def judge(self, *, instructions, projection, timeout_seconds):
+                reply = judgment("WAKE", evidence=["not-in-the-snapshot"])
+                return reply
+
+        scene = scene_by_id("bot-status-report")
+        job = run.Job(scene, 0, "vigil", "bad/model", 0)
+        record = run.judge_moment(job, lambda _: Uncited("WAKE"), timeout_seconds=5)
+        self.assertTrue(record["provider_error"])
+        self.assertEqual(["not-in-the-snapshot"], record["raw_reply"]["evidence_event_ids"])
+        self.assertEqual("model evidence must cite only supplied event IDs", record["invalid_reason"])
+        summary = run.summarize(
+            [scene], ["bad/model"], [record], [],
+            {
+                "started_at": "s", "finished_at": "f", "git_sha": "x", "git_dirty": False,
+                "nunchi_version": "v", "runs": 1, "temperature": 0, "base_url": "u",
+                "calls": 1, "provider_errors": 1, "command": "c",
+            },
+        )
+        self.assertIn("invalid reply: model evidence must cite only supplied event IDs", summary)
+
+    def test_calls_to_one_model_are_capped(self):
+        import threading
+        import time as clock
+
+        lock = threading.Lock()
+        active = {}
+        peak = {}
+
+        class Slow(FixedModel):
+            def judge(self, **kwargs):
+                with lock:
+                    active[self.model_id] = active.get(self.model_id, 0) + 1
+                    peak[self.model_id] = max(peak.get(self.model_id, 0), active[self.model_id])
+                clock.sleep(0.05)
+                with lock:
+                    active[self.model_id] -= 1
+                return super().judge(**kwargs)
+
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(
+            os.environ, {"NUNCHI_OPENROUTER": "k"}
+        ), mock.patch.object(
+            run, "openai_compatible_factory", return_value=lambda model_id: Slow("WAKE", model_id=model_id)
+        ), mock.patch("sys.stdout"):
+            code = run.main([
+                "--models", "a/model,b/model", "--runs", "3", "--scenes", "behavior",
+                "--workers", "8", "--per-model", "2", "--out", directory,
+            ])
+            meta = json.loads((Path(directory) / "run.json").read_text())
+        self.assertEqual(0, code)
+        self.assertEqual(2, meta["per_model"])
+        self.assertEqual({"a/model": 2, "b/model": 2}, peak)
+
     def test_a_live_run_needs_the_key(self):
         with mock.patch.dict(os.environ, {}, clear=True), mock.patch("sys.stderr"):
             with self.assertRaises(SystemExit):

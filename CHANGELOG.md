@@ -19,7 +19,8 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   converted from the V1 litmus corpus. The runner drives the production
   observation and attention path against OpenAI-compatible models, reports
   per-model spread, and never writes its key. Any failed call fails the run
-  and is listed first in the summary. The manual `behavior-eval` workflow
+  and is listed first in the summary; a rejected reply is kept with its
+  reason, and calls to one model at a time are capped. The manual `behavior-eval` workflow
   runs it through OpenRouter.
 - Shared V2 runtime: canonical bounded observation and continuation,
   participant-shaped attention, a coalescing opportunity scheduler (one active

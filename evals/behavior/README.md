@@ -51,7 +51,9 @@ attention path to each model, then writes three files to `--out`:
 
 The key is never written. If any call fails, the summary lists the errors
 first and the run exits non-zero, because a failed call would otherwise
-count as a woken agent. The manual `behavior-eval` GitHub workflow runs
+count as a woken agent. When a model answers but its reply is rejected,
+`results.jsonl` keeps the reply and the reason. `--per-model` (default 3)
+caps how many calls go to one model at once, to stay under rate limits. The manual `behavior-eval` GitHub workflow runs
 the same command with the `NUNCHI_OPENROUTER` repository secret.
 
 ## What today's V2 can show
