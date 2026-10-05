@@ -194,6 +194,12 @@ class RecordingAgent:
     ) -> dict[str, Any]:
         bare = deepcopy(dict(wake))
         bare["attention"] = {"source": wake["attention"]["source"]}
+        # The second play gets its own fresh view of the same turn. Sharing the
+        # first play's view would hide what that play already read, including
+        # a message that arrived mid-turn.
+        fork = getattr(getattr(expand, "__self__", None), "fork", None)
+        if callable(fork):
+            expand = fork().expand
         played: dict[str, Any] = {}
         started = time.monotonic()
         try:

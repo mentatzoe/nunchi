@@ -483,6 +483,30 @@ class AgentTurnTests(unittest.TestCase):
         self.assertEqual(1, record["agent"]["looked_again"])
         self.assertEqual(("stay_quiet", "fits"), (record["result"], record["grade"]["visible"]))
 
+    def test_the_paired_play_gets_its_own_view_of_the_turn(self):
+        # The second play must see what the first play saw, including the
+        # message that arrived mid-turn, or the pair measures the view, not
+        # the reading.
+        class ReadsAll(FakeAgent):
+            def run_protocol(self, *, wake, opportunity, expand, cancel):
+                self.turns.append((wake, opportunity))
+                history = expand(direction="before", max_events=12, max_bytes=16_384)
+                new = expand(direction="new", max_events=12, max_bytes=16_384)
+                self.shown.append(
+                    ([event["id"] for event in history["events"]], [event["id"] for event in new["events"]])
+                )
+                return None if new["events"] else speaks(wake)
+
+        agent = ReadsAll(None)
+        agent.shown = []
+        record, _ = self.judge(
+            "never-mind-while-composing", 0, "WAKE", None, reading="Zoe asked Vigil directly", paired=True, agent=agent
+        )
+        self.assertEqual(2, len(agent.turns))
+        self.assertEqual(agent.shown[0], agent.shown[1])
+        self.assertEqual(["n1"], agent.shown[1][1])
+        self.assertEqual(("stay_quiet", "fits"), (record["agent"]["without_reading"]["move"], record["agent"]["without_reading"]["grade"]))
+
     def test_context_requests_are_recorded(self):
         class Looks(FakeAgent):
             def run_protocol(self, *, wake, opportunity, expand, cancel):
