@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://nunchi.invalid/schemas/v2/participant-wake.schema.json",
   "title": "ParticipantWakeV2",
-  "description": "I-010C ParticipantWakeV2@2 — the materialized normal-turn or ACK effect facts. @2 adds ACK as an explicit advice-free source; WAKE, DEFER, ERROR_FALLBACK, PREATTENTION_BYPASS, exact identity/room/event facts, bounded coverage, and host-only continuation semantics remain unchanged. No admission meta-answer, composed reply, or social ledger is part of the contract.",
+  "description": "I-010C ParticipantWakeV2@3 — the materialized normal-turn or ACK effect facts. @3 lets a DEFER wake carry the model's reading of the room, as a WAKE wake already could, and adds judged_through_event_id: the newest event the reading saw. @2 added ACK as an explicit source without a reading; ERROR_FALLBACK, PREATTENTION_BYPASS, exact identity/room/event facts, bounded coverage, and host-only continuation semantics remain unchanged. No admission meta-answer, composed reply, or social ledger is part of the contract.",
   "$defs": {
     "nonEmptyString": {
       "type": "string",
@@ -24,20 +24,30 @@
         "evidence_event_ids": {
           "type": "array",
           "items": {"$ref": "#/$defs/nonEmptyString"}
+        },
+        "judged_through_event_id": {
+          "$comment": "The newest event the reading saw; it must name an event in this wake (runtime-adapter-only).",
+          "$ref": "#/$defs/nonEmptyString"
         }
       },
       "allOf": [
         {
-          "$comment": "FR-013: ACK, DEFER, ERROR_FALLBACK, and PREATTENTION_BYPASS wakes are advice-free because no classifier advice exists for those sources.",
-          "if": {"required": ["source"], "properties": {"source": {"const": "WAKE"}}},
+          "$comment": "WAKE and DEFER are turns the participant takes after a model judgment, so they may carry its reading. ACK is Nunchi's own effect, and ERROR_FALLBACK and PREATTENTION_BYPASS have no model judgment, so they carry none.",
+          "if": {"required": ["source"], "properties": {"source": {"enum": ["WAKE", "DEFER"]}}},
           "else": {
             "not": {
               "anyOf": [
                 {"required": ["advice"]},
-                {"required": ["evidence_event_ids"]}
+                {"required": ["evidence_event_ids"]},
+                {"required": ["judged_through_event_id"]}
               ]
             }
           }
+        },
+        {
+          "$comment": "judged_through_event_id dates a reading, so it appears only with one.",
+          "if": {"required": ["judged_through_event_id"]},
+          "then": {"required": ["advice"]}
         }
       ]
     }

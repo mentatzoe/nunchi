@@ -212,11 +212,11 @@ class GradeTests(unittest.TestCase):
 
 
 class JudgeMomentTests(unittest.TestCase):
-    def judge(self, scene_id, moment, disposition, **kwargs):
+    def judge(self, scene_id, moment, disposition, *, ack="agent", **kwargs):
         model = FixedModel(disposition, **kwargs)
         scene = scene_by_id(scene_id)
         job = run.Job(scene, moment, scene.participants[0], "fixture/model", 0)
-        record = run.judge_moment(job, lambda _: model, timeout_seconds=5)
+        record = run.judge_moment(job, lambda _: model, timeout_seconds=5, ack=ack)
         return record, model
 
     def test_suppress_at_the_end_of_the_story_is_a_miss(self):
@@ -229,11 +229,16 @@ class JudgeMomentTests(unittest.TestCase):
         _, model = self.judge("story-across-messages", 0, "ACK")
         self.assertEqual(["s1", "s2"], [event["id"] for event in model.projections[0]["events"]])
 
-    def test_ack_goes_through_the_capability_and_counts_as_mhm(self):
-        record, _ = self.judge("story-across-messages", 0, "ACK")
-        self.assertEqual("mhm", record["result"])
+    def test_nunchis_own_ack_goes_through_the_capability_and_counts_as_mhm(self):
+        record, _ = self.judge("story-across-messages", 0, "ACK", ack="nunchi")
+        self.assertEqual(("mhm", "nunchi"), (record["result"], record["by"]))
         self.assertEqual("ACK", record["decision"]["effective_disposition"])
         self.assertEqual("fits", record["grade"]["visible"])
+
+    def test_by_default_an_ack_is_the_agents_turn(self):
+        record, _ = self.judge("story-across-messages", 0, "ACK")
+        self.assertEqual(("woken", "DEFER"), (record["result"], record["decision"]["effective_disposition"]))
+        self.assertEqual("policy-defer", record["decision"]["routing_audit"]["valve"])
 
     def test_late_judgment_sees_the_answer(self):
         _, model = self.judge("answered-by-someone-else", 0, "WAKE")
@@ -348,8 +353,8 @@ class AgentTurnTests(unittest.TestCase):
         self.assertEqual(("mhm", "agent"), (record["result"], record["by"]))
         self.assertEqual("fits", record["grade"]["visible"])
 
-    def test_nunchis_ack_never_reaches_the_agent(self):
-        record, agent = self.judge("story-across-messages", 0, "ACK", speaks)
+    def test_nunchis_own_ack_never_reaches_the_agent(self):
+        record, agent = self.judge("story-across-messages", 0, "ACK", speaks, ack="nunchi")
         self.assertEqual(("mhm", "nunchi"), (record["result"], record["by"]))
         self.assertEqual([], agent.turns)
         self.assertNotIn("agent", record)

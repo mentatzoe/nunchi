@@ -386,21 +386,26 @@ def build_participant_wake(
         )
     }
     attention: dict[str, Any] = {"source": source}
-    if source == "WAKE":
+    if source in ("WAKE", "DEFER") and checked_decision["status"] == "ok":
+        # The turn carries the model's reading of the room. The wake is built
+        # fresh, so an item whose messages have left the window is dropped on
+        # its own; the reading never stops the turn.
         event_ids = {event["id"] for event in wake["events"]}
-        raw_advice = checked_decision.get("attention_advice")
-        if raw_advice and all(
-            set(item["evidence_event_ids"]).issubset(event_ids)
-            for item in raw_advice
-        ):
-            attention["advice"] = deepcopy(raw_advice)
+        reading = [
+            deepcopy(item)
+            for item in checked_decision.get("attention_advice", ())
+            if set(item["evidence_event_ids"]).issubset(event_ids)
+        ]
+        if reading:
+            attention["advice"] = reading
             attention["evidence_event_ids"] = sorted(
-                {
-                    event_id
-                    for item in raw_advice
-                    for event_id in item["evidence_event_ids"]
-                }
+                {event_id for item in reading for event_id in item["evidence_event_ids"]}
             )
+            # The newest message attention saw, so the participant can tell
+            # which messages arrived after the reading was written.
+            judged_through = checked_request["events"][-1]["id"]
+            if judged_through in event_ids:
+                attention["judged_through_event_id"] = judged_through
     wake["attention"] = attention
     return validate_participant_wake(wake)
 

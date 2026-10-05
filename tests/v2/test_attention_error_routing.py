@@ -97,23 +97,6 @@ class ProviderTextNeverSuppressesTests(unittest.TestCase):
 
         self.assert_wakes_on_provider_failure(_JudgmentModel(duplicated))
 
-    def test_duplicate_advice_evidence_is_a_provider_failure(self) -> None:
-        def duplicated(projection):
-            trigger = projection["trigger_event_id"]
-            return {
-                "disposition": "WAKE",
-                "reasons": ["asked directly"],
-                "evidence_event_ids": [trigger],
-                "attention_advice": [
-                    {"note": "asked directly", "evidence_event_ids": [trigger, trigger]}
-                ],
-                "legacy_verdict_confidences": {
-                    "PASS": 0.02, "ACK": 0.03, "ASK": 0.05, "SPEAK": 0.9
-                },
-            }
-
-        self.assert_wakes_on_provider_failure(_JudgmentModel(duplicated))
-
 
 class EngineOwnedErrorsTests(unittest.TestCase):
     def test_engine_cancellation_still_does_not_wake(self) -> None:

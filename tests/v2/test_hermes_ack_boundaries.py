@@ -46,7 +46,7 @@ class PersistenceBoundaryTests(unittest.TestCase):
         _seed(receipts, "req-boundary", cap.permissions_revision)
         kwargs: dict[str, Any] = dict(
             adapter=adapter, event=event, platform="discord", room_id="42",
-            actor_id="discord:actor:999", policy=AckPolicy(), journal=journal,
+            actor_id="discord:actor:999", policy=AckPolicy(enabled=True), journal=journal,
             receipts=receipts, wake=_wake(), request={"request_id": "req-boundary"},
             decision=_decision(cap.permissions_revision), token=token,
             deadline=time.monotonic() + budget, lifecycle_id=scheduler.lifecycle_id,

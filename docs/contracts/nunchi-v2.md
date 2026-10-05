@@ -161,7 +161,7 @@ A truthful attention request represents:
   to coverage plus expansion-capability booleans before that call. This is
   a runtime-adapter-only behavior, not a schema constraint.
 
-## I-010B AttentionDecisionV2@3
+## I-010B AttentionDecisionV2@4
 
 A tagged host-facing union on `status`:
 
@@ -171,21 +171,27 @@ A tagged host-facing union on `status`:
   possibly empty, that never enters the participant turn and is never a
   member of the routing-audit object), `evidence_event_ids`, `classifier`
   (`{name, provider?, model?}`), the optional conditional
-  `legacy_verdict_confidences` vector (FR-007, below), and optional
-  WAKE-only `attention_advice` (an array of `{note, evidence_event_ids}`,
-  not a single object), and an ACK-only authority audit. The declared
+  `legacy_verdict_confidences` vector (FR-007, below), the optional
+  `attention_advice` reading of the room (an array of at most 4
+  `{note, evidence_event_ids}` items with notes of at most 400 characters,
+  allowed on every pair since @4), and an ACK-only authority audit. The declared
   classifier/effective pairs validate,
   each mapped onto its applied valve (FR-006):
 
-  | Transition | Applied valve | `override_cause` | `attention_advice` |
-  |---|---|---|---|
-  | `WAKE -> WAKE` | `none` | `none` | allowed (FR-013) |
-  | `ACK -> ACK` | `none` | `none` | forbidden |
-  | `ACK -> DEFER` | `policy-defer` | `ack-disabled` | forbidden |
-  | `ACK -> DEFER` | `capability-defer` | `ack-unsupported` | forbidden |
-  | `DEFER -> DEFER` | `classifier-defer` | `none` | forbidden |
-  | `SUPPRESS -> DEFER` | `margin-defer` or `policy-defer` | `margin` (margin valve); `suppression-disabled` or `recoverability-unproven` (policy valve) | forbidden |
-  | `SUPPRESS -> SUPPRESS` | `none` | `none` | forbidden |
+  | Transition | Applied valve | `override_cause` |
+  |---|---|---|
+  | `WAKE -> WAKE` | `none` | `none` |
+  | `ACK -> ACK` | `none` | `none` |
+  | `ACK -> DEFER` | `policy-defer` | `ack-disabled` |
+  | `ACK -> DEFER` | `capability-defer` | `ack-unsupported` |
+  | `DEFER -> DEFER` | `classifier-defer` | `none` |
+  | `SUPPRESS -> DEFER` | `margin-defer` or `policy-defer` | `margin` (margin valve); `suppression-disabled` or `recoverability-unproven` (policy valve) |
+  | `SUPPRESS -> SUPPRESS` | `none` | `none` |
+
+  Until @3, only `WAKE -> WAKE` could carry `attention_advice`. Zoe,
+  2026-10-05 (#94): the reading reaches the participant on every turn it
+  takes, so @4 allows it on every pair. A malformed item is dropped by the
+  engine on its own and never fails the judgment.
 
   Classifier-DEFER and margin-DEFER stay separately auditable (S08); a
   widened suppression preserves its exact valve and override cause (S05).
@@ -248,18 +254,22 @@ closed-union change: `@2` consumers must upgrade before receiving ACK.
   occur before a request ID is assignable); an optional `classifier` audit is
   present only when the error occurred after classifier invocation.
 
-## I-010C ParticipantWakeV2@2
+## I-010C ParticipantWakeV2@3
 
 The normal-turn input materializes `self`, `room`, `actors`, `events`,
 `trigger_event_id`, `coverage`, and optional `continuation` directly —
 the same field shapes as `AttentionRequestV2` — not a wrapped
 `observation` reference or classifier projection (FR-014). A separate
 `attention` object carries the explicit `source` (`ACK`, `WAKE`, `DEFER`,
-`ERROR_FALLBACK`, or the non-social `PREATTENTION_BYPASS`) and, only when
-`source` is `WAKE`, optional `advice` (an array of `{note,
-evidence_event_ids}`) and optional `evidence_event_ids`. `ACK`, `DEFER`,
-`ERROR_FALLBACK`, and `PREATTENTION_BYPASS` wakes are advice-free because
-no classifier advice exists for those sources (FR-008/FR-013). There is no
+`ERROR_FALLBACK`, or the non-social `PREATTENTION_BYPASS`) and, when
+`source` is `WAKE` or `DEFER` (since @3), the model's reading of the room:
+optional `advice` (an array of `{note, evidence_event_ids}`), optional
+`evidence_event_ids`, and optional `judged_through_event_id`, the newest
+event the reading saw, which must name an event in the wake and appears
+only with a reading. The host keeps each reading item whose citations are
+still in the fresh wake and drops the rest one by one. `ACK` is Nunchi's
+own effect, and `ERROR_FALLBACK` and `PREATTENTION_BYPASS` have no model
+judgment, so those wakes carry no reading. There is no
 separate participant "budgets" field — the wake's own `coverage` (computed
 when the packet was materialized for the participant) carries the
 independent participant event/byte budget (S15). The contract contains no

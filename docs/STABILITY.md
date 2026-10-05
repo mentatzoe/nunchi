@@ -51,10 +51,12 @@ is stable or executable.
 - Native IDs remain strings and canonical IDs are platform-qualified.
 - `self.actor_id` is exact transport/host binding, independent of aliases,
   names, and roles.
-- Attention dispositions are `SUPPRESS`, `ACK`, `WAKE`, and `DEFER`. `ACK`
-  adds one configured reaction without a participant turn; when ACK is
-  disabled or the platform cannot attest the reaction, it widens to `DEFER`,
-  never to suppression. Bypass and operational error are distinct non-social
+- Attention dispositions are `SUPPRESS`, `ACK`, `WAKE`, and `DEFER`. By
+  default the ACK policy is off, so `ACK` widens to `DEFER` and the
+  participant sends any "mhm" itself. With the policy on, `ACK` adds one
+  configured reaction without a participant turn, and still widens to
+  `DEFER`, never to suppression, when the platform cannot attest the
+  reaction. Bypass and operational error are distinct non-social
   statuses.
 - Attention model configuration selects its implementation with `kind`
   (default `openai-compatible`). The `openai-compatible` attention model and

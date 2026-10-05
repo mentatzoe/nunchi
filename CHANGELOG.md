@@ -61,6 +61,25 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- Attention's reading of the room reaches the agent on every turn it takes
+  (#94, plan step 2). The attention model gives a short reading with every
+  judgment: what is happening, with pointers to the messages, and the kinds
+  of response that could fit, each with a reason, never an order. The
+  reading now goes with DEFER turns as well as WAKE, including ACK and
+  suppression widened to DEFER. A bad or empty reading no longer throws
+  away the judgment: in the last baseline, 27 judgments failed only
+  because of their reading, 24 of them empty. Bad items are dropped one by
+  one, and the reading is bounded to 4 notes of at most 400 characters.
+  When the agent's fresh window has lost a message an item cites, only that
+  item is dropped, and `judged_through_event_id` tells the agent the newest
+  message the reading saw. The turn prompts frame the reading as a
+  recommendation with reasons. Contracts: `I-010B AttentionDecisionV2@4`,
+  `I-010C ParticipantWakeV2@3`.
+- The agent sends its own "mhm" by default (Zoe, 2026-10-05). The ACK policy
+  is off by default, so an ACK judgment gives the agent a turn, with the
+  reading saying why a nod could fit, instead of Nunchi adding 👂 itself.
+  `ack.enabled: true` turns Nunchi's nod back on until step 7 of the plan
+  removes it. The behavior suite's `--ack` defaults to `agent` to match.
 - `main` is the V2 working branch; `integration/v2` is retired. CI and the
   Hermes host-contract workflow run on pushes to `main` and on PRs into it
   (#88).

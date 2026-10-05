@@ -671,8 +671,13 @@ def write_nunchi_config(
     attention_model: str = "probe-model",
     timeout_seconds: float = 20.0,
     suppression_enabled: bool = True,
+    ack_enabled: bool | None = None,
 ) -> tuple[Path, Path]:
-    """Write the dashboard-default pinned config + digest for one Discord room."""
+    """Write the dashboard-default pinned config + digest for one Discord room.
+
+    ``ack_enabled`` writes the room's ``ack`` policy; left out, the room uses
+    the default, where the participant sends its own "mhm".
+    """
 
     from nunchi.integrations.hermes_dashboard_store import default_config_paths
 
@@ -720,6 +725,8 @@ def write_nunchi_config(
             }
         ],
     }
+    if ack_enabled is not None:
+        document["rooms"][0]["ack"] = {"enabled": ack_enabled}
     raw = (json.dumps(document, sort_keys=True, indent=2) + "\n").encode("utf-8")
     paths.config.write_bytes(raw)
     os.chmod(paths.config, 0o600)

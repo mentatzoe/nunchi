@@ -90,7 +90,7 @@ class StockVerifierTests(unittest.TestCase):
 
     def test_lane_manifest_has_exact_no_skip_denominators(self):
         lanes = script("stock_hermes_probe").LANES
-        self.assertEqual({"contract": 4, "normal-attention": 32,
+        self.assertEqual({"contract": 4, "normal-attention": 33,
                           "startup-single": 1, "startup-multiplex": 1},
                          {name: value[1] for name, value in lanes.items()})
 

@@ -183,7 +183,9 @@ another consumer's success.
 
 The confidence vector is margin evidence, not a V1 lifecycle verdict.
 Uncertainty returns `DEFER`. `ACK` selects the core-configured lightweight
-reaction. Only WAKE may include evidence-bound `attention_advice`.
+reaction. Every judgment may include evidence-bound `attention_advice`, the
+model's reading of the room; it reaches the participant on WAKE and DEFER
+turns.
 
 ## Normal participant result
 

@@ -95,7 +95,9 @@ Then it decides, and it acts.
 **Every visible move is the agent's own act, including a "mhm".** Nunchi
 never posts on the agent's behalf. If Nunchi nodded for an agent that never
 knew, the room would believe the agent was listening when the agent has no
-memory of it. Today's ACK still breaks this rule.
+memory of it. Since 2026-10-05 Nunchi's own nod is off by default: an ACK
+judgment gives the agent a turn, and any "mhm" is the agent's own. The
+setting that turns Nunchi's nod back on goes away in step 7 of the plan.
 
 ### Looking again
 
@@ -193,18 +195,21 @@ this behavior. The rules replaced so far:
 - the ban on any social memory (a work queue is still out);
 - ACK as a cheaper answer that Nunchi sends itself;
 - ASK as its own kind of move (Zoe, 2026-10-05: too specific; speaking
-  covers asking).
+  covers asking);
+- advice only on WAKE (030 FR-005, 010 FR-013). Zoe, 2026-10-05: the
+  reading reaches the agent on every turn it takes, and a bad reading never
+  throws away a judgment.
 
 ## Where the code is today
 
 | Behavior here | Today (`main`) |
 |---|---|
 | Step 1 suppresses only non-conversation | Attention can also suppress when the agent is "neither addressed nor useful" |
-| Step 2 gives a social reading with reasons | A wake/no-wake decision; at most an optional advice note reaches the agent |
+| Step 2 gives a social reading with reasons | A wake/defer/no-wake decision plus a short reading (up to 4 notes with pointers) that reaches the agent on every turn it takes; the reading is not yet structured into typed questions |
 | The agent's turn carries social context | A generic "contribute naturally or stay silent" prompt |
 | Conversation memory | None between judgments; a window of the newest 24 events, plus up to 6 older messages of the agent's direct exchange (mentions of it, replies to it, its own messages) |
 | Pace and pauses | No current time; nothing happens when someone stops talking |
-| The agent sends its own "mhm" | Nunchi adds 👂 itself, on the newest event |
+| The agent sends its own "mhm" | By default an ACK judgment gives the agent a turn and any "mhm" is its own; Nunchi's own 👂 remains as an opt-in (`ack.enabled: true`) |
 
 The defects and the full history are in
 [#94](https://github.com/mentatzoe/nunchi/issues/94).
