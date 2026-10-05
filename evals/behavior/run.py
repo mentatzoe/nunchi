@@ -47,6 +47,8 @@ from nunchi.attention import (
     ParticipantProfile,
     _validate_model_judgment,
 )
+from nunchi.adapters.decisions_api import DEFAULT_URL as DECISIONS_URL, DecisionsAttentionModel
+from nunchi.attention_questions import answers_leaning
 from nunchi.observation import ObservationProvider, ParticipantBinding
 from nunchi.participant import (
     ConversationOpportunityScheduler,
@@ -57,7 +59,6 @@ from nunchi.participant_model import OpenAICompatibleParticipant
 from nunchi.pipeline import NunchiV2Pipeline
 from nunchi.receipts import ReceiptJournal
 
-from . import jev
 from .scene import SCENES, Moment, Scene, load_scenes, parse_offset, profile_sha256
 from .score import cell, collective_silence, grade, pile_on, visible_result
 
@@ -90,11 +91,8 @@ class OfflineModel:
 
     def judge(self, *, instructions, projection, timeout_seconds):
         return {
-            "disposition": "WAKE",
-            "reasons": ["offline dry run"],
-            "evidence_event_ids": [projection["trigger_event_id"]],
-            "legacy_verdict_confidences": {"PASS": 0, "ACK": 0, "ASK": 0, "SPEAK": 1},
-            "attention_advice": [
+            **answers_leaning("WAKE"),
+            "notes": [
                 {"note": "offline dry run", "evidence_event_ids": [projection["trigger_event_id"]]}
             ],
         }
@@ -113,10 +111,20 @@ class RecordingModel:
         self.raw_reply: Any = None
         self.latency_ms: int | None = None
 
+        if callable(getattr(inner, "answer", None)):
+            # A typed decision model answers the questions natively.
+            self.answer = self._answer
+
     def judge(self, **kwargs: Any) -> Mapping[str, Any]:
+        return self._record(self.inner.judge, kwargs)
+
+    def _answer(self, **kwargs: Any) -> Mapping[str, Any]:
+        return self._record(self.inner.answer, kwargs)
+
+    def _record(self, call: Callable[..., Any], kwargs: Mapping[str, Any]) -> Mapping[str, Any]:
         started = time.monotonic()
         try:
-            self.raw = self.inner.judge(**kwargs)
+            self.raw = call(**kwargs)
             return self.raw
         except BaseException as exc:
             self.error = _describe_error(exc)
@@ -305,14 +313,21 @@ ModelFactory = Callable[[str], Any]
 AgentFactory = Callable[[ParticipantProfile], Any]
 
 
-def invalid_reason(raw: Any, event_ids: set[str]) -> str:
+def invalid_reason(raw: Any, event_ids: set[str], trigger_event_id: str) -> str:
     """Why the engine rejected a reply that the model did return."""
 
     try:
-        _validate_model_judgment(raw, event_ids=event_ids)
+        _validate_model_judgment(raw, event_ids=event_ids, trigger_event_id=trigger_event_id)
     except AttentionError as exc:
         return str(exc)
     return "the decision failed the attention contract check"
+
+
+TYPED_DECISION_PREFIX = "typesafe/"
+
+
+def is_typed_decision_model(model_id: str) -> bool:
+    return model_id.startswith(TYPED_DECISION_PREFIX) or model_id.startswith("~" + TYPED_DECISION_PREFIX)
 
 
 def openai_compatible_factory(
@@ -320,14 +335,15 @@ def openai_compatible_factory(
     api_key: str,
     base_url: str,
     temperature: float | None,
-    jev_url: str = jev.DEFAULT_DECISIONS_URL,
+    jev_url: str = DECISIONS_URL,
 ) -> ModelFactory:
-    """Build each attention model: Jev through the Decisions API, any other
-    model through the OpenAI-compatible chat endpoint."""
+    """Build each attention model: a typed decision model (``typesafe/``,
+    such as Jev) through the Decisions API, any other model through the
+    OpenAI-compatible chat endpoint. Both answer the same typed questions."""
 
     def build(model_id: str) -> Any:
-        if jev.is_jev(model_id):
-            return jev.JevAttentionModel(model=model_id, api_key=api_key, url=jev_url)
+        if is_typed_decision_model(model_id):
+            return DecisionsAttentionModel(model=model_id, api_key=api_key, url=jev_url)
         return OpenAICompatibleAttentionModel(
             model=model_id,
             api_key=api_key,
@@ -504,12 +520,6 @@ def judge_moment(
     transport = EvalTransport()
     ack_policy = AckPolicy(reaction=ACK_REACTION, enabled=ack == "nunchi")
     inner = factory(job.model)
-    bind_profile = getattr(inner, "bind_profile", None)
-    if callable(bind_profile):
-        # A typed decision model gets the participant's own instructions.
-        bind_profile(profile)
-    if isinstance(inner, jev.JevAttentionModel):
-        inner.max_notes = reading_items
     model = RecordingModel(inner)
     engine = RecordingEngine(
         profile=profile,
@@ -601,7 +611,7 @@ def judge_moment(
         # The model answered but the engine rejected the reply; keep it so the
         # failure can be diagnosed.
         record["raw_reply"] = model.raw
-        record["invalid_reason"] = invalid_reason(model.raw, set(event_ids))
+        record["invalid_reason"] = invalid_reason(model.raw, set(event_ids), request["trigger_event_id"])
 
     attention = visible_result(decision)
     result = attention
@@ -668,7 +678,7 @@ def judge_moment(
                 "reasons",
                 "evidence_event_ids",
                 "attention_advice",
-                "legacy_verdict_confidences",
+                "answers",
                 "error",
             )
             if key in decision
@@ -996,7 +1006,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument(
         "--jev-url",
-        default=jev.DEFAULT_DECISIONS_URL,
+        default=DECISIONS_URL,
         help="Decisions API endpoint for typesafe/ models",
     )
     parser.add_argument("--key-env", default=DEFAULT_KEY_ENV)
@@ -1126,7 +1136,7 @@ def main(argv: list[str] | None = None) -> int:
         "workers": args.workers,
         "per_model": args.per_model,
         "base_url": "offline" if args.dry_run else args.base_url,
-        "jev_url": args.jev_url if not args.dry_run and any(jev.is_jev(model) for model in models) else None,
+        "jev_url": args.jev_url if not args.dry_run and any(is_typed_decision_model(model) for model in models) else None,
         "key_env": None if args.dry_run else args.key_env,
         "scenes": [scene.id for scene in scenes],
         "calls": sum(1 for record in records if record["result"] != "unsupported" and "decision" in record),

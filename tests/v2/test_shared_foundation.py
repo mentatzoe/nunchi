@@ -25,6 +25,7 @@ from nunchi.attention import (
     ParticipantProfile,
     participant_attention_prompt,
 )
+from nunchi.attention_questions import answers_leaning
 from nunchi.authorization import (
     AuthorizationCoordinator,
     AuthorizationError,
@@ -117,19 +118,7 @@ class FixtureModel:
             self.block.wait(timeout_seconds * 2)
         if self.fail:
             raise RuntimeError("fixture provider failed")
-        evidence = [projection["trigger_event_id"]]
-        return {
-            "disposition": self.disposition,
-            "reasons": ["participant-shaped judgment"],
-            "evidence_event_ids": evidence,
-            "legacy_verdict_confidences": (
-                {"PASS": 0.9, "ACK": 0.03, "ASK": 0.03, "SPEAK": 0.04}
-                if self.disposition == "SUPPRESS"
-                else {"PASS": 0.02, "ACK": 0.9, "ASK": 0.03, "SPEAK": 0.05}
-                if self.disposition == "ACK"
-                else {"PASS": 0.02, "ACK": 0.03, "ASK": 0.05, "SPEAK": 0.9}
-            ),
-        }
+        return answers_leaning(self.disposition)
 
 
 class RecordingTransport:
@@ -859,14 +848,8 @@ class AttentionAndHostTests(unittest.TestCase):
                     original = model.judge
 
                     def close_margin(**kwargs):
-                        result = original(**kwargs)
-                        result["legacy_verdict_confidences"] = {
-                            "PASS": 0.52,
-                            "ACK": 0.1,
-                            "ASK": 0.18,
-                            "SPEAK": 0.48,
-                        }
-                        return result
+                        original(**kwargs)
+                        return answers_leaning("SUPPRESS", close=True)
 
                     model.judge = close_margin
                 wakes = []

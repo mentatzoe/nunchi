@@ -128,7 +128,7 @@ class InstalledAttentionServiceTests(_Base):
             is_denial=is_hermes_attention_denial,
             denied_detail=TRUST_REPAIR,
         )
-        arguments = {"instructions": "Judge SUPPRESS, ACK, WAKE or DEFER.",
+        arguments = {"instructions": f"Please {sup.ATTENTION_MARKER}.",
                      "projection": {"event_id": "test-event"}, "timeout_seconds": 10}
         with self.assertRaises(HostAttentionPermissionError):
             model.judge(**arguments)
@@ -136,7 +136,7 @@ class InstalledAttentionServiceTests(_Base):
         InstalledAttentionSetupTests._save_dashboard_configuration(self, timeout_seconds=20)
         self.server.script({"content": sup.attention_judgment("SUPPRESS", "test-event")})
         result = model.judge(**arguments)
-        self.assertEqual("SUPPRESS", result["disposition"])
+        self.assertLess(result["conversation"], 0.5)
         self.assertEqual(1, len(self.attention_calls()))
         self.assertEqual("attention-probe-model", self.attention_calls()[0]["model"])
         path = self.home / "config.yaml"

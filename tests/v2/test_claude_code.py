@@ -38,6 +38,7 @@ import unittest
 from unittest import mock
 
 from nunchi import __version__
+from nunchi.attention_questions import answers_leaning
 from nunchi.attention import ParticipantProfile
 from nunchi.errors import ValidationError
 from nunchi.integrations import claude_code_v2
@@ -515,16 +516,7 @@ class FixtureModel:
             self.block.wait(timeout_seconds * 2)
         if self.fail:
             raise RuntimeError("fixture provider failed")
-        return {
-            "disposition": self.disposition,
-            "reasons": ["fixture judgment"],
-            "evidence_event_ids": [projection["trigger_event_id"]],
-            "legacy_verdict_confidences": (
-                {"PASS": 0.55, "ACK": 0.2, "ASK": 0.15, "SPEAK": 0.1}
-                if self.disposition == "SUPPRESS"
-                else {"PASS": 0.02, "ACK": 0.03, "ASK": 0.05, "SPEAK": 0.9}
-            ),
-        }
+        return answers_leaning(self.disposition)
 
 
 class RecordingClient:

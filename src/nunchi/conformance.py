@@ -9,6 +9,7 @@ import tempfile
 
 from .ack import AckJournal, AckPolicy, ReactionCapability
 from .attention import AttentionEngine, AttentionPolicy, ParticipantProfile
+from .attention_questions import answers_leaning
 from .observation import ObservationProvider, ParticipantBinding
 from .participant import (
     ConversationOpportunityScheduler,
@@ -55,19 +56,10 @@ class _Model:
             "ack-disabled": "ACK",
             "ack-unsupported": "ACK",
         }.get(self.scenario, "WAKE")
-        vector = (
-            {"PASS": 0.52, "ACK": 0.1, "ASK": 0.18, "SPEAK": 0.48}
-            if self.scenario == "margin-defer"
-            else {"PASS": 0.91, "ACK": 0.03, "ASK": 0.02, "SPEAK": 0.04}
-        )
-        if disposition == "WAKE":
-            vector = {"PASS": 0.03, "ACK": 0.12, "ASK": 0.2, "SPEAK": 0.9}
+        answers = answers_leaning(disposition, close=self.scenario == "margin-defer")
         return {
-            "disposition": disposition,
-            "reasons": ["offline lifecycle fixture"],
-            "evidence_event_ids": [projection["trigger_event_id"]],
-            "legacy_verdict_confidences": vector,
-            "attention_advice": [
+            **answers,
+            "notes": [
                 {
                     "note": "Offline reading of the room.",
                     "evidence_event_ids": [projection["trigger_event_id"]],

@@ -20,16 +20,22 @@ class DemoAttention:
     model_id = "fixed"
 
     def judge(self, *, projection, **_):
+        # The typed answers a chat model returns: conversation, addressed to
+        # the participant, nothing answered yet, and speaking fits best.
         return {
-            "disposition": "WAKE",
-            "reasons": ["direct demo observation"],
-            "evidence_event_ids": [projection["trigger_event_id"]],
-            "legacy_verdict_confidences": {
-                "PASS": 0.02,
-                "ACK": 0.05,
-                "ASK": 0.1,
-                "SPEAK": 0.95,
-            },
+            "conversation": 0.98,
+            "addressee": {"participant": 0.9, "room": 0.1, "someone_else": 0.0, "nobody": 0.0},
+            "answered": 0.02,
+            "answered_by": None,
+            "mid_thought": 0.05,
+            "adds_something": 0.9,
+            "move": {"speak": 0.95, "mhm": 0.02, "wait": 0.02, "stay_quiet": 0.01},
+            "notes": [
+                {
+                    "note": "The demo message asks Helpbot directly.",
+                    "evidence_event_ids": [projection["trigger_event_id"]],
+                }
+            ],
         }
 
 

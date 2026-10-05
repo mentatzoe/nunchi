@@ -181,6 +181,20 @@ An attention model block in an adapter or runner configuration looks like:
 }
 ```
 
+The reference adapters, the Claude Code runner and the Codex runner also
+accept a typed decision model, which answers the attention questions
+natively and much faster than a chat model:
+
+```json
+{
+  "kind": "decisions-api",
+  "model": "typesafe/jev-1.13",
+  "api_key_env": "NUNCHI_ATTENTION_API_KEY"
+}
+```
+
+`url` defaults to OpenRouter's Decisions API endpoint.
+
 Room text cannot supply or override any of these values.
 
 ## Shared Discord transport

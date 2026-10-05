@@ -297,7 +297,7 @@ class FakeOpenAIServer(ThreadingHTTPServer):
             return {"content": "ESCALATE"}
         if "Generate a short, descriptive title" in system:
             return {"content": "probe title"}
-        if self.attention is not None and "tools" not in payload and "Uncertainty must return DEFER" in json.dumps(messages):
+        if self.attention is not None and is_attention_call(payload):
             return self.attention(payload)
         return None
 
@@ -735,23 +735,21 @@ def write_nunchi_config(
     return paths.config, paths.digest
 
 
+# A phrase only Nunchi's attention prompt contains; the model double uses it to
+# tell attention calls from the native participant's.
+ATTENTION_MARKER = "answer typed questions about the judged message"
+
+
+def is_attention_call(payload: dict[str, Any]) -> bool:
+    return "tools" not in payload and ATTENTION_MARKER in json.dumps(payload.get("messages") or [])
+
+
 def attention_judgment(disposition: str, event_id: str) -> str:
     """JSON text the attention double returns for Nunchi's structured call."""
 
-    speak = disposition in {"WAKE", "DEFER"}
-    return json.dumps(
-        {
-            "disposition": disposition,
-            "reasons": ["probe decision"],
-            "evidence_event_ids": [event_id],
-            "legacy_verdict_confidences": {
-                "PASS": 0.01 if speak else 0.9,
-                "ACK": 0.01,
-                "ASK": 0.08,
-                "SPEAK": 0.9 if speak else 0.01,
-            },
-        }
-    )
+    from nunchi.attention_questions import answers_leaning
+
+    return json.dumps(answers_leaning(disposition))
 
 
 # ---------------------------------------------------------------------------

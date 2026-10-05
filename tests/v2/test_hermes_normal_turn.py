@@ -223,7 +223,7 @@ class _Base(unittest.TestCase):
     def attention_calls(self) -> list[dict[str, Any]]:
         """Nunchi's structured attention call goes through host PluginLlm with no tools."""
 
-        return [b for b in self.server.bodies() if "tools" not in b and any("DEFER" in str(m.get("content", "")) for m in b.get("messages", []))]
+        return [b for b in self.server.bodies() if sup.is_attention_call(b)]
 
     def receipts(self) -> list[dict[str, Any]]:
         return sup.receipts(self.home, room_id=str(self.room))

@@ -456,6 +456,57 @@ def _ack_audit(value: Any, path: str = "ack") -> Mapping[str, Any]:
 READING_MAX_ITEMS = 4
 READING_NOTE_MAX_CHARS = 400
 
+# The typed answers behind every model judgment (#94, step 4): step 1 asks
+# whether the judged message is conversation; step 2 asks what is happening
+# and which kinds of response could fit.
+ANSWER_MOVES = ("speak", "mhm", "wait", "stay_quiet")
+ANSWER_ADDRESSEES = ("participant", "room", "someone_else", "nobody")
+ANSWER_QUESTIONS = (
+    "conversation",
+    "addressee",
+    "answered",
+    "answered_by",
+    "mid_thought",
+    "adds_something",
+    "move",
+)
+_ANSWER_YES_NO = ("conversation", "answered", "mid_thought", "adds_something")
+_ANSWER_CHOICES = {"addressee": ANSWER_ADDRESSEES, "move": ANSWER_MOVES}
+
+
+def _unit(value: Any, path: str) -> None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, Real)
+        or not math.isfinite(float(value))
+        or not 0 <= float(value) <= 1
+    ):
+        _fail(path, "must be finite within [0, 1]")
+
+
+def _answers(
+    value: Any,
+    event_ids: set[str] | None,
+    path: str,
+) -> dict[str, Any]:
+    checked = _closed(
+        value,
+        path,
+        required=tuple(key for key in ANSWER_QUESTIONS if key != "answered_by"),
+        optional=("answered_by",),
+    )
+    for key in _ANSWER_YES_NO:
+        _unit(checked[key], f"{path}.{key}")
+    for key, options in _ANSWER_CHOICES.items():
+        choice = _closed(checked[key], f"{path}.{key}", required=options)
+        for option in options:
+            _unit(choice[option], f"{path}.{key}.{option}")
+    if "answered_by" in checked:
+        _nes(checked["answered_by"], f"{path}.answered_by")
+        if event_ids is not None and checked["answered_by"] not in event_ids:
+            _fail(f"{path}.answered_by", "is an unknown event ID")
+    return deepcopy(dict(checked))
+
 
 def _advice(
     value: Any,
@@ -530,8 +581,9 @@ def validate_attention_decision(
                 "reasons",
                 "evidence_event_ids",
                 "classifier",
+                "answers",
             ),
-            optional=("legacy_verdict_confidences", "attention_advice", "ack"),
+            optional=("attention_advice", "ack"),
         )
         classifier_disposition = checked["classifier_disposition"]
         effective = checked["effective_disposition"]
@@ -568,23 +620,8 @@ def validate_attention_decision(
         if event_ids is not None and set(evidence) - event_ids:
             _fail("decision.evidence_event_ids", "contains an unknown event ID")
         _classifier(checked["classifier"])
-        if classifier_disposition == "SUPPRESS" and routing["margin_status"] == "active":
-            if "legacy_verdict_confidences" not in checked:
-                _fail("decision.legacy_verdict_confidences", "is required for active-margin suppression")
-        if "legacy_verdict_confidences" in checked:
-            vector = _closed(
-                checked["legacy_verdict_confidences"],
-                "decision.legacy_verdict_confidences",
-                required=("PASS", "ACK", "ASK", "SPEAK"),
-            )
-            for key, raw in vector.items():
-                if (
-                    isinstance(raw, bool)
-                    or not isinstance(raw, Real)
-                    or not math.isfinite(float(raw))
-                    or not 0 <= float(raw) <= 1
-                ):
-                    _fail(f"decision.legacy_verdict_confidences.{key}", "must be finite within [0, 1]")
+        # The model's typed answers behind the judgment (@5).
+        _answers(checked["answers"], event_ids, "decision.answers")
         if "attention_advice" in checked:
             # The model's reading of the room may accompany any judgment; it
             # reaches the participant only on a turn it takes (WAKE or DEFER).
