@@ -2192,6 +2192,8 @@ class GatedParticipantTests(unittest.TestCase):
 
         def expand(**kwargs):
             pages.append(kwargs)
+            if kwargs["direction"] == "new":
+                return {"events": [], "has_next_page": False}
             return {
                 "events": [
                     {
@@ -2220,7 +2222,45 @@ class GatedParticipantTests(unittest.TestCase):
         self._act(participant, SEND, {"text": "re: that", "reply_to_event_id": "e0"})
         thread.join(5)
         self.assertEqual("reply", box["action"]["kind"])
+        # Before posting, the gate looked again; nobody else had posted.
+        self.assertEqual("new", pages[-1]["direction"])
         participant.settle("r1", TransportResult("sent", "x"))
+
+    def test_the_first_post_waits_once_for_what_others_said(self):
+        calls = []
+        castor = {
+            "id": "e9",
+            "type": "message",
+            "author_id": "discord:actor:43",
+            "text": "It was the expired cert; I rotated it.",
+            "mentioned_actor_ids": [],
+            "mentions_room": False,
+        }
+
+        def expand(**kwargs):
+            calls.append(kwargs["direction"])
+            if kwargs["direction"] == "new" and calls.count("new") == 1:
+                return {"events": [castor], "has_next_page": False}
+            return {"events": [], "has_next_page": False}
+
+        participant, session = self._participant()
+        thread, box, wake_id, _ = self._start(participant, session, expand=expand)
+        participant.bind_turn(turn_id="t1", wake_id=wake_id)
+        ok, text = participant.call_tool(
+            turn_id="t1", tool=SEND, arguments={"text": "The deploy failed on the cert."}
+        )
+        self.assertTrue(ok)
+        self.assertTrue(text.startswith("Not posted yet: 1 new message(s)"))
+        self.assertIn("It was the expired cert", text)
+        self.assertNotIn("action", box)
+        answer_thread, _ = self._act(
+            participant, SEND, {"text": "Thanks Castor, that matches.", "reply_to_event_id": "e9"}
+        )
+        thread.join(5)
+        self.assertEqual(("reply", "e9"), (box["action"]["kind"], box["action"]["target_event_id"]))
+        self.assertEqual(["new"], calls)
+        participant.settle("r1", TransportResult("sent", "x"))
+        answer_thread.join(5)
 
     def test_cancellation_interrupts_the_session_and_is_closed_work(self):
         participant, session = self._participant()

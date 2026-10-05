@@ -208,6 +208,7 @@ this behavior. The rules replaced so far:
 | Step 2 gives a social reading with reasons | A wake/defer/no-wake decision plus a short reading (up to 4 notes with pointers) that reaches the agent on every turn it takes; the reading is not yet structured into typed questions |
 | The agent's turn carries social context | A generic "contribute naturally or stay silent" prompt |
 | Conversation memory | None between judgments; a window of the newest 24 events, plus up to 6 older messages of the agent's direct exchange (mentions of it, replies to it, its own messages) |
+| The agent sees the room as it is now | During its turn the agent can read the live room (older, newer, or new since it last looked), and before its first post it is shown what others said meanwhile, once; Hermes does not offer this yet |
 | Pace and pauses | No current time; nothing happens when someone stops talking |
 | The agent sends its own "mhm" | By default an ACK judgment gives the agent a turn and any "mhm" is its own; Nunchi's own 👂 remains as an opt-in (`ack.enabled: true`) |
 
