@@ -35,7 +35,7 @@
         {"fact": "Castor hasn't answered in five minutes", "events": ["q1"]},
         {"fact": "Vigil wrote the backoff and knows the answer", "events": ["v1"]}
       ],
-      "fitting": ["contribute", "ask"],
+      "fitting": ["speak"],
       "misses": [
         {"move": "stay_quiet", "why": "nobody answered and Vigil knows the answer"}
       ]

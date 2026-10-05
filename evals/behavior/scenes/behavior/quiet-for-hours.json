@@ -28,7 +28,7 @@
         {"fact": "The room was quiet for seven hours; this starts a new stretch of conversation", "events": ["n3", "m1"]},
         {"fact": "Vigil said it would report on the nightly build in the morning", "events": ["n1", "n2"]}
       ],
-      "fitting": ["contribute"],
+      "fitting": ["speak"],
       "misses": [
         {"move": "stay_quiet", "why": "Vigil said it would report on this build, and Sam is asking about it"},
         {"move": "mhm", "why": "a nod doesn't say whether the build is green"}

@@ -20,7 +20,7 @@
       "notice": [
         {"fact": "Zoe asked every bot in the room; one answer is enough", "events": ["q1"]}
       ],
-      "fitting": ["contribute", "wait", "stay_quiet"],
+      "fitting": ["speak", "wait", "stay_quiet"],
       "misses": []
     }
   ],

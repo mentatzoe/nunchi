@@ -34,9 +34,9 @@ This is the yardstick. Every change is judged against it.
   messages, it gives a "mhm" rather than taking the floor.
 - **Lets the addressee answer first.** It joins if they don't answer, or if
   it knows something they don't.
-- **Asks when it needs to.** One clarifying question beats a guess.
-- **Contributes when it has something that serves the moment.** The question
-  is "do I have something to add?", not "do I *have* to take this?".
+- **Speaks when it has something that serves the moment.** The test is "do I
+  have something to add?", not "do I *have* to take this?". One clarifying
+  question beats a guess.
 - **Holds back when others have it covered.**
 - **Keeps track of its own share.** It neither dominates nor vanishes.
 - **Notices when the floor opens.** When someone finishes, it may take its
@@ -77,8 +77,7 @@ history, the pace and the conversation memory. It names:
   - Stay quiet.
   - "Mhm".
   - Wait: for the addressee, or for the speaker to finish.
-  - Ask.
-  - Contribute.
+  - Speak: answer, ask, give an opinion, or say anything else to the room.
 
 The reading is a recommendation with reasons, not an order.
 
@@ -137,7 +136,7 @@ floor.
 - **Where it goes.** On the message it acknowledges.
 - **What it means.** "I'm with you." Not "I agree", and not "I'll do it".
 - **What happens after.** When the speaker finishes, the agent may still
-  reply, ask, or stay quiet.
+  reply or stay quiet.
 - **Who sends it.** The agent itself.
 
 ## Many agents in one room
@@ -192,7 +191,9 @@ this behavior. The rules replaced so far:
   worth waking for now";
 - the ban on naming a social move;
 - the ban on any social memory (a work queue is still out);
-- ACK as a cheaper answer that Nunchi sends itself.
+- ACK as a cheaper answer that Nunchi sends itself;
+- ASK as its own kind of move (Zoe, 2026-10-05: too specific; speaking
+  covers asking).
 
 ## Where the code is today
 

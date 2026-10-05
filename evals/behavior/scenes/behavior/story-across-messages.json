@@ -30,7 +30,7 @@
       ],
       "fitting": ["mhm", "stay_quiet", "wait"],
       "misses": [
-        {"move": "contribute", "why": "takes the floor while Zoe is mid-story"}
+        {"move": "speak", "why": "takes the floor while Zoe is mid-story"}
       ]
     },
     {
@@ -42,7 +42,7 @@
       ],
       "fitting": ["mhm", "stay_quiet", "wait"],
       "misses": [
-        {"move": "contribute", "why": "interrupts the story before Zoe gets to her point"}
+        {"move": "speak", "why": "interrupts the story before Zoe gets to her point"}
       ]
     },
     {
@@ -52,7 +52,7 @@
       "notice": [
         {"fact": "Zoe finished the story and asked Vigil directly what it would have done", "events": ["s1", "s5"]}
       ],
-      "fitting": ["contribute", "ask"],
+      "fitting": ["speak"],
       "misses": [
         {"move": "stay_quiet", "why": "the story ended with a question to Vigil"},
         {"move": "mhm", "why": "a nod doesn't answer the question"}

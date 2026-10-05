@@ -20,7 +20,7 @@ A scene is JSON:
         {"event": "m2", "step1": "pass",
          "notice": [{"fact": "Zoe is mid-story", "events": ["m1", "m2"]}],
          "fitting": ["mhm", "stay_quiet"],
-         "misses": [{"move": "contribute", "why": "takes the floor mid-story"}]}
+         "misses": [{"move": "speak", "why": "takes the floor mid-story"}]}
       ]
     }
 
@@ -48,7 +48,7 @@ import re
 from typing import Any, Mapping
 
 
-MOVES = ("stay_quiet", "mhm", "wait", "ask", "contribute")
+MOVES = ("stay_quiet", "mhm", "wait", "speak")
 STEP1 = ("pass", "either", "suppress")
 TOGETHER = ("not-all-quiet",)
 ACTOR_KINDS = ("human", "bot", "system", "unknown")

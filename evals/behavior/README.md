@@ -14,7 +14,8 @@ For each moment, a scene names:
 - **step 1**: whether the conservative first step must `pass` the moment,
   may `suppress` it, or `either`.
 
-The moves are `stay_quiet`, `mhm`, `wait`, `ask`, and `contribute`. Fitting
+The moves are `stay_quiet`, `mhm`, `wait`, and `speak`. Speaking covers
+anything said to the room: an answer, a question, an opinion. Fitting
 is a range, not one right answer. A move that is neither fitting nor a miss
 is reported as unlisted, for review rather than as a failure. The full file
 format is in `scene.py`.
