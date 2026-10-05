@@ -97,8 +97,8 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   sends the action schema its prompt promises, bound to the turn's exact
   binding. Before, the prompt said "matching the supplied action schema" but
   no schema was sent, so models had to guess the envelope: in the first
-  behavior run with a simulated agent, about four in five agent turns were
-  rejected for an envelope that didn't match.
+  behavior run with a simulated agent, 763 of 809 agent turns were rejected
+  for an envelope that didn't match.
 - The manual `live-smoke` workflow works again. Its model config lacked the
   now-required `base_url`, so every run failed before calling a model. It now
   calls a current model (chosen at dispatch) through OpenRouter with the
