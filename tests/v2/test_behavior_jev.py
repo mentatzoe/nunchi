@@ -183,6 +183,23 @@ class JevInTheRunnerTests(unittest.TestCase):
         state = json.loads(endpoint.requests[0][0].data)["state"]
         self.assertEqual(scene.profiles["vigil"]["instructions"], state["participant"]["instructions"])
 
+    def test_a_shorter_reading_keeps_the_fitting_moves(self):
+        scene = next(scene for scene in load_scenes() if scene.id == "story-across-messages")
+        endpoint = Endpoint({"answers": answers({"speak": 0.9, "wait": 0.1}, answered=0.8, mid_thought=0.8)})
+        factory = run.openai_compatible_factory(api_key="k", base_url=run.DEFAULT_BASE_URL, temperature=0)
+        with mock.patch("urllib.request.urlopen", endpoint):
+            record = run.judge_moment(
+                run.Job(scene, 2, "vigil", "typesafe/jev-1.13", 0),
+                factory,
+                timeout_seconds=5,
+                reading_items=2,
+                reading_chars=120,
+            )
+        notes = [item["note"] for item in record["decision"]["attention_advice"]]
+        self.assertEqual(2, len(notes))
+        self.assertTrue(notes[-1].startswith("Kinds of response that could fit"))
+        self.assertTrue(all(len(note) <= 120 for note in notes))
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

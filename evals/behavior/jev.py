@@ -278,7 +278,7 @@ class JevAttentionModel:
         self.provider = provider
         self._url = url
         self._api_key = api_key
-        self._max_notes = max_notes
+        self.max_notes = max_notes
         self._instructions = ""
         self.last_response: Mapping[str, Any] | None = None
 
@@ -318,4 +318,4 @@ class JevAttentionModel:
         if not isinstance(payload, Mapping) or not isinstance(payload.get("answers"), Mapping):
             raise AttentionError("Jev response has no answers")
         self.last_response = payload
-        return judgment_from_answers(payload["answers"], projection, max_notes=self._max_notes)
+        return judgment_from_answers(payload["answers"], projection, max_notes=self.max_notes)

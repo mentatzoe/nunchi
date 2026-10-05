@@ -78,7 +78,11 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   item is dropped, and `judged_through_event_id` tells the agent the newest
   message the reading saw. The turn prompts frame the reading as a
   recommendation with reasons. Contracts: `I-010B AttentionDecisionV2@4`,
-  `I-010C ParticipantWakeV2@3`.
+  `I-010C ParticipantWakeV2@3`. The reading's length is attention policy:
+  `reading_items` (0 to 4, default 4) and `reading_note_chars` (40 to 400,
+  default 400) set the prompt and cap what reaches the agent, so a shorter
+  reading can trade detail for speed; the behavior suite's
+  `--reading-items` and `--reading-chars` compare lengths.
 - The agent sends its own "mhm" by default (Zoe, 2026-10-05). The ACK policy
   is off by default, so an ACK judgment gives the agent a turn, with the
   reading saying why a nod could fit, instead of Nunchi adding 👂 itself.

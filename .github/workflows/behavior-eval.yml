@@ -41,6 +41,14 @@ on:
         required: true
         default: true
         type: boolean
+      reading_items:
+        description: Ask attention for at most this many reading notes (0 to 4; 0 asks for none)
+        required: true
+        default: "4"
+      reading_chars:
+        description: Ask for reading notes of at most this many characters (40 to 400)
+        required: true
+        default: "400"
 
 permissions:
   contents: read
@@ -67,6 +75,8 @@ jobs:
           AGENT_MODEL: ${{ inputs.agent_model }}
           ACK: ${{ inputs.ack }}
           PAIRED: ${{ inputs.paired }}
+          READING_ITEMS: ${{ inputs.reading_items }}
+          READING_CHARS: ${{ inputs.reading_chars }}
         run: |
           if [ -z "$NUNCHI_OPENROUTER" ]; then
             echo "::error::The NUNCHI_OPENROUTER secret is not set."
@@ -86,6 +96,8 @@ jobs:
             --temperature "$TEMPERATURE" \
             --agent-model "$AGENT_MODEL" \
             --ack "$ACK" \
+            --reading-items "$READING_ITEMS" \
+            --reading-chars "$READING_CHARS" \
             "${paired[@]}" \
             --workers 12 \
             --out behavior-eval-out > /dev/null || status=$?

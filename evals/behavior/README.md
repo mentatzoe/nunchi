@@ -83,6 +83,10 @@ agent's side of the room:
 - `--paired` plays every turn that carried a reading a second time, on the
   same wake without the reading. That second move is graded but never sent,
   so the summary shows what the reading changed at the same moment.
+- `--reading-items` and `--reading-chars` set how long a reading attention
+  is asked for: at most 4 notes of at most 400 characters by default, and
+  `--reading-items 0` asks for none. Shorter readings answer faster; the
+  paired arm shows what each length changes.
 - `--ack` says who sends the "mhm". The default, `agent`, matches Nunchi's
   default: an ACK judgment gives the agent a turn, and any "mhm" is its
   own. `--ack nunchi` turns Nunchi's own nod back on, for comparison.

@@ -393,6 +393,8 @@ def judge_moment(
     agent_factory: AgentFactory | None = None,
     ack: str = "agent",
     paired: bool = False,
+    reading_items: int = 4,
+    reading_chars: int = 400,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Run one moment through the production pipeline and grade what the room saw.
@@ -457,11 +459,17 @@ def judge_moment(
     if callable(bind_profile):
         # A typed decision model gets the participant's own instructions.
         bind_profile(profile)
+    if isinstance(inner, jev.JevAttentionModel):
+        inner.max_notes = reading_items
     model = RecordingModel(inner)
     engine = RecordingEngine(
         profile=profile,
         model=model,
-        policy=AttentionPolicy(timeout_seconds=timeout_seconds),
+        policy=AttentionPolicy(
+            timeout_seconds=timeout_seconds,
+            reading_items=reading_items,
+            reading_note_chars=reading_chars,
+        ),
         receipts=receipts,
         ack_policy=ack_policy,
         reaction_capability_provider=transport.reaction_capability,
@@ -745,6 +753,13 @@ def summarize(
         f"- Runs per moment: {meta['runs']}; temperature: {meta['temperature']}; endpoint: {meta['base_url']}",
         f"- Scenes: {len(scenes)}; attention calls: {meta['calls']}; agent turns: {meta.get('agent_calls', 0)}; provider errors: {meta['provider_errors']}",
         f"- Command: `{meta['command']}`",
+        f"- Reading: "
+        + (
+            f"up to {meta.get('reading_items', 4)} note{'' if meta.get('reading_items', 4) == 1 else 's'} "
+            f"of up to {meta.get('reading_chars', 400)} characters"
+            if meta.get("reading_items", 4)
+            else "none asked for"
+        ),
         "",
     ]
     if meta.get("agent_model"):
@@ -925,6 +940,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="also play each agent turn that carried a reading without it, on the same wake",
     )
+    parser.add_argument(
+        "--reading-items",
+        type=int,
+        default=4,
+        help="ask attention for at most this many reading notes (0 asks for none)",
+    )
+    parser.add_argument(
+        "--reading-chars",
+        type=int,
+        default=400,
+        help="ask for reading notes of at most this many characters (40 to 400)",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args(argv)
@@ -940,6 +967,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--runs, --workers and --per-model must be positive")
     if args.paired and not args.agent_model:
         parser.error("--paired needs --agent-model")
+    try:
+        AttentionPolicy(reading_items=args.reading_items, reading_note_chars=args.reading_chars)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     agent_factory: AgentFactory | None = None
     if args.dry_run:
@@ -975,6 +1006,8 @@ def main(argv: list[str] | None = None) -> int:
                 agent_factory=agent_factory,
                 ack=args.ack,
                 paired=args.paired,
+                reading_items=args.reading_items,
+                reading_chars=args.reading_chars,
             )
 
     started = datetime.now(timezone.utc)
@@ -1000,6 +1033,8 @@ def main(argv: list[str] | None = None) -> int:
         "agent_model": (DRY_RUN_AGENT if args.dry_run else args.agent_model) if args.agent_model else None,
         "ack": args.ack,
         "paired": args.paired,
+        "reading_items": args.reading_items,
+        "reading_chars": args.reading_chars,
         "runs": args.runs,
         "temperature": None if args.dry_run else args.temperature,
         "timeout_seconds": args.timeout,
