@@ -759,6 +759,37 @@ def attention_judgment(disposition: str, event_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def clear_dead_thread_interrupts() -> list[int]:
+    """Drop stock interrupt bits left on threads that have exited.
+
+    Stock ``tools.interrupt`` keeps tool interrupts in a process-global table
+    keyed by ``threading.get_ident()``, and the OS reuses an ident once its
+    thread exits. A bit outlives its thread when nothing runs on that thread
+    again. One probe in this process does that: after ``/stop``, stock's
+    gateway interrupt monitor can call ``agent.interrupt()`` once more, the
+    turn ends, and ``ProbeHost.close()`` shuts the executor down. The bit
+    ("user interrupt") stays behind. Stock clears a tool worker's bit only
+    when the worker exits, so a later probe's tool worker that reuses the
+    ident starts out interrupted, and its native approval is withdrawn before
+    anyone can answer it.
+
+    A thread that has exited can never act on its bit, so clearing only those
+    bits removes nothing a live thread could observe. Returns the cleared
+    idents. Raises if stock changed the table, so this can never silently
+    stop working.
+    """
+
+    interrupt = importlib.import_module("tools.interrupt")
+    live = {thread.ident for thread in threading.enumerate()}
+    with interrupt._lock:
+        marked = set(interrupt._interrupted_threads) | set(getattr(interrupt, "_yield_threads", ()))
+    dead = sorted(ident for ident in marked if ident not in live)
+    for ident in dead:
+        # Public API; it also drops the reason and any pending yield.
+        interrupt.set_interrupt(False, ident)
+    return dead
+
+
 class ProbeHost:
     """One real GatewayRunner + one real DiscordAdapter wired like ``start()``.
 
@@ -790,6 +821,8 @@ class ProbeHost:
             _RAW_CONFIG_CACHE.clear()
         except Exception:
             pass
+        # Must run before this probe starts any thread that could reuse an ident.
+        clear_dead_thread_interrupts()
 
         self.home = home
         self.client = client
