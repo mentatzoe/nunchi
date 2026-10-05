@@ -17,7 +17,7 @@
     {
       "id": "v1",
       "author": "vigil",
-      "at": "-1d",
+      "at": "-3h",
       "text": "I moved the gateway retry settings into gateway/config.toml, under [retry], so they live next to the timeouts."
     },
     {
