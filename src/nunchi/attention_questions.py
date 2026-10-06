@@ -468,8 +468,8 @@ def _occasion_note(projection: Mapping[str, Any]) -> list[dict[str, Any]]:
         name = participant_name(projection)
         return [
             {
-                "note": f"An action {name} proposed was approved and has finished; "
-                f"{name} has a turn to tell the room if that still helps.",
+                "note": f"An operator approved an action {name} proposed, and it has settled. "
+                f"Nobody in the room has been told how it went; {name} has a turn to tell them.",
                 "evidence_event_ids": [projection["trigger_event_id"]],
             }
         ]

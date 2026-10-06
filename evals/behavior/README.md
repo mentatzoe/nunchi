@@ -142,7 +142,9 @@ events say the agent asked for approval; a scripted proposal stands in for
 the authorization coordinator, shows it awaiting approval in the agent's
 memory, and settles as the moment says. The agent then gets its outcome
 turn, which carries `occasion: "outcome"`, and its move is graded. Each
-such record has `outcome_turn`.
+such record has `outcome_turn`. The grade covers the move only: whether the
+agent's words match how the action ended has to be read from the record's
+text.
 
 ## Which run to use
 

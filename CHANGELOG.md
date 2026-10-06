@@ -78,7 +78,9 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   cause (`I-010B AttentionDecisionV2@7`, `I-010E AttentionReceiptV2@4`),
   and an attention error still gives the turn. Nunchi never reports the
   outcome in the room. Only a participant that may propose hears about
-  outcome turns in its prompt. The behavior suite adds outcome moments and
+  outcome turns in its prompt, which names each way an action can end
+  (done, failed, unknown, denied), says nobody in the room has been told,
+  and asks that what the agent says match how it ended. The behavior suite adds outcome moments and
   the `approval-comes-through` scene (71 scenes); `nunchi probe` reports
   the new versions.
 - Nunchi looks again after a pause (#94, plan step 6, second part). When a

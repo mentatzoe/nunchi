@@ -161,21 +161,26 @@ class PromptAndReadingTests(unittest.TestCase):
         attention = participant_attention_prompt(PROFILE)
         self.assertIn("When observation.occasion is pause", attention)
         self.assertIn("When it is outcome, no new message arrived either", attention)
+        self.assertIn("Nobody in the room has been told how it went", attention)
         for prompt in (participant_turn_prompt(PROFILE), participant_tool_turn_prompt(PROFILE, tools={"send": "send"})):
             with self.subTest(prompt=prompt[:30]):
                 self.assertIn("When occasion is pause, no new message arrived", prompt)
                 # Only a participant that may propose hears about outcome turns.
                 self.assertNotIn("When occasion is outcome", prompt)
         proposing = participant_tool_turn_prompt(PROFILE, tools={"send": "send", "propose": "propose"})
-        self.assertIn("When occasion is outcome, an action you proposed", proposing)
-        self.assertIn("Nunchi says nothing in the room for you", proposing)
+        self.assertIn("When occasion is outcome, an operator approved an action you proposed", proposing)
+        self.assertIn("Nunchi never says it for you", proposing)
+        # Each way it can end is named, so the agent's words match it.
+        for status in ("done (it ran)", "failed (it was tried and failed)", "unknown (", "denied ("):
+            self.assertIn(status, proposing)
 
     def test_an_outcome_turn_says_the_action_finished(self):
         pace = {"now": "2026-10-06T09:05:00.000Z", "window_messages": 1, "own_messages": 0, "judged_seconds_ago": 900}
         projection = dict(self.projection(pace), occasion="outcome")
         notes = [item["note"] for item in fact_notes(answers_leaning("DEFER"), projection)]
         self.assertEqual(
-            "An action Vigil proposed was approved and has finished; Vigil has a turn to tell the room if that still helps.",
+            "An operator approved an action Vigil proposed, and it has settled. "
+            "Nobody in the room has been told how it went; Vigil has a turn to tell them.",
             notes[1],
         )
         self.assertFalse([note for note in notes if note.startswith("Nothing new")])

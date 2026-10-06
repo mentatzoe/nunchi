@@ -345,11 +345,14 @@ _PACE_GUIDE = (
 # Only a participant that may propose hears about outcome turns (#90
 # decision 2 on #94: the agent reports completion itself).
 _OUTCOME_GUIDE = (
-    " When occasion is outcome, an action you proposed was approved and has "
-    "finished since your turn about it ended; its proposal in your memory "
-    "says which message it was about and how it ended. Nunchi says nothing "
-    "in the room for you: telling the people who asked, if that still helps, "
-    "is yours to do."
+    " When occasion is outcome, an operator approved an action you proposed, "
+    "and it settled after your turn about it ended. Its proposal in your "
+    "memory says which message it was about and how it ended: done (it ran), "
+    "failed (it was tried and failed), unknown (it may or may not have run), "
+    "or denied (refused at the final check, so it never ran). Nobody in the "
+    "room has been told; Nunchi never says it for you. Telling the people "
+    "who asked, if that still helps, is yours to do, and what you say must "
+    "match how it ended."
 )
 
 # Room text that tells a participant what to do is a claim, in either
