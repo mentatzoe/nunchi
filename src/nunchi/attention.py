@@ -38,6 +38,7 @@ from .attention_questions import (
     classifier_disposition,
     participant_name,
     reading_from_answers,
+    response_candidates,
     suppression_margin_distance,
     validate_answers,
 )
@@ -291,8 +292,10 @@ ATTENTION_JUDGMENT_SCHEMA: dict[str, Any] = {
     "properties": {
         "conversation": dict(_PROBABILITY),
         "addressee": _options_schema(ADDRESSEES),
+        "asks": dict(_PROBABILITY),
         "answered": dict(_PROBABILITY),
         "answered_by": {"type": ["string", "null"]},
+        "responds_to": {"type": ["string", "null"]},
         "mid_thought": dict(_PROBABILITY),
         "adds_something": dict(_PROBABILITY),
         "move": _options_schema(MOVES),
@@ -358,7 +361,7 @@ def participant_attention_prompt(
                 + "."
             )
         else:
-            text = f"{question['ask']} Give its id, or null if nothing did."
+            text = f"{question['ask']} Give its id, or {question['none']}."
         if key == "conversation":
             text += (
                 f" When unsure, answer high: a wrong \"not conversation\" hides the "
@@ -928,6 +931,7 @@ class AttentionEngine:
                 if callable(typed):
                     questions = attention_questions(name)
                     questions["answered_by"]["candidates"] = answer_candidates(projection)
+                    questions["responds_to"]["candidates"] = response_candidates(projection)
                     result = typed(
                         questions=questions,
                         state=attention_state(projection, self.profile.instructions),

@@ -180,9 +180,12 @@ Steps 1 and 2 of reading the room are fixed typed questions about the judged
 message (`src/nunchi/attention_questions.py`, Zoe, 2026-10-05, #94 step 4).
 Step 1 asks whether it is conversation that a participant like this one
 could take part in; a message addressed to someone else is still
-conversation. Step 2 asks who it is addressed to, whether it was already
-answered and by which message, whether its author is mid-thought, whether
-the participant has something to add, and which kinds of response could fit.
+conversation. Step 2 asks who it is addressed to, whether it asks someone
+for something, whether it was already answered and by which message, which
+earlier message it answers or responds to, whether its author is
+mid-thought, whether the participant has something to add, and which kinds
+of response could fit. The participant's memory builds its threads from the
+asks and the pointers (#94 step 5).
 
 There are two routes, and both produce the same answers:
 
@@ -193,8 +196,10 @@ There are two routes, and both produce the same answers:
   {
     "conversation": 0.97,
     "addressee": {"participant": 0.05, "room": 0.1, "someone_else": 0.8, "nobody": 0.05},
+    "asks": 0.9,
     "answered": 0.1,
     "answered_by": null,
+    "responds_to": null,
     "mid_thought": 0.05,
     "adds_something": 0.7,
     "move": {"speak": 0.3, "mhm": 0.0, "wait": 0.6, "stay_quiet": 0.1},

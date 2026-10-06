@@ -231,11 +231,12 @@ class JudgeMomentTests(unittest.TestCase):
         record, model = self.judge("story-across-messages", 2, "SUPPRESS")
         self.assertEqual("stay_quiet", record["result"])
         self.assertEqual("miss", record["grade"]["visible"])
-        self.assertEqual(["s1", "s2", "s3", "s4", "s5"], [event["id"] for event in model.projections[0]["events"]])
+        # Earlier messages are judged first for the memory; the moment last.
+        self.assertEqual(["s1", "s2", "s3", "s4", "s5"], [event["id"] for event in model.projections[-1]["events"]])
 
     def test_a_moment_sees_only_what_had_happened(self):
         _, model = self.judge("story-across-messages", 0, "ACK")
-        self.assertEqual(["s1", "s2"], [event["id"] for event in model.projections[0]["events"]])
+        self.assertEqual(["s1", "s2"], [event["id"] for event in model.projections[-1]["events"]])
 
     def test_nunchis_own_ack_goes_through_the_capability_and_counts_as_mhm(self):
         record, _ = self.judge("story-across-messages", 0, "ACK", ack="nunchi")
@@ -250,7 +251,7 @@ class JudgeMomentTests(unittest.TestCase):
 
     def test_late_judgment_sees_the_answer(self):
         _, model = self.judge("answered-by-someone-else", 0, "WAKE")
-        projection = model.projections[0]
+        projection = model.projections[-1]
         self.assertEqual("q1", projection["trigger_event_id"])
         self.assertEqual(["q1", "a1"], [event["id"] for event in projection["events"]])
 
@@ -258,7 +259,7 @@ class JudgeMomentTests(unittest.TestCase):
         _, model = self.judge("quiet-for-hours", 0, "WAKE")
         times = {
             event["id"]: datetime.fromisoformat(event["timestamp"].replace("Z", "+00:00"))
-            for event in model.projections[0]["events"]
+            for event in model.projections[-1]["events"]
         }
         self.assertLess(abs(datetime.now(timezone.utc) - times["m1"]), timedelta(minutes=1))
         self.assertEqual(timedelta(hours=7), times["m1"] - times["n3"])
@@ -780,8 +781,8 @@ class UsageTests(unittest.TestCase):
         factory = run.openai_compatible_factory(api_key="k", base_url=run.DEFAULT_BASE_URL, temperature=0)
         scene = scene_by_id("bot-status-report")
         with mock.patch("urllib.request.urlopen", provider):
-            run.judge_moment(run.Job(scene, 0, "vigil", "x/model@low", 0), factory, timeout_seconds=5)
-            run.judge_moment(run.Job(scene, 0, "vigil", "x/model", 0), factory, timeout_seconds=5)
+            run.judge_moment(run.Job(scene, 0, "vigil", "x/model@low", 0), factory, timeout_seconds=5, replay=False)
+            run.judge_moment(run.Job(scene, 0, "vigil", "x/model", 0), factory, timeout_seconds=5, replay=False)
         with_effort, default = provider.bodies
         self.assertEqual("x/model", with_effort["model"])
         self.assertEqual({"effort": "low"}, with_effort["reasoning"])
@@ -789,13 +790,13 @@ class UsageTests(unittest.TestCase):
         self.assertNotIn("reasoning", default)
         other = run.openai_compatible_factory(api_key="k", base_url="http://localhost:1/v1", temperature=0)
         with mock.patch("urllib.request.urlopen", provider):
-            run.judge_moment(run.Job(scene, 0, "vigil", "x/model@high", 0), other, timeout_seconds=5)
+            run.judge_moment(run.Job(scene, 0, "vigil", "x/model@high", 0), other, timeout_seconds=5, replay=False)
         self.assertEqual("high", provider.bodies[-1]["reasoning_effort"])
         self.assertNotIn("usage", provider.bodies[-1])
         # Reasoning off, for models that take only on/off or a token budget.
         with mock.patch("urllib.request.urlopen", provider):
-            run.judge_moment(run.Job(scene, 0, "vigil", "x/model@off", 0), factory, timeout_seconds=5)
-            run.judge_moment(run.Job(scene, 0, "vigil", "x/model@off", 0), other, timeout_seconds=5)
+            run.judge_moment(run.Job(scene, 0, "vigil", "x/model@off", 0), factory, timeout_seconds=5, replay=False)
+            run.judge_moment(run.Job(scene, 0, "vigil", "x/model@off", 0), other, timeout_seconds=5, replay=False)
         self.assertEqual({"enabled": False}, provider.bodies[-2]["reasoning"])
         self.assertEqual("none", provider.bodies[-1]["reasoning_effort"])
 
@@ -807,6 +808,12 @@ class UsageTests(unittest.TestCase):
         job = run.Job(scene, 2, scene.participants[0], "x/model@low", 0)
         with mock.patch("urllib.request.urlopen", provider):
             record = run.judge_moment(job, factory, timeout_seconds=5, agent_factory=agents, paired=True)
+        # The four earlier messages were judged first, for the memory.
+        self.assertEqual(
+            {"judged": 4, "failed": 0, "usage": {"calls": 4, "prompt_tokens": 4800, "completion_tokens": 1200,
+                                                 "reasoning_tokens": 880, "cost": 0.0016, "providers": ["FixtureCloud"]}},
+            record["memory_replay"],
+        )
         self.assertEqual(
             {
                 "model": "x/model-20260901",
@@ -823,9 +830,9 @@ class UsageTests(unittest.TestCase):
             record["agent"]["usage"],
         )
         self.assertEqual(0.0031, record["agent"]["without_reading"]["usage"]["cost"])
-        self.assertEqual({"include": True}, provider.bodies[1]["usage"])
+        self.assertEqual({"include": True}, provider.bodies[5]["usage"])
         # The agent caps its output, so the provider never reserves its whole limit.
-        self.assertEqual(run.AGENT_MAX_TOKENS, provider.bodies[1]["max_tokens"])
+        self.assertEqual(run.AGENT_MAX_TOKENS, provider.bodies[5]["max_tokens"])
 
         summary = run.summarize(
             [scene], ["x/model@low"], [record], [],
@@ -836,10 +843,14 @@ class UsageTests(unittest.TestCase):
             },
         )
         self.assertIn(
-            "| `x/model@low` | 1/1 | 1200 / 300 / 220 | $0.0004 | $0.0031 | $0.0035 | $0.0031 | FixtureCloud (1) |",
+            "| `x/model@low` | 1/1 | 1200 / 300 / 220 | $0.0004 | 4 / $0.0016 | $0.0031 | $0.0051 | $0.0031 | FixtureCloud (1) |",
             summary,
         )
-        self.assertIn("Reported cost of the whole run: $0.0066", summary)
+        self.assertIn("Reported cost of the whole run: $0.0082", summary)
+        self.assertIn(
+            "- Memory replay: 4 earlier messages judged for the participant's memory over 1 moments; 0 failed\n",
+            summary,
+        )
 
     def test_a_typed_decision_reports_its_usage_too(self):
         self.assertEqual(
@@ -886,6 +897,18 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(["reply"], record["agent"]["memory_moves"])
         (wake, _), = agent.turns
         self.assertEqual("Will do.", wake["memory"]["own_moves"][0]["text"])
+        # Zoe's two earlier messages were judged for the memory: her ask has
+        # Vigil's reply as its response (the fixture says both ask).
+        self.assertEqual({"judged": 2, "failed": 0, "usage": {"calls": 0}}, record["memory_replay"])
+        self.assertEqual(
+            [{"event_id": "n1", "responses": ["n2"]}, {"event_id": "n3", "responses": []}],
+            record["agent"]["memory_threads"],
+        )
+        without = run.judge_moment(
+            job, lambda _: FixedModel("WAKE"), timeout_seconds=5, agent_factory=lambda profile: FakeAgent(lambda wake: None), replay=False
+        )
+        self.assertNotIn("memory_replay", without)
+        self.assertNotIn("memory_threads", without["agent"])
 
     def test_no_usage_means_no_cost_section(self):
         scene = scene_by_id("bot-status-report")

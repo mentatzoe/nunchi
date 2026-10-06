@@ -88,7 +88,7 @@ def decisions_questions(
             request[key] = {
                 "type": "choice",
                 "instructions": question["ask"],
-                "criteria": {**options, _NONE: "No supplied message answered or handled it."},
+                "criteria": {**options, _NONE: question["no_message"]},
             }
         else:
             raise ValidationError(f"question {key} has an unsupported kind {kind!r}")

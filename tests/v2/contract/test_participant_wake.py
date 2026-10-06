@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010C ParticipantWakeV2@4`` (slice 010, T004).
+"""Contract tests for ``I-010C ParticipantWakeV2@5`` (slice 010, T004).
 
 Red cases cover the wake sources, advice-free ``PREATTENTION_BYPASS``
 (010-Preattention-bypass), the FR-013 advice-source violations (advice on
@@ -59,6 +59,60 @@ class MemoryCases(unittest.TestCase):
         extra = make_wake("WAKE")
         extra["memory"] = {"own_moves": self.MOVES, "todo": ["answer q2"]}
         assert_schema_verdict(self, "participant-wake", extra, "invalid")
+        empty = make_wake("WAKE")
+        empty["memory"] = {}
+        assert_schema_verdict(self, "participant-wake", empty, "invalid")
+
+
+class ThreadCases(unittest.TestCase):
+    """@5: who asked what and which messages responded (#94 step 5)."""
+
+    THREADS = [
+        {
+            "event_id": "q1",
+            "author_id": "human:zoe",
+            "text": "Does the backoff cap at 30 seconds?",
+            "addressed_to": "room",
+            "at": "2026-10-06T08:00:00.000Z",
+            "responses": [{"event_id": "a1", "author_id": "human:castor", "text": "Yes, 30 s."}],
+        },
+        {
+            "event_id": "v1",
+            "author_id": "bot:vigil",
+            "text": "Docs too?",
+            "responses": [{"event_id": "z1", "author_id": "human:zoe", "text": "Yes please."}],
+        },
+        {"event_id": "q2", "author_id": "human:zoe", "text": "Lunch?", "addressed_to": "participant", "responses": []},
+    ]
+
+    def wake(self, threads, **memory):
+        doc = make_wake("DEFER")
+        doc["memory"] = {"threads": threads, **memory}
+        return doc
+
+    def test_threads_validate_alone_or_with_own_moves(self):
+        assert_schema_verdict(self, "participant-wake", self.wake(self.THREADS), "valid")
+        both = self.wake(self.THREADS, own_moves=MemoryCases.MOVES)
+        assert_schema_verdict(self, "participant-wake", both, "valid")
+
+    def test_malformed_threads_reject(self):
+        thread = self.THREADS[0]
+        response = thread["responses"][0]
+        for bad in (
+            [],
+            [dict(thread, open=True)],
+            [dict(thread, addressed_to="Castor")],
+            [dict(thread, text="x" * 281)],
+            [{k: v for k, v in thread.items() if k != "responses"}],
+            [dict(thread, responses=[{"event_id": "a1"}])],
+            [dict(thread, responses=[{k: v for k, v in response.items() if k != "text"}])],
+            [dict(thread, responses=[dict(response, text="x" * 281)])],
+            [dict(thread, responses=[dict(response, verdict="handled")])],
+            [dict(thread, responses=[response] * 5)],
+            [dict(thread, author_id="")],
+        ):
+            with self.subTest(bad=bad):
+                assert_schema_verdict(self, "participant-wake", self.wake(bad), "invalid")
 
 
 class WakeSourceCases(unittest.TestCase):

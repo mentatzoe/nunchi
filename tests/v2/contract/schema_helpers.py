@@ -98,8 +98,8 @@ SCHEMA_FILES = {
 
 INTERFACE_VERSIONS = {
     "attention-request": ("I-010A", "AttentionRequestV2", 1),
-    "attention-decision": ("I-010B", "AttentionDecisionV2", 5),
-    "participant-wake": ("I-010C", "ParticipantWakeV2", 4),
+    "attention-decision": ("I-010B", "AttentionDecisionV2", 6),
+    "participant-wake": ("I-010C", "ParticipantWakeV2", 5),
     "context-continuation": ("I-010D", "ContextContinuationV2", 1),
     "attention-receipt": ("I-010E", "AttentionReceiptV2", 3),
     "privileged-action-authorization": (
@@ -141,8 +141,10 @@ NON_FINITE_SENTINELS = {
 
 DISPOSITIONS = ("SUPPRESS", "ACK", "WAKE", "DEFER")
 VERDICT_KEYS = ("PASS", "ACK", "ASK", "SPEAK")
-# The typed answers behind every status-ok decision (@5, #94 step 4).
-ANSWER_YES_NO = ("conversation", "answered", "mid_thought", "adds_something")
+# The typed answers behind every status-ok decision (@5, #94 step 4; asks
+# and responds_to since @6, step 5).
+ANSWER_YES_NO = ("conversation", "asks", "answered", "mid_thought", "adds_something")
+ANSWER_POINTERS = ("answered_by", "responds_to")
 ANSWER_CHOICES = {
     "addressee": ("participant", "room", "someone_else", "nobody"),
     "move": ("speak", "mhm", "wait", "stay_quiet"),
@@ -156,6 +158,7 @@ def make_answers(**overrides: Any) -> dict[str, Any]:
     answers: dict[str, Any] = {
         "conversation": 0.95,
         "addressee": {"participant": 0.8, "room": 0.1, "someone_else": 0.05, "nobody": 0.05},
+        "asks": 0.8,
         "answered": 0.05,
         "mid_thought": 0.05,
         "adds_something": 0.8,
@@ -1146,7 +1149,7 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
 
     answers = doc.get("answers")
     if "answers" in doc and _check_closed_object(
-        errors, "answers", answers, ANSWER_KEYS, ANSWER_KEYS + ("answered_by",)
+        errors, "answers", answers, ANSWER_KEYS, ANSWER_KEYS + ANSWER_POINTERS
     ):
         for key in ANSWER_YES_NO:
             if key in answers:
@@ -1156,8 +1159,9 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
                 for option in options:
                     if option in answers[key]:
                         _check_confidence(errors, f"answers.{key}.{option}", answers[key][option])
-        if "answered_by" in answers:
-            _check_nes(errors, "answers.answered_by", answers["answered_by"])
+        for key in ANSWER_POINTERS:
+            if key in answers:
+                _check_nes(errors, f"answers.{key}", answers[key])
 
     if "attention_advice" in doc:
         _check_attention_advice_list(errors, "attention_advice", doc["attention_advice"])
@@ -1264,15 +1268,49 @@ _OWN_MOVE_FIELDS = {
 }
 
 
+def _check_wake_thread(errors: "_Errors", path: str, thread: Any) -> None:
+    """@5: an ask, or the participant's own message, and who responded."""
+    required = ("event_id", "author_id", "text", "responses")
+    if not _check_closed_object(errors, path, thread, required, required + ("addressed_to", "at")):
+        return
+    if any(name not in thread for name in required):
+        return
+    for name in ("event_id", "author_id", "at"):
+        if name in thread:
+            _check_nes(errors, f"{path}.{name}", thread[name])
+    if not isinstance(thread["text"], str) or len(thread["text"]) > 280:
+        errors.add(f"{path}.text", "must be a string of at most 280 characters")
+    if "addressed_to" in thread and thread["addressed_to"] not in ANSWER_CHOICES["addressee"]:
+        errors.add(f"{path}.addressed_to", "must be an addressee option")
+    responses = thread["responses"]
+    if not isinstance(responses, list) or len(responses) > 4:
+        errors.add(f"{path}.responses", "must be an array of at most 4")
+        return
+    for index, response in enumerate(responses):
+        item = f"{path}.responses[{index}]"
+        fields = ("event_id", "author_id", "text")
+        if _check_closed_object(errors, item, response, fields, fields):
+            for name in ("event_id", "author_id"):
+                if name in response:
+                    _check_nes(errors, f"{item}.{name}", response[name])
+            if "text" in response and (not isinstance(response["text"], str) or len(response["text"]) > 280):
+                errors.add(f"{item}.text", "must be a string of at most 280 characters")
+
+
 def _check_wake_memory(errors: "_Errors", path: str, value: Any) -> None:
-    """@4: the participant's own recent moves, one closed shape per kind."""
-    if not _check_closed_object(errors, path, value, ("own_moves",), ("own_moves",)):
+    """@4: own recent moves, one closed shape per kind; @5: threads."""
+    if not _check_closed_object(errors, path, value, (), ("own_moves", "threads")):
         return
-    moves = value.get("own_moves")
-    if not isinstance(moves, list) or not moves:
-        errors.add(f"{path}.own_moves", "must be a non-empty array")
+    if not value:
+        errors.add(path, "must carry own_moves or threads")
         return
-    for index, move in enumerate(moves):
+    for key in ("own_moves", "threads"):
+        if key in value and (not isinstance(value[key], list) or not value[key]):
+            errors.add(f"{path}.{key}", "must be a non-empty array")
+            return
+    for index, thread in enumerate(value.get("threads", ())):
+        _check_wake_thread(errors, f"{path}.threads[{index}]", thread)
+    for index, move in enumerate(value.get("own_moves", ())):
         item = f"{path}.own_moves[{index}]"
         kind = move.get("kind") if isinstance(move, dict) else None
         if kind not in _OWN_MOVE_FIELDS:

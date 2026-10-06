@@ -201,7 +201,7 @@ class ReadingTests(unittest.TestCase):
         _, wakes, _ = self.turn(ReadingModel("WAKE", "omit"))
         self.assertEqual(
             [
-                note("The judged message is addressed to you (0.80).", "e1"),
+                note("The judged message is addressed to you, and it asks for something (0.80; asks 0.80).", "e1"),
                 note("You may know something useful that nobody has said yet (0.80).", "e1"),
                 moves("WAKE"),
             ],
@@ -234,6 +234,29 @@ class ReadingTests(unittest.TestCase):
             note("Castor seems to have answered or handled it already, in a1 (0.90).", "e1", "a1"),
             wakes[0]["attention"]["advice"],
         )
+
+    def test_a_reading_cites_the_message_it_responds_to(self):
+        class Responding(ReadingModel):
+            def judge(self, **kwargs):
+                answers = super().judge(**kwargs)
+                answers.update(asks=0.1, responds_to="v1")
+                answers.pop("notes", None)
+                return answers
+
+        wakes = []
+        pipeline, _, _, _ = foundation(
+            model=Responding("WAKE", "omit"),
+            participant=lambda **turn: wakes.append(turn["wake"]) or None,
+        )
+        pipeline.observation.observe(
+            delivery_id="d-v1",
+            event=message("v1", author_id="discord:bot:9", text="Is the cert renewed?"),
+            actors={},
+        )
+        deliver(pipeline, "e1")
+        advice = wakes[0]["attention"]["advice"]
+        self.assertEqual(note("The judged message is addressed to you (0.80).", "e1"), advice[0])
+        self.assertIn(note("It answers or responds to your message v1.", "e1", "v1"), advice)
 
 
 class ReadingLengthTests(unittest.TestCase):

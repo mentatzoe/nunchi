@@ -24,6 +24,7 @@ from typing import Any
 from .v2_contracts import (
     ANSWER_ADDRESSEES,
     ANSWER_MOVES,
+    ANSWER_POINTERS,
     ANSWER_QUESTIONS,
     READING_MAX_ITEMS,
     READING_NOTE_MAX_CHARS,
@@ -89,6 +90,13 @@ def attention_questions(name: str) -> dict[str, dict[str, Any]]:
                 "nobody": "Nobody in particular: a remark, a status line, or thinking out loud.",
             },
         },
+        "asks": {
+            "step": 2,
+            "kind": YES_NO,
+            "ask": "Does the judged message ask someone in the room for something?",
+            "yes": "It asks a question, or asks for an action, an opinion or a decision.",
+            "no": "It asks nothing: a remark, a report, an answer, thanks, or a greeting.",
+        },
         "answered": {
             "step": 2,
             "kind": YES_NO,
@@ -106,6 +114,18 @@ def attention_questions(name: str) -> dict[str, dict[str, Any]]:
                 f"Which supplied message from someone other than {name} answered or "
                 "handled it?"
             ),
+            "none": "null if nothing did",
+            "no_message": "No supplied message answered or handled it.",
+        },
+        "responds_to": {
+            "step": 2,
+            "kind": EVENT,
+            "ask": (
+                "Which earlier supplied message, if any, does the judged message answer "
+                f"or respond to? It may be one of {name}'s own."
+            ),
+            "none": "null if it responds to none",
+            "no_message": "It answers or responds to no earlier supplied message.",
         },
         "mid_thought": {
             "step": 2,
@@ -229,6 +249,23 @@ def answer_candidates(projection: Mapping[str, Any]) -> list[str]:
     ]
 
 
+def response_candidates(projection: Mapping[str, Any]) -> list[str]:
+    """Earlier messages the judged message could answer or respond to.
+
+    Messages before the judged one, the participant's own included: someone
+    answering the participant's question is part of what it remembers.
+    """
+
+    trigger = projection["trigger_event_id"]
+    earlier = []
+    for event in projection["events"]:
+        if event["id"] == trigger:
+            break
+        if event["type"] == "message":
+            earlier.append(event["id"])
+    return earlier
+
+
 def _probability(value: Any, label: str) -> float:
     if (
         isinstance(value, bool)
@@ -289,22 +326,24 @@ def validate_answers(
 
     if not isinstance(raw, Mapping):
         raise ValueError("answers must be an object")
-    required = set(QUESTION_IDS) - {"answered_by"}
+    required = set(QUESTION_IDS) - set(ANSWER_POINTERS)
     if required - set(raw) or set(raw) - set(QUESTION_IDS):
         raise ValueError("answers have a missing or unexpected question")
     answers: dict[str, Any] = {
         "conversation": _yes_no(raw["conversation"], "conversation"),
         "addressee": _distribution(raw["addressee"], ADDRESSEES, "addressee"),
+        "asks": _yes_no(raw["asks"], "asks"),
         "answered": _yes_no(raw["answered"], "answered"),
         "mid_thought": _yes_no(raw["mid_thought"], "mid_thought"),
         "adds_something": _yes_no(raw["adds_something"], "adds_something"),
         "move": _distribution(raw["move"], MOVES, "move"),
     }
-    pointer = raw.get("answered_by")
-    if pointer is not None and not isinstance(pointer, str):
-        raise ValueError("answer answered_by must be a message id or null")
-    if pointer and pointer in event_ids and pointer != trigger_event_id:
-        answers["answered_by"] = pointer
+    for key in ANSWER_POINTERS:
+        pointer = raw.get(key)
+        if pointer is not None and not isinstance(pointer, str):
+            raise ValueError(f"answer {key} must be a message id or null")
+        if pointer and pointer in event_ids and pointer != trigger_event_id:
+            answers[key] = pointer
     return {key: answers[key] for key in QUESTION_IDS if key in answers}
 
 
@@ -343,20 +382,25 @@ def answer_reasons(answers: Mapping[str, Any]) -> list[str]:
     reasons = [
         f"conversation {answers['conversation']:.2f}",
         f"addressee {who} {addressee[who]:.2f}",
+        f"asks {answers['asks']:.2f}",
         f"answered {answers['answered']:.2f}",
+    ]
+    for key in ANSWER_POINTERS:
+        if answers.get(key):
+            reasons.append(f"{key} {answers[key]}")
+    reasons += [
         f"mid_thought {answers['mid_thought']:.2f}",
         f"adds_something {answers['adds_something']:.2f}",
         f"move {move} {answers['move'][move]:.2f}",
     ]
-    if answers.get("answered_by"):
-        reasons.insert(3, f"answered_by {answers['answered_by']}")
     return reasons
 
 
 def answer_evidence(answers: Mapping[str, Any], trigger_event_id: str) -> list[str]:
     evidence = [trigger_event_id]
-    if answers.get("answered_by"):
-        evidence.append(answers["answered_by"])
+    for key in ANSWER_POINTERS:
+        if answers.get(key) and answers[key] not in evidence:
+            evidence.append(answers[key])
     return evidence
 
 
@@ -376,6 +420,14 @@ def _author(projection: Mapping[str, Any], event_id: str) -> str | None:
     return None
 
 
+def _is_own(projection: Mapping[str, Any], event_id: str) -> bool:
+    own_actor = projection["self"]["actor_id"]
+    return any(
+        event["id"] == event_id and event["author_id"] == own_actor
+        for event in projection.get("events", ())
+    )
+
+
 def fact_notes(answers: Mapping[str, Any], projection: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Describe what the answers found, each note citing its messages."""
 
@@ -383,9 +435,11 @@ def fact_notes(answers: Mapping[str, Any], projection: Mapping[str, Any]) -> lis
     notes = []
     addressee = answers["addressee"]
     who = max(ADDRESSEES, key=lambda key: (addressee[key], -ADDRESSEES.index(key)))
-    notes.append(
-        {"note": f"{_ADDRESSEE_NOTES[who]} ({addressee[who]:.2f}).", "evidence_event_ids": [trigger]}
-    )
+    if answers["asks"] >= 0.5:
+        text = f"{_ADDRESSEE_NOTES[who]}, and it asks for something ({addressee[who]:.2f}; asks {answers['asks']:.2f})."
+    else:
+        text = f"{_ADDRESSEE_NOTES[who]} ({addressee[who]:.2f})."
+    notes.append({"note": text, "evidence_event_ids": [trigger]})
     if answers["conversation"] < 0.5:
         notes.append(
             {
@@ -406,6 +460,14 @@ def fact_notes(answers: Mapping[str, Any], projection: Mapping[str, Any]) -> lis
             text = f"Someone else seems to have answered or handled it already ({answers['answered']:.2f})."
             cited = [trigger]
         notes.append({"note": text, "evidence_event_ids": cited})
+    earlier = answers.get("responds_to")
+    if earlier:
+        if _is_own(projection, earlier):
+            text = f"It answers or responds to your message {earlier}."
+        else:
+            author = _author(projection, earlier) or "someone"
+            text = f"It answers or responds to {author}'s message {earlier}."
+        notes.append({"note": text, "evidence_event_ids": [trigger, earlier]})
     if answers["mid_thought"] >= 0.5:
         notes.append(
             {
@@ -478,8 +540,10 @@ def answers_leaning(disposition: str, *, close: bool = False) -> dict[str, Any]:
         return {
             "conversation": 0.47 if close else 0.05,
             "addressee": {"participant": 0.0, "room": 0.0, "someone_else": 0.0, "nobody": 1.0},
+            "asks": 0.0,
             "answered": 0.0,
             "answered_by": None,
+            "responds_to": None,
             "mid_thought": 0.0,
             "adds_something": 0.0,
             "move": {"speak": 0.0, "mhm": 0.0, "wait": 0.1, "stay_quiet": 0.9},
@@ -496,8 +560,10 @@ def answers_leaning(disposition: str, *, close: bool = False) -> dict[str, Any]:
             if disposition == "DEFER"
             else {"participant": 0.8, "room": 0.1, "someone_else": 0.05, "nobody": 0.05}
         ),
+        "asks": 0.1 if disposition == "ACK" else 0.8,
         "answered": 0.05,
         "answered_by": None,
+        "responds_to": None,
         "mid_thought": 0.8 if disposition == "ACK" else 0.05,
         "adds_something": 0.8 if disposition == "WAKE" else 0.3,
         "move": move,

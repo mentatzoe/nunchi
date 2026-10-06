@@ -258,6 +258,8 @@ class NunchiV2Pipeline:
                 break
             request = prepared.request
             decision = prepared.decision
+            if request is not None and decision is not None:
+                self._remember(request, decision)
             if request is None or decision is None:
                 opportunities.append(
                     OpportunityOutcome(
@@ -301,6 +303,32 @@ class NunchiV2Pipeline:
             )
             token = self.scheduler.complete(token)
         return tuple(opportunities)
+
+    def recall(self, event_id: str, *, timeout_seconds: float | None = None) -> Mapping[str, Any]:
+        """Judge an already observed message for the participant's memory only.
+
+        No turn follows: the answers only feed the threads the participant
+        remembers. A host uses this for a message that was observed without
+        being judged, such as the earlier messages of a replayed scene.
+        Returns the decision, which may be an operational error.
+        """
+
+        request = self.observation.build_snapshot(event_id)
+        seconds = self.host.host_timeout_seconds if timeout_seconds is None else timeout_seconds
+        decision = self.attention.judge(request, deadline=time.monotonic() + seconds)
+        self._remember(request, decision)
+        return decision
+
+    def _remember(self, request: Mapping[str, Any], decision: Mapping[str, Any]) -> None:
+        """Keep what a judgment found about its message for the memory."""
+
+        if decision.get("status") != "ok" or "answers" not in decision:
+            return
+        trigger = request["trigger_event_id"]
+        event = next((item for item in request["events"] if item["id"] == trigger), None)
+        if event is None or event.get("type") != "message":
+            return
+        self.host.memory.record_judgment(event_id=trigger, answers=decision["answers"])
 
     def cancel(self) -> None:
         self.scheduler.cancel()

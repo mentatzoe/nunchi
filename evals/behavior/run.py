@@ -122,6 +122,7 @@ class RecordingModel:
         return self._record(self.inner.answer, kwargs)
 
     def _record(self, call: Callable[..., Any], kwargs: Mapping[str, Any]) -> Mapping[str, Any]:
+        self.reset()
         started = time.monotonic()
         try:
             self.raw = call(**kwargs)
@@ -132,6 +133,11 @@ class RecordingModel:
             raise
         finally:
             self.latency_ms = int((time.monotonic() - started) * 1000)
+
+    def reset(self) -> None:
+        """Forget the last call, so a record shows only the judged moment's."""
+
+        self.raw = self.error = self.raw_reply = self.latency_ms = None
 
 
 class OfflineAgent:
@@ -176,8 +182,10 @@ class RecordingAgent:
         self.expansions: list[dict[str, Any]] = []
         self.without_reading: dict[str, Any] | None = None
         self.usage: dict[str, Any] | None = None
-        # The participant's own moves its wake remembered (#94 step 5).
+        # What the participant's wake remembered (#94 step 5): its own moves,
+        # and each thread with the messages that responded.
         self.memory_moves: list[str] = []
+        self.memory_threads: list[dict[str, Any]] = []
 
     def _usage_since(self, start: int) -> dict[str, Any] | None:
         log = getattr(self.inner, "usage_log", None)
@@ -189,7 +197,12 @@ class RecordingAgent:
     def run_protocol(self, *, wake: Mapping[str, Any], expand: Any, **kwargs: Any) -> Any:
         self.called = True
         self.attention = deepcopy(dict(wake.get("attention", {})))
-        self.memory_moves = [move["kind"] for move in (wake.get("memory") or {}).get("own_moves", ())]
+        memory = wake.get("memory") or {}
+        self.memory_moves = [move["kind"] for move in memory.get("own_moves", ())]
+        self.memory_threads = [
+            {"event_id": thread["event_id"], "responses": [item["event_id"] for item in thread["responses"]]}
+            for thread in memory.get("threads", ())
+        ]
         if self.arrive is not None:
             arrive, self.arrive = self.arrive, None
             arrive()
@@ -569,6 +582,7 @@ def judge_moment(
     paired: bool = False,
     reading_items: int = 4,
     reading_chars: int = 400,
+    replay: bool = True,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Run one moment through the production pipeline and grade what the room saw.
@@ -579,7 +593,9 @@ def judge_moment(
     "agent decides". By default (``ack="agent"``) Nunchi never nods itself:
     an ACK judgment gives the agent a turn, and any "mhm" is the agent's own.
     ``ack="nunchi"`` turns Nunchi's own nod back on. With ``paired``, a turn
-    that carried a reading is also played without it.
+    that carried a reading is also played without it. With ``replay`` (the
+    default), each earlier message the participant would have judged live is
+    judged first, in order, so its memory holds who asked what.
     """
 
     scene, moment, participant = job.scene, job.moment, job.participant
@@ -677,7 +693,9 @@ def judge_moment(
         observation=observation, attention=engine, host=host, scheduler=scheduler
     )
     token = None
-    for raw in observed:
+    judged_index = scene.event_index(moment.event)
+    replayed: list[dict[str, Any]] = []
+    for index, raw in enumerate(observed):
         at = None
         if "at" in raw:
             at = now - timedelta(seconds=parse_offset(raw["at"]) - end_offset)
@@ -688,8 +706,23 @@ def judge_moment(
         }
         if raw["id"] == moment.event:
             _, token = pipeline.observe_and_offer(**delivery)
-        else:
-            observation.observe(**delivery)
+            continue
+        seen = observation.observe(**delivery)
+        if replay and index < judged_index and seen.wake_eligible and delivery["event"]["type"] == "message":
+            # Live, this message was judged when it arrived; its answers are
+            # what the participant's memory of others is built from.
+            outcome = pipeline.recall(raw["id"], timeout_seconds=timeout_seconds)
+            replayed.append(
+                {"ok": outcome.get("status") == "ok", "usage": call_usage(getattr(inner, "last_response", None))}
+            )
+    if replayed:
+        record["memory_replay"] = {
+            "judged": sum(item["ok"] for item in replayed),
+            "failed": sum(not item["ok"] for item in replayed),
+            "usage": usage_total([item["usage"] for item in replayed if item["usage"]]),
+        }
+        engine.last_request = engine.last_decision = None
+        model.reset()
     if token is None:
         # The transport keeps the participant's own events from waking it.
         record.update(
@@ -741,6 +774,8 @@ def judge_moment(
             record["agent"]["usage"] = agent.usage
         if agent.memory_moves:
             record["agent"]["memory_moves"] = agent.memory_moves
+        if agent.memory_threads:
+            record["agent"]["memory_threads"] = agent.memory_threads
         if agent.expansions:
             record["agent"]["expansions"] = agent.expansions
         looked_again = [
@@ -971,12 +1006,14 @@ def _cost_section(models: list[str], records: list[dict[str, Any]]) -> list[str]
         "## Cost and tokens",
         "",
         "As each provider reported it. A call that failed or timed out reports",
-        "nothing, so it is not counted. *Per moment* is attention plus the agent's",
-        "real turn, over every moment of that route; the paired play is a",
-        "measurement and is listed apart.",
+        "nothing, so it is not counted. *Replay* is attention judging the earlier",
+        "messages of each moment for the participant's memory, as it would have",
+        "live. *Per moment* is attention, replay, and the agent's real turn, over",
+        "every moment of that route; the paired play is a measurement and is",
+        "listed apart.",
         "",
-        "| Model | Attention calls reported / moments | Median tokens in / out / reasoning | Attention cost | Agent turns' cost | Per moment | Paired play cost | Providers |",
-        "|---|---|---|---|---|---|---|---|",
+        "| Model | Attention calls reported / moments | Median tokens in / out / reasoning | Attention cost | Replay calls / cost | Agent turns' cost | Per moment | Paired play cost | Providers |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     totals = Counter()
     for model in models:
@@ -988,12 +1025,14 @@ def _cost_section(models: list[str], records: list[dict[str, Any]]) -> list[str]
             return str(int(statistics.median(values))) if values else "-"
 
         attention = sum(call.get("cost", 0) for call in calls)
+        replays = [record["memory_replay"]["usage"] for record in mine if record.get("memory_replay")]
+        replay = sum(usage.get("cost", 0) for usage in replays)
         turns = sum(agent_usage(record, "turn").get("cost", 0) for record in mine)
         paired = sum(agent_usage(record, "paired").get("cost", 0) for record in mine)
-        totals.update(attention=attention, turns=turns, paired=paired)
+        totals.update(attention=attention, replay=replay, turns=turns, paired=paired)
         providers = Counter(call["provider"] for call in calls if "provider" in call)
         lines.append(
-            "| `{}` | {}/{} | {} / {} / {} | {} | {} | {} | {} | {} |".format(
+            "| `{}` | {}/{} | {} / {} / {} | {} | {} / {} | {} | {} | {} | {} |".format(
                 model,
                 len(calls),
                 len(mine),
@@ -1001,19 +1040,36 @@ def _cost_section(models: list[str], records: list[dict[str, Any]]) -> list[str]
                 median("completion_tokens"),
                 median("reasoning_tokens"),
                 _cost(attention),
+                sum(usage["calls"] for usage in replays),
+                _cost(replay),
                 _cost(turns),
-                _cost((attention + turns) / len(mine)) if mine else "-",
+                _cost((attention + replay + turns) / len(mine)) if mine else "-",
                 _cost(paired),
                 ", ".join(f"{name} ({count})" for name, count in providers.most_common(3)) or "-",
             )
         )
     lines += [
         "",
-        f"Reported cost of the whole run: {_cost(totals['attention'] + totals['turns'] + totals['paired'])}"
-        f" (attention {_cost(totals['attention'])}, agent turns {_cost(totals['turns'])},"
-        f" paired play {_cost(totals['paired'])}).",
+        f"Reported cost of the whole run: {_cost(sum(totals.values()))}"
+        f" (attention {_cost(totals['attention'])}, replay {_cost(totals['replay'])},"
+        f" agent turns {_cost(totals['turns'])}, paired play {_cost(totals['paired'])}).",
     ]
     return lines
+
+
+def _replay_line(records: list[dict[str, Any]]) -> str:
+    """How many earlier messages were judged for the memory, and how many failed."""
+
+    replays = [record["memory_replay"] for record in records if record.get("memory_replay")]
+    if not replays:
+        return "- Memory replay: none"
+    judged = sum(item["judged"] for item in replays)
+    failed = sum(item["failed"] for item in replays)
+    line = (
+        f"- Memory replay: {judged + failed} earlier messages judged for the participant's memory"
+        f" over {len(replays)} moments; {failed} failed"
+    )
+    return line + (", so those moments remembered less" if failed else "")
 
 
 def summarize(
@@ -1032,6 +1088,7 @@ def summarize(
         f"- Runs per moment: {meta['runs']}; temperature: {meta['temperature']}; endpoint: {meta['base_url']}",
         f"- Scenes: {len(scenes)}; attention calls: {meta['calls']}; agent turns: {meta.get('agent_calls', 0)}; provider errors: {meta['provider_errors']}",
         f"- Command: `{meta['command']}`",
+        _replay_line(records),
         f"- Reading: "
         + (
             f"up to {meta.get('reading_items', 4)} note{'' if meta.get('reading_items', 4) == 1 else 's'} "
@@ -1234,6 +1291,11 @@ def main(argv: list[str] | None = None) -> int:
         default=400,
         help="ask for reading notes of at most this many characters (40 to 400)",
     )
+    parser.add_argument(
+        "--no-replay",
+        action="store_true",
+        help="judge only the moment, without first judging its earlier messages for the participant's memory",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args(argv)
@@ -1295,6 +1357,7 @@ def main(argv: list[str] | None = None) -> int:
                 paired=args.paired,
                 reading_items=args.reading_items,
                 reading_chars=args.reading_chars,
+                replay=not args.no_replay,
             )
 
     started = datetime.now(timezone.utc)
@@ -1323,6 +1386,7 @@ def main(argv: list[str] | None = None) -> int:
         "paired": args.paired,
         "reading_items": args.reading_items,
         "reading_chars": args.reading_chars,
+        "replay": not args.no_replay,
         "runs": args.runs,
         "temperature": None if args.dry_run else args.temperature,
         "timeout_seconds": args.timeout,

@@ -14,8 +14,8 @@ The changed portable interfaces are:
 
 | Interface | Version | Change |
 |---|---:|---|
-| `I-010B AttentionDecisionV2` | `@5` | first-class `ACK`, ACK audit, and safe ACK-to-DEFER widening (@3); the reading of the room on every judgment (@4); the model's typed answers in place of the legacy confidence vector (@5) |
-| `I-010C ParticipantWakeV2` | `@3` | `ACK` wake/effect source without a reading (@2); the reading on `DEFER` wakes and `judged_through_event_id` (@3) |
+| `I-010B AttentionDecisionV2` | `@6` | first-class `ACK`, ACK audit, and safe ACK-to-DEFER widening (@3); the reading of the room on every judgment (@4); the model's typed answers in place of the legacy confidence vector (@5); the `asks` answer and the `responds_to` pointer (@6) |
+| `I-010C ParticipantWakeV2` | `@5` | `ACK` wake/effect source without a reading (@2); the reading on `DEFER` wakes and `judged_through_event_id` (@3); the participant's own recent moves in `memory` (@4); the threads, who asked what and which messages responded, in `memory` (@5) |
 | `I-010E AttentionReceiptV2` | `@3` | ACK disposition, authority audit, and ACK host source |
 | `I-030A AttentionEngineV2` | `@2` | shared ACK selection and capability/policy widening |
 | `I-040A ParticipantTurnHostV2` | `@2` | one core-owned participant protocol and durable ACK commit path |

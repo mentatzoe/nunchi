@@ -76,6 +76,15 @@ A moment's `during_turn` messages reach the room after the agent's turn
 began, so the agent sees them only by looking at the room again; each
 record says how many new messages it was shown before posting.
 
+Live, attention judges each message as it arrives, and the participant's
+memory of who asked what is built from those judgments. So before a moment
+is judged, attention first judges each earlier message the participant
+would have judged live (messages by others, in order), with the same model.
+These replayed judgments only feed the memory: no turn follows them, and
+they are not graded. Each record's `memory_replay` says how many were
+judged, how many failed, and their usage. `--no-replay` skips them, to
+measure what the memory of others changes.
+
 Step 1 is graded on attention alone, and so is attention's own most likely
 move: each record's `top_move` grades it as if the agent followed it, with
 waiting graded like staying quiet, and the summary's *Top move fits / miss*
@@ -87,8 +96,9 @@ agent by default; one fixed agent model keeps differences between runs down
 to attention.
 
 Each agent turn records how the agent got it (a wake, or a defer and why),
-whether attention's reading came with it, and which of its own earlier moves
-its memory carried (`memory_moves`). When the turn protocol rejects
+whether attention's reading came with it, which of its own earlier moves
+its memory carried (`memory_moves`), and which threads it carried, each with
+the messages that responded (`memory_threads`). When the turn protocol rejects
 the agent's reply, the record keeps that reply under `raw_reply`, so the
 failure can be read. Two options measure the
 agent's side of the room:
@@ -123,7 +133,9 @@ play).
 | Did a change to the reading help? | the same agent, with `--paired` | $16 |
 
 The agent's turns cost the most: a Haiku turn costs several times an
-attention call, and `--paired` plays each turn twice.
+attention call, and `--paired` plays each turn twice. Since step 5b each
+moment also replays its earlier messages through attention, which roughly
+doubles the attention calls; these figures predate that.
 
 **The implementation baseline keeps one agent.** Every run that judges a
 step of the plan on [#94](https://github.com/mentatzoe/nunchi/issues/94)
@@ -175,7 +187,9 @@ On OpenRouter every call asks for its cost. Each record keeps what the
 provider reported: `attention_usage` for the attention call, and
 `agent.usage` and `agent.without_reading.usage` for the agent's real and
 paired plays (tokens in and out, reasoning tokens, cost, and the provider
-that served it). The summary adds a cost and tokens table per model. A call
+that served it), and `memory_replay.usage` for the replayed judgments. The
+summary adds a cost and tokens table per model, with the replay in its own
+column. A call
 that failed or timed out reports nothing, so it is not counted. The agent's
 calls ask for at most 4096 output tokens; without a cap, OpenRouter reserves
 the model's whole output limit against the balance on every call.

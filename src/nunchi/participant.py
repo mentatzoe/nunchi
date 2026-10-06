@@ -357,8 +357,9 @@ def build_participant_wake(
 ) -> dict[str, Any] | None:
     """Build the fresh bounded facts delivered to any admitted participant.
 
-    With ``memory``, the wake also carries the participant's own recent moves
-    in the room (#94 step 5).
+    With ``memory``, the wake also carries the participant's memory of the
+    room (#94 step 5): its own recent moves, and the threads before the
+    message this turn is about.
     """
 
     checked_request = validate_attention_request(request)
@@ -418,7 +419,7 @@ def build_participant_wake(
                 attention["judged_through_event_id"] = judged_through
     wake["attention"] = attention
     if memory is not None:
-        facts = memory.facts(observation)
+        facts = memory.facts(observation, current_event_id=wake["trigger_event_id"])
         if facts:
             wake["memory"] = facts
     return validate_participant_wake(wake)
