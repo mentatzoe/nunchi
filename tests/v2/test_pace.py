@@ -158,10 +158,15 @@ class PromptAndReadingTests(unittest.TestCase):
         self.assertFalse([note for note in notes if note.startswith("Nothing new")])
 
     def test_every_prompt_explains_a_look_again_and_an_outcome_turn(self):
-        attention = participant_attention_prompt(PROFILE)
-        self.assertIn("When observation.occasion is pause", attention)
-        self.assertIn("When it is outcome, no new message arrived either", attention)
-        self.assertIn("Nobody in the room has been told how it went", attention)
+        # Attention hears what an occasion means only when the judgment has one.
+        ordinary = participant_attention_prompt(PROFILE)
+        self.assertNotIn("occasion", ordinary)
+        pause = participant_attention_prompt(PROFILE, occasion="pause")
+        self.assertIn("This judgment has observation.occasion pause", pause)
+        self.assertNotIn("outcome", pause)
+        outcome = participant_attention_prompt(PROFILE, occasion="outcome")
+        self.assertIn("This judgment has observation.occasion outcome", outcome)
+        self.assertIn("Nobody in the room has been told how it went, and vigil gets a turn", outcome)
         for prompt in (participant_turn_prompt(PROFILE), participant_tool_turn_prompt(PROFILE, tools={"send": "send"})):
             with self.subTest(prompt=prompt[:30]):
                 self.assertIn("When occasion is pause, no new message arrived", prompt)

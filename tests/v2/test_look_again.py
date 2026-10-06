@@ -48,9 +48,12 @@ class LookAgainTests(unittest.TestCase):
         self.assertEqual(1, len(model.calls))
         (outcome,) = pipeline.look_again(now=True)
         self.assertEqual("q1", outcome.anchor_event_id)
-        _, projection = model.calls[-1]
+        instructions, projection = model.calls[-1]
         self.assertEqual("pause", projection["occasion"])
         self.assertNotIn("occasion", model.calls[0][1])
+        # Only the look again hears what a pause means.
+        self.assertIn("This judgment has observation.occasion pause", instructions)
+        self.assertNotIn("occasion", model.calls[0][0])
         wake = self.wakes[-1]
         self.assertEqual(("q1", "pause"), (wake["trigger_event_id"], wake["occasion"]))
         validate_participant_wake(wake)
