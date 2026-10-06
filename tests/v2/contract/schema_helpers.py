@@ -97,9 +97,9 @@ SCHEMA_FILES = {
 }
 
 INTERFACE_VERSIONS = {
-    "attention-request": ("I-010A", "AttentionRequestV2", 1),
+    "attention-request": ("I-010A", "AttentionRequestV2", 2),
     "attention-decision": ("I-010B", "AttentionDecisionV2", 6),
-    "participant-wake": ("I-010C", "ParticipantWakeV2", 7),
+    "participant-wake": ("I-010C", "ParticipantWakeV2", 8),
     "context-continuation": ("I-010D", "ContextContinuationV2", 1),
     "attention-receipt": ("I-010E", "AttentionReceiptV2", 3),
     "privileged-action-authorization": (
@@ -885,9 +885,11 @@ def validate_attention_request(doc: Any) -> list[str]:
         "schema_version", "request_id", "self", "room",
         "actors", "events", "trigger_event_id", "coverage",
     )
-    allowed = required + ("continuation",)
+    allowed = required + ("continuation", "pace")
     if not _check_closed_object(errors, "request", doc, required, allowed):
         return list(errors)
+    if "pace" in doc:
+        _check_pace(errors, "pace", doc["pace"])
     if doc.get("schema_version") != 2:
         errors.add("schema_version", "must be the number 2")
     _check_nes(errors, "request_id", doc.get("request_id"))
@@ -917,6 +919,27 @@ def validate_attention_request(doc: Any) -> list[str]:
     if "continuation" in doc:
         _check_continuation(errors, "continuation", doc["continuation"])
     return list(errors)
+
+
+_PACE_COUNTS = ("window_messages", "own_messages")
+_PACE_OPTIONAL = (
+    "judged_seconds_ago", "quiet_before_seconds", "author_run_messages", "author_run_seconds", "own_last_seconds_ago",
+)
+
+
+def _check_pace(errors: _Errors, path: str, value: Any) -> None:
+    """I-010A@2 / I-010C@8: the room's pace, whole non-negative numbers."""
+    required = ("now",) + _PACE_COUNTS
+    if not _check_closed_object(errors, path, value, required, required + _PACE_OPTIONAL):
+        return
+    if "now" in value:
+        _check_nes(errors, f"{path}.now", value["now"])
+    for name in _PACE_COUNTS + _PACE_OPTIONAL:
+        if name in value:
+            item = value[name]
+            minimum = 1 if name == "author_run_messages" else 0
+            if isinstance(item, bool) or not isinstance(item, int) or item < minimum:
+                errors.add(f"{path}.{name}", f"must be an integer of at least {minimum}")
 
 
 def _check_confidence(errors: _Errors, path: str, value: Any) -> None:
@@ -1338,9 +1361,11 @@ def validate_participant_wake(doc: Any) -> list[str]:
     """Mirror of schemas/v2/participant-wake.schema.json (I-010C)."""
     errors = _Errors()
     required = ("request_id", "self", "room", "actors", "events", "trigger_event_id", "coverage", "attention")
-    allowed = required + ("continuation", "memory")
+    allowed = required + ("continuation", "memory", "pace")
     if not _check_closed_object(errors, "wake", doc, required, allowed):
         return list(errors)
+    if "pace" in doc:
+        _check_pace(errors, "pace", doc["pace"])
     _check_nes(errors, "request_id", doc.get("request_id"))
     if "memory" in doc:
         _check_wake_memory(errors, "memory", doc["memory"])

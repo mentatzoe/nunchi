@@ -2,8 +2,24 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://nunchi.invalid/schemas/v2/attention-request.schema.json",
   "title": "AttentionRequestV2",
-  "description": "I-010A AttentionRequestV2@1 — the bounded factual attention request and classifier projection, encoding the selected design's field inventory verbatim (FR-014, c834e8c): exact self binding, room platform/id/continuity-scope/name/kind facts, the observed/referenced actor map, the typed message/reaction/membership event union, honest coverage facts, and optional host-only continuation capability. Host-only continuation authority (handle, binding, cursor, expiry, fetch capabilities) is forbidden from the classifier projection and lives only under `continuation`. Runtime-adapter-only semantic rules (cross-item ID uniqueness, timestamp-versus-order agreement, trigger membership, actor-map reference integrity, advice citations, fetch-time binding/expiry state, receipt-stage sequences) are documented in docs/contracts/nunchi-v2.md and enforced by the stdlib runtime adapter, not this schema.",
+  "description": "I-010A AttentionRequestV2@2 — the bounded factual attention request and classifier projection. @2 (#94 step 6) adds the optional pace: the current time and the room's pace computed when the snapshot was built (how long ago the judged event happened, how long the room was quiet before it, the judged author's run of messages, and the participant's own share and last post), facts in whole seconds and never verdicts. It is encoding the selected design's field inventory verbatim (FR-014, c834e8c): exact self binding, room platform/id/continuity-scope/name/kind facts, the observed/referenced actor map, the typed message/reaction/membership event union, honest coverage facts, and optional host-only continuation capability. Host-only continuation authority (handle, binding, cursor, expiry, fetch capabilities) is forbidden from the classifier projection and lives only under `continuation`. Runtime-adapter-only semantic rules (cross-item ID uniqueness, timestamp-versus-order agreement, trigger membership, actor-map reference integrity, advice citations, fetch-time binding/expiry state, receipt-stage sequences) are documented in docs/contracts/nunchi-v2.md and enforced by the stdlib runtime adapter, not this schema.",
   "$defs": {
+    "pace": {
+      "$comment": "The room's pace at the snapshot (@2). A fact that needs a timestamp the platform did not give is left out.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["now", "window_messages", "own_messages"],
+      "properties": {
+        "now": {"$ref": "#/$defs/nonEmptyString"},
+        "window_messages": {"type": "integer", "minimum": 0},
+        "own_messages": {"type": "integer", "minimum": 0},
+        "judged_seconds_ago": {"type": "integer", "minimum": 0},
+        "quiet_before_seconds": {"type": "integer", "minimum": 0},
+        "author_run_messages": {"type": "integer", "minimum": 1},
+        "author_run_seconds": {"type": "integer", "minimum": 0},
+        "own_last_seconds_ago": {"type": "integer", "minimum": 0}
+      }
+    },
     "nonEmptyString": {
       "type": "string",
       "minLength": 1
@@ -197,6 +213,7 @@
     },
     "trigger_event_id": {"$ref": "#/$defs/nonEmptyString"},
     "coverage": {"$ref": "#/$defs/coverage"},
-    "continuation": {"$ref": "#/$defs/continuation"}
+    "continuation": {"$ref": "#/$defs/continuation"},
+    "pace": {"$ref": "#/$defs/pace"}
   }
 }

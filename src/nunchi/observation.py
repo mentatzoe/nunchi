@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -16,6 +16,7 @@ from typing import Any, Literal
 from uuid import uuid4
 
 from .errors import NunchiError, ValidationError
+from .pace import pace_facts
 from .receipts import PersistenceError, ReceiptJournal
 from .v2_contracts import (
     validate_attention_request,
@@ -257,8 +258,12 @@ class ObservationProvider:
         persistence_path: str | Path | None = None,
         continuity: Literal["restart-safe", "session-only", "unknown"] | None = None,
         event_visibility: Mapping[str, str] | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.binding = binding
+        # The room's time for snapshots and their pace; continuation handles
+        # always expire on the real clock.
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.limits = limits or ObservationLimits()
         self.receipts = receipts or ReceiptJournal()
         self._path = Path(persistence_path) if persistence_path is not None else None
@@ -794,7 +799,9 @@ class ObservationProvider:
                 raise
             return ObservationResult(audit, eligible)
 
-    def _selected_indices(self, trigger_event_id: str) -> tuple[list[int], set[str]]:
+    def _selected_indices(
+        self, trigger_event_id: str, now: datetime | None = None
+    ) -> tuple[list[int], set[str]]:
         events = list(self._events)
         by_id = {event["id"]: index for index, event in enumerate(events)}
         if trigger_event_id not in by_id:
@@ -816,7 +823,7 @@ class ObservationProvider:
                     selected.add(related)
                     pending.append(related)
 
-        now = datetime.now(timezone.utc)
+        now = now or self.clock()
         cutoff = now - timedelta(seconds=self.limits.snapshot_age_seconds)
         # The newest messages of the participant's direct exchange stay in the
         # snapshot even when older than the window: messages that mention it
@@ -911,7 +918,8 @@ class ObservationProvider:
     ) -> dict[str, Any]:
         with self._lock:
             all_events = list(self._events)
-            indices, truncated = self._selected_indices(trigger_event_id)
+            now = self.clock()
+            indices, truncated = self._selected_indices(trigger_event_id, now)
             events = [deepcopy(all_events[index]) for index in indices]
             first = indices[0]
             last = indices[-1]
@@ -953,6 +961,13 @@ class ObservationProvider:
                 "events": events,
                 "trigger_event_id": trigger_event_id,
                 "coverage": coverage,
+                # The room's pace at this moment (#94 step 6).
+                "pace": pace_facts(
+                    events,
+                    trigger_event_id=trigger_event_id,
+                    actor_id=self.binding.actor_id,
+                    now=now,
+                ),
             }
             # Interior gaps (left by relation closure, kept older exchange, or
             # age and byte cuts) stay fetchable even when both ends are covered.

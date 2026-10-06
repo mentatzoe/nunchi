@@ -66,6 +66,18 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- The judgment and the agent's turn notice the room's pace (#94, plan step
+  6, first part). Every snapshot carries `pace`: the current time, how long
+  ago the judged message came, how long the room was quiet before it, its
+  author's unbroken run of messages and how long that took, and the
+  participant's own share of the window and its last post, in whole seconds
+  (`I-010A AttentionRequestV2@2`, `I-010C ParticipantWakeV2@8`,
+  `src/nunchi/pace.py`). The attention and turn prompts explain it, a typed
+  model gets it in its state, and a reading written from typed answers notes
+  a quiet of an hour or more and a quick run of messages. The observation
+  provider's clock is injectable, so the behavior suite now judges each
+  replayed message at its own scene time and the judged moment at the
+  scene's end, however long the replay takes.
 - The agent knows what became of its privileged proposals, and can withdraw
   one (#90 additions, #94 plan step 5). The authorization coordinator keeps
   each proposal's status (`awaiting_approval`, `done`, `failed`, `unknown`,

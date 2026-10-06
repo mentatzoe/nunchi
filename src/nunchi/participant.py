@@ -418,7 +418,9 @@ def build_participant_wake(
             "events",
             "trigger_event_id",
             "coverage",
+            "pace",
         )
+        if key in fresh
     }
     attention: dict[str, Any] = {"source": source}
     if source in ("WAKE", "DEFER") and checked_decision["status"] == "ok":

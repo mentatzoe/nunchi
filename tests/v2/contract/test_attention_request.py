@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010A AttentionRequestV2@1`` (slice 010, T002).
+"""Contract tests for ``I-010A AttentionRequestV2@2`` (slice 010, T002; @2 adds the pace, #94 step 6).
 
 Red cases cover exact identity (S01), actor mentions versus
 ``mentions_room`` (S02), the runtime-adapter-only relational classes
@@ -41,6 +41,38 @@ from tests.v2.contract.schema_helpers import (
 class AttentionRequestCorpusSuite(ContractCorpusMixin, unittest.TestCase):
     CORPUS = "attention-request"
     REQUIRED_SCENES = frozenset({"S01", "S02", "S03", "S15", "S16", "010-V1"})
+
+
+class PaceCases(unittest.TestCase):
+    """@2 (#94 step 6): the room's pace, plain facts in whole seconds."""
+
+    PACE = {
+        "now": "2026-10-06T09:00:00.000Z",
+        "window_messages": 5,
+        "own_messages": 1,
+        "judged_seconds_ago": 2,
+        "quiet_before_seconds": 25200,
+        "author_run_messages": 3,
+        "author_run_seconds": 40,
+        "own_last_seconds_ago": 25300,
+    }
+
+    def test_pace_validates_with_or_without_its_optional_facts(self):
+        for pace in (self.PACE, {key: self.PACE[key] for key in ("now", "window_messages", "own_messages")}):
+            with self.subTest(keys=sorted(pace)):
+                assert_schema_verdict(self, "attention-request", dict(make_request(), pace=pace), "valid")
+
+    def test_malformed_pace_rejects(self):
+        for bad in (
+            {k: v for k, v in self.PACE.items() if k != "now"},
+            dict(self.PACE, quiet_before_seconds=-1),
+            dict(self.PACE, judged_seconds_ago=2.5),
+            dict(self.PACE, author_run_messages=0),
+            dict(self.PACE, own_messages=True),
+            dict(self.PACE, mood="tense"),
+        ):
+            with self.subTest(bad=bad):
+                assert_schema_verdict(self, "attention-request", dict(make_request(), pace=bad), "invalid")
 
 
 class ExactIdentityRedCases(unittest.TestCase):
