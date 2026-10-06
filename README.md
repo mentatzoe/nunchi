@@ -100,7 +100,7 @@ flowchart TB
     end
     subgraph measure["Evaluation"]
         direction LR
-        e1["Behavior suite:<br/>73 scenes, real models"]:::done
+        e1["Behavior suite:<br/>74 scenes, real models"]:::done
         e2["Implementation baseline:<br/>one fixed agent"]:::done
         e3["Refinement, later:<br/>other agent families,<br/>real agents"]:::later
         e1 --> e2 --> e3

@@ -1,0 +1,38 @@
+{
+  "id": "asked-while-busy",
+  "title": "Sam asks Vigil something while Vigil is answering Zoe; Zoe's thanks comes next",
+  "source": "docs/behavior.md",
+  "review": "draft: written from docs/behavior.md (#94 step 6, messages that arrive mid-turn); ranges need Zoe's review",
+  "platform": "discord",
+  "participants": ["vigil"],
+  "actors": {
+    "zoe": {"display_name": "Zoe", "kind": "human"},
+    "sam": {"display_name": "Sam", "kind": "human"}
+  },
+  "events": [
+    {"id": "z1", "author": "zoe", "at": "-50s", "mentions": ["vigil"],
+     "text": "Vigil, can you check why last night's nightly failed?"},
+    {"id": "s1", "author": "sam", "at": "-35s", "mentions": ["vigil"],
+     "text": "Vigil, while you're in there: is the staging box still on the old base image?"},
+    {"id": "v1", "author": "vigil", "at": "-20s", "reply_to": "z1",
+     "text": "It failed on a flaky migration test; I reran it and it passed."},
+    {"id": "z2", "author": "zoe", "at": "0s",
+     "text": "Thanks!"}
+  ],
+  "moments": [
+    {
+      "label": "Zoe's thanks, with Sam's question still open",
+      "event": "z2",
+      "step1": "pass",
+      "notice": [
+        {"fact": "Sam asked Vigil about the staging image while Vigil was answering Zoe", "events": ["s1"]},
+        {"fact": "Vigil answered Zoe but not Sam", "events": ["v1"]}
+      ],
+      "fitting": ["speak"],
+      "misses": [
+        {"move": "stay_quiet", "why": "Sam's question to Vigil is still unanswered"},
+        {"move": "mhm", "why": "a nod to Zoe's thanks leaves Sam's question unanswered"}
+      ]
+    }
+  ]
+}
