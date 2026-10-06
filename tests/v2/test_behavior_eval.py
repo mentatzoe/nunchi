@@ -279,7 +279,8 @@ class JudgeMomentTests(unittest.TestCase):
         record, model = self.judge("addressee-first", 1, "WAKE")
         self.assertFalse(record["looked_again"])
         self.assertEqual(("stay_quiet", "attention"), (record["result"], record["by"]))
-        self.assertEqual("miss", record["grade"]["visible"])
+        # Step 1 never ran at the pause, so it is not graded as suppressing.
+        self.assertEqual({"visible": "miss", "step1": "not judged"}, record["grade"])
         self.assertEqual(1, len(model.projections))
 
     def test_own_event_never_reaches_the_model(self):
@@ -429,6 +430,7 @@ class AgentTurnTests(unittest.TestCase):
         record, agent = self.judge("addressee-first", 1, "DEFER", speaks)
         self.assertFalse(record["looked_again"])
         self.assertEqual(("stay_quiet", "agent"), (record["result"], record["by"]))
+        self.assertEqual("not judged", record["grade"]["step1"])
         self.assertIn("before the pause was speak", record["detail"])
         self.assertEqual(1, len(agent.turns))
 

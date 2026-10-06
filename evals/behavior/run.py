@@ -839,14 +839,14 @@ def judge_moment(
                 record.update(
                     result="stay_quiet",
                     by="agent",
-                    grade=grade(moment, "stay_quiet"),
+                    grade=grade(moment, "stay_quiet", attention="not judged"),
                     detail=f"the agent's move before the pause was {before['move']}, so Nunchi did not look again",
                 )
             else:
                 record.update(
                     result="stay_quiet",
                     by="attention",
-                    grade=grade(moment, "stay_quiet"),
+                    grade=grade(moment, "stay_quiet", attention="not judged"),
                     detail="the judgment before the pause was not to wait, so Nunchi did not look again",
                 )
             return record

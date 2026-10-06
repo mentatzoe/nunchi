@@ -78,7 +78,8 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   newer message (the scheduler gains an idle-only offer), and happens once
   per quiet stretch. Claude Code, Codex and the generic runtime look again;
   Hermes does not yet. The behavior suite now grades pause moments instead
-  of reporting them as unsupported, records `looked_again`, and adds a
+  of reporting them as unsupported, records `looked_again` (step 1 is
+  graded `not judged` when Nunchi did not look again), and adds a
   restraint scene where looking again should still stay quiet
   (`only-they-can-do-it`, 70 scenes). `nunchi probe` now reports the
   current I-010A, I-010B and I-010C versions; they had been stale.

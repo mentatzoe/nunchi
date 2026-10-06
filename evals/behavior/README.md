@@ -129,9 +129,10 @@ the scene through the message before the pause as it happened live: that
 message is judged, and with an agent its turn is played. The scene clock
 then moves on by the pause, and Nunchi looks again (#94 step 6). It looks
 again only when that judgment's most likely move was to wait and the agent
-did not post; otherwise the record counts as staying quiet, by attention.
-Each pause record's `looked_again` says whether it did, and a turn from a
-look again carries `occasion: "pause"`.
+did not post; otherwise the record counts as staying quiet, and step 1,
+which never ran, is graded `not judged`. Each pause record's
+`looked_again` says whether it did, and its `detail` says why not; a turn
+from a look again carries `occasion: "pause"`.
 
 ## Which run to use
 
