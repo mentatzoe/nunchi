@@ -1,0 +1,50 @@
+{
+  "id": "addressee-never-answers",
+  "title": "A question to another agent goes unanswered, then the asker asks the room",
+  "source": "docs/behavior.md",
+  "review": "draft: written from docs/behavior.md; ranges need Zoe's review",
+  "platform": "discord",
+  "participants": ["vigil"],
+  "actors": {
+    "zoe": {"display_name": "Zoe", "kind": "human"},
+    "sam": {"display_name": "Sam", "kind": "human"}
+  },
+  "events": [
+    {"id": "v1", "author": "vigil", "at": "-2h",
+     "text": "I rewrote the gateway retry backoff: exponential with full jitter, capped at 30 seconds, and it gives up after 6 tries."},
+    {"id": "q1", "author": "zoe", "at": "-6m", "mentions": ["castor"],
+     "text": "Castor, how does the retry backoff in the gateway work these days?"},
+    {"id": "s1", "author": "sam", "at": "-4m",
+     "text": "Unrelated, but is anyone using the staging box this afternoon?"},
+    {"id": "q2", "author": "zoe", "at": "0s",
+     "text": "Anyone? I need the backoff details before the review."}
+  ],
+  "moments": [
+    {
+      "label": "the question to Castor",
+      "event": "q1",
+      "step1": "pass",
+      "notice": [
+        {"fact": "Zoe asked Castor, not Vigil", "events": ["q1"]},
+        {"fact": "Vigil wrote the backoff two hours ago and knows the answer", "events": ["v1"]}
+      ],
+      "fitting": ["wait", "stay_quiet"],
+      "misses": []
+    },
+    {
+      "label": "Castor never answered, and Zoe asks the room",
+      "event": "q2",
+      "step1": "pass",
+      "notice": [
+        {"fact": "Castor never answered Zoe's question", "events": ["q1"]},
+        {"fact": "Zoe now asks anyone in the room", "events": ["q2"]},
+        {"fact": "Vigil held back for Castor and knows the answer", "events": ["q1", "v1"]}
+      ],
+      "fitting": ["speak"],
+      "misses": [
+        {"move": "stay_quiet", "why": "Vigil held back for Castor, who never answered, and Zoe now asks anyone"},
+        {"move": "mhm", "why": "a nod doesn't give Zoe the backoff details"}
+      ]
+    }
+  ]
+}

@@ -8,7 +8,11 @@ Its own moves: its recent messages, replies and reactions, each pointing at
 the message it was about, and where it stayed quiet. The visible moves come
 from the room's retained history, which the host observes like anyone
 else's. A silence leaves no trace in the room, so the participant host
-records it here when a turn ends without an action.
+records it here when a turn ends without an action. A move may carry the
+participant's own reason at the time, in its own words (``why``): a person
+remembers that they held back because someone else was asked, not only that
+they held back. The host keeps the reason it was given; a visible move gets
+it when the room shows the move as it was sent.
 
 Threads: recent messages that asked someone for something, and the
 participant's own messages that others responded to, each with the messages
@@ -32,7 +36,12 @@ from datetime import datetime, timedelta, timezone
 import threading
 from typing import Any
 
-from .v2_contracts import ANSWER_ADDRESSEES, MEMORY_TEXT_MAX_CHARS, THREAD_RESPONSES_MAX
+from .v2_contracts import (
+    ANSWER_ADDRESSEES,
+    MEMORY_TEXT_MAX_CHARS,
+    MOVE_REASON_MAX_CHARS,
+    THREAD_RESPONSES_MAX,
+)
 
 
 OWN_MOVE_KINDS = ("message", "reply", "reaction", "silence")
@@ -57,11 +66,30 @@ def _parse(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
-def _excerpt(text: str) -> str:
+def _excerpt(text: str, limit: int = MEMORY_TEXT_MAX_CHARS) -> str:
     text = " ".join(text.split())
-    if len(text) <= MEMORY_TEXT_MAX_CHARS:
+    if len(text) <= limit:
         return text
-    return text[: MEMORY_TEXT_MAX_CHARS - 1].rstrip() + "…"
+    return text[: limit - 1].rstrip() + "…"
+
+
+def move_reason(value: Any) -> str | None:
+    """A participant's stated reason, shortened, or None when it gave none."""
+
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return _excerpt(value, MOVE_REASON_MAX_CHARS)
+
+
+def _move_key(move: Mapping[str, Any]) -> tuple[Any, ...] | None:
+    """What identifies a visible move: its kind, target, and words."""
+
+    kind = move.get("kind")
+    if kind in ("message", "reply"):
+        return (kind, move.get("about_event_id"), _excerpt(str(move.get("text", ""))))
+    if kind == "reaction":
+        return (kind, move.get("about_event_id"), move.get("reaction"))
+    return None
 
 
 def _own_move(event: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -113,19 +141,51 @@ class ConversationMemory:
         self.judgments_limit = judgments
         self.max_age = timedelta(seconds=max_age_seconds)
         self._silences: deque[dict[str, Any]] = deque(maxlen=silences)
+        self._reasons: deque[tuple[tuple[Any, ...], str]] = deque(maxlen=own_moves * 2)
         self._judgments: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._lock = threading.Lock()
 
-    def record_silence(self, *, about_event_id: str, at: datetime | None = None) -> None:
+    def record_silence(
+        self,
+        *,
+        about_event_id: str,
+        at: datetime | None = None,
+        why: Any = None,
+    ) -> None:
         """A turn about this message ended without a visible move."""
 
         if not isinstance(about_event_id, str) or not about_event_id:
             raise ValueError("a silence must name the message it was about")
         moment = at or datetime.now(timezone.utc)
+        silence = {"kind": "silence", "about_event_id": about_event_id, "at": _timestamp(moment)}
+        reason = move_reason(why)
+        if reason:
+            silence["why"] = reason
         with self._lock:
-            self._silences.append(
-                {"kind": "silence", "about_event_id": about_event_id, "at": _timestamp(moment)}
-            )
+            self._silences.append(silence)
+
+    def record_reason(self, action: Mapping[str, Any], why: Any) -> None:
+        """Keep the reason the participant gave for a visible move it sent.
+
+        ``action`` is the core action (message, reply or reaction). The reason
+        joins the move once the room shows it with the same words; a move the
+        room never shows keeps its reason to itself.
+        """
+
+        reason = move_reason(why)
+        kind = action.get("kind")
+        if reason is None or kind not in ("message", "reply", "reaction"):
+            return
+        if kind == "reaction" and action.get("operation") != "add":
+            return
+        move = {
+            "kind": kind,
+            "about_event_id": action.get("target_event_id"),
+            "text": action.get("text", ""),
+            "reaction": action.get("reaction"),
+        }
+        with self._lock:
+            self._reasons.append((_move_key(move), reason))
 
     def record_judgment(
         self,
@@ -167,6 +227,7 @@ class ConversationMemory:
 
         with self._lock:
             self._silences.clear()
+            self._reasons.clear()
             self._judgments.clear()
 
     def own_moves(
@@ -200,6 +261,14 @@ class ConversationMemory:
                     visible.append((float(index), move))
         with self._lock:
             silences = [dict(item) for item in self._silences]
+            reasons = list(self._reasons)
+        # Each reason joins the newest move it matches, once.
+        for _, move in reversed(visible):
+            key = _move_key(move)
+            for index in range(len(reasons) - 1, -1, -1):
+                if reasons[index][0] == key:
+                    move["why"] = reasons.pop(index)[1]
+                    break
         quiet = [
             (position[silence["about_event_id"]] + 0.5 + order / 1000, silence)
             for order, silence in enumerate(silences)

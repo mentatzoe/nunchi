@@ -303,9 +303,23 @@ def participant_host_receipt_body(
     }
 
 
+def _is_silence(action: Any) -> bool:
+    """A participant stays silent by returning nothing, or a silence with its reason."""
+
+    return action is None or (isinstance(action, Mapping) and action.get("kind") == "silence")
+
+
 def _validate_action(action: Any) -> dict[str, Any]:
+    """Check one participant action and return it with its reason apart.
+
+    Any action may carry ``why``, the participant's own reason, for its
+    memory only: it is returned under ``why`` and never reaches the room.
+    """
+
     if not isinstance(action, Mapping):
         raise ParticipantError("participant action must be an object or silence")
+    why = action.get("why")
+    action = {key: action[key] for key in action if key != "why"}
     kind = action.get("kind")
     common = {"kind", "origin_event_id"}
     if kind == "message":
@@ -345,7 +359,10 @@ def _validate_action(action: Any) -> dict[str, Any]:
         raise ParticipantError("participant action kind is unsupported")
     if not isinstance(action.get("origin_event_id"), str) or not action["origin_event_id"]:
         raise ParticipantError("participant action origin_event_id must be non-empty")
-    return deepcopy(dict(action))
+    checked = deepcopy(dict(action))
+    if why is not None:
+        checked["why"] = why
+    return checked
 
 
 def build_participant_wake(
@@ -924,17 +941,23 @@ class ParticipantTurnHost:
         if not self.scheduler.is_current(token):
             settle_host("unknown")
             return None
-        if raw_action is None:
+        if _is_silence(raw_action):
             settle_host("silent")
             # A silence leaves no trace in the room; the participant's memory
-            # keeps it so a later turn knows where it held back.
-            self.memory.record_silence(about_event_id=wake["trigger_event_id"])
+            # keeps it, with the reason the participant gave, so a later turn
+            # knows where it held back and why.
+            self.memory.record_silence(
+                about_event_id=wake["trigger_event_id"],
+                why=raw_action.get("why") if raw_action is not None else None,
+            )
             return None
         try:
             action = _validate_action(raw_action)
         except ParticipantError:
             settle_host("unknown")
             return TransportResult("failed", "participant returned an invalid action")
+        # The reason is the participant's own memory; it never reaches the room.
+        why = action.pop("why", None)
         if token.cancel_event.is_set() or not self.scheduler.is_current(token):
             settle_host("unknown")
             return None
@@ -1066,6 +1089,7 @@ class ParticipantTurnHost:
         if not isinstance(result, TransportResult):
             result = TransportResult("unknown", "transport returned no attested result")
         self._append_transport_receipt(wake["request_id"], result)
+        self.memory.record_reason(action, why)
         return result
 
     def _append_transport_receipt(

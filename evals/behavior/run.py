@@ -185,7 +185,19 @@ class RecordingAgent:
         # What the participant's wake remembered (#94 step 5): its own moves,
         # and each thread with the messages that responded.
         self.memory_moves: list[str] = []
+        self.memory_reasons: list[str] = []
         self.memory_threads: list[dict[str, Any]] = []
+
+    def reset(self) -> None:
+        """Forget a played earlier turn, so the record shows only the judged one."""
+
+        self.called = False
+        self.action = self.error = self.raw_reply = self.latency_ms = None
+        self.attention = self.without_reading = self.usage = None
+        self.expansions = []
+        self.memory_moves = []
+        self.memory_reasons = []
+        self.memory_threads = []
 
     def _usage_since(self, start: int) -> dict[str, Any] | None:
         log = getattr(self.inner, "usage_log", None)
@@ -199,6 +211,7 @@ class RecordingAgent:
         self.attention = deepcopy(dict(wake.get("attention", {})))
         memory = wake.get("memory") or {}
         self.memory_moves = [move["kind"] for move in memory.get("own_moves", ())]
+        self.memory_reasons = [move["why"] for move in memory.get("own_moves", ()) if "why" in move]
         self.memory_threads = [
             {"event_id": thread["event_id"], "responses": [item["event_id"] for item in thread["responses"]]}
             for thread in memory.get("threads", ())
@@ -304,7 +317,7 @@ class EvalTransport:
 def agent_move(calls: list[Mapping[str, Any]]) -> str:
     """The move the room saw from the agent's own actions."""
 
-    kinds = {call.get("kind") for call in calls}
+    kinds = {call.get("kind") for call in calls} - {"silence"}
     if kinds & {"message", "reply"}:
         return "speak"
     if "reaction" in kinds:
@@ -595,7 +608,10 @@ def judge_moment(
     ``ack="nunchi"`` turns Nunchi's own nod back on. With ``paired``, a turn
     that carried a reading is also played without it. With ``replay`` (the
     default), each earlier message the participant would have judged live is
-    judged first, in order, so its memory holds who asked what.
+    judged first, in order, so its memory holds who asked what. With an
+    agent, an earlier moment of the same scene is played in full first: the
+    agent takes that turn, its posts enter the room as its own, and its
+    silences and reasons stay in its memory, as they would live.
     """
 
     scene, moment, participant = job.scene, job.moment, job.participant
@@ -670,11 +686,7 @@ def judge_moment(
             )
 
     agent = (
-        RecordingAgent(
-            agent_factory(profile),
-            paired=paired,
-            arrive=arrive if moment.during_turn else None,
-        )
+        RecordingAgent(agent_factory(profile), paired=paired)
         if agent_factory is not None
         else None
     )
@@ -695,6 +707,64 @@ def judge_moment(
     token = None
     judged_index = scene.event_index(moment.event)
     replayed: list[dict[str, Any]] = []
+    # Earlier moments of this scene the agent plays before the judged one.
+    played_moments = (
+        {
+            other.event
+            for other in scene.moments
+            if other.event and not other.is_pause and scene.event_index(other.event) < judged_index
+        }
+        if replay and agent is not None
+        else set()
+    )
+
+    def play(delivery: Mapping[str, Any], at: datetime | None) -> dict[str, Any]:
+        """Take an earlier moment's turn and leave its moves in the room."""
+
+        _, played_token = pipeline.observe_and_offer(**delivery)
+        entry: dict[str, Any] = {"event": delivery["event"]["id"], "ok": False, "usage": {}}
+        if played_token is None:
+            return entry
+        agent.paired = False
+        try:
+            pipeline.run_opportunities(played_token)
+        finally:
+            agent.paired = paired
+        decision = engine.last_decision or {}
+        entry["ok"] = decision.get("status") == "ok"
+        entry["usage"] = call_usage(getattr(inner, "last_response", None))
+        entry["move"] = agent_move(transport.calls) if agent.called else "not woken"
+        if agent.error:
+            entry["error"] = agent.error
+        if agent.usage:
+            entry["agent_usage"] = agent.usage
+        if isinstance(agent.action, Mapping) and agent.action.get("why"):
+            entry["why"] = agent.action["why"]
+        for number, call in enumerate(transport.calls, start=1):
+            own_id = f"{participant}-played-{delivery['event']['id']}-{number}"
+            if call.get("kind") in ("message", "reply"):
+                own = {"id": own_id, "author": participant, "text": call["text"]}
+                if call["kind"] == "reply":
+                    own["reply_to"] = call["target_event_id"]
+            elif call.get("kind") == "reaction" and call.get("operation", "add") == "add":
+                own = {
+                    "id": own_id,
+                    "type": "reaction",
+                    "author": participant,
+                    "target": call["target_event_id"],
+                    "reaction": call["reaction"],
+                }
+            else:
+                continue
+            observation.observe(
+                delivery_id=f"d-{own_id}",
+                event=canonical_event(own, at=at),
+                actors=_event_actors(scene, own),
+            )
+        transport.calls.clear()
+        agent.reset()
+        return entry
+
     for index, raw in enumerate(observed):
         at = None
         if "at" in raw:
@@ -706,6 +776,9 @@ def judge_moment(
         }
         if raw["id"] == moment.event:
             _, token = pipeline.observe_and_offer(**delivery)
+            continue
+        if raw["id"] in played_moments:
+            replayed.append(play(delivery, at))
             continue
         seen = observation.observe(**delivery)
         if replay and index < judged_index and seen.wake_eligible and delivery["event"]["type"] == "message":
@@ -721,8 +794,20 @@ def judge_moment(
             "failed": sum(not item["ok"] for item in replayed),
             "usage": usage_total([item["usage"] for item in replayed if item["usage"]]),
         }
+        played = [
+            {key: item[key] for key in ("event", "move", "why", "error") if key in item}
+            for item in replayed
+            if "move" in item
+        ]
+        if played:
+            record["memory_replay"]["played"] = played
+            record["memory_replay"]["agent_usage"] = usage_total(
+                [item["agent_usage"] for item in replayed if item.get("agent_usage")]
+            )
         engine.last_request = engine.last_decision = None
         model.reset()
+    if agent is not None and moment.during_turn:
+        agent.arrive = arrive
     if token is None:
         # The transport keeps the participant's own events from waking it.
         record.update(
@@ -774,6 +859,10 @@ def judge_moment(
             record["agent"]["usage"] = agent.usage
         if agent.memory_moves:
             record["agent"]["memory_moves"] = agent.memory_moves
+        if agent.memory_reasons:
+            record["agent"]["memory_reasons"] = agent.memory_reasons
+        if isinstance(agent.action, Mapping) and agent.action.get("why"):
+            record["agent"]["why"] = agent.action["why"]
         if agent.memory_threads:
             record["agent"]["memory_threads"] = agent.memory_threads
         if agent.expansions:
@@ -1008,7 +1097,8 @@ def _cost_section(models: list[str], records: list[dict[str, Any]]) -> list[str]
         "As each provider reported it. A call that failed or timed out reports",
         "nothing, so it is not counted. *Replay* is attention judging the earlier",
         "messages of each moment for the participant's memory, as it would have",
-        "live. *Per moment* is attention, replay, and the agent's real turn, over",
+        "live, and the agent playing the scene's earlier moments. *Per moment* is",
+        "attention, replay, and the agent's real turn, over",
         "every moment of that route; the paired play is a measurement and is",
         "listed apart.",
         "",
@@ -1025,7 +1115,14 @@ def _cost_section(models: list[str], records: list[dict[str, Any]]) -> list[str]
             return str(int(statistics.median(values))) if values else "-"
 
         attention = sum(call.get("cost", 0) for call in calls)
-        replays = [record["memory_replay"]["usage"] for record in mine if record.get("memory_replay")]
+        # Replay is attention on earlier messages, and the agent on earlier moments.
+        replays = [
+            usage
+            for record in mine
+            if record.get("memory_replay")
+            for usage in (record["memory_replay"]["usage"], record["memory_replay"].get("agent_usage") or {})
+            if usage
+        ]
         replay = sum(usage.get("cost", 0) for usage in replays)
         turns = sum(agent_usage(record, "turn").get("cost", 0) for record in mine)
         paired = sum(agent_usage(record, "paired").get("cost", 0) for record in mine)
@@ -1040,7 +1137,7 @@ def _cost_section(models: list[str], records: list[dict[str, Any]]) -> list[str]
                 median("completion_tokens"),
                 median("reasoning_tokens"),
                 _cost(attention),
-                sum(usage["calls"] for usage in replays),
+                sum(usage.get("calls", 0) for usage in replays),
                 _cost(replay),
                 _cost(turns),
                 _cost((attention + replay + turns) / len(mine)) if mine else "-",
@@ -1065,11 +1162,15 @@ def _replay_line(records: list[dict[str, Any]]) -> str:
         return "- Memory replay: none"
     judged = sum(item["judged"] for item in replays)
     failed = sum(item["failed"] for item in replays)
+    played = sum(len(item.get("played", ())) for item in replays)
     line = (
         f"- Memory replay: {judged + failed} earlier messages judged for the participant's memory"
         f" over {len(replays)} moments; {failed} failed"
     )
-    return line + (", so those moments remembered less" if failed else "")
+    line += ", so those moments remembered less" if failed else ""
+    if played:
+        line += f"; the agent first played {played} earlier moment turn(s) of the same scenes"
+    return line
 
 
 def summarize(

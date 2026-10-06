@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010C ParticipantWakeV2@5`` (slice 010, T004).
+"""Contract tests for ``I-010C ParticipantWakeV2@6`` (slice 010, T004).
 
 Red cases cover the wake sources, advice-free ``PREATTENTION_BYPASS``
 (010-Preattention-bypass), the FR-013 advice-source violations (advice on
@@ -41,6 +41,14 @@ class MemoryCases(unittest.TestCase):
                 doc = make_wake(source)
                 doc["memory"] = {"own_moves": self.MOVES[:1]}
                 assert_schema_verdict(self, "participant-wake", doc, "valid")
+
+    def test_any_move_may_carry_its_reason(self):
+        # @6: the participant's own reason at the time, never posted.
+        moves = [dict(move, why="Castor was asked; waiting for him.") for move in self.MOVES]
+        assert_schema_verdict(self, "participant-wake", self.wake(moves), "valid")
+        for bad in ("", "x" * 201, 7):
+            with self.subTest(why=bad):
+                assert_schema_verdict(self, "participant-wake", self.wake([dict(self.MOVES[3], why=bad)]), "invalid")
 
     def test_malformed_memory_rejects(self):
         too_long = dict(self.MOVES[0], text="x" * 281)

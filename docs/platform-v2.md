@@ -263,6 +263,14 @@ host rejects unknown versions, changed bindings, invisible origins or targets,
 malformed actions, stale opportunities, deadline overruns, and unavailable
 native capabilities. The participant cannot send directly.
 
+Every action but `expand`, `silence` included, may carry `why`: one short
+sentence in the participant's own words on why it chose the move (#94 step
+5). The host strips it before anything is sent or proposed and keeps it in
+the participant's memory, where later turns see it with the move
+(`memory.own_moves[].why`, at most 200 characters). A malformed `why` is
+dropped alone. The Claude Code participant acts through tools and has no
+`why`: its dedicated session keeps its own reasons in its transcript.
+
 The envelope may come alone or in one Markdown code fence. Text after the
 closing fence is the model's own note, usually explaining a silence; it is
 dropped and never posted. Any other text beside the envelope is a malformed

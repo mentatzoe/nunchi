@@ -262,6 +262,37 @@ class ParticipantProtocolTests(unittest.TestCase):
         reply = "```json\n" + envelope + "\n```\n\nI don't know where those settings live, so I'm staying quiet."
         self.assertEqual((True, None), self.protocol.consume(reply, expand=None))
 
+    def test_any_move_may_say_why_for_the_agents_own_memory(self):
+        # #94 step 5: the reason goes to the host, which keeps it in memory.
+        quiet = {"kind": "silence", "why": "Zoe asked Castor; waiting for him."}
+        self.assertEqual((True, quiet), self.protocol.consume(json.dumps(self.envelope(quiet)), expand=None))
+        reply = {"kind": "reply", "origin_event_id": "e1", "target_event_id": "e1", "text": "Yes.", "why": "I know it."}
+        self.assertEqual(
+            reply,
+            parse_participant_action(self.envelope(reply), request=self.protocol.request, visible_event_ids={"e1"}),
+        )
+        # A malformed reason is dropped alone; it never fails the move.
+        for bad in ("", "   ", 7, None):
+            with self.subTest(why=bad):
+                self.assertEqual(
+                    (True, None),
+                    self.protocol.consume(json.dumps(self.envelope({"kind": "silence", "why": bad})), expand=None),
+                )
+        # Looking around the room is not a move.
+        expand = {"kind": "expand", "direction": "before", "max_events": 5, "max_bytes": 4096, "why": "context"}
+        with self.assertRaises(ParticipantModelError):
+            self.protocol.consume(json.dumps(self.envelope(expand)), expand=lambda **_: {"events": []})
+        schema = participant_action_schema(self.protocol.request["binding"])
+        kinds = {
+            variant["properties"]["kind"]["const"]: "why" in variant["properties"]
+            for variant in schema["properties"]["action"]["oneOf"]
+        }
+        self.assertEqual(
+            {"silence": True, "expand": False, "message": True, "reply": True, "reaction": True, "privileged": True},
+            kinds,
+        )
+        self.assertIn("Any action but expand may add why", self.protocol.instructions)
+
     def test_a_fence_inside_the_text_is_kept(self):
         action = {"kind": "message", "origin_event_id": "e1", "text": "Try:\n```sh\nmake test\n```"}
         fenced = "```json\n" + json.dumps(self.envelope(action)) + "\n```\nA code block answers it."

@@ -11,7 +11,7 @@ live, integrated, or released status.
 `docs/architecture/v2-selected-design.md` preserve the field inventory selected
 from Aleph Vault at `c834e8c`; the external path is provenance, not a
 contributor dependency. The program-canonical interface names and versions
-(`I-010A`, `I-010D`, `I-010F` at `@1`; `I-010E` at `@3`; `I-010C` at `@5`; `I-010B` at `@6`) are this
+(`I-010A`, `I-010D`, `I-010F` at `@1`; `I-010E` at `@3`; `I-010C` at `@6`; `I-010B` at `@6`) are this
 slice's vocabulary layered over that inventory. A document the selected design
 declares valid that either validator rejects is a contract defect, never
 resolved by narrowing the corpus.
@@ -22,7 +22,7 @@ resolved by narrowing the corpus.
 |---|---|---|
 | `I-010A AttentionRequestV2` | `@1` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
 | `I-010B AttentionDecisionV2` | `@6` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
-| `I-010C ParticipantWakeV2` | `@5` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
+| `I-010C ParticipantWakeV2` | `@6` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
 | `I-010E AttentionReceiptV2` | `@3` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
 | `I-010F PrivilegedActionAuthorizationV2` | `@1` | [`schemas/v2/privileged-action-authorization.schema.json`](../../schemas/v2/privileged-action-authorization.schema.json) |
@@ -265,7 +265,7 @@ closed-union change: `@2` consumers must upgrade before receiving ACK.
   occur before a request ID is assignable); an optional `classifier` audit is
   present only when the error occurred after classifier invocation.
 
-## I-010C ParticipantWakeV2@5
+## I-010C ParticipantWakeV2@6
 
 The normal-turn input materializes `self`, `room`, `actors`, `events`,
 `trigger_event_id`, `coverage`, and optional `continuation` directly —
@@ -316,6 +316,14 @@ newest 64 messages and shows the newest 6 threads within a day, leaves the
 message the turn is about out of the threads and their responses (its reading
 describes it), and forgets the judgments on restart. A message observed but never judged, such as one that
 arrived while the participant was mid-turn, starts no thread.
+
+Since @6 (#94 step 5) any own move may carry `why`: the participant's own
+reason at the time, in its own words, a non-empty string of at most 200
+characters. It comes from the action the participant returned (silence
+included) and is never posted. The reference host keeps it with a silence
+directly, and joins it to a visible move once the room shows that move with
+the same kind, target and words; a move the room never shows keeps its reason
+to itself. A restart forgets the reasons.
 
 ## I-010D ContextContinuationV2@1
 

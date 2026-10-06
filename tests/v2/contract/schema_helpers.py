@@ -99,7 +99,7 @@ SCHEMA_FILES = {
 INTERFACE_VERSIONS = {
     "attention-request": ("I-010A", "AttentionRequestV2", 1),
     "attention-decision": ("I-010B", "AttentionDecisionV2", 6),
-    "participant-wake": ("I-010C", "ParticipantWakeV2", 5),
+    "participant-wake": ("I-010C", "ParticipantWakeV2", 6),
     "context-continuation": ("I-010D", "ContextContinuationV2", 1),
     "attention-receipt": ("I-010E", "AttentionReceiptV2", 3),
     "privileged-action-authorization": (
@@ -1261,10 +1261,10 @@ def _validate_decision_error(doc: dict[str, Any]) -> list[str]:
 
 
 _OWN_MOVE_FIELDS = {
-    "message": (("kind", "event_id", "text"), ("at",)),
-    "reply": (("kind", "event_id", "about_event_id", "text"), ("at",)),
-    "reaction": (("kind", "event_id", "about_event_id", "reaction"), ("at",)),
-    "silence": (("kind", "about_event_id", "at"), ()),
+    "message": (("kind", "event_id", "text"), ("at", "why")),
+    "reply": (("kind", "event_id", "about_event_id", "text"), ("at", "why")),
+    "reaction": (("kind", "event_id", "about_event_id", "reaction"), ("at", "why")),
+    "silence": (("kind", "about_event_id", "at"), ("why",)),
 }
 
 
@@ -1324,6 +1324,8 @@ def _check_wake_memory(errors: "_Errors", path: str, value: Any) -> None:
                 _check_nes(errors, f"{item}.{name}", move[name])
         if "text" in move and (not isinstance(move["text"], str) or len(move["text"]) > 280):
             errors.add(f"{item}.text", "must be a string of at most 280 characters")
+        if "why" in move and (not isinstance(move["why"], str) or not 1 <= len(move["why"]) <= 200):
+            errors.add(f"{item}.why", "must be a non-empty string of at most 200 characters")
 
 
 def validate_participant_wake(doc: Any) -> list[str]:

@@ -349,8 +349,9 @@ class AgentTurnTests(unittest.TestCase):
         record, agent = self.judge("story-across-messages", 2, "WAKE", speaks)
         self.assertEqual(("speak", "agent"), (record["result"], record["by"]))
         self.assertEqual({"visible": "fits", "step1": "ok"}, record["grade"])
-        wake, opportunity = agent.turns[0]
-        self.assertEqual("s5", wake["trigger_event_id"])
+        # The two earlier moments are played first; the judged turn is last.
+        self.assertEqual(["s2", "s4", "s5"], [wake["trigger_event_id"] for wake, _ in agent.turns])
+        wake, opportunity = agent.turns[-1]
         self.assertEqual(["message", "reply", "reaction"], opportunity["permissions"]["ordinary_actions"])
 
     def test_speaking_mid_story_is_a_miss_and_silence_fits(self):
@@ -393,6 +394,46 @@ class AgentTurnTests(unittest.TestCase):
         self.assertEqual({"source": "WAKE", "reading_items": 2}, record["agent"]["attention"])
         self.assertEqual("WAKE", run.turn_source(record))
 
+    def test_earlier_moments_are_played_and_remembered_with_their_reasons(self):
+        # #94 step 5: live, the agent took the earlier turns of this story;
+        # its later turn remembers them, with the reasons it gave.
+        def by_moment(wake):
+            trigger = wake["trigger_event_id"]
+            if trigger == "s2":
+                return {"kind": "silence", "why": "Zoe is mid-story."}
+            if trigger == "s4":
+                return dict(reacts(wake), why="Following along.")
+            return speaks(wake)
+
+        record, agent = self.judge("story-across-messages", 2, "WAKE", by_moment)
+        self.assertEqual(("speak", "fits"), (record["result"], record["grade"]["visible"]))
+        self.assertEqual(
+            [{"event": "s2", "move": "stay_quiet", "why": "Zoe is mid-story."},
+             {"event": "s4", "move": "mhm", "why": "Following along."}],
+            record["memory_replay"]["played"],
+        )
+        wake, _ = agent.turns[-1]
+        self.assertEqual(
+            [("silence", "s2", "Zoe is mid-story."), ("reaction", "s4", "Following along.")],
+            [(move["kind"], move["about_event_id"], move.get("why")) for move in wake["memory"]["own_moves"]],
+        )
+        # The agent's earlier reaction is in the room as its own.
+        self.assertIn("vigil-played-s4-1", [event["id"] for event in wake["events"]])
+        self.assertEqual(["Zoe is mid-story.", "Following along."], record["agent"]["memory_reasons"])
+        # A played turn that fails says so, and the judged turn still runs.
+        def fails_first(wake):
+            if wake["trigger_event_id"] == "s2":
+                raise RuntimeError("agent provider HTTP 429")
+            return speaks(wake)
+
+        failed, _ = self.judge("story-across-messages", 2, "WAKE", fails_first)
+        self.assertIn("HTTP 429", failed["memory_replay"]["played"][0]["error"])
+        self.assertEqual(("speak", False), (failed["result"], failed["provider_error"]))
+        # Without replay, nothing earlier is played.
+        bare, _ = self.judge("story-across-messages", 2, "WAKE", by_moment, replay=False)
+        self.assertNotIn("memory_replay", bare)
+        self.assertNotIn("memory_moves", bare["agent"])
+
     def test_a_paired_turn_is_played_again_without_the_reading_and_never_sent(self):
         def speaks_only_with_a_reading(wake):
             return speaks(wake) if wake["attention"].get("advice") else None
@@ -404,6 +445,7 @@ class AgentTurnTests(unittest.TestCase):
             speaks_only_with_a_reading,
             reading="Zoe has finished her story and asked for the next step",
             paired=True,
+            replay=False,
         )
         self.assertEqual(("speak", "agent", "fits"), (record["result"], record["by"], record["grade"]["visible"]))
         self.assertEqual(2, len(agent.turns))
@@ -416,7 +458,7 @@ class AgentTurnTests(unittest.TestCase):
         self.assertIsNone(unread["action"])
 
     def test_a_turn_without_a_reading_is_not_paired(self):
-        record, agent = self.judge("story-across-messages", 2, "WAKE", speaks, paired=True, reading_items=0)
+        record, agent = self.judge("story-across-messages", 2, "WAKE", speaks, paired=True, reading_items=0, replay=False)
         self.assertEqual(1, len(agent.turns))
         self.assertNotIn("without_reading", record["agent"])
 
@@ -428,7 +470,8 @@ class AgentTurnTests(unittest.TestCase):
                 return super().run_protocol(wake=wake, opportunity=opportunity, expand=expand, cancel=cancel)
 
         record, _ = self.judge(
-            "story-across-messages", 2, "WAKE", speaks, reading="finished", paired=True, agent=FailsSecondTime(speaks)
+            "story-across-messages", 2, "WAKE", speaks, reading="finished", paired=True, agent=FailsSecondTime(speaks),
+            replay=False,
         )
         self.assertEqual(("speak", "agent"), (record["result"], record["by"]))
         self.assertFalse(record["provider_error"])
@@ -550,7 +593,7 @@ class RunTests(unittest.TestCase):
 
     def test_scene_selection(self):
         scenes = load_scenes()
-        self.assertEqual(10, len(run.select_scenes(scenes, "behavior")))
+        self.assertEqual(12, len(run.select_scenes(scenes, "behavior")))
         self.assertEqual(57, len(run.select_scenes(scenes, "litmus")))
         self.assertEqual(5, len(run.select_scenes(scenes, "tool-chrome")))
         self.assertEqual(["did-you-see"], [scene.id for scene in run.select_scenes(scenes, "did-you-see")])
@@ -808,10 +851,17 @@ class UsageTests(unittest.TestCase):
         job = run.Job(scene, 2, scene.participants[0], "x/model@low", 0)
         with mock.patch("urllib.request.urlopen", provider):
             record = run.judge_moment(job, factory, timeout_seconds=5, agent_factory=agents, paired=True)
-        # The four earlier messages were judged first, for the memory.
+        # The four earlier messages were judged first, for the memory, and
+        # the agent played the scene's two earlier moments.
         self.assertEqual(
-            {"judged": 4, "failed": 0, "usage": {"calls": 4, "prompt_tokens": 4800, "completion_tokens": 1200,
-                                                 "reasoning_tokens": 880, "cost": 0.0016, "providers": ["FixtureCloud"]}},
+            {
+                "judged": 4,
+                "failed": 0,
+                "usage": {"calls": 4, "prompt_tokens": 4800, "completion_tokens": 1200,
+                          "reasoning_tokens": 880, "cost": 0.0016, "providers": ["FixtureCloud"]},
+                "played": [{"event": "s2", "move": "stay_quiet"}, {"event": "s4", "move": "stay_quiet"}],
+                "agent_usage": {"calls": 2, "prompt_tokens": 6000, "completion_tokens": 80, "cost": 0.0062},
+            },
             record["memory_replay"],
         )
         self.assertEqual(
@@ -830,9 +880,9 @@ class UsageTests(unittest.TestCase):
             record["agent"]["usage"],
         )
         self.assertEqual(0.0031, record["agent"]["without_reading"]["usage"]["cost"])
-        self.assertEqual({"include": True}, provider.bodies[5]["usage"])
+        self.assertEqual({"include": True}, provider.bodies[7]["usage"])
         # The agent caps its output, so the provider never reserves its whole limit.
-        self.assertEqual(run.AGENT_MAX_TOKENS, provider.bodies[5]["max_tokens"])
+        self.assertEqual(run.AGENT_MAX_TOKENS, provider.bodies[7]["max_tokens"])
 
         summary = run.summarize(
             [scene], ["x/model@low"], [record], [],
@@ -843,12 +893,13 @@ class UsageTests(unittest.TestCase):
             },
         )
         self.assertIn(
-            "| `x/model@low` | 1/1 | 1200 / 300 / 220 | $0.0004 | 4 / $0.0016 | $0.0031 | $0.0051 | $0.0031 | FixtureCloud (1) |",
+            "| `x/model@low` | 1/1 | 1200 / 300 / 220 | $0.0004 | 6 / $0.0078 | $0.0031 | $0.0113 | $0.0031 | FixtureCloud (1) |",
             summary,
         )
-        self.assertIn("Reported cost of the whole run: $0.0082", summary)
+        self.assertIn("Reported cost of the whole run: $0.0144", summary)
         self.assertIn(
-            "- Memory replay: 4 earlier messages judged for the participant's memory over 1 moments; 0 failed\n",
+            "- Memory replay: 4 earlier messages judged for the participant's memory over 1 moments; 0 failed;"
+            " the agent first played 2 earlier moment turn(s) of the same scenes\n",
             summary,
         )
 

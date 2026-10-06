@@ -66,6 +66,18 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- The agent remembers why it made each move (#94, plan step 5, third part).
+  Any action of the shared turn protocol, silence included, may carry `why`:
+  one short sentence in the agent's own words. The host strips it before
+  anything is sent and keeps it in the agent's memory, so a later turn sees
+  "stayed quiet: Zoe asked Castor" and not only "stayed quiet"
+  (`I-010C ParticipantWakeV2@6`, at most 200 characters). A visible move gets
+  its reason once the room shows it with the same words. The Claude Code
+  participant keeps its reasons in its own session transcript and has no
+  `why`. The behavior suite now plays a scene's earlier moments with the
+  agent before the judged one, so its posts, silences and reasons carry
+  forward as they would live, and has two new draft scenes where that
+  matters (`addressee-never-answers`, `said-it-would-check`).
 - The agent remembers who asked what in the room, and which messages
   responded (#94, plan step 5, second part). Step 2 asks two more typed
   questions about each judged message: whether it `asks` someone in the

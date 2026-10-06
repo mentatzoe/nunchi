@@ -654,11 +654,14 @@ def validate_attention_decision(
 # and the threads: asks and the messages that responded to them.
 MEMORY_TEXT_MAX_CHARS = 280
 THREAD_RESPONSES_MAX = 4
+# Since @6 any own move may carry ``why``: the participant's own reason at the
+# time, in its own words, never posted.
+MOVE_REASON_MAX_CHARS = 200
 _OWN_MOVE_FIELDS = {
-    "message": (("kind", "event_id", "text"), ("at",)),
-    "reply": (("kind", "event_id", "about_event_id", "text"), ("at",)),
-    "reaction": (("kind", "event_id", "about_event_id", "reaction"), ("at",)),
-    "silence": (("kind", "about_event_id", "at"), ()),
+    "message": (("kind", "event_id", "text"), ("at", "why")),
+    "reply": (("kind", "event_id", "about_event_id", "text"), ("at", "why")),
+    "reaction": (("kind", "event_id", "about_event_id", "reaction"), ("at", "why")),
+    "silence": (("kind", "about_event_id", "at"), ("why",)),
 }
 
 
@@ -713,6 +716,10 @@ def _memory(value: Any, path: str) -> dict[str, Any]:
                 _nes(move[name], f"{item}.{name}")
         if "text" in move:
             _memory_text(move["text"], f"{item}.text")
+        if "why" in move:
+            _nes(move["why"], f"{item}.why")
+            if len(move["why"]) > MOVE_REASON_MAX_CHARS:
+                _fail(f"{item}.why", f"must be at most {MOVE_REASON_MAX_CHARS} characters")
     return doc
 
 

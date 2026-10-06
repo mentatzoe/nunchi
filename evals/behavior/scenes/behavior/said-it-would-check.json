@@ -1,0 +1,52 @@
+{
+  "id": "said-it-would-check",
+  "title": "Asked to check something, then asked for news",
+  "source": "docs/behavior.md",
+  "review": "draft: written from docs/behavior.md; ranges need Zoe's review",
+  "platform": "discord",
+  "participants": ["vigil"],
+  "actors": {
+    "zoe": {"display_name": "Zoe", "kind": "human"},
+    "sam": {"display_name": "Sam", "kind": "human"},
+    "ci": {"display_name": "CI", "kind": "bot"}
+  },
+  "events": [
+    {"id": "q1", "author": "zoe", "at": "-50m", "mentions": ["vigil"],
+     "text": "Vigil, can you keep an eye on the nightly build and tell me when it finishes?"},
+    {"id": "s1", "author": "sam", "at": "-30m",
+     "text": "I'm heading out for lunch, back in an hour."},
+    {"id": "c1", "author": "ci", "at": "-5m",
+     "text": "nightly #812: passed in 42m (2,311 tests, 0 failures)"},
+    {"id": "q2", "author": "zoe", "at": "0s",
+     "text": "Any news on the nightly?"}
+  ],
+  "moments": [
+    {
+      "label": "Zoe asks Vigil to watch the build",
+      "event": "q1",
+      "step1": "pass",
+      "notice": [
+        {"fact": "Zoe asked Vigil directly to watch the nightly and report back", "events": ["q1"]}
+      ],
+      "fitting": ["speak", "mhm"],
+      "misses": [
+        {"move": "stay_quiet", "why": "Zoe asked Vigil directly; silence leaves her unsure it was heard"}
+      ]
+    },
+    {
+      "label": "Zoe asks for news after the build passed",
+      "event": "q2",
+      "step1": "pass",
+      "notice": [
+        {"fact": "Vigil was asked to report on the nightly", "events": ["q1"]},
+        {"fact": "The nightly passed", "events": ["c1"]},
+        {"fact": "Zoe asks for news", "events": ["q2"]}
+      ],
+      "fitting": ["speak"],
+      "misses": [
+        {"move": "stay_quiet", "why": "Vigil was asked to report and the build has finished"},
+        {"move": "mhm", "why": "a nod doesn't say the build passed"}
+      ]
+    }
+  ]
+}
