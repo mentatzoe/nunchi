@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass
 import threading
@@ -118,7 +119,9 @@ def prepare_opportunity(
         acknowledge = False
     else:
         admit = (
-            attention.policy.error_action == "WAKE"
+            # An outcome turn reaches the participant even when attention
+            # failed: it is the one who reports what its action did.
+            (attention.policy.error_action == "WAKE" or occasion == "outcome")
             and decision["error"]["code"] != "cancelled"
         )
         effective = "ERROR_FALLBACK" if admit else None
@@ -187,6 +190,12 @@ class NunchiV2Pipeline:
     for ``look_again_seconds``, ``look_again`` judges the same message again
     as a ``pause`` and the participant may get a turn with a fresh reading.
     It looks again once per quiet stretch.
+
+    Outcome turns (Zoe, #90 decision 2 on #94): when an approved action
+    settles after the participant's turn about it ended, ``outcome_arrived``
+    queues it, and ``report_outcomes`` gives the participant a turn about the
+    message it was proposed for, with ``occasion: "outcome"``, so the
+    participant is the one who tells the room. That turn always reaches it.
     """
 
     def __init__(
@@ -220,6 +229,8 @@ class NunchiV2Pipeline:
         self._look_again: tuple[str, float] | None = None
         # The newest eligible event delivered: only it can be looked at again.
         self._newest_eligible: str | None = None
+        # Settled proposals whose outcome turn has not run yet, oldest first.
+        self._outcomes: deque[dict[str, Any]] = deque()
 
     def handle_delivery(
         self,
@@ -296,9 +307,59 @@ class NunchiV2Pipeline:
             return None
         return self.run_opportunities(token, occasion="pause")
 
+    def outcome_arrived(self, proposal: Mapping[str, Any]) -> None:
+        """Queue the outcome turn for one settled proposal."""
+
+        with self._lifecycle_lock:
+            self._outcomes.append(
+                {"proposal_id": proposal["proposal_id"], "about_event_id": proposal["about_event_id"]}
+            )
+
+    def outcomes_waiting(self) -> bool:
+        with self._lifecycle_lock:
+            return bool(self._outcomes)
+
+    def report_outcomes(self) -> tuple[OpportunityOutcome, ...]:
+        """Run the queued outcome turns while nothing else is running.
+
+        Each turn is about the message the action was proposed for, or,
+        once that message has left the window, the newest retained event by
+        someone else. When another opportunity is running, the rest wait for
+        the next call.
+        """
+
+        results: list[OpportunityOutcome] = []
+        own = self.observation.binding.actor_id
+        while True:
+            with self._lifecycle_lock:
+                if not self._outcomes:
+                    break
+                about = self._outcomes[0]["about_event_id"]
+            retained = self.observation.retained_events()
+            others = [event["id"] for event in retained if event.get("author_id") != own]
+            anchor = about if any(event["id"] == about for event in retained) else (others[-1] if others else None)
+            if anchor is None:
+                # Nothing left to anchor a turn on; the next turn's memory
+                # still shows the outcome.
+                with self._lifecycle_lock:
+                    if self._outcomes:
+                        self._outcomes.popleft()
+                continue
+            token = self.scheduler.offer(anchor, only_if_idle=True)
+            if token is None:
+                break
+            with self._lifecycle_lock:
+                if self._outcomes:
+                    self._outcomes.popleft()
+            results.extend(self.run_opportunities(token, occasion="outcome"))
+        return tuple(results)
+
     def _arm_look_again(self, token: Any, decision: Mapping[str, Any], occasion: str | None) -> None:
         """Arm a look again after a judgment to wait; any other judgment disarms."""
 
+        if occasion == "outcome":
+            # A turn about an action's outcome says nothing about the quiet.
+            return
         answers = decision.get("answers") if decision.get("status") == "ok" else None
         with self._lifecycle_lock:
             if (
@@ -318,7 +379,7 @@ class NunchiV2Pipeline:
         """A look again whose message is no longer the newest is not run."""
 
         with self._lifecycle_lock:
-            return occasion is not None and token.anchor_event_id != self._newest_eligible
+            return occasion == "pause" and token.anchor_event_id != self._newest_eligible
 
     def run_opportunities(
         self, token: Any, *, occasion: str | None = None
@@ -339,13 +400,14 @@ class NunchiV2Pipeline:
                 token = self.scheduler.complete(token)
                 continue
             deadline = time.monotonic() + self.host.host_timeout_seconds
+            turn_occasion, occasion = occasion, None
             prepared = prepare_opportunity(
                 observation=self.observation,
                 attention=self.attention,
                 scheduler=self.scheduler,
                 token=token,
                 deadline=deadline,
-                occasion=occasion,
+                occasion=turn_occasion,
             )
             if prepared is None:
                 break
@@ -353,8 +415,7 @@ class NunchiV2Pipeline:
             decision = prepared.decision
             if request is not None and decision is not None:
                 self._remember(request, decision)
-                self._arm_look_again(token, decision, occasion)
-            occasion = None
+                self._arm_look_again(token, decision, turn_occasion)
             if request is None or decision is None:
                 opportunities.append(
                     OpportunityOutcome(
@@ -380,7 +441,9 @@ class NunchiV2Pipeline:
                     request=request,
                     decision=decision,
                     token=token,
-                    error_wake=self.attention.policy.error_action == "WAKE",
+                    # An outcome turn reaches the participant even when
+                    # attention failed.
+                    error_wake=self.attention.policy.error_action == "WAKE" or turn_occasion == "outcome",
                     deadline=deadline,
                 )
                 if prepared.wake is not None
@@ -434,6 +497,9 @@ class NunchiV2Pipeline:
     def cancel(self) -> None:
         with self._lifecycle_lock:
             self._look_again = None
+            # A dropped outcome turn still reaches the participant's next
+            # turn through its memory.
+            self._outcomes.clear()
         self.scheduler.cancel()
         privileged = self.host.privileged
         if privileged is not None and hasattr(privileged, "cancel"):
@@ -444,6 +510,7 @@ class NunchiV2Pipeline:
         with self._lifecycle_lock:
             self._look_again = None
             self._newest_eligible = None
+            self._outcomes.clear()
             self.scheduler.restart()
             self.observation.restart()
             self.host.memory.restart()
@@ -469,6 +536,9 @@ class AsyncDeliveryLane:
         self._errors: list[str] = []
         # The timer for the pipeline's armed look again, if any.
         self._look_again_timer: threading.Timer | None = None
+        privileged = pipeline.host.privileged
+        if privileged is not None and hasattr(privileged, "add_outcome_listener"):
+            privileged.add_outcome_listener(self.outcome_arrived)
 
     def submit(
         self,
@@ -505,6 +575,7 @@ class AsyncDeliveryLane:
     def _run(self, token: Any) -> None:
         try:
             self.pipeline.run_opportunities(token)
+            self.pipeline.report_outcomes()
         except BaseException:
             self.pipeline.cancel()
             with self._lock:
@@ -515,6 +586,49 @@ class AsyncDeliveryLane:
                 if not self._workers:
                     self._idle.set()
             self._schedule_look_again()
+            self._start_outcomes()
+
+    def outcome_arrived(self, proposal: Mapping[str, Any]) -> None:
+        """An approved action settled: give the participant its outcome turn."""
+
+        self.pipeline.outcome_arrived(proposal)
+        self._start_outcomes()
+
+    def _start_outcomes(self) -> None:
+        """Run waiting outcome turns on a worker, unless one is already running."""
+
+        with self._lock:
+            if (
+                self._workers
+                or self.pipeline.scheduler.active
+                or not self.pipeline.outcomes_waiting()
+            ):
+                # A running worker reports them when its turn ends.
+                return
+            self._idle.clear()
+            worker = threading.Thread(
+                target=self._run_outcomes,
+                name="nunchi-outcome-lane",
+                daemon=True,
+            )
+            self._workers.add(worker)
+            worker.start()
+
+    def _run_outcomes(self) -> None:
+        try:
+            self.pipeline.report_outcomes()
+        except BaseException:
+            self.pipeline.cancel()
+            with self._lock:
+                self._errors.append("outcome turn failed")
+        finally:
+            with self._lock:
+                self._workers.discard(threading.current_thread())
+                if not self._workers:
+                    self._idle.set()
+            self._schedule_look_again()
+            # One may have arrived just as this worker finished.
+            self._start_outcomes()
 
     def _schedule_look_again(self) -> None:
         """Wake when the armed look again is due; a newer arming replaces it."""
@@ -539,6 +653,7 @@ class AsyncDeliveryLane:
             self._workers.add(worker)
         try:
             self.pipeline.look_again()
+            self.pipeline.report_outcomes()
         except BaseException:
             self.pipeline.cancel()
             with self._lock:
@@ -550,6 +665,7 @@ class AsyncDeliveryLane:
                     self._idle.set()
             # Messages that arrived during it may have armed a new one.
             self._schedule_look_again()
+            self._start_outcomes()
 
     def drain(self, timeout: float | None = None) -> bool:
         return self._idle.wait(timeout)

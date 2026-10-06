@@ -426,6 +426,23 @@ class AgentTurnTests(unittest.TestCase):
         self.assertEqual("Zoe asked Castor; waiting for him.", silence["why"])
         self.assertEqual(300, wake["pace"]["judged_seconds_ago"])
 
+    def test_the_agent_reports_an_approved_action_after_the_pause(self):
+        # #90 decision 2 on #94: the agent says it is done, not Nunchi.
+        def reports(wake):
+            (proposal,) = [move for move in wake["memory"]["own_moves"] if move["kind"] == "proposal"]
+            self.assertEqual(("outcome", "done", "z1"), (wake["occasion"], proposal["status"], proposal["about_event_id"]))
+            return speaks(wake)
+
+        for disposition in ("WAKE", "SUPPRESS"):
+            with self.subTest(disposition=disposition):
+                record, agent = self.judge("approval-comes-through", 0, disposition, reports)
+                self.assertTrue(record["outcome_turn"])
+                self.assertEqual(("speak", "fits"), (record["result"], record["grade"]["visible"]))
+                wake, _ = agent.turns[-1]
+                self.assertEqual("z1", wake["trigger_event_id"])
+                # Zoe asked 10 minutes before the scene's end, then 10 quiet minutes passed.
+                self.assertEqual(20 * 60, wake["pace"]["judged_seconds_ago"])
+
     def test_no_look_again_after_the_agent_already_spoke(self):
         record, agent = self.judge("addressee-first", 1, "DEFER", speaks)
         self.assertFalse(record["looked_again"])
@@ -633,7 +650,7 @@ class RunTests(unittest.TestCase):
 
     def test_scene_selection(self):
         scenes = load_scenes()
-        self.assertEqual(13, len(run.select_scenes(scenes, "behavior")))
+        self.assertEqual(14, len(run.select_scenes(scenes, "behavior")))
         self.assertEqual(57, len(run.select_scenes(scenes, "litmus")))
         self.assertEqual(5, len(run.select_scenes(scenes, "tool-chrome")))
         self.assertEqual(["did-you-see"], [scene.id for scene in run.select_scenes(scenes, "did-you-see")])

@@ -1,5 +1,5 @@
 """Contract tests for ``I-010D ContextContinuationV2@1`` and
-``I-010E AttentionReceiptV2@3`` (slice 010, T005).
+``I-010E AttentionReceiptV2@4`` (slice 010, T005).
 
 Red cases cover host-secret leakage, fetch-time binding validation
 (expired-handle rejection and cross-binding cursor reuse,
@@ -373,6 +373,10 @@ class ReceiptRecordCases(unittest.TestCase):
             make_receipt("attention", body=widened),
             "valid",
         )
+        # @4 (#94 step 6): an outcome turn widens ACK too.
+        outcome = deepcopy(widened)
+        outcome["routing_audit"]["override_cause"] = "outcome-turn"
+        assert_schema_verdict(self, "attention-receipt", make_receipt("attention", body=outcome), "valid")
         wrong_ack_cause = deepcopy(widened)
         wrong_ack_cause["routing_audit"]["override_cause"] = "suppression-disabled"
         assert_schema_verdict(

@@ -1,5 +1,5 @@
-"""Contract tests for ``I-010B AttentionDecisionV2@6`` (slice 010, T003;
-reworked by T028 after rejection R2; @5 for #94 step 4, @6 for step 5).
+"""Contract tests for ``I-010B AttentionDecisionV2@7`` (slice 010, T003;
+reworked by T028 after rejection R2; @5 for #94 step 4, @6 for step 5, @7 for step 6).
 
 @5 (Zoe, 2026-10-05) grounds every ``status: ok`` decision in the model's
 typed answers (``answers``): exactly the step 1 and step 2 questions, each a
@@ -138,6 +138,24 @@ class TransitionMatrixCases(unittest.TestCase):
         doc = make_decision_ok("DEFER", "DEFER", "classifier-defer")
         doc["routing_audit"]["override_cause"] = "margin"
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
+
+
+class OutcomeTurnCases(unittest.TestCase):
+    """@7 (#94 step 6): an outcome turn widens SUPPRESS or ACK to DEFER."""
+
+    def test_outcome_turn_is_a_policy_widening_of_suppress_or_ack(self):
+        for classifier in ("SUPPRESS", "ACK"):
+            with self.subTest(classifier=classifier):
+                doc = make_decision_ok(classifier, "DEFER", "policy-defer")
+                doc["routing_audit"]["override_cause"] = "outcome-turn"
+                assert_schema_verdict(self, "attention-decision", doc, "valid")
+        # It is a policy widening only, never a capability or margin one.
+        for valve in ("capability-defer", "margin-defer", "none"):
+            with self.subTest(valve=valve):
+                doc = make_decision_ok("SUPPRESS", "DEFER", "margin-defer")
+                doc["routing_audit"]["valve"] = valve
+                doc["routing_audit"]["override_cause"] = "outcome-turn"
+                assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
 
 class RoutingAuditCases(unittest.TestCase):

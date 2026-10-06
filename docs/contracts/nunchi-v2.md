@@ -11,7 +11,7 @@ live, integrated, or released status.
 `docs/architecture/v2-selected-design.md` preserve the field inventory selected
 from Aleph Vault at `c834e8c`; the external path is provenance, not a
 contributor dependency. The program-canonical interface names and versions
-(`I-010D`, `I-010F` at `@1`; `I-010A` at `@3`; `I-010E` at `@3`; `I-010C` at `@9`; `I-010B` at `@6`) are this
+(`I-010D`, `I-010F` at `@1`; `I-010A` at `@4`; `I-010E` at `@4`; `I-010C` at `@10`; `I-010B` at `@7`) are this
 slice's vocabulary layered over that inventory. A document the selected design
 declares valid that either validator rejects is a contract defect, never
 resolved by narrowing the corpus.
@@ -20,11 +20,11 @@ resolved by narrowing the corpus.
 
 | Interface | Version | Schema path |
 |---|---|---|
-| `I-010A AttentionRequestV2` | `@3` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
-| `I-010B AttentionDecisionV2` | `@6` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
-| `I-010C ParticipantWakeV2` | `@9` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
+| `I-010A AttentionRequestV2` | `@4` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
+| `I-010B AttentionDecisionV2` | `@7` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
+| `I-010C ParticipantWakeV2` | `@10` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
-| `I-010E AttentionReceiptV2` | `@3` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
+| `I-010E AttentionReceiptV2` | `@4` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
 | `I-010F PrivilegedActionAuthorizationV2` | `@1` | [`schemas/v2/privileged-action-authorization.schema.json`](../../schemas/v2/privileged-action-authorization.schema.json) |
 
 ### Privileged-action boundary
@@ -111,7 +111,7 @@ python3 -m unittest tests.v2.contract.test_privileged_action_authorization
 uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
 ```
 
-## I-010A AttentionRequestV2@3
+## I-010A AttentionRequestV2@4
 
 A truthful attention request represents:
 
@@ -176,9 +176,14 @@ A truthful attention request represents:
   replay, as it arrived). `pause` means an earlier judgment of the same
   trigger read it as a moment to wait on, and the room stayed quiet since,
   so it is judged again as it stands now. `pace.judged_seconds_ago` then
-  says how long the quiet has lasted.
+  says how long the quiet has lasted. Since @4, `outcome` means an action
+  the participant proposed was approved and has finished since its turn
+  about it ended (Zoe, #90 decision 2 on #94). The trigger is the message
+  the action was proposed about, or the newest retained event once that
+  message has left the window. The participant gets a turn to tell the
+  room itself, whatever the judgment reads (I-010B@7 `outcome-turn`).
 
-## I-010B AttentionDecisionV2@6
+## I-010B AttentionDecisionV2@7
 
 A tagged host-facing union on `status`:
 
@@ -199,10 +204,10 @@ A tagged host-facing union on `status`:
   |---|---|---|
   | `WAKE -> WAKE` | `none` | `none` |
   | `ACK -> ACK` | `none` | `none` |
-  | `ACK -> DEFER` | `policy-defer` | `ack-disabled` |
+  | `ACK -> DEFER` | `policy-defer` | `ack-disabled`; `outcome-turn` (@7) |
   | `ACK -> DEFER` | `capability-defer` | `ack-unsupported` |
   | `DEFER -> DEFER` | `classifier-defer` | `none` |
-  | `SUPPRESS -> DEFER` | `margin-defer` or `policy-defer` | `margin` (margin valve); `suppression-disabled` or `recoverability-unproven` (policy valve) |
+  | `SUPPRESS -> DEFER` | `margin-defer` or `policy-defer` | `margin` (margin valve); `suppression-disabled`, `recoverability-unproven`, or `outcome-turn` (@7) (policy valve) |
   | `SUPPRESS -> SUPPRESS` | `none` | `none` |
 
   Until @3, only `WAKE -> WAKE` could carry `attention_advice`. Zoe,
@@ -218,7 +223,8 @@ A tagged host-facing union on `status`:
   recording the applied `valve` (`none`, `classifier-defer`,
   `margin-defer`, `policy-defer`, or `capability-defer`), the
   `override_cause` (`none`, `margin`, `suppression-disabled`,
-  `recoverability-unproven`, `ack-disabled`, or `ack-unsupported`), the
+  `recoverability-unproven`, `ack-disabled`, `ack-unsupported`, or, since
+  @7, `outcome-turn`), the
   `margin_status` (`active` or `retired`, recorded on every ok decision),
   the `effective_margin`, and the trusted `margin_source`. The
   cross-field rules are part of the contract: a margin counts as
@@ -233,6 +239,12 @@ A tagged host-facing union on `status`:
   decision (optional there); valves `none`/`classifier-defer` pair with
   override cause `none`; `policy-defer` pairs with a trusted policy cause;
   and `capability-defer` pairs only with `ack-unsupported`.
+- **`outcome-turn` (@7, #94 step 6)** — on a request whose `occasion` is
+  `outcome`, a SUPPRESS or ACK judgment widens to DEFER through
+  `policy-defer` with this cause, ahead of every other valve: the
+  participant reports what its approved action did, so the turn always
+  reaches it, with the reading as advice. Only such a request may use it,
+  and on such a request every widening uses it (runtime-adapter-only).
 - **`ack`** — required exactly when the delegated classifier selects ACK. It
   records the configured reaction, trusted ACK-policy provenance, and current
   authenticated native `permissions_revision`. ACK can remain ACK only while
@@ -282,7 +294,7 @@ closed-union change: `@2` consumers must upgrade before receiving ACK.
   occur before a request ID is assignable); an optional `classifier` audit is
   present only when the error occurred after classifier invocation.
 
-## I-010C ParticipantWakeV2@9
+## I-010C ParticipantWakeV2@10
 
 The normal-turn input materializes `self`, `room`, `actors`, `events`,
 `trigger_event_id`, `coverage`, and optional `continuation` directly —
@@ -355,7 +367,10 @@ request's, computed for the fresh view the turn is built from.
 
 Since @9 (#94 step 6) a wake may carry `occasion`, copied from the attention
 request it follows: `pause` means the turn comes from a look again after the
-room stayed quiet, not from a new message.
+room stayed quiet, not from a new message. Since @10 it may also be
+`outcome`: an action the participant proposed was approved and has finished,
+and its `proposal` own move says how it ended. Nunchi never reports the
+outcome in the room; the participant does, if it still helps.
 
 ## I-010D ContextContinuationV2@1
 
@@ -388,7 +403,7 @@ independently against the issuing continuation capability's exact
 does not establish correct binding or bounded authorization — see the
 runtime-adapter-only rules below.
 
-## I-010E AttentionReceiptV2@3
+## I-010E AttentionReceiptV2@4
 
 Immutable, append-only stage records correlated by `request_id`, in the
 canonical order `observation -> attention -> participant-host ->
@@ -422,7 +437,8 @@ and does not serve as general policy provenance.
 authority audit. An ACK host record has `invoked: false`; the following
 transport record alone reports whether the one reaction was sent, failed,
 unknown, or unavailable. `@2` consumers must upgrade before receiving ACK
-receipts.
+receipts. `@4` (#94 step 6) lets the attention stage record the I-010B@7
+`outcome-turn` widening.
 
 The stage-to-writer binding is part of the public per-record contract
 (FR-010): each stage names its single directly observing owner per the

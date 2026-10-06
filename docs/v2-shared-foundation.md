@@ -14,10 +14,10 @@ The changed portable interfaces are:
 
 | Interface | Version | Change |
 |---|---:|---|
-| `I-010A AttentionRequestV2` | `@3` | the room's pace at the snapshot: the current time, the quiet before the judged message, its author's run, and the participant's own share (@2); the `pause` occasion, a look again after the room stayed quiet (@3) |
-| `I-010B AttentionDecisionV2` | `@6` | first-class `ACK`, ACK audit, and safe ACK-to-DEFER widening (@3); the reading of the room on every judgment (@4); the model's typed answers in place of the legacy confidence vector (@5); the `asks` answer and the `responds_to` pointer (@6) |
-| `I-010C ParticipantWakeV2` | `@8` | `ACK` wake/effect source without a reading (@2); the reading on `DEFER` wakes and `judged_through_event_id` (@3); the participant's own recent moves in `memory` (@4); the threads, who asked what and which messages responded, in `memory` (@5); the participant's own reason with each move (@6); its privileged proposals and what became of them (@7); the room's pace for the turn (@8); the `pause` occasion of a turn from a look again (@9) |
-| `I-010E AttentionReceiptV2` | `@3` | ACK disposition, authority audit, and ACK host source |
+| `I-010A AttentionRequestV2` | `@4` | the room's pace at the snapshot: the current time, the quiet before the judged message, its author's run, and the participant's own share (@2); the `pause` occasion, a look again after the room stayed quiet (@3); the `outcome` occasion, a turn for an approved action that finished (@4) |
+| `I-010B AttentionDecisionV2` | `@7` | first-class `ACK`, ACK audit, and safe ACK-to-DEFER widening (@3); the reading of the room on every judgment (@4); the model's typed answers in place of the legacy confidence vector (@5); the `asks` answer and the `responds_to` pointer (@6); the `outcome-turn` widening, so an outcome turn always reaches the participant (@7) |
+| `I-010C ParticipantWakeV2` | `@10` | `ACK` wake/effect source without a reading (@2); the reading on `DEFER` wakes and `judged_through_event_id` (@3); the participant's own recent moves in `memory` (@4); the threads, who asked what and which messages responded, in `memory` (@5); the participant's own reason with each move (@6); its privileged proposals and what became of them (@7); the room's pace for the turn (@8); the `pause` occasion of a turn from a look again (@9); the `outcome` occasion of a turn for an approved action that finished (@10) |
+| `I-010E AttentionReceiptV2` | `@4` | ACK disposition, authority audit, and ACK host source (@3); the `outcome-turn` widening (@4) |
 | `I-030A AttentionEngineV2` | `@2` | shared ACK selection and capability/policy widening |
 | `I-040A ParticipantTurnHostV2` | `@2` | one core-owned participant protocol and durable ACK commit path |
 

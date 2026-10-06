@@ -294,6 +294,43 @@ class RecordingEngine(AttentionEngine):
         return decision
 
 
+class SceneProposal:
+    """The participant's one proposal in a scene with an outcome moment.
+
+    It stands in for the authorization coordinator: the scene's own events
+    say the participant asked for approval, the turn's memory shows the
+    proposal awaiting it, and after the pause it settles as the scene says.
+    The participant cannot make or withdraw another one here.
+    """
+
+    def __init__(self, outcome: Mapping[str, str], at: datetime | None) -> None:
+        self.record = {
+            "proposal_id": "authorization:scene",
+            "about_event_id": outcome["about"],
+            "capability": outcome["capability"],
+            "status": "awaiting_approval",
+            "at": (at or datetime.now(timezone.utc)).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        }
+
+    def proposals(self) -> tuple[dict[str, Any], ...]:
+        return (dict(self.record),)
+
+    def settle(self, status: str) -> dict[str, Any]:
+        self.record["status"] = status
+        return dict(self.record)
+
+    def execute_proposal(self, **_: Any) -> TransportResult:
+        return TransportResult("failed", "this scene's proposal is scripted")
+
+    def withdraw(self, **_: Any) -> TransportResult:
+        return TransportResult("failed", "this scene's proposal is scripted")
+
+    def cancel(self) -> None:
+        pass
+
+    restart = cancel
+
+
 class EvalTransport:
     """Records every visible move: Nunchi's ACK and the agent's own actions."""
 
@@ -691,12 +728,20 @@ def judge_moment(
         else None
     )
     scheduler = ConversationOpportunityScheduler(f"{participant}:eval:{scene.id}")
+    scripted = None
+    if moment.outcome is not None:
+        about = scene.events[scene.event_index(moment.outcome["about"])]
+        scripted = SceneProposal(
+            moment.outcome,
+            now - timedelta(seconds=parse_offset(about["at"]) - end_offset) if "at" in about else None,
+        )
     host = ParticipantTurnHost(
         observation=observation,
         participant=agent if agent is not None else _not_simulated,
         transport=transport,
         scheduler=scheduler,
         receipts=receipts,
+        privileged=scripted,
         # A paired turn plays the agent twice before the real action is sent.
         participant_timeout_seconds=timeout_seconds + AGENT_TIMEOUT_SECONDS * (2 if paired else 1),
         ack_policy=ack_policy,
@@ -717,7 +762,7 @@ def judge_moment(
         if replay and agent is not None
         else set()
     )
-    if moment.is_pause:
+    if moment.is_pause and moment.outcome is None:
         # The message before the pause is judged and played as it was live:
         # only that judgment can arm the look again.
         played_moments.add(moment.pause_after)
@@ -821,7 +866,14 @@ def judge_moment(
     scene_time[0] = now
     if agent is not None and moment.during_turn:
         agent.arrive = arrive
-    if moment.is_pause:
+    if moment.outcome is not None:
+        # After the pause the approved action settles, and the participant
+        # gets its turn to say so (#90 decision 2 on #94).
+        scene_time[0] = now + timedelta(seconds=moment.pause_seconds)
+        pipeline.outcome_arrived(scripted.settle(moment.outcome["status"]))
+        outcomes = pipeline.report_outcomes()
+        record["outcome_turn"] = bool(outcomes)
+    elif moment.is_pause:
         scene_time[0] = now + timedelta(seconds=moment.pause_seconds)
         outcomes = pipeline.look_again(now=True)
         record["looked_again"] = outcomes is not None

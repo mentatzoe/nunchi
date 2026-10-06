@@ -41,7 +41,9 @@ def proposal(origin="e1"):
     }
 
 
-class ProposalOutcomeTests(unittest.TestCase):
+class ProposalFixture:
+    """A room with Zoe and Vigil, and a coordinator for Vigil's proposals."""
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
@@ -97,6 +99,8 @@ class ProposalOutcomeTests(unittest.TestCase):
         self.assertEqual("awaiting_approval", record["status"])
         return record
 
+
+class ProposalOutcomeTests(ProposalFixture, unittest.TestCase):
     def test_an_approved_and_done_proposal_reaches_the_next_turn(self):
         coordinator = self.coordinator()
         record = self.propose(coordinator)
@@ -200,9 +204,10 @@ class ProposalOutcomeTests(unittest.TestCase):
         allowed["permissions"]["privileged_proposals"] = True
         denied = opportunity()
         denied["permissions"]["privileged_proposals"] = False
-        withdraw = "kind withdraw with a proposal_id withdraws"
-        self.assertIn(withdraw, ParticipantTurnProtocol(profile=PROFILE, wake=wake(), opportunity=allowed).instructions)
-        self.assertNotIn(withdraw, ParticipantTurnProtocol(profile=PROFILE, wake=wake(), opportunity=denied).instructions)
+        for sentence in ("kind withdraw with a proposal_id withdraws", "When occasion is outcome"):
+            with self.subTest(sentence=sentence):
+                self.assertIn(sentence, ParticipantTurnProtocol(profile=PROFILE, wake=wake(), opportunity=allowed).instructions)
+                self.assertNotIn(sentence, ParticipantTurnProtocol(profile=PROFILE, wake=wake(), opportunity=denied).instructions)
 
     def test_a_tool_host_withdraws_through_its_own_tool(self):
         request = {

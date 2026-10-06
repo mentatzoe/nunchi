@@ -457,9 +457,22 @@ def _pace_notes(projection: Mapping[str, Any]) -> list[dict[str, Any]]:
     return notes
 
 
-def _pause_note(projection: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """On a look again, how long the room has been quiet (#94 step 6)."""
+def _occasion_note(projection: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Why this message is judged without a new one (#94 step 6).
 
+    On a look again after a pause, how long the room has been quiet; on an
+    outcome turn, that the participant's approved action has finished.
+    """
+
+    if projection.get("occasion") == "outcome":
+        name = participant_name(projection)
+        return [
+            {
+                "note": f"An operator approved an action {name} proposed, and it has settled. "
+                f"Nobody in the room has been told how it went; {name} has a turn to tell them.",
+                "evidence_event_ids": [projection["trigger_event_id"]],
+            }
+        ]
     since = (projection.get("pace") or {}).get("judged_seconds_ago")
     if projection.get("occasion") != "pause" or not isinstance(since, int):
         return []
@@ -496,7 +509,7 @@ def fact_notes(answers: Mapping[str, Any], projection: Mapping[str, Any]) -> lis
     else:
         text = f"{_ADDRESSEE_NOTES[who]} ({addressee[who]:.2f})."
     notes.append({"note": text, "evidence_event_ids": [trigger]})
-    notes += _pause_note(projection)
+    notes += _occasion_note(projection)
     if answers["conversation"] < 0.5:
         notes.append(
             {

@@ -157,11 +157,39 @@ class PromptAndReadingTests(unittest.TestCase):
         notes = [item["note"] for item in fact_notes(answers_leaning("WAKE"), later)]
         self.assertFalse([note for note in notes if note.startswith("Nothing new")])
 
-    def test_every_prompt_explains_a_look_again(self):
-        self.assertIn("When observation.occasion is pause", participant_attention_prompt(PROFILE))
+    def test_every_prompt_explains_a_look_again_and_an_outcome_turn(self):
+        # Attention hears what an occasion means only when the judgment has one.
+        ordinary = participant_attention_prompt(PROFILE)
+        self.assertNotIn("occasion", ordinary)
+        pause = participant_attention_prompt(PROFILE, occasion="pause")
+        self.assertIn("This judgment has observation.occasion pause", pause)
+        self.assertNotIn("outcome", pause)
+        outcome = participant_attention_prompt(PROFILE, occasion="outcome")
+        self.assertIn("This judgment has observation.occasion outcome", outcome)
+        self.assertIn("Nobody in the room has been told how it went, and vigil gets a turn", outcome)
         for prompt in (participant_turn_prompt(PROFILE), participant_tool_turn_prompt(PROFILE, tools={"send": "send"})):
             with self.subTest(prompt=prompt[:30]):
                 self.assertIn("When occasion is pause, no new message arrived", prompt)
+                # Only a participant that may propose hears about outcome turns.
+                self.assertNotIn("When occasion is outcome", prompt)
+        proposing = participant_tool_turn_prompt(PROFILE, tools={"send": "send", "propose": "propose"})
+        self.assertIn("When occasion is outcome, an operator approved an action you proposed", proposing)
+        self.assertIn("Nunchi never says it for you", proposing)
+        # Each way it can end is named, so the agent's words match it.
+        for status in ("done means it ran", "failed means it was approved and tried", "unknown means", "denied means"):
+            self.assertIn(status, proposing)
+        self.assertIn("The approval was given in every case; only denied means the action was refused.", proposing)
+
+    def test_an_outcome_turn_says_the_action_finished(self):
+        pace = {"now": "2026-10-06T09:05:00.000Z", "window_messages": 1, "own_messages": 0, "judged_seconds_ago": 900}
+        projection = dict(self.projection(pace), occasion="outcome")
+        notes = [item["note"] for item in fact_notes(answers_leaning("DEFER"), projection)]
+        self.assertEqual(
+            "An operator approved an action Vigil proposed, and it has settled. "
+            "Nobody in the room has been told how it went; Vigil has a turn to tell them.",
+            notes[1],
+        )
+        self.assertFalse([note for note in notes if note.startswith("Nothing new")])
 
 
 if __name__ == "__main__":  # pragma: no cover

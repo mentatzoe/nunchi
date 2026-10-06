@@ -130,6 +130,24 @@ class ToolRolesAndPromptTests(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertIn('"trigger_event_id":"e2"', match.group(1))
 
+    def test_an_outcome_turn_says_plainly_how_the_action_ended(self):
+        request = _request()
+        request["wake"] = dict(
+            request["wake"],
+            occasion="outcome",
+            memory={"own_moves": [{
+                "kind": "proposal", "proposal_id": "authorization:1", "about_event_id": "e2",
+                "capability": "workspace.file.write", "status": "unknown", "at": "2026-10-06T09:00:00.000Z",
+            }]},
+        )
+        text = participant_tool_turn_text(PROFILE, request, tools=TOOLS)
+        self.assertIn(
+            "your proposal authorization:1 about message e2 ended unknown: the operator approved it; "
+            "whether it ran is unknown.",
+            text,
+        )
+        self.assertNotIn("This turn is an outcome turn", participant_tool_turn_text(PROFILE, _request(), tools=TOOLS))
+
     def test_every_tool_schema_is_a_closed_object(self):
         for role, spec in PARTICIPANT_TOOL_SPECS.items():
             with self.subTest(role=role):

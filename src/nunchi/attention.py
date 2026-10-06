@@ -325,12 +325,31 @@ ATTENTION_JUDGMENT_SCHEMA: dict[str, Any] = {
 }
 
 
+# What a judgment without a new message means (#94 step 6). Only that
+# judgment hears it, so ordinary judgments are not nudged by it.
+_OCCASION_PROMPTS = {
+    "pause": (
+        " This judgment has observation.occasion pause: no new message "
+        "arrived. An earlier judgment read this moment as one to wait on, and "
+        "the room has stayed quiet since; judge it again as it stands now."
+    ),
+    "outcome": (
+        " This judgment has observation.occasion outcome: no new message "
+        "arrived. An operator approved an action {called} proposed, usually "
+        "about this message, and it has settled since its turn ended. Nobody "
+        "in the room has been told how it went, and {called} gets a turn to "
+        "tell them; judge the room as it stands now."
+    ),
+}
+
+
 def participant_attention_prompt(
     profile: ParticipantProfile,
     *,
     reading_items: int = READING_MAX_ITEMS,
     reading_note_chars: int = READING_NOTE_MAX_CHARS,
     name: str | None = None,
+    occasion: str | None = None,
 ) -> str:
     """Return the shared instructions for a participant's chat-model attention.
 
@@ -341,7 +360,8 @@ def participant_attention_prompt(
     answers, so the model is asked for at most one fewer. ``name`` is what the
     questions call the participant; it defaults to the participant id, so the
     prompt depends only on the trusted profile, and the observation names the
-    participant.
+    participant. ``occasion`` adds what a judgment without a new message
+    means, only to that judgment (#94 step 6).
     """
 
     called = name or profile.participant_id
@@ -387,10 +407,8 @@ def participant_attention_prompt(
         "ago the judged message came, how long the room was quiet before it, its "
         "author's unbroken run of messages and how long that run took, and "
         f"{called}'s own messages in the window and how long ago it last posted."
-        " When observation.occasion is pause, no new message arrived: an earlier "
-        "judgment read this moment as one to wait on, and the room has stayed "
-        "quiet since; judge it again as it stands now."
-        "\n\n"
+        + _OCCASION_PROMPTS.get(occasion or "", "").format(called=called)
+        + "\n\n"
         "Participant instructions (trusted host profile):\n"
         f"{profile.instructions}\n\n"
         "Questions. Give every probability as a number from 0 to 1.\n"
@@ -951,6 +969,7 @@ class AttentionEngine:
                             self.profile,
                             reading_items=self.policy.reading_items,
                             reading_note_chars=self.policy.reading_note_chars,
+                            occasion=projection.get("occasion"),
                         ),
                         projection=projection,
                         timeout_seconds=provider_timeout,
@@ -1137,6 +1156,14 @@ class AttentionEngine:
             valve = "none"
             override = "none"
             ack_audit = None
+        if checked.get("occasion") == "outcome" and disposition in ("SUPPRESS", "ACK"):
+            # An approved action finished after the participant's turn about
+            # it ended. The participant is the one who says so in the room,
+            # so the turn always reaches it, with the reading as advice (Zoe,
+            # #90 decision 2 on #94).
+            effective = "DEFER"
+            valve = "policy-defer"
+            override = "outcome-turn"
 
         routing: dict[str, Any] = {
             "valve": valve,

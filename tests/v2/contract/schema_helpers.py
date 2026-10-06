@@ -97,11 +97,11 @@ SCHEMA_FILES = {
 }
 
 INTERFACE_VERSIONS = {
-    "attention-request": ("I-010A", "AttentionRequestV2", 3),
-    "attention-decision": ("I-010B", "AttentionDecisionV2", 6),
-    "participant-wake": ("I-010C", "ParticipantWakeV2", 9),
+    "attention-request": ("I-010A", "AttentionRequestV2", 4),
+    "attention-decision": ("I-010B", "AttentionDecisionV2", 7),
+    "participant-wake": ("I-010C", "ParticipantWakeV2", 10),
     "context-continuation": ("I-010D", "ContextContinuationV2", 1),
-    "attention-receipt": ("I-010E", "AttentionReceiptV2", 3),
+    "attention-receipt": ("I-010E", "AttentionReceiptV2", 4),
     "privileged-action-authorization": (
         "I-010F",
         "PrivilegedActionAuthorizationV2",
@@ -181,6 +181,8 @@ OVERRIDE_CAUSES = (
     "recoverability-unproven",
     "ack-disabled",
     "ack-unsupported",
+    # I-010B@7: an outcome turn always reaches the participant.
+    "outcome-turn",
 )
 MARGIN_STATUSES = ("active", "retired")
 RECEIPT_STAGES = ("observation", "attention", "participant-host", "transport")
@@ -946,8 +948,8 @@ def _check_pace(errors: _Errors, path: str, value: Any) -> None:
 
 def _check_occasion(errors: _Errors, path: str, value: Any) -> None:
     """I-010A@3 / I-010C@9: why a moment is judged without a new message."""
-    if value not in ("pause",):
-        errors.add(path, "must be pause")
+    if value not in ("pause", "outcome"):
+        errors.add(path, "must be pause or outcome")
 
 
 def _check_confidence(errors: _Errors, path: str, value: Any) -> None:
@@ -1102,6 +1104,7 @@ def _check_routing_audit(errors: _Errors, routing: Any) -> str | None:
             "suppression-disabled",
             "recoverability-unproven",
             "ack-disabled",
+            "outcome-turn",
         ):
             errors.add(
                 "routing_audit.override_cause",
@@ -1240,7 +1243,7 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
                 expected_cause = (
                     "ack-disabled" if valve == "policy-defer" else "ack-unsupported"
                 )
-                if cause != expected_cause:
+                if cause != expected_cause and not (valve == "policy-defer" and cause == "outcome-turn"):
                     errors.add(
                         "routing_audit.override_cause",
                         f"ACK widening via {valve!r} requires {expected_cause!r}",
@@ -1249,7 +1252,7 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
                 classifier == "SUPPRESS"
                 and effective == "DEFER"
                 and valve == "policy-defer"
-                and cause not in ("suppression-disabled", "recoverability-unproven")
+                and cause not in ("suppression-disabled", "recoverability-unproven", "outcome-turn")
             ):
                 errors.add(
                     "routing_audit.override_cause",
@@ -1606,7 +1609,7 @@ def _check_attention_body(errors: _Errors, path: str, value: Any) -> None:
                 expected_cause = (
                     "ack-disabled" if valve == "policy-defer" else "ack-unsupported"
                 )
-                if cause != expected_cause:
+                if cause != expected_cause and not (valve == "policy-defer" and cause == "outcome-turn"):
                     errors.add(
                         f"{path}.routing_audit.override_cause",
                         f"ACK widening via {valve!r} requires {expected_cause!r}",
@@ -1615,7 +1618,7 @@ def _check_attention_body(errors: _Errors, path: str, value: Any) -> None:
                 classifier == "SUPPRESS"
                 and effective == "DEFER"
                 and valve == "policy-defer"
-                and cause not in ("suppression-disabled", "recoverability-unproven")
+                and cause not in ("suppression-disabled", "recoverability-unproven", "outcome-turn")
             ):
                 errors.add(
                     f"{path}.routing_audit.override_cause",
