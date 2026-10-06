@@ -56,6 +56,23 @@ class OutcomeTurnTests(ProposalFixture, unittest.TestCase):
         self.assertFalse(self.pipeline.outcomes_waiting())
         self.assertEqual((), self.pipeline.report_outcomes())
 
+    def test_the_turn_says_plainly_how_the_action_ended(self):
+        # Run 33: a bare "failed" was read as "the approval was denied".
+        from nunchi.participant_model import ParticipantTurnProtocol
+        from tests.v2.test_operator_protocol import PROFILE, opportunity
+
+        coordinator, record = self.proposed(result=TransportResult("failed", "disk full"))
+        self.approve(coordinator)
+        self.pipeline.report_outcomes()
+        allowed = opportunity()
+        allowed["permissions"]["privileged_proposals"] = True
+        outcome = ParticipantTurnProtocol(profile=PROFILE, wake=self.wakes[-1], opportunity=allowed).instructions
+        self.assertIn(f"your proposal {record['proposal_id']} about message e1 ended failed", outcome)
+        self.assertIn("the operator approved it; it was tried and the action itself failed", outcome)
+        # An ordinary turn carries no such sentence.
+        ordinary = ParticipantTurnProtocol(profile=PROFILE, wake=self.wakes[0], opportunity=allowed).instructions
+        self.assertNotIn("This turn is an outcome turn", ordinary)
+
     def test_a_reading_to_stay_quiet_still_reaches_the_agent(self):
         coordinator, _ = self.proposed()
         self.approve(coordinator)

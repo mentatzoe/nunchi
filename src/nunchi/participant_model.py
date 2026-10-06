@@ -406,6 +406,43 @@ def participant_turn_prompt(profile: ParticipantProfile) -> str:
     )
 
 
+# How an approved action ended, in plain words (#94 step 6). Run 33 showed
+# a model reading a bare "failed" as "the approval was denied".
+_OUTCOME_ENDINGS = {
+    "done": "the operator approved it and it ran",
+    "failed": "the operator approved it; it was tried and the action itself failed",
+    "unknown": "the operator approved it; whether it ran is unknown",
+    "denied": "the operator approved it, but the final check refused it, so it never ran",
+}
+
+
+def outcome_turn_note(request: Mapping[str, Any]) -> str:
+    """On an outcome turn, how the proposal ended, said plainly; otherwise ''.
+
+    It restates the newest settled proposal in the turn's own memory about
+    the message the turn is about, so the words the agent uses can match it.
+    """
+
+    wake = request["wake"]
+    if wake.get("occasion") != "outcome":
+        return ""
+    moves = (wake.get("memory") or {}).get("own_moves", ())
+    settled = [
+        move
+        for move in moves
+        if move.get("kind") == "proposal" and move.get("status") in _OUTCOME_ENDINGS
+    ]
+    about = [move for move in settled if move["about_event_id"] == wake["trigger_event_id"]]
+    if not (about or settled):
+        return ""
+    move = (about or settled)[-1]
+    return (
+        f"\n\nThis turn is an outcome turn: your proposal {move['proposal_id']} about "
+        f"message {move['about_event_id']} ended {move['status']}: "
+        f"{_OUTCOME_ENDINGS[move['status']]}. Nobody in the room has been told yet."
+    )
+
+
 def participant_turn_instructions(
     profile: ParticipantProfile,
     request: Mapping[str, Any],
@@ -435,6 +472,7 @@ def participant_turn_instructions(
     return (
         participant_turn_prompt(profile)
         + proposals
+        + outcome_turn_note(request)
         + "\n\nAction schema for this turn (JSON Schema; the protocol and "
         "binding values are fixed):\n"
         + schema
@@ -996,6 +1034,7 @@ def participant_tool_turn_text(
     )
     return (
         participant_tool_turn_prompt(profile, tools=tools)
+        + outcome_turn_note(request)
         + f"\n\n<nunchi_participant_turn_v1>{document}</nunchi_participant_turn_v1>"
     )
 

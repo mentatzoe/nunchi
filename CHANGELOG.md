@@ -80,7 +80,10 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   outcome in the room. Only a participant that may propose hears about
   outcome turns in its prompt, which names each way an action can end
   (done, failed, unknown, denied), says nobody in the room has been told,
-  and asks that what the agent says match how it ended. Attention's prompt
+  and asks that what the agent says match how it ended; the outcome turn
+  itself also says in a plain sentence how that proposal ended ("the
+  operator approved it; it was tried and the action itself failed").
+  Attention's prompt
   explains a pause or an outcome only to the judgment that has one, so
   ordinary judgments carry no occasion text. The behavior suite adds outcome moments and
   the `approval-comes-through` scene (71 scenes); `nunchi probe` reports
