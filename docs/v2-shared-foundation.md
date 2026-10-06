@@ -53,7 +53,9 @@ explicit `base_url` (there is no vendor default endpoint) and passes any
 provider-specific request fields through `extra_body`. An integration adds its
 own kinds through `host_kinds`; the reference adapters, the Claude Code gate
 and the Codex runner add `decisions-api`, a typed decision model that answers
-the attention questions natively. `HostTextAttentionModel` serves hosts whose
+the attention questions natively, and `messages-api` and `responses-api`,
+which send the same prompt and answer schema through the Anthropic Messages
+API and the OpenAI Responses API (#94 step 8). `HostTextAttentionModel` serves hosts whose
 completion returns plain text, such as a mod running attention on the user's
 own plan (not built); `HostStructuredAttentionModel` serves hosts with structured
 completion and takes the host's denial check (`is_denial`, `denied_detail`)

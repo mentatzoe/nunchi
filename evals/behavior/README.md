@@ -199,8 +199,13 @@ Chat models answer them as one JSON object through the OpenAI-compatible
 endpoint. Models named `typesafe/...` (for example `typesafe/jev-1.13`) are
 typed decision models: they go through OpenRouter's Decisions API
 (`src/nunchi/adapters/decisions_api.py`, `--jev-url`) and answer with
-probabilities, never text. The core decides from the answers either way, so
-a run compares the two routes on the same scenes. Each record keeps the
+probabilities, never text. A chat model's name may start with `messages:` or
+`responses:` to send its attention through the Messages API or the Responses
+API instead of chat completions (`src/nunchi/adapters/model_apis.py`; #94
+step 8), for example `responses:openai/gpt-6-luna@low` or
+`messages:anthropic/claude-haiku-4.5`. On OpenRouter both go to the same base
+URL. The core decides from the answers on every route, so a run compares the
+routes on the same scenes. Each record keeps the
 answers under `decision.answers`, and a typed model's full response and the
 snapshot that served it under `model_response`.
 

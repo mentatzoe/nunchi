@@ -195,6 +195,23 @@ natively and much faster than a chat model:
 
 `url` defaults to OpenRouter's Decisions API endpoint.
 
+They also accept attention through the Anthropic Messages API or the OpenAI
+Responses API, with an explicit endpoint:
+
+```json
+{
+  "kind": "messages-api",
+  "base_url": "https://llm.example/v1",
+  "model": "provider/attention-model",
+  "api_key_env": "NUNCHI_ATTENTION_API_KEY",
+  "auth": "x-api-key"
+}
+```
+
+`kind: "responses-api"` takes the same fields without `auth`. Set `auth` to
+`bearer` when a router takes the key as a bearer token. Both take optional
+`temperature`, `effort` and `max_tokens`.
+
 Room text cannot supply or override any of these values.
 
 ## Shared Discord transport
