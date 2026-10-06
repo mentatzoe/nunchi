@@ -24,7 +24,6 @@ import time
 from typing import Any, Iterator
 
 from . import __version__
-from .ack import AckPolicy
 from .attention import AttentionPolicy
 from .errors import ValidationError
 from .install import initialize, verify
@@ -182,10 +181,13 @@ def validate_operator_config(value: Any) -> dict[str, Any]:
         "rooms",
         "models",
         "attention_policy",
-        "ack_policy",
         "services",
     }
-    if not isinstance(value, Mapping) or set(value) != required:
+    # "ack_policy" configured Nunchi's own nod, removed in #94 step 7. A
+    # profile written before then still reads; the setting is dropped.
+    if not isinstance(value, Mapping) or not (
+        set(value) == required or set(value) == required | {"ack_policy"}
+    ):
         raise ValidationError("operator config has a missing or unexpected field")
     result = dict(value)
     if (
@@ -228,12 +230,6 @@ def validate_operator_config(value: Any) -> dict[str, Any]:
         attention_policy = AttentionPolicy(**dict(result["attention_policy"]))
     except (TypeError, ValueError) as exc:
         raise ValidationError(f"operator attention_policy is invalid: {exc}") from exc
-    if not isinstance(result["ack_policy"], Mapping):
-        raise ValidationError("operator ack_policy must be an object")
-    try:
-        ack_policy = AckPolicy(**dict(result["ack_policy"]))
-    except (TypeError, ValueError) as exc:
-        raise ValidationError(f"operator ack_policy is invalid: {exc}") from exc
     services = result["services"]
     if not isinstance(services, list):
         raise ValidationError("operator services must be an array")
@@ -249,10 +245,6 @@ def validate_operator_config(value: Any) -> dict[str, Any]:
         "attention_policy": {
             name: getattr(attention_policy, name)
             for name in AttentionPolicy.__dataclass_fields__
-        },
-        "ack_policy": {
-            name: getattr(ack_policy, name)
-            for name in AckPolicy.__dataclass_fields__
         },
         "services": checked_services,
     }
@@ -275,8 +267,6 @@ def build_operator_config(
     participant_provider: str = "openai-compatible",
     attention_credential_env: str = "NUNCHI_ATTENTION_API_KEY",
     participant_credential_env: str = "NUNCHI_PARTICIPANT_API_KEY",
-    ack_enabled: bool = True,
-    ack_reaction: str = "👂",
     services: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Build the shared schema from guided fields; no hand-written JSON."""
@@ -316,11 +306,6 @@ def build_operator_config(
             "attention_policy": {
                 name: getattr(AttentionPolicy(), name)
                 for name in AttentionPolicy.__dataclass_fields__
-            },
-            "ack_policy": {
-                "enabled": ack_enabled,
-                "reaction": ack_reaction,
-                "provenance": f"trusted:ack-policy/{profile_id}@1",
             },
             "services": [dict(item) for item in services],
         }
@@ -568,7 +553,6 @@ class OperatorStore:
         room_capabilities: dict[str, Any] = {}
         compatibility: dict[str, Any] = {}
         warnings = []
-        ack = config["ack_policy"]
         _load_reference_platforms()
         for room in config["rooms"]:
             key = f"{room['platform']}:{room['room_id']}"
@@ -591,22 +575,6 @@ class OperatorStore:
                 capability = deepcopy(dict(platform.capabilities))
                 compatibility[key] = deepcopy(dict(platform.compatibility))
             room_capabilities[key] = capability
-            reaction = capability["reaction"]
-            if ack["enabled"] and (
-                not reaction["supported"]
-                or (
-                    "*" not in reaction["reactions"]
-                    and ack["reaction"] not in reaction["reactions"]
-                )
-            ):
-                warnings.append(
-                    {
-                        "room": key,
-                        "feature": "ACK",
-                        "behavior": "DEFER",
-                        "detail": "configured native reaction is unavailable",
-                    }
-                )
         credentials = {
             name: {
                 "environment": model["credential_env"],
@@ -943,7 +911,7 @@ class ServiceManager:
                 if path.exists():
                     path.unlink()
                     removed.append(filename)
-        # Durable ACK and receipt journals deliberately live outside this
+        # Durable receipt journals deliberately live outside this
         # ephemeral service directory and survive reset.
         return {"status": "reset", "name": name, "removed": removed}
 

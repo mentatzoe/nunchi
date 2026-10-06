@@ -37,9 +37,8 @@ capability contract passes:
 - Hermes auto-title is disabled on configured Nunchi rooms. Its background
   provider call and rename can otherwise run after the admitted turn ends.
 - Hermes's stock processing reactions run only after participant invocation
-  begins. A model ACK, when the authenticated adapter can add the configured
-  reaction, is one native reaction on the exact trigger and does not run the
-  participant. Unsupported or unknown permission widens that ACK to DEFER.
+  begins. A judgment that leans to a "mhm" runs the participant like any
+  DEFER; Nunchi never reacts on its behalf (#94 step 7).
   Stock typing is disabled because Hermes 0.19.0 starts a
   background typing loop that can outlive the admitted opportunity.
 - Discord voice input and native `/thread` are disabled on configured rooms.
@@ -361,7 +360,8 @@ unchanged during installation and use.
 
 Source tests and a successful probe do not prove live platform behavior. The
 minimum/release installed-stock matrix exercises ordinary tools and native
-approval alongside normal turns and ACK; contract CI also checks moving main.
+approval alongside normal turns and a mhm as the participant's own turn;
+contract CI also checks moving main.
 See [the verification record](../../docs/v2-verification.md) for exact scope.
 Live acceptance still requires attributable suppress, wake, defer, silence,
 delivery, cancellation, restart, and later-message recovery runs on each

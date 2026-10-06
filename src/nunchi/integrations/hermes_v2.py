@@ -40,7 +40,6 @@ from nunchi.integrations.hermes_attention_trust import (
     is_hermes_attention_denial,
     TRUST_REPAIR,
 )
-from nunchi.ack import AckJournal, AckPolicy, ReactionCapability, UNAVAILABLE_REACTION_CAPABILITY
 from nunchi.errors import ValidationError
 from nunchi.observation import (
     ObservationLimits,
@@ -54,14 +53,6 @@ from nunchi.participant import (
 )
 from nunchi.pipeline import OpportunityPreparation, prepare_opportunity
 from nunchi.receipts import ReceiptJournal
-from nunchi.integrations.hermes_ack import (
-    AckAuthorityClosed,
-    ack_effect_permit_present,
-    ack_effects_quiescent,
-    claim_ack_effect,
-    dispatch_attention_ack,
-    probe_reaction_capability,
-)
 from nunchi.integrations.hermes_tools import NativeInvocationJournal, install_approval_boundary
 from nunchi.v2_contracts import validate_canonical_event
 
@@ -680,9 +671,6 @@ class HermesRoomConfig:
     limits: ObservationLimits
     participant_timeout_seconds: float
     participant_max_expansions: int
-    # Nunchi's own nod is off by default: an ACK judgment gives the
-    # participant a turn and any "mhm" is its own (Zoe, 2026-10-05).
-    ack: AckPolicy = AckPolicy()
 
 
 @dataclass(frozen=True)
@@ -768,6 +756,8 @@ def _load_room(value: Any, *, index: int) -> HermesRoomConfig:
     room = _closed(
         value,
         required={"binding", "profile", "attention", "limits", "participant"},
+        # Nunchi's own nod, removed in #94 step 7; a pinned room that still
+        # has it loads, and the setting is ignored.
         optional={"ack"},
         label=f"rooms[{index}]",
     )
@@ -910,15 +900,12 @@ def _load_room(value: Any, *, index: int) -> HermesRoomConfig:
         or not 0 <= expansions <= 8
     ):
         raise ValidationError("participant max_expansions must be within [0, 8]")
-    try:
-        ack = AckPolicy(**dict(_closed(
-            room.get("ack", {}),
-            required=set(),
-            optional={"enabled", "reaction"},
-            label=f"rooms[{index}].ack",
-        )))
-    except (TypeError, ValueError) as exc:
-        raise ValidationError(f"Hermes ACK policy is invalid: {exc}") from exc
+    _closed(
+        room.get("ack", {}),
+        required=set(),
+        optional={"enabled", "reaction"},
+        label=f"rooms[{index}].ack",
+    )
     return HermesRoomConfig(
         binding=binding,
         profile=profile,
@@ -927,7 +914,6 @@ def _load_room(value: Any, *, index: int) -> HermesRoomConfig:
         limits=limits,
         participant_timeout_seconds=float(timeout),
         participant_max_expansions=expansions,
-        ack=ack,
     )
 
 
@@ -1303,14 +1289,6 @@ class _GateIngress:
 
 
 @dataclass
-class _PendingAck:
-    token: OpportunityToken
-    evaluation: OpportunityPreparation
-    ingress: _GateIngress
-    deadline: float
-
-
-@dataclass
 class _StockTurnTrace:
     request_id: str
     wake: Mapping[str, Any]
@@ -1424,12 +1402,6 @@ class _RoomRuntime:
             "Hermes V2 room state directory",
         )
         receipts = ReceiptJournal(self.directory / "receipts.jsonl")
-        self.ack_policy = config.ack
-        self.ack_journal = AckJournal(self.directory / "ack.jsonl")
-        self._ack_cache_lock = threading.Lock()
-        self._ack_capability: ReactionCapability = UNAVAILABLE_REACTION_CAPABILITY
-        self._ack_capability_generation: int | None = None
-        self._pending_ack: _PendingAck | None = None
         observation = ObservationProvider(
             config.binding,
             limits=config.limits,
@@ -1458,8 +1430,6 @@ class _RoomRuntime:
             ),
             policy=config.attention,
             receipts=receipts,
-            ack_policy=self.ack_policy,
-            reaction_capability_provider=self.reaction_capability,
         )
         self.scheduler = ConversationOpportunityScheduler(
             f"{config.binding.participant_id}:{config.binding.platform}:"
@@ -1548,110 +1518,6 @@ class _RoomRuntime:
     def _forget_deadline(self, token: OpportunityToken | None) -> None:
         if token is not None:
             self._opportunity_deadlines.pop(token.generation, None)
-
-    def reaction_capability(self) -> ReactionCapability:
-        """Return the capability captured for the active opportunity.
-
-        The capture happens on the event-loop task after stock ingress auth
-        and before attention. A missing or stale capture is unavailable, which
-        widens ACK to DEFER. It is not a fabricated allow.
-        """
-
-        with self._ack_cache_lock:
-            token = self._active_token
-            if (
-                token is None
-                or self._ack_capability_generation != token.generation
-            ):
-                return UNAVAILABLE_REACTION_CAPABILITY
-            return self._ack_capability
-
-    def _store_reaction_capability(
-        self,
-        token: OpportunityToken,
-        capability: ReactionCapability,
-    ) -> None:
-        with self._ack_cache_lock:
-            if self._active_token is not token and (
-                self._active_token is None
-                or self._active_token.generation != token.generation
-            ):
-                return
-            self._ack_capability = capability
-            self._ack_capability_generation = token.generation
-
-    async def refresh_reaction_capability(self, token: OpportunityToken) -> None:
-        """Probe the authenticated adapter without holding runtime locks."""
-
-        with self._lock:
-            if not self.scheduler.is_current(token):
-                ingress = None
-                deadline = None
-            else:
-                ingress = self._ingress.get(token.anchor_event_id)
-                deadline = self._deadline(token)
-        remaining = None if deadline is None else deadline - time.monotonic()
-        if ingress is None or remaining is None or remaining <= 0:
-            self._store_reaction_capability(token, UNAVAILABLE_REACTION_CAPABILITY)
-            return
-        capability = await probe_reaction_capability(
-            ingress.adapter,
-            ingress.event,
-            platform=self.config.binding.platform,
-            room_id=self.config.binding.room_id,
-            actor_id=self.config.binding.actor_id,
-            timeout=remaining,
-        )
-        self._store_reaction_capability(token, capability)
-
-    def take_pending_ack(self) -> _PendingAck | None:
-        with self._lock:
-            pending = self._pending_ack
-            self._pending_ack = None
-            return pending
-
-    async def dispatch_attention_ack(self, pending: _PendingAck) -> None:
-        evaluation = pending.evaluation
-        request = evaluation.request
-        decision = evaluation.decision
-        wake = evaluation.wake
-        if request is None or decision is None or wake is None:
-            return
-        await dispatch_attention_ack(
-            adapter=pending.ingress.adapter,
-            event=pending.ingress.event,
-            platform=self.config.binding.platform,
-            room_id=self.config.binding.room_id,
-            actor_id=self.config.binding.actor_id,
-            policy=self.ack_policy,
-            journal=self.ack_journal,
-            receipts=self.receipts,
-            wake=wake,
-            request=request,
-            decision=decision,
-            token=pending.token,
-            deadline=pending.deadline,
-            lifecycle_id=self.scheduler.lifecycle_id,
-            scheduler=self.scheduler,
-        )
-
-    def finish_ack(self, token: OpportunityToken) -> OpportunityToken | None:
-        """Release the ACK opportunity without admitting a stock participant."""
-
-        with self._lock:
-            self._ingress.pop(token.anchor_event_id, None)
-            self._forget_deadline(token)
-            self._pending_ack = None
-            with self._ack_cache_lock:
-                if self._ack_capability_generation == token.generation:
-                    self._ack_capability = UNAVAILABLE_REACTION_CAPABILITY
-                    self._ack_capability_generation = None
-            next_token = self.scheduler.complete(token)
-            self._arm_deadline(next_token)
-            self._active_token = next_token
-            if next_token is not None:
-                self._pending_anchor = None
-            return next_token
 
     def _append_host_receipt(
         self,
@@ -2024,29 +1890,6 @@ class _RoomRuntime:
                 self._active_token = None
                 return None, None
             ingress = self._ingress.get(token.anchor_event_id)
-            if (
-                evaluation.acknowledge
-                and evaluation.wake is not None
-                and evaluation.request is not None
-                and evaluation.decision is not None
-                and ingress is not None
-            ):
-                deadline = self._deadline(token)
-                if deadline is None or time.monotonic() >= deadline:
-                    self.scheduler.cancel()
-                    self._forget_deadline(token)
-                    self._ingress.clear()
-                    self._pending_anchor = None
-                    self._active_token = None
-                    self._pending_ack = None
-                    return None, None
-                self._pending_ack = _PendingAck(
-                    token=token,
-                    evaluation=evaluation,
-                    ingress=ingress,
-                    deadline=deadline,
-                )
-                return None, None
             if evaluation.wake is not None and ingress is not None:
                 deadline = self._deadline(token)
                 if deadline is None or time.monotonic() >= deadline:
@@ -2292,18 +2135,11 @@ class _RoomRuntime:
                         "Nunchi could not persist terminal Hermes settlement"
                     )
                     return False
-            while (
-                self._processing_traces
-                or self._detached_stock_tasks
-                or not ack_effects_quiescent()
-            ):
+            while self._processing_traces or self._detached_stock_tasks:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return False
-                if self._processing_traces or self._detached_stock_tasks:
-                    self._settlement_changed.wait(remaining)
-                else:
-                    self._settlement_changed.wait(min(remaining, 0.05))
+                self._settlement_changed.wait(remaining)
             return self._active_trace is None
 
 
@@ -2440,17 +2276,9 @@ class NunchiHermesV2Plugin:
     ) -> None:
         current: OpportunityToken | None = token
         while current is not None:
-            await runtime.refresh_reaction_capability(current)
             evaluation = await asyncio.to_thread(runtime.evaluate, current)
             evaluated = current
             ingress, current = runtime.resolve(evaluated, evaluation)
-            pending = runtime.take_pending_ack()
-            if pending is not None:
-                try:
-                    await runtime.dispatch_attention_ack(pending)
-                finally:
-                    current = runtime.finish_ack(pending.token)
-                continue
             if ingress is None:
                 continue
             await _run_configured_stock_handle(
@@ -4724,12 +4552,6 @@ def _wrap_stock_effect_methods(target_class: type[Any]) -> int:
         ) -> Any:
             trace = _ACTIVE_STOCK_TURN.get()
             if trace is None:
-                if claim_ack_effect(self, __name, args, kwargs):
-                    return await __current(self, *args, **kwargs)
-                if ack_effect_permit_present():
-                    raise AckAuthorityClosed(
-                        "ACK effect authority does not allow this call"
-                    )
                 owner = _SHIM_OWNER
                 control_authorization = _AUTHORIZED_STOCK_CONTROL.get()
                 configured_target = (

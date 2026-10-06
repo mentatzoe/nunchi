@@ -130,7 +130,7 @@ class JudgmentSchemaMatchesValidatorTests(unittest.TestCase):
         self.assertEqual(1, notes["note"]["minLength"])
         self.assertEqual(1, notes["evidence_event_ids"]["minItems"])
         # Every disposition's scripted answers pass the validator.
-        for disposition in ("WAKE", "ACK", "DEFER", "SUPPRESS"):
+        for disposition in ("WAKE", "mhm", "DEFER", "SUPPRESS"):
             with self.subTest(disposition=disposition):
                 validate_answers(answers_leaning(disposition), event_ids={"e1"}, trigger_event_id="e1")
 

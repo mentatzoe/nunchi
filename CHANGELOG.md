@@ -29,9 +29,8 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   and what reading came with it, and keeps a reply the turn protocol
   rejects. `--paired` plays every turn that carried a
   reading a second time on the same wake without it, graded but never sent,
-  so a run shows what the reading changed. `--ack agent` turns off Nunchi's
-  own nod, so an ACK judgment gives the agent a turn and any "mhm" is its
-  own. Models named `typesafe/...` go to Jev, a typed decision model, through
+  so a run shows what the reading changed. Nunchi never nods for the agent:
+  any "mhm" is the agent's own. Models named `typesafe/...` go to Jev, a typed decision model, through
   OpenRouter's Decisions API: a prototype route that answers six typed
   questions about the judged message and writes the agent's reading from
   them, so Jev's speed and fit can be compared with the LLM routes. The
@@ -407,6 +406,31 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 - `HostStructuredParticipant` (#91).
 - The headless Claude Code runner (PR #32) and its real-binary scene runner
   (`evals/v2/claude_code/`), replaced by the gate and mod (#43).
+- Nunchi's own nod (#94 step 7; Zoe, 2026-10-05: every visible move is the
+  agent's own). It had been off by default since #107. A judgment that leans
+  to a "mhm" is now `DEFER`: the agent takes the turn and reacts itself if it
+  wants to.
+  - Contracts: I-010B@9 drops the ACK disposition, the ACK transitions, the
+    `capability-defer` valve, the `ack-disabled` and `ack-unsupported`
+    causes, and the `ack` audit. I-010C@13 drops the ACK wake source.
+    I-010E@5 writes no ACK record but still reads ones written before, so
+    older receipt journals load. I-030A@3 and I-040A@3 drop the engine's
+    reaction policy and the host's durable nod path.
+  - Gone: `AckPolicy`, `AckJournal`, `nunchi.ack` (the reaction capability
+    moves to `nunchi.reactions`), the Hermes nod module and its reaction
+    probe before every attention call, `nunchi config set-ack`, the setup
+    flags `--ack-reaction` and `--ack-disabled`, the eval's `--ack` option
+    and the workflow's `ack` input, and the three nod conformance scenarios
+    (replaced by one `mhm` scenario).
+  - Old settings still load and are ignored: the operator profile's
+    `ack_policy`, the `ack` key in adapter, Claude Code and Codex configs,
+    and a Hermes room's `ack`.
+  - The agent's own reaction is now checked against the platform's attested
+    capability: the turn offers a reaction when the capability permits any,
+    and a reaction it does not name is refused before dispatch. Before, the
+    check used the nod's emoji.
+  - `nunchi probe` and the adapter runtime's probe now report the same
+    interface versions from one table; the runtime's had fallen behind.
 - The executable SpecKit workflow, generated task and checklist control plane,
   and slice lifecycle as implementation authority. Specifications and plans
   remain reference material.

@@ -98,10 +98,10 @@ SCHEMA_FILES = {
 
 INTERFACE_VERSIONS = {
     "attention-request": ("I-010A", "AttentionRequestV2", 6),
-    "attention-decision": ("I-010B", "AttentionDecisionV2", 8),
-    "participant-wake": ("I-010C", "ParticipantWakeV2", 12),
+    "attention-decision": ("I-010B", "AttentionDecisionV2", 9),
+    "participant-wake": ("I-010C", "ParticipantWakeV2", 13),
     "context-continuation": ("I-010D", "ContextContinuationV2", 1),
-    "attention-receipt": ("I-010E", "AttentionReceiptV2", 4),
+    "attention-receipt": ("I-010E", "AttentionReceiptV2", 5),
     "privileged-action-authorization": (
         "I-010F",
         "PrivilegedActionAuthorizationV2",
@@ -139,7 +139,12 @@ NON_FINITE_SENTINELS = {
     "-Infinity": float("-inf"),
 }
 
-DISPOSITIONS = ("SUPPRESS", "ACK", "WAKE", "DEFER")
+DISPOSITIONS = ("SUPPRESS", "WAKE", "DEFER")
+# Nunchi's own nod wrote ACK records before I-010E@5 (#94 step 7); receipts
+# still read them, read-only, so older journals load.
+LEGACY_ACK = "ACK"
+LEGACY_ACK_VALVES = ("capability-defer",)
+LEGACY_ACK_CAUSES = ("ack-disabled", "ack-unsupported")
 VERDICT_KEYS = ("PASS", "ACK", "ASK", "SPEAK")
 # The typed answers behind every status-ok decision (@5, #94 step 4; asks
 # and responds_to since @6, step 5).
@@ -168,21 +173,18 @@ def make_answers(**overrides: Any) -> dict[str, Any]:
     }
     answers.update(overrides)
     return answers
-WAKE_SOURCES = ("ACK", "WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS")
+WAKE_SOURCES = ("WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS")
 ROUTING_VALVES = (
     "none",
     "classifier-defer",
     "margin-defer",
     "policy-defer",
-    "capability-defer",
 )
 OVERRIDE_CAUSES = (
     "none",
     "margin",
     "suppression-disabled",
     "recoverability-unproven",
-    "ack-disabled",
-    "ack-unsupported",
     # I-010B@7: an outcome turn always reaches the participant.
     "outcome-turn",
 )
@@ -1029,11 +1031,14 @@ _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 # separately by the routing-audit rules (FR-005).
 _OK_TRANSITIONS = {
     ("WAKE", "WAKE"): {"valves": ("none",)},
-    ("ACK", "ACK"): {"valves": ("none",)},
-    ("ACK", "DEFER"): {"valves": ("policy-defer", "capability-defer")},
     ("DEFER", "DEFER"): {"valves": ("classifier-defer",)},
     ("SUPPRESS", "DEFER"): {"valves": ("margin-defer", "policy-defer")},
     ("SUPPRESS", "SUPPRESS"): {"valves": ("none",)},
+}
+# Transitions only Nunchi's own nod wrote, before I-010E@5; receipts read them.
+_LEGACY_ACK_TRANSITIONS = {
+    (LEGACY_ACK, LEGACY_ACK): {"valves": ("none",)},
+    (LEGACY_ACK, "DEFER"): {"valves": ("policy-defer", "capability-defer")},
 }
 
 
@@ -1053,7 +1058,7 @@ def validate_attention_decision(doc: Any) -> list[str]:
     return list(errors)
 
 
-def _check_routing_audit(errors: _Errors, routing: Any) -> str | None:
+def _check_routing_audit(errors: _Errors, routing: Any, *, legacy_ack: bool = False) -> str | None:
     """The closed FR-005 routing audit with its per-combination rules.
 
     A margin counts as applied exactly on valve ``margin-defer``: the
@@ -1063,9 +1068,13 @@ def _check_routing_audit(errors: _Errors, routing: Any) -> str | None:
     margin status must be ``active`` (a retired margin cannot apply). The
     trusted margin source may appear only on that margin-applied decision.
     Valves ``none``/``classifier-defer`` pair with override cause ``none``;
-    valve ``policy-defer`` pairs with a trusted policy cause, and
-    ``capability-defer`` pairs only with an unavailable ACK capability.
+    valve ``policy-defer`` pairs with a trusted policy cause. A receipt
+    written by Nunchi's own nod before I-010E@5 (``legacy_ack``) may also
+    carry ``capability-defer`` with ``ack-unsupported``, or ``policy-defer``
+    with ``ack-disabled``.
     """
+    valves = ROUTING_VALVES + (LEGACY_ACK_VALVES if legacy_ack else ())
+    causes = OVERRIDE_CAUSES + (LEGACY_ACK_CAUSES if legacy_ack else ())
     if not _check_closed_object(
         errors,
         "routing_audit",
@@ -1076,9 +1085,9 @@ def _check_routing_audit(errors: _Errors, routing: Any) -> str | None:
         return None
     valve = routing.get("valve")
     if "valve" in routing:
-        _check_enum(errors, "routing_audit.valve", valve, ROUTING_VALVES)
+        _check_enum(errors, "routing_audit.valve", valve, valves)
     if "override_cause" in routing:
-        _check_enum(errors, "routing_audit.override_cause", routing["override_cause"], OVERRIDE_CAUSES)
+        _check_enum(errors, "routing_audit.override_cause", routing["override_cause"], causes)
     if "margin_status" in routing:
         _check_enum(errors, "routing_audit.margin_status", routing["margin_status"], MARGIN_STATUSES)
     if "effective_margin" in routing:
@@ -1093,7 +1102,7 @@ def _check_routing_audit(errors: _Errors, routing: Any) -> str | None:
         _check_nes(errors, "routing_audit.margin_source", routing["margin_source"])
 
     if valve == "margin-defer":
-        if routing.get("override_cause") in OVERRIDE_CAUSES and routing["override_cause"] != "margin":
+        if routing.get("override_cause") in causes and routing["override_cause"] != "margin":
             errors.add(
                 "routing_audit.override_cause",
                 "valve margin-defer requires override cause 'margin'",
@@ -1112,25 +1121,24 @@ def _check_routing_audit(errors: _Errors, routing: Any) -> str | None:
                 "effective width",
             )
     elif valve in ("none", "classifier-defer"):
-        if routing.get("override_cause") in OVERRIDE_CAUSES and routing["override_cause"] != "none":
+        if routing.get("override_cause") in causes and routing["override_cause"] != "none":
             errors.add(
                 "routing_audit.override_cause",
                 f"valve {valve!r} requires override cause 'none'",
             )
     elif valve == "policy-defer":
-        if routing.get("override_cause") in OVERRIDE_CAUSES and routing["override_cause"] not in (
+        if routing.get("override_cause") in causes and routing["override_cause"] not in (
             "suppression-disabled",
             "recoverability-unproven",
-            "ack-disabled",
             "outcome-turn",
-        ):
+        ) + (("ack-disabled",) if legacy_ack else ()):
             errors.add(
                 "routing_audit.override_cause",
                 "valve policy-defer requires override cause "
                 "a supported policy override cause",
             )
     elif valve == "capability-defer":
-        if routing.get("override_cause") in OVERRIDE_CAUSES and routing["override_cause"] != "ack-unsupported":
+        if routing.get("override_cause") in causes and routing["override_cause"] != "ack-unsupported":
             errors.add(
                 "routing_audit.override_cause",
                 "valve capability-defer requires override cause 'ack-unsupported'",
@@ -1147,7 +1155,7 @@ def _check_routing_audit(errors: _Errors, routing: Any) -> str | None:
                 "forbidden: the trusted margin source may appear only on a "
                 "margin-applied (valve margin-defer) decision",
             )
-    return valve if valve in ROUTING_VALVES else None
+    return valve if valve in valves else None
 
 
 def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
@@ -1163,7 +1171,7 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
         "classifier",
         "answers",
     )
-    allowed = required + ("attention_advice", "ack")
+    allowed = required + ("attention_advice",)
     if not _check_closed_object(errors, "decision", doc, required, allowed):
         return list(errors)
     _check_nes(errors, "request_id", doc.get("request_id"))
@@ -1218,22 +1226,6 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
     if "attention_advice" in doc:
         _check_attention_advice_list(errors, "attention_advice", doc["attention_advice"])
 
-    if "ack" in doc:
-        ack = doc["ack"]
-        if _check_closed_object(
-            errors,
-            "ack",
-            ack,
-            ("reaction", "policy_provenance", "permissions_revision"),
-            ("reaction", "policy_provenance", "permissions_revision"),
-        ):
-            for name in ("reaction", "policy_provenance", "permissions_revision"):
-                _check_nes(errors, f"ack.{name}", ack.get(name))
-    if classifier == "ACK" and "ack" not in doc:
-        errors.add("ack", "required when the classifier selects ACK")
-    if classifier != "ACK" and "ack" in doc:
-        errors.add("ack", "allowed only when the classifier selects ACK")
-
     # FR-007 conditional requirement: the legacy vector is required exactly
     # when the classifier disposition is SUPPRESS while the routing audit
     # reports the margin active; it stays optional (and permitted) on WAKE,
@@ -1257,15 +1249,6 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
                     f"valve in {rule['valves']}",
                 )
             cause = routing.get("override_cause") if isinstance(routing, dict) else None
-            if classifier == "ACK" and effective == "DEFER":
-                expected_cause = (
-                    "ack-disabled" if valve == "policy-defer" else "ack-unsupported"
-                )
-                if cause != expected_cause and not (valve == "policy-defer" and cause == "outcome-turn"):
-                    errors.add(
-                        "routing_audit.override_cause",
-                        f"ACK widening via {valve!r} requires {expected_cause!r}",
-                    )
             if (
                 classifier == "SUPPRESS"
                 and effective == "DEFER"
@@ -1458,8 +1441,8 @@ def validate_participant_wake(doc: Any) -> list[str]:
         if source not in ("WAKE", "DEFER") and reading:
             errors.add(
                 "attention.advice",
-                "only allowed when source is 'WAKE' or 'DEFER' (@3): ACK, "
-                "ERROR_FALLBACK, and PREATTENTION_BYPASS wakes carry no reading",
+                "only allowed when source is 'WAKE' or 'DEFER' (@3): "
+                "ERROR_FALLBACK and PREATTENTION_BYPASS wakes carry no reading",
             )
     return list(errors)
 
@@ -1583,13 +1566,16 @@ def _check_attention_body(errors: _Errors, path: str, value: Any) -> None:
         )
         if not _check_closed_object(errors, path, value, fields, fields + ("ack",)):
             return
+        # A legacy record of Nunchi's own nod still reads (I-010E@5).
+        legacy = value.get("classifier_disposition") == LEGACY_ACK
+        known = DISPOSITIONS + ((LEGACY_ACK,) if legacy else ())
         if "classifier_disposition" in value:
             _check_enum(
-                errors, f"{path}.classifier_disposition", value["classifier_disposition"], DISPOSITIONS
+                errors, f"{path}.classifier_disposition", value["classifier_disposition"], known
             )
         if "effective_disposition" in value:
             _check_enum(
-                errors, f"{path}.effective_disposition", value["effective_disposition"], DISPOSITIONS
+                errors, f"{path}.effective_disposition", value["effective_disposition"], known
             )
         if "classifier" in value:
             _check_classifier_audit(errors, f"{path}.classifier", value["classifier"])
@@ -1602,7 +1588,7 @@ def _check_attention_body(errors: _Errors, path: str, value: Any) -> None:
                     _check_nes(errors, f"{path}.evidence_event_ids[{index}]", event_id)
         valve = None
         if "routing_audit" in value:
-            valve = _check_routing_audit(errors, value["routing_audit"])
+            valve = _check_routing_audit(errors, value["routing_audit"], legacy_ack=legacy)
         if "policy_provenance" in value:
             _check_nes(errors, f"{path}.policy_provenance", value["policy_provenance"])
         if "ack" in value:
@@ -1617,8 +1603,8 @@ def _check_attention_body(errors: _Errors, path: str, value: Any) -> None:
             errors.add(f"{path}.ack", "allowed only when the classifier selects ACK")
         classifier = value.get("classifier_disposition")
         effective = value.get("effective_disposition")
-        if classifier in DISPOSITIONS and effective in DISPOSITIONS:
-            rule = _OK_TRANSITIONS.get((classifier, effective))
+        if classifier in known and effective in known:
+            rule = {**_OK_TRANSITIONS, **_LEGACY_ACK_TRANSITIONS}.get((classifier, effective))
             if rule is None or valve not in rule["valves"]:
                 errors.add(
                     f"{path}.routing_audit.valve",
@@ -1693,7 +1679,8 @@ def _check_participant_host_body(errors: _Errors, path: str, value: Any) -> None
     if not _check_closed_object(errors, path, value, fields, fields):
         return
     if "wake_source" in value:
-        _check_enum(errors, f"{path}.wake_source", value["wake_source"], WAKE_SOURCES)
+        # A legacy nod's host record (wake source ACK) still reads.
+        _check_enum(errors, f"{path}.wake_source", value["wake_source"], WAKE_SOURCES + (LEGACY_ACK,))
     for name in ("packet_event_count", "packet_byte_count", "expansion_calls"):
         if name in value:
             amount = value[name]
@@ -3247,8 +3234,8 @@ def make_routing(valve: str = "none", **overrides: Any) -> dict[str, Any]:
 
     ``margin-defer`` carries the margin cross-field facts (override cause
     ``margin``, margin status ``active``, the effective margin) and
-    ``policy-defer`` a policy override cause, ``capability-defer`` an ACK
-    capability cause, and ``none``/``classifier-defer`` override cause
+    ``policy-defer`` a policy override cause, ``capability-defer`` (legacy
+    receipts only) an ACK capability cause, and ``none``/``classifier-defer`` override cause
     ``none``. The default margin status is ``active``
     because the uncertainty margin remains active at initial V2 cutover.
     """
@@ -3289,7 +3276,8 @@ def make_decision_ok(
         },
         "answers": make_answers(),
     }
-    if classifier == "ACK":
+    if classifier == LEGACY_ACK:
+        # Only to build a legacy receipt: an I-010B@9 decision rejects it.
         doc["ack"] = {
             "reaction": "👂",
             "policy_provenance": "trusted:ack-policy/default@1",

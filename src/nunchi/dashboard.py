@@ -28,7 +28,7 @@ button{padding:.55rem .8rem;margin:.2rem}input,textarea{width:100%;box-sizing:bo
 <section><h2>Recent receipts</h2><pre id="receipts">Loading…</pre></section></div>
 <script>
 async function refresh(){const r=await fetch('/api/v1/operator',{headers:{Accept:'application/json'}});const d=await r.json();
-for(const [id,v] of Object.entries({health:d.health,config:{identity:d.config.identity,rooms:d.config.rooms,models:d.config.models,attention_policy:d.config.attention_policy,ack_policy:d.config.ack_policy},capabilities:{capabilities:d.capabilities,compatibility:d.compatibility},receipts:d.recent_receipts}))document.getElementById(id).textContent=JSON.stringify(v,null,2)}
+for(const [id,v] of Object.entries({health:d.health,config:{identity:d.config.identity,rooms:d.config.rooms,models:d.config.models,attention_policy:d.config.attention_policy},capabilities:{capabilities:d.capabilities,compatibility:d.compatibility},receipts:d.recent_receipts}))document.getElementById(id).textContent=JSON.stringify(v,null,2)}
 refresh().catch(e=>document.getElementById('health').textContent=String(e));setInterval(refresh,5000);
 </script></body></html>"""
 

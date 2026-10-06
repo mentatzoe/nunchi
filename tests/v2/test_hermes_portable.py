@@ -5478,18 +5478,21 @@ class GatewayRunner:
                 hermes_profile="default",
             )
             self.assertEqual("discord", loaded.rooms[0].binding.platform)
-            # The participant sends its own "mhm" unless the room turns
-            # Nunchi's nod on.
-            self.assertFalse(loaded.rooms[0].ack.enabled)
+            # Nunchi's own nod is gone (#94 step 7): a pinned room that still
+            # turns it on loads, and the setting is ignored.
+            self.assertFalse(hasattr(loaded.rooms[0], "ack"))
             document["rooms"][0]["ack"] = {"enabled": True}
             nodding = json.dumps(document).encode()
             path.write_bytes(nodding)
-            self.assertTrue(
-                hermes_v2.load_pinned_config(
-                    path,
-                    expected_sha256=hashlib.sha256(nodding).hexdigest(),
-                    hermes_profile="default",
-                ).rooms[0].ack.enabled
+            self.assertFalse(
+                hasattr(
+                    hermes_v2.load_pinned_config(
+                        path,
+                        expected_sha256=hashlib.sha256(nodding).hexdigest(),
+                        hermes_profile="default",
+                    ).rooms[0],
+                    "ack",
+                )
             )
             document["rooms"][0]["ack"] = {"enabled": True, "unknown": 1}
             unknown = json.dumps(document).encode()

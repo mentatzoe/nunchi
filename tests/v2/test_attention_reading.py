@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import unittest
 
-from nunchi.ack import AckPolicy, ReactionCapability
+from nunchi.reactions import ReactionCapability
 from nunchi.attention import (
     ATTENTION_JUDGMENT_SCHEMA,
     AttentionPolicy,
@@ -80,7 +80,7 @@ class ReadingTests(unittest.TestCase):
         return outcome.opportunities[0], wakes, receipts
 
     def test_an_empty_reading_never_discards_a_judgment(self):
-        for disposition in ("SUPPRESS", "ACK", "WAKE", "DEFER"):
+        for disposition in ("SUPPRESS", "mhm", "WAKE", "DEFER"):
             for empty in (None, [], "not a list"):
                 with self.subTest(disposition=disposition, reading=empty):
                     opportunity, _, _ = self.turn(ReadingModel(disposition, empty))
@@ -121,19 +121,18 @@ class ReadingTests(unittest.TestCase):
         self.assertEqual(["e1"], wake["attention"]["evidence_event_ids"])
         self.assertEqual("e1", wake["attention"]["judged_through_event_id"])
 
-    def test_an_ack_the_agent_takes_carries_the_reading(self):
-        # Without a reaction capability, ACK widens to a DEFER turn for the
-        # agent; the reading says why a nod could fit.
+    def test_a_mhm_the_agent_may_send_carries_the_reading(self):
+        # Without a reaction capability the agent cannot react, but the
+        # judgment still gives it the turn; the reading says why a mhm fits.
         reading = [note("Zoe shared an update; a quick mhm could show Vigil is following.", "e1")]
-        opportunity, wakes, _ = self.turn(ReadingModel("ACK", reading))
+        opportunity, wakes, _ = self.turn(ReadingModel("mhm", reading))
         self.assertEqual("DEFER", opportunity.effective_disposition)
-        self.assertEqual(reading + [moves("ACK")], wakes[0]["attention"]["advice"])
+        self.assertEqual(reading + [moves("mhm")], wakes[0]["attention"]["advice"])
 
-    def test_by_default_the_agent_sends_its_own_mhm(self):
-        # Zoe, 2026-10-05: every visible move is the agent's own. Even where
-        # the platform could take Nunchi's nod, an ACK judgment is the
-        # agent's turn, with the reading saying why a nod could fit.
-        self.assertFalse(AckPolicy().enabled)
+    def test_the_agent_sends_its_own_mhm(self):
+        # Every visible move is the agent's own (Zoe, 2026-10-05; #94 step
+        # 7): where the platform takes reactions, a judgment that leans to
+        # a mhm is still the agent's turn, and Nunchi never reacts for it.
         transport = RecordingTransport(
             capability=ReactionCapability(
                 supported=True,
@@ -144,10 +143,10 @@ class ReadingTests(unittest.TestCase):
             )
         )
         reading = [note("Zoe shared an update; a quick mhm could show Vigil is following.", "e1")]
-        opportunity, wakes, _ = self.turn(ReadingModel("ACK", reading), transport=transport)
+        opportunity, wakes, _ = self.turn(ReadingModel("mhm", reading), transport=transport)
         self.assertEqual("DEFER", opportunity.effective_disposition)
         self.assertEqual("DEFER", wakes[0]["attention"]["source"])
-        self.assertEqual(reading + [moves("ACK")], wakes[0]["attention"]["advice"])
+        self.assertEqual(reading + [moves("mhm")], wakes[0]["attention"]["advice"])
         self.assertEqual([], transport.calls)
 
     def test_a_suppressed_moment_reaches_no_one(self):

@@ -675,8 +675,8 @@ def write_nunchi_config(
 ) -> tuple[Path, Path]:
     """Write the dashboard-default pinned config + digest for one Discord room.
 
-    ``ack_enabled`` writes the room's ``ack`` policy; left out, the room uses
-    the default, where the participant sends its own "mhm".
+    ``ack_enabled`` writes the room's legacy ``ack`` setting, for Nunchi's own
+    nod; since #94 step 7 a room loads with it and ignores it.
     """
 
     from nunchi.integrations.hermes_dashboard_store import default_config_paths

@@ -2,13 +2,32 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://nunchi.invalid/schemas/v2/attention-receipt.schema.json",
   "title": "AttentionReceiptV2",
-  "description": "I-010E AttentionReceiptV2@4 — one immutable, request-correlated stage record. @4 (#94 step 6) lets the attention stage record the I-010B@7 outcome-turn widening of SUPPRESS or ACK to DEFER. @3 adds ACK dispositions, ACK participant-host source, and an ACK-only attention audit containing the reaction, policy provenance, and permission revision. The canonical observation -> attention -> participant-host -> transport order, stage ownership, explicit silence/unknown/unavailable outcomes, policy provenance, and operational-error separation remain unchanged.",
+  "description": "I-010E AttentionReceiptV2@5 — one immutable, request-correlated stage record. @5 (#94 step 7) removes Nunchi's own nod: no new record carries an ACK disposition, an ACK widening, an ack audit, or an ACK participant-host source. Records written before @5 with those facts still validate, read-only, so older journals load; their rows are marked legacy below. @4 (#94 step 6) lets the attention stage record the I-010B@7 outcome-turn widening of SUPPRESS or ACK to DEFER. @3 adds ACK dispositions, ACK participant-host source, and an ACK-only attention audit containing the reaction, policy provenance, and permission revision. The canonical observation -> attention -> participant-host -> transport order, stage ownership, explicit silence/unknown/unavailable outcomes, policy provenance, and operational-error separation remain unchanged.",
   "$defs": {
     "nonEmptyString": {
       "type": "string",
       "minLength": 1
     },
-    "disposition": {"enum": ["SUPPRESS", "ACK", "WAKE", "DEFER"]},
+    "disposition": {"enum": ["SUPPRESS", "WAKE", "DEFER"]},
+    "legacyDisposition": {
+      "$comment": "ACK only in a record written before @5 by Nunchi's own nod.",
+      "enum": ["SUPPRESS", "ACK", "WAKE", "DEFER"]
+    },
+    "legacyAckRouting": {
+      "$comment": "The two ACK widenings a record written before @5 may carry: the disabled nod policy, or an unsupported reaction capability.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["valve", "override_cause", "margin_status"],
+      "properties": {
+        "valve": {"enum": ["policy-defer", "capability-defer"]},
+        "override_cause": {"enum": ["ack-disabled", "ack-unsupported"]},
+        "margin_status": {"enum": ["active", "retired"]}
+      },
+      "oneOf": [
+        {"properties": {"valve": {"const": "policy-defer"}, "override_cause": {"const": "ack-disabled"}}},
+        {"properties": {"valve": {"const": "capability-defer"}, "override_cause": {"const": "ack-unsupported"}}}
+      ]
+    },
     "observationBody": {
       "type": "object",
       "additionalProperties": false,
@@ -34,16 +53,22 @@
           "additionalProperties": false,
           "required": ["classifier_disposition", "effective_disposition", "classifier", "evidence_event_ids", "routing_audit", "policy_provenance"],
           "properties": {
-            "classifier_disposition": {"$ref": "#/$defs/disposition"},
-            "effective_disposition": {"$ref": "#/$defs/disposition"},
+            "classifier_disposition": {"$ref": "#/$defs/legacyDisposition"},
+            "effective_disposition": {"$ref": "#/$defs/legacyDisposition"},
             "classifier": {"$ref": "https://nunchi.invalid/schemas/v2/attention-decision.schema.json#/$defs/classifierAudit"},
             "evidence_event_ids": {
               "type": "array",
               "items": {"$ref": "#/$defs/nonEmptyString"}
             },
-            "routing_audit": {"$ref": "https://nunchi.invalid/schemas/v2/attention-decision.schema.json#/$defs/routingAudit"},
+            "routing_audit": {
+              "anyOf": [
+                {"$ref": "https://nunchi.invalid/schemas/v2/attention-decision.schema.json#/$defs/routingAudit"},
+                {"$ref": "#/$defs/legacyAckRouting"}
+              ]
+            },
             "policy_provenance": {"$ref": "#/$defs/nonEmptyString"},
             "ack": {
+              "$comment": "Legacy, before @5: the nod's reaction, policy provenance, and permission revision.",
               "type": "object",
               "additionalProperties": false,
               "required": ["reaction", "policy_provenance", "permissions_revision"],
@@ -64,7 +89,7 @@
               "$comment": "Attention receipts preserve the exact successful transition matrix and widening cause.",
               "oneOf": [
                 {"properties": {"classifier_disposition": {"const": "WAKE"}, "effective_disposition": {"const": "WAKE"}, "routing_audit": {"properties": {"valve": {"const": "none"}}}}},
-                {"properties": {"classifier_disposition": {"const": "ACK"}, "effective_disposition": {"const": "ACK"}, "routing_audit": {"properties": {"valve": {"const": "none"}}}}},
+                {"$comment": "Legacy ACK rows, before @5: read, never written.", "properties": {"classifier_disposition": {"const": "ACK"}, "effective_disposition": {"const": "ACK"}, "routing_audit": {"properties": {"valve": {"const": "none"}}}}},
                 {"properties": {"classifier_disposition": {"const": "ACK"}, "effective_disposition": {"const": "DEFER"}, "routing_audit": {"properties": {"valve": {"const": "policy-defer"}, "override_cause": {"enum": ["ack-disabled", "outcome-turn"]}}}}},
                 {"properties": {"classifier_disposition": {"const": "ACK"}, "effective_disposition": {"const": "DEFER"}, "routing_audit": {"properties": {"valve": {"const": "capability-defer"}, "override_cause": {"const": "ack-unsupported"}}}}},
                 {"properties": {"classifier_disposition": {"const": "DEFER"}, "effective_disposition": {"const": "DEFER"}, "routing_audit": {"properties": {"valve": {"const": "classifier-defer"}}}}},
@@ -124,7 +149,7 @@
       "additionalProperties": false,
       "required": ["wake_source", "packet_event_count", "packet_byte_count", "delivered_event_ids", "expansion_calls", "invoked", "outcome"],
       "properties": {
-        "wake_source": {"enum": ["ACK", "WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS"]},
+        "wake_source": {"$comment": "ACK only in a record written before @5.", "enum": ["ACK", "WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS"]},
         "packet_event_count": {"type": "integer", "minimum": 0},
         "packet_byte_count": {"type": "integer", "minimum": 0},
         "delivered_event_ids": {
@@ -137,7 +162,7 @@
       },
       "allOf": [
         {
-          "$comment": "Core ACK bypasses the participant model; an ACK host receipt can never claim participant invocation.",
+          "$comment": "Legacy, before @5: Nunchi's own nod bypassed the participant model, so an ACK host receipt never claims participant invocation.",
           "if": {
             "required": ["wake_source"],
             "properties": {"wake_source": {"const": "ACK"}}

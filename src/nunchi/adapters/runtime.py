@@ -12,7 +12,7 @@ import sys
 from typing import Any, TextIO
 
 from .. import __version__
-from ..ack import AckJournal, AckPolicy, ReactionCapability
+from ..reactions import ReactionCapability
 from ..attention import (
     AttentionEngine,
     AttentionPolicy,
@@ -35,6 +35,7 @@ from ..participant import (
 from ..participant_model import OpenAICompatibleParticipant
 from ..pipeline import AsyncDeliveryLane, DeliveryOutcome, NunchiV2Pipeline
 from ..receipts import ReceiptJournal
+from ..v2_contracts import INTERFACE_VERSIONS
 from .decisions_api import ATTENTION_KINDS
 from .v2 import NORMALIZERS
 
@@ -183,6 +184,8 @@ class ReferenceAdapterRuntime:
             "authorization",
             "transport",
             "participant_timeout_seconds",
+            # Nunchi's own nod, removed in #94 step 7; an older config that
+            # still has it loads, and the setting is ignored.
             "ack",
         }
         if set(config) - (required | optional) or required - set(config):
@@ -271,10 +274,6 @@ class ReferenceAdapterRuntime:
         scheduler = ConversationOpportunityScheduler(
             f"{self.binding.participant_id}:{self.binding.continuity_scope_id}"
         )
-        try:
-            ack_policy = AckPolicy(**dict(config.get("ack", {})))
-        except (TypeError, ValueError) as exc:
-            raise ValidationError(f"adapter ACK policy is invalid: {exc}") from exc
         privileged = None
         authorization = config.get("authorization")
         if authorization is not None:
@@ -302,8 +301,6 @@ class ReferenceAdapterRuntime:
             scheduler=scheduler,
             receipts=receipts,
             privileged=privileged,
-            ack_policy=ack_policy,
-            ack_journal=AckJournal(state_directory / f"{stem}.acks.jsonl"),
             participant_timeout_seconds=config.get(
                 "participant_timeout_seconds",
                 300.0,
@@ -314,8 +311,6 @@ class ReferenceAdapterRuntime:
             model=model,
             policy=policy,
             receipts=receipts,
-            ack_policy=ack_policy,
-            reaction_capability_provider=host.reaction_capability,
         )
         self.surface = surface
         self.transport = transport
@@ -387,17 +382,7 @@ class ReferenceAdapterRuntime:
             "room_id": self.binding.room_id,
             "continuity_scope_id": self.binding.continuity_scope_id,
             "capabilities": deepcopy(CAPABILITIES[self.surface]),
-            "interfaces": {
-                "I-010A": 1,
-                "I-010B": 3,
-                "I-010C": 2,
-                "I-010D": 1,
-                "I-010E": 3,
-                "I-010F": 1,
-                "I-020A": 1,
-                "I-030A": 2,
-                "I-040A": 2,
-            },
+            "interfaces": dict(INTERFACE_VERSIONS),
             "participant_turn_protocol_version": 1,
             "operator_schema_version": 1,
             "v1_fallback": False,

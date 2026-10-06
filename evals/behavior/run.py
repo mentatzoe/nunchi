@@ -38,7 +38,7 @@ from typing import Any, Callable, Mapping
 import urllib.error
 
 from nunchi import __version__
-from nunchi.ack import AckPolicy, ReactionCapability
+from nunchi.reactions import ReactionCapability
 from nunchi.attention import (
     AttentionEngine,
     AttentionError,
@@ -76,7 +76,6 @@ DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_KEY_ENV = "NUNCHI_OPENROUTER"
 DRY_RUN_MODEL = "offline/always-wake"
 DRY_RUN_AGENT = "offline/always-speaks"
-ACK_REACTION = "👂"
 AGENT_TIMEOUT_SECONDS = 90.0
 
 
@@ -332,7 +331,7 @@ class SceneProposal:
 
 
 class EvalTransport:
-    """Records every visible move: Nunchi's ACK and the agent's own actions."""
+    """Records every visible move the agent makes."""
 
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
@@ -642,7 +641,6 @@ def judge_moment(
     *,
     timeout_seconds: float,
     agent_factory: AgentFactory | None = None,
-    ack: str = "agent",
     paired: bool = False,
     reading_items: int = 4,
     reading_chars: int = 400,
@@ -651,12 +649,12 @@ def judge_moment(
 ) -> dict[str, Any]:
     """Run one moment through the production pipeline and grade what the room saw.
 
-    Observation, attention, the participant host, and ACK are Nunchi's own.
+    Observation, attention, and the participant host are Nunchi's own.
     With an agent factory, a model plays the woken agent's turn through the
     shared participant protocol; without one, a woken agent counts as
-    "agent decides". By default (``ack="agent"``) Nunchi never nods itself:
-    an ACK judgment gives the agent a turn, and any "mhm" is the agent's own.
-    ``ack="nunchi"`` turns Nunchi's own nod back on. With ``paired``, a turn
+    "agent decides". Nunchi never nods itself: a judgment that leans to a
+    "mhm" gives the agent a turn, and any "mhm" is the agent's own. With
+    ``paired``, a turn
     that carried a reading is also played without it. With ``replay`` (the
     default), each earlier message the participant would have judged live is
     judged first, in order, so its memory holds who asked what. With an
@@ -710,7 +708,6 @@ def judge_moment(
     scene_time = [now]
     observation = ObservationProvider(binding, receipts=receipts, clock=lambda: scene_time[0])
     transport = EvalTransport()
-    ack_policy = AckPolicy(reaction=ACK_REACTION, enabled=ack == "nunchi")
     inner = factory(job.model)
     model = RecordingModel(inner)
     engine = RecordingEngine(
@@ -722,8 +719,6 @@ def judge_moment(
             reading_note_chars=reading_chars,
         ),
         receipts=receipts,
-        ack_policy=ack_policy,
-        reaction_capability_provider=transport.reaction_capability,
     )
     def arrive() -> None:
         # The scene's mid-turn messages reach the room after the wake was
@@ -758,7 +753,6 @@ def judge_moment(
         privileged=scripted,
         # A paired turn plays the agent twice before the real action is sent.
         participant_timeout_seconds=timeout_seconds + AGENT_TIMEOUT_SECONDS * (2 if paired else 1),
-        ack_policy=ack_policy,
     )
     pipeline = NunchiV2Pipeline(
         observation=observation, attention=engine, host=host, scheduler=scheduler
@@ -979,7 +973,7 @@ def judge_moment(
 
     attention = visible_result(decision)
     result = attention
-    by = {"stay_quiet": "attention", "mhm": "nunchi", "woken": None}[attention]
+    by = {"stay_quiet": "attention", "woken": None}[attention]
     provider_error = decision.get("status") == "error"
     if attention == "woken" and agent is not None:
         transport_result = outcomes[0].transport if outcomes else None
@@ -1338,12 +1332,7 @@ def summarize(
     ]
     if meta.get("agent_model"):
         lines[-1:-1] = [
-            "- Mhm: "
-            + (
-                "the agent's own; an ACK judgment gives the agent a turn"
-                if meta.get("ack") == "agent"
-                else "sent by Nunchi on an ACK judgment"
-            )
+            "- Mhm: the agent's own; Nunchi never nods for it"
             + ("; each turn with a reading is also played without it" if meta.get("paired") else ""),
         ]
     if meta.get("agent_model"):
@@ -1391,8 +1380,8 @@ def summarize(
     lines += [
         "## Per model",
         "",
-        "| Model | Moments | Fits | Miss | Unlisted | Agent decides | Agent spoke / quiet / mhm | Step 1 over-suppress | Step 1 over-wake | Nunchi-sent mhm | Cited facts | Top move fits / miss | Errors | Median ms |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| Model | Moments | Fits | Miss | Unlisted | Agent decides | Agent spoke / quiet / mhm | Step 1 over-suppress | Step 1 over-wake | Cited facts | Top move fits / miss | Errors | Median ms |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for model in models:
         mine = [record for record in records if record["model"] == model and record["result"] != "unsupported"]
@@ -1403,7 +1392,7 @@ def summarize(
         agent = Counter(record["result"] for record in mine if record.get("by") == "agent")
         tops = Counter(record["top_move"]["grade"] for record in mine if record.get("top_move"))
         lines.append(
-            "| `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+            "| `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
                 model,
                 len(mine),
                 visible["fits"],
@@ -1413,7 +1402,6 @@ def summarize(
                 f"{agent['speak']} / {agent['stay_quiet']} / {agent['mhm']}" if meta.get("agent_model") else "-",
                 step1["over-suppress"],
                 step1["over-wake"],
-                sum(1 for record in mine if record.get("by") == "nunchi"),
                 f"{sum(cited)}/{len(cited)}" if cited else "-",
                 f"{tops['fits']} / {tops['miss']} of {sum(tops.values())}" if tops else "-",
                 sum(1 for record in mine if record["provider_error"]),
@@ -1435,8 +1423,8 @@ def summarize(
         "## Moments",
         "",
         "Each cell has one letter per run: Q quiet (attention), q quiet (the agent's",
-        "choice), M mhm sent by Nunchi, m the agent's own mhm, S the agent spoke,",
-        "O another agent action, W woken (agent not simulated), E an error, and a",
+        "choice), m the agent's own mhm, S the agent spoke, O another agent",
+        "action, W woken (agent not simulated), E an error, and a",
         "dash where today's V2 has no route. A trailing `!` marks a clear miss in",
         "some run; `?` marks an unlisted move.",
         "",
@@ -1505,12 +1493,6 @@ def main(argv: list[str] | None = None) -> int:
         "--agent-model",
         default="",
         help="model that plays the woken agent's turn; empty grades attention alone",
-    )
-    parser.add_argument(
-        "--ack",
-        choices=("agent", "nunchi"),
-        default="agent",
-        help="who sends the mhm on an ACK judgment: the agent in its own turn (the default), or Nunchi itself",
     )
     parser.add_argument(
         "--paired",
@@ -1591,7 +1573,6 @@ def main(argv: list[str] | None = None) -> int:
                 factory,
                 timeout_seconds=args.timeout,
                 agent_factory=agent_factory,
-                ack=args.ack,
                 paired=args.paired,
                 reading_items=args.reading_items,
                 reading_chars=args.reading_chars,
@@ -1620,7 +1601,6 @@ def main(argv: list[str] | None = None) -> int:
         "models": models,
         "reasoning_efforts": {model: model_spec(model)[1] for model in models if model_spec(model)[1]},
         "agent_model": (DRY_RUN_AGENT if args.dry_run else args.agent_model) if args.agent_model else None,
-        "ack": args.ack,
         "paired": args.paired,
         "reading_items": args.reading_items,
         "reading_chars": args.reading_chars,

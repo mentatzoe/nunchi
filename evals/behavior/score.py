@@ -4,7 +4,6 @@ Attention first decides one of:
 
 - `stay_quiet`: attention suppressed it, or the transport kept the
   participant's own event from waking it;
-- `mhm`: attention chose ACK and Nunchi reacted for the agent;
 - `woken`: the agent got a turn (WAKE, DEFER, or a provider error under the
   default wake-on-error policy);
 - `unsupported`: no route judged this moment.
@@ -43,8 +42,6 @@ def visible_result(decision: Mapping[str, Any] | None, *, transport_self: bool =
         effective = decision["effective_disposition"]
         if effective == "SUPPRESS":
             return "stay_quiet"
-        if effective == "ACK":
-            return "mhm"
         return "woken"
     if status == "error" and decision.get("wake_action") == "NO_WAKE":
         return "stay_quiet"
@@ -105,8 +102,8 @@ def pile_on(results: list[str]) -> bool:
 def symbol(item: Mapping[str, Any]) -> str:
     """One letter for one run.
 
-    Q quiet by attention, q quiet by the agent's choice, M Nunchi's mhm,
-    m the agent's own mhm, S the agent spoke, O another agent action,
+    Q quiet by attention, q quiet by the agent's choice, m the agent's own
+    mhm, S the agent spoke, O another agent action,
     W woken (agent not simulated), E an error, - not supported today.
     """
 
@@ -120,7 +117,7 @@ def symbol(item: Mapping[str, Any]) -> str:
     if result == "stay_quiet":
         return "q" if by == "agent" else "Q"
     if result == "mhm":
-        return "m" if by == "agent" else "M"
+        return "m"
     if result == "speak":
         return "S"
     return "O"

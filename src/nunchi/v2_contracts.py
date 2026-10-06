@@ -19,8 +19,25 @@ from typing import Any
 
 from .errors import ValidationError
 
-DISPOSITIONS = ("SUPPRESS", "ACK", "WAKE", "DEFER")
-WAKE_SOURCES = ("ACK", "WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS")
+DISPOSITIONS = ("SUPPRESS", "WAKE", "DEFER")
+WAKE_SOURCES = ("WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS")
+# The portable interfaces and their versions, as `nunchi probe` reports them.
+INTERFACE_VERSIONS = {
+    "I-010A": 6,
+    "I-010B": 9,
+    "I-010C": 13,
+    "I-010D": 1,
+    "I-010E": 5,
+    "I-010F": 1,
+    "I-020A": 1,
+    "I-030A": 3,
+    "I-040A": 3,
+    "I-040B": 1,
+    "I-040C": 1,
+}
+# Nunchi's own nod is gone (#94 step 7): a mhm is the participant's own move.
+# Receipts it wrote before I-010E@5 still read, so older journals load.
+LEGACY_ACK = "ACK"
 RECEIPT_STAGES = ("observation", "attention", "participant-host", "transport")
 RECEIPT_WRITERS = {
     "observation": "observation-provider",
@@ -462,7 +479,7 @@ def _classifier(value: Any, path: str = "classifier") -> Mapping[str, Any]:
     return doc
 
 
-def _routing(value: Any) -> Mapping[str, Any]:
+def _routing(value: Any, *, legacy_ack: bool = False) -> Mapping[str, Any]:
     doc = _closed(
         value,
         "routing_audit",
@@ -475,8 +492,7 @@ def _routing(value: Any) -> Mapping[str, Any]:
         "classifier-defer",
         "margin-defer",
         "policy-defer",
-        "capability-defer",
-    ):
+    ) and not (legacy_ack and valve == "capability-defer"):
         _fail("routing_audit.valve", "has an unsupported valve")
     if doc["margin_status"] not in ("active", "retired"):
         _fail("routing_audit.margin_status", "must be active or retired")
@@ -498,14 +514,30 @@ def _routing(value: Any) -> Mapping[str, Any]:
     if valve == "policy-defer" and doc["override_cause"] not in (
         "suppression-disabled",
         "recoverability-unproven",
-        "ack-disabled",
         # Since I-010B@7: an outcome turn always reaches the participant.
         "outcome-turn",
-    ):
+    ) and not (legacy_ack and doc["override_cause"] == "ack-disabled"):
         _fail("routing_audit.override_cause", "does not match policy-defer")
     if valve == "capability-defer" and doc["override_cause"] != "ack-unsupported":
         _fail("routing_audit.override_cause", "does not match capability-defer")
     return doc
+
+
+# What a judgment may turn into: the classifier's disposition, the effective
+# one, and the valve between them.
+_TRANSITIONS = (
+    ("WAKE", "WAKE", "none"),
+    ("DEFER", "DEFER", "classifier-defer"),
+    ("SUPPRESS", "DEFER", "margin-defer"),
+    ("SUPPRESS", "DEFER", "policy-defer"),
+    ("SUPPRESS", "SUPPRESS", "none"),
+)
+# Transitions only Nunchi's own nod wrote, before I-010E@5.
+_LEGACY_ACK_TRANSITIONS = (
+    (LEGACY_ACK, LEGACY_ACK, "none"),
+    (LEGACY_ACK, "DEFER", "policy-defer"),
+    (LEGACY_ACK, "DEFER", "capability-defer"),
+)
 
 
 def _ack_audit(value: Any, path: str = "ack") -> Mapping[str, Any]:
@@ -662,7 +694,7 @@ def validate_attention_decision(
                 "classifier",
                 "answers",
             ),
-            optional=("attention_advice", "ack"),
+            optional=("attention_advice",),
         )
         classifier_disposition = checked["classifier_disposition"]
         effective = checked["effective_disposition"]
@@ -670,24 +702,8 @@ def validate_attention_decision(
             _fail("decision", "contains an unsupported disposition")
         routing = _routing(checked["routing_audit"])
         pair = (classifier_disposition, effective, routing["valve"])
-        if pair not in (
-            ("WAKE", "WAKE", "none"),
-            ("ACK", "ACK", "none"),
-            ("ACK", "DEFER", "policy-defer"),
-            ("ACK", "DEFER", "capability-defer"),
-            ("DEFER", "DEFER", "classifier-defer"),
-            ("SUPPRESS", "DEFER", "margin-defer"),
-            ("SUPPRESS", "DEFER", "policy-defer"),
-            ("SUPPRESS", "SUPPRESS", "none"),
-        ):
+        if pair not in _TRANSITIONS:
             _fail("decision", "contains an invalid disposition transition")
-        if pair == ("ACK", "DEFER", "policy-defer") and routing["override_cause"] not in (
-            "ack-disabled",
-            "outcome-turn",
-        ):
-            _fail("decision.routing_audit.override_cause", "must be ack-disabled or outcome-turn for ACK policy widening")
-        if pair == ("ACK", "DEFER", "capability-defer") and routing["override_cause"] != "ack-unsupported":
-            _fail("decision.routing_audit.override_cause", "must be ack-unsupported for ACK capability widening")
         if pair == ("SUPPRESS", "DEFER", "policy-defer") and routing["override_cause"] not in (
             "suppression-disabled",
             "recoverability-unproven",
@@ -722,12 +738,6 @@ def validate_attention_decision(
             # The model's reading of the room may accompany any judgment; it
             # reaches the participant only on a turn it takes (WAKE or DEFER).
             _advice(checked["attention_advice"], event_ids, "decision.attention_advice")
-        if classifier_disposition == "ACK":
-            if "ack" not in checked:
-                _fail("decision.ack", "is required for an ACK selection")
-            _ack_audit(checked["ack"], "decision.ack")
-        elif "ack" in checked:
-            _fail("decision.ack", "is allowed only for an ACK selection")
     else:
         _fail("decision.status", "must be ok, bypass, or error")
     if "request_id" in checked:
@@ -911,7 +921,7 @@ def validate_participant_wake(value: Any) -> dict[str, Any]:
     elif {"advice", "evidence_event_ids", "judged_through_event_id"} & set(attention):
         _fail(
             "wake.attention",
-            "ACK, error fallback, and bypass carry no reading",
+            "error fallback and bypass carry no reading",
         )
     return deepcopy(dict(doc))
 
@@ -990,22 +1000,16 @@ def validate_receipt(value: Any) -> dict[str, Any]:
             )
             classifier = checked["classifier_disposition"]
             effective = checked["effective_disposition"]
-            if classifier not in DISPOSITIONS or effective not in DISPOSITIONS:
+            # A legacy record of Nunchi's own nod still reads (I-010E@5).
+            legacy = classifier == LEGACY_ACK
+            known = DISPOSITIONS + ((LEGACY_ACK,) if legacy else ())
+            if classifier not in known or effective not in known:
                 _fail("receipt.body", "contains an unsupported disposition")
             _classifier(checked["classifier"], "receipt.body.classifier")
             _string_list(checked["evidence_event_ids"], "receipt.body.evidence_event_ids")
-            routing = _routing(checked["routing_audit"])
+            routing = _routing(checked["routing_audit"], legacy_ack=legacy)
             pair = (classifier, effective, routing["valve"])
-            if pair not in (
-                ("WAKE", "WAKE", "none"),
-                ("ACK", "ACK", "none"),
-                ("ACK", "DEFER", "policy-defer"),
-                ("ACK", "DEFER", "capability-defer"),
-                ("DEFER", "DEFER", "classifier-defer"),
-                ("SUPPRESS", "DEFER", "margin-defer"),
-                ("SUPPRESS", "DEFER", "policy-defer"),
-                ("SUPPRESS", "SUPPRESS", "none"),
-            ):
+            if pair not in _TRANSITIONS + _LEGACY_ACK_TRANSITIONS:
                 _fail("receipt.body", "contains an invalid disposition transition")
             if pair == ("ACK", "DEFER", "policy-defer") and routing["override_cause"] not in (
                 "ack-disabled",
@@ -1021,7 +1025,7 @@ def validate_receipt(value: Any) -> dict[str, Any]:
             ):
                 _fail("receipt.body.routing_audit.override_cause", "must name a suppression policy widening")
             _nes(checked["policy_provenance"], "receipt.body.policy_provenance")
-            if checked["classifier_disposition"] == "ACK":
+            if legacy:
                 if "ack" not in checked:
                     _fail("receipt.body.ack", "is required for an ACK selection")
                 _ack_audit(checked["ack"], "receipt.body.ack")
@@ -1041,14 +1045,15 @@ def validate_receipt(value: Any) -> dict[str, Any]:
                 "outcome",
             ),
         )
-        if checked["wake_source"] not in WAKE_SOURCES:
+        # A legacy nod's host record (wake source ACK) still reads.
+        if checked["wake_source"] not in WAKE_SOURCES + (LEGACY_ACK,):
             _fail("receipt.body.wake_source", "has an unsupported source")
         for name in ("packet_event_count", "packet_byte_count", "expansion_calls"):
             _nonnegative_int(checked[name], f"receipt.body.{name}")
         _string_list(checked["delivered_event_ids"], "receipt.body.delivered_event_ids")
         if not isinstance(checked["invoked"], bool):
             _fail("receipt.body.invoked", "must be a boolean")
-        if checked["wake_source"] == "ACK" and checked["invoked"] is not False:
+        if checked["wake_source"] == LEGACY_ACK and checked["invoked"] is not False:
             _fail("receipt.body.invoked", "must be false for an ACK host record")
         if checked["outcome"] not in ("sent", "silent", "unknown"):
             _fail("receipt.body.outcome", "has an unsupported outcome")

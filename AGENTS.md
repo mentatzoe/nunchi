@@ -30,8 +30,8 @@ Reading the room means:
   for it. Deterministic code never decides relevance, resolution, or
   obligation.
 - **Every visible move is the agent's own act**, including a "mhm". Nunchi
-  never posts on the agent's behalf. (Nunchi's own nod is off by default
-  since 2026-10-05; the opt-in goes away in step 7 of #94.)
+  never posts on the agent's behalf. (Nunchi's own nod was removed in step 7
+  of #94.)
 - **A conversation has memory, not a work queue.** Each participant keeps a
   memory of the conversation: who asked what, what was answered and by whom,
   its own moves and why. Every fact points to the messages it came from and

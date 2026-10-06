@@ -22,7 +22,7 @@ Three parts:
 
 - **The gate**, `nunchi-claude-code-room-runner`: one Python process per room.
   It owns the room transport (the shared Discord MCP server), observation,
-  attention, scheduling, ACK, authority, and receipts.
+  attention, scheduling, authority, and receipts.
 - **A dedicated Claude Code session** per room, which the gate starts on the
   first wake. It is not your everyday terminal session. The gate runs
   `claude -p --input-format stream-json --output-format stream-json --verbose
@@ -36,8 +36,9 @@ Three parts:
 
 One wake, step by step:
 
-1. A room event arrives. Attention decides SUPPRESS, ACK, WAKE, or DEFER. ACK
-   adds one reaction without waking the agent.
+1. A room event arrives. Attention decides SUPPRESS, WAKE, or DEFER. A
+   judgment that leans to a "mhm" is DEFER: the agent gets the turn and
+   nods itself if it wants to.
 2. On a wake, the gate writes one turn into the session: a wake marker, the
    participant prompt with your profile's instructions, and the room facts.
 3. The agent may call `mcp__nunchi__room_context` for more history. To take

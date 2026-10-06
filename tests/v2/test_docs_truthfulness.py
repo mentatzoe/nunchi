@@ -37,7 +37,7 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
             "No surface has passed a live real-room check",
             "incomplete Hermes, Codex, and Claude Code integrations",
             "Historical Hermes evidence is not current proof",
-            "normal turns, ordinary tools, native approval, ACK",
+            "normal turns, ordinary tools, native approval, a mhm as the agent's own turn",
             "installed-runtime checks, not live ones",
             "it has not run in a real room",
             "issues/43",

@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010C ParticipantWakeV2@12`` (slice 010, T004; @12 the unattended messages).
+"""Contract tests for ``I-010C ParticipantWakeV2@13`` (slice 010, T004; @12 the unattended messages; @13 no ACK source).
 
 Red cases cover the wake sources, advice-free ``PREATTENTION_BYPASS``
 (010-Preattention-bypass), the FR-013 advice-source violations (advice on
@@ -36,7 +36,7 @@ class MemoryCases(unittest.TestCase):
 
     def test_each_kind_of_move_validates(self):
         assert_schema_verdict(self, "participant-wake", self.wake(self.MOVES), "valid")
-        for source in ("ACK", "DEFER", "ERROR_FALLBACK"):
+        for source in ("DEFER", "ERROR_FALLBACK"):
             with self.subTest(source=source):
                 doc = make_wake(source)
                 doc["memory"] = {"own_moves": self.MOVES[:1]}
@@ -193,9 +193,14 @@ class WakeSourceCases(unittest.TestCase):
     """FR-008: explicit sources, no admission meta-answer, facts separate."""
 
     def test_every_source_validates_without_advice(self):
-        for source in ("ACK", "WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS"):
+        for source in ("WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS"):
             with self.subTest(source=source):
                 assert_schema_verdict(self, "participant-wake", make_wake(source), "valid")
+
+    def test_the_ack_source_is_gone(self):
+        # @13 (#94 step 7): Nunchi never nods for the participant, so every
+        # wake is a turn it takes.
+        assert_schema_verdict(self, "participant-wake", make_wake("ACK"), "invalid")
 
     def test_unknown_source_rejects(self):
         assert_schema_verdict(self, "participant-wake", make_wake("BYPASS"), "invalid")

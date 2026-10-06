@@ -19,7 +19,7 @@ import secrets
 from typing import Any
 
 from ..errors import ValidationError
-from ..ack import ReactionCapability, reaction_capability
+from ..reactions import ReactionCapability, reaction_capability
 from ..mcp_discord.authorization import make_tool_authorization
 from ..participant import TransportResult
 from .mcp_client import StreamableMCPClient

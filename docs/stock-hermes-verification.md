@@ -14,7 +14,7 @@ multiple times; each lane runs in a separate isolated interpreter and fresh home
 | Lane | Required tests | Boundary exercised |
 |---|---:|---|
 | `contract` | 4 | Installed discovery, registry rollback, platform host contract; Discord or Telegram |
-| `normal-attention` | 33 | Stock Discord admission, normal participant turn, native read-file dispatch, native approval/denial, ACK as the participant's own turn by default, Nunchi's opt-in nod, silence, attention Save/WAKE/SUPPRESS/revocation |
+| `normal-attention` | 28 | Stock Discord admission, normal participant turn, native read-file dispatch, native approval/denial, a mhm judgment as the participant's own turn (a legacy nod setting is ignored), silence, attention Save/WAKE/SUPPRESS/revocation |
 | `startup-single` | 1 | Real single-profile startup, adapter ownership, native connect budgets and reconnect |
 | `startup-multiplex` | 1 | Real two-profile startup and profile-owned reconnect |
 

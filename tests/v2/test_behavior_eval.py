@@ -203,7 +203,6 @@ class GradeTests(unittest.TestCase):
     def test_visible_result(self):
         ok = {"status": "ok"}
         self.assertEqual("stay_quiet", visible_result({**ok, "effective_disposition": "SUPPRESS"}))
-        self.assertEqual("mhm", visible_result({**ok, "effective_disposition": "ACK"}))
         self.assertEqual("woken", visible_result({**ok, "effective_disposition": "DEFER"}))
         self.assertEqual("woken", visible_result({"status": "error"}))
         self.assertEqual("stay_quiet", visible_result({"status": "error", "wake_action": "NO_WAKE"}))
@@ -220,11 +219,11 @@ class GradeTests(unittest.TestCase):
 
 
 class JudgeMomentTests(unittest.TestCase):
-    def judge(self, scene_id, moment, disposition, *, ack="agent", **kwargs):
+    def judge(self, scene_id, moment, disposition, **kwargs):
         model = FixedModel(disposition, **kwargs)
         scene = scene_by_id(scene_id)
         job = run.Job(scene, moment, scene.participants[0], "fixture/model", 0)
-        record = run.judge_moment(job, lambda _: model, timeout_seconds=5, ack=ack)
+        record = run.judge_moment(job, lambda _: model, timeout_seconds=5)
         return record, model
 
     def test_suppress_at_the_end_of_the_story_is_a_miss(self):
@@ -235,19 +234,14 @@ class JudgeMomentTests(unittest.TestCase):
         self.assertEqual(["s1", "s2", "s3", "s4", "s5"], [event["id"] for event in model.projections[-1]["events"]])
 
     def test_a_moment_sees_only_what_had_happened(self):
-        _, model = self.judge("story-across-messages", 0, "ACK")
+        _, model = self.judge("story-across-messages", 0, "mhm")
         self.assertEqual(["s1", "s2"], [event["id"] for event in model.projections[-1]["events"]])
 
-    def test_nunchis_own_ack_goes_through_the_capability_and_counts_as_mhm(self):
-        record, _ = self.judge("story-across-messages", 0, "ACK", ack="nunchi")
-        self.assertEqual(("mhm", "nunchi"), (record["result"], record["by"]))
-        self.assertEqual("ACK", record["decision"]["effective_disposition"])
-        self.assertEqual("fits", record["grade"]["visible"])
-
-    def test_by_default_an_ack_is_the_agents_turn(self):
-        record, _ = self.judge("story-across-messages", 0, "ACK")
+    def test_a_mhm_judgment_is_the_agents_turn(self):
+        # Nunchi never nods for the agent (#94 step 7).
+        record, _ = self.judge("story-across-messages", 0, "mhm")
         self.assertEqual(("woken", "DEFER"), (record["result"], record["decision"]["effective_disposition"]))
-        self.assertEqual("policy-defer", record["decision"]["routing_audit"]["valve"])
+        self.assertEqual("classifier-defer", record["decision"]["routing_audit"]["valve"])
 
     def test_late_judgment_sees_the_answer(self):
         _, model = self.judge("answered-by-someone-else", 0, "WAKE")
@@ -379,12 +373,6 @@ class AgentTurnTests(unittest.TestCase):
         record, _ = self.judge("story-across-messages", 0, "WAKE", reacts)
         self.assertEqual(("mhm", "agent"), (record["result"], record["by"]))
         self.assertEqual("fits", record["grade"]["visible"])
-
-    def test_nunchis_own_ack_never_reaches_the_agent(self):
-        record, agent = self.judge("story-across-messages", 0, "ACK", speaks, ack="nunchi")
-        self.assertEqual(("mhm", "nunchi"), (record["result"], record["by"]))
-        self.assertEqual([], agent.turns)
-        self.assertNotIn("agent", record)
 
     def test_suppression_never_reaches_the_agent(self):
         record, agent = self.judge("story-across-messages", 2, "SUPPRESS", speaks)
@@ -556,12 +544,12 @@ class AgentTurnTests(unittest.TestCase):
         self.assertIn("not valid JSON", record["agent"]["error"])
         self.assertEqual(reply, record["agent"]["raw_reply"])
 
-    def test_the_agent_sends_its_own_mhm_when_nunchi_does_not(self):
-        record, agent = self.judge("story-across-messages", 0, "ACK", reacts, ack="agent")
+    def test_the_agent_sends_its_own_mhm(self):
+        record, agent = self.judge("story-across-messages", 0, "mhm", reacts)
         self.assertEqual(("mhm", "agent", "fits"), (record["result"], record["by"], record["grade"]["visible"]))
         self.assertEqual(1, len(agent.turns))
         self.assertEqual("DEFER", record["agent"]["attention"]["source"])
-        self.assertEqual("ACK widened to DEFER (policy-defer)", run.turn_source(record))
+        self.assertEqual("DEFER (model)", run.turn_source(record))
 
     def test_a_message_that_arrives_mid_turn_is_seen_by_looking_again(self):
         class LooksAgain(FakeAgent):
@@ -759,6 +747,7 @@ class RunTests(unittest.TestCase):
         self.assertEqual({"a/model": 2, "b/model": 2}, peak)
 
     def test_a_paired_run_reports_the_reading_and_who_nods(self):
+        # The agent nods for itself; Nunchi never does (#94 step 7).
         with tempfile.TemporaryDirectory() as directory:
             with mock.patch("sys.stdout"):
                 code = run.main(
@@ -766,7 +755,6 @@ class RunTests(unittest.TestCase):
                         "--dry-run",
                         "--agent-model", "x",
                         "--paired",
-                        "--ack", "agent",
                         "--scenes", "story-across-messages",
                         "--runs", "1",
                         "--out", directory,
@@ -775,7 +763,8 @@ class RunTests(unittest.TestCase):
             summary = (Path(directory) / "summary.md").read_text(encoding="utf-8")
             meta = json.loads((Path(directory) / "run.json").read_text(encoding="utf-8"))
         self.assertEqual(0, code)
-        self.assertEqual(("agent", True), (meta["ack"], meta["paired"]))
+        self.assertNotIn("ack", meta)
+        self.assertTrue(meta["paired"])
         self.assertIn("- Mhm: the agent's own", summary)
         self.assertIn("## What the agent saw", summary)
         self.assertIn("| WAKE | 3 | 1 / 1 | 2 / 2 | 3 / 3 | 0 |", summary)

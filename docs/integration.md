@@ -35,8 +35,7 @@ the action `ParticipantTurnHost` commits. See
 Some hosts run their own participant pipeline, as Hermes does. They do not
 use `ParticipantTurnHost`. Instead they wrap their own turn with the shared
 owners: observation, attention, the scheduler, shared opportunity preparation
-and wake facts (`nunchi.pipeline.prepare_opportunity`), the ACK journal, and
-shared receipts (`participant_host_receipt_body`). Nunchi decides before the
+and wake facts (`nunchi.pipeline.prepare_opportunity`), and shared receipts (`participant_host_receipt_body`). Nunchi decides before the
 host starts visible work, hands an admitted turn the bounded wake facts, and
 records the lifecycle facts the host exposes. The host keeps its own prompt,
 model, tools, and delivery behind Nunchi's guards. See

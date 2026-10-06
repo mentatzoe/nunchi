@@ -160,7 +160,7 @@ its absence. Receipt stages run `observation` → `attention` →
 | 2 | WAKE, contribution | address it directly, within its brief | `room_send` called once; `transport` `sent`; a real message |
 | 3 | WAKE, silence | an open moment not worth speaking into | a session turn; `participant-host` `silent`; **no** transport stage |
 | 4 | reaction | a message better answered with a reaction | `room_react`; `transport` `sent` |
-| 5 | ACK | a moment that only needs acknowledgement | ACK widens to DEFER by default: a session turn whose reading says a nod could fit; `room_react` if the agent nods |
+| 5 | mhm | a moment that only needs acknowledgement | DEFER: a session turn whose reading says a "mhm" could fit; `room_react` if the agent nods, and Nunchi never reacts for it |
 | 6 | more context | a question about something said earlier | `room_context` before acting; the action names a fetched event |
 | 7 | cancellation | restart the transport mid-turn | `interrupt` reaches the session; no late post |
 | 7a | steering | while it works on a request that needs a tool (a file read, say), post another question to it | its next tool result carries the room update; it answers both or says why not; no second session turn is needed |

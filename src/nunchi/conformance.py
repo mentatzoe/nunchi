@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import tempfile
 
-from .ack import AckJournal, AckPolicy, ReactionCapability
+from .reactions import ReactionCapability
 from .attention import AttentionEngine, AttentionPolicy, ParticipantProfile
 from .attention_questions import answers_leaning
 from .observation import ObservationProvider, ParticipantBinding
@@ -22,9 +22,7 @@ from .receipts import ReceiptJournal
 
 SCENARIOS = {
     "suppress": "participant-bound classifier SUPPRESS with active recovery",
-    "ack": "ACK adds one exact reaction without invoking the participant",
-    "ack-disabled": "disabled ACK widens safely to the participant DEFER path",
-    "ack-unsupported": "unsupported ACK widens safely to the participant DEFER path",
+    "mhm": "a judgment leaning to a mhm defers to the participant, who sends its own",
     "wake-contribution": "WAKE followed by one host-owned contribution",
     "wake-silence": "WAKE followed by participant silence",
     "classifier-defer": "direct model DEFER wakes with the model's reading",
@@ -52,9 +50,7 @@ class _Model:
             "suppress": "SUPPRESS",
             "margin-defer": "SUPPRESS",
             "classifier-defer": "DEFER",
-            "ack": "ACK",
-            "ack-disabled": "ACK",
-            "ack-unsupported": "ACK",
+            "mhm": "mhm",
         }.get(self.scenario, "WAKE")
         answers = answers_leaning(disposition, close=self.scenario == "margin-defer")
         return {
@@ -69,17 +65,16 @@ class _Model:
 
 
 class _Transport:
-    def __init__(self, *, reactions_supported: bool) -> None:
+    def __init__(self) -> None:
         self.calls = 0
         self.actions: list[dict] = []
-        self._reactions_supported = reactions_supported
 
     def reaction_capability(self) -> ReactionCapability:
         return ReactionCapability(
-            supported=self._reactions_supported,
+            supported=True,
             authenticated=True,
-            operations=("add",) if self._reactions_supported else (),
-            reactions=("👂",) if self._reactions_supported else (),
+            operations=("add",),
+            reactions=("👂",),
             permissions_revision="offline-fixture:permissions:v1",
         )
 
@@ -112,12 +107,11 @@ def run_scenario(scenario: str) -> dict:
         preattention_enabled=scenario != "bypass",
         error_action="NO_WAKE" if scenario == "error-no-wake" else "WAKE",
     )
-    ack_policy = AckPolicy(enabled=scenario != "ack-disabled")
     with tempfile.TemporaryDirectory(prefix="nunchi-v2-conformance-") as directory:
         receipts = ReceiptJournal(Path(directory) / "receipts.jsonl")
         observation = ObservationProvider(binding, receipts=receipts)
         scheduler = ConversationOpportunityScheduler("conformance:42")
-        transport = _Transport(reactions_supported=scenario != "ack-unsupported")
+        transport = _Transport()
 
         readings: list[bool] = []
 
@@ -125,6 +119,15 @@ def run_scenario(scenario: str) -> dict:
             readings.append("advice" in wake["attention"])
             if scenario == "wake-silence":
                 return None
+            if scenario == "mhm":
+                # The participant's own mhm, on the message it acknowledges.
+                return {
+                    "kind": "reaction",
+                    "origin_event_id": "discord:message:100",
+                    "target_event_id": "discord:message:100",
+                    "reaction": "👂",
+                    "operation": "add",
+                }
             return {
                 "kind": "message",
                 "origin_event_id": "discord:message:100",
@@ -137,8 +140,6 @@ def run_scenario(scenario: str) -> dict:
             transport=transport,
             scheduler=scheduler,
             receipts=receipts,
-            ack_policy=ack_policy,
-            ack_journal=AckJournal(Path(directory) / "ack.jsonl"),
         )
         pipeline = NunchiV2Pipeline(
             observation=observation,
@@ -147,8 +148,6 @@ def run_scenario(scenario: str) -> dict:
                 model=None if scenario == "bypass" else model,
                 policy=policy,
                 receipts=receipts,
-                ack_policy=ack_policy,
-                reaction_capability_provider=transport.reaction_capability,
             ),
             host=host,
             scheduler=scheduler,
@@ -172,19 +171,7 @@ def run_scenario(scenario: str) -> dict:
         ]
         expected = {
             "suppress": ("SUPPRESS", 0, 0, ["observation", "attention"]),
-            "ack": (
-                "ACK",
-                0,
-                1,
-                ["observation", "attention", "participant-host", "transport"],
-            ),
-            "ack-disabled": (
-                "DEFER",
-                1,
-                1,
-                ["observation", "attention", "participant-host", "transport"],
-            ),
-            "ack-unsupported": (
+            "mhm": (
                 "DEFER",
                 1,
                 1,
@@ -246,7 +233,7 @@ def run_scenario(scenario: str) -> dict:
             transport.calls,
             stages,
         )
-        ack_native_ok = scenario != "ack" or transport.actions == [
+        mhm_ok = scenario != "mhm" or transport.actions == [
             {
                 "kind": "reaction",
                 "origin_event_id": "discord:message:100",
@@ -260,7 +247,7 @@ def run_scenario(scenario: str) -> dict:
             "scenario": scenario,
             "status": (
                 "pass"
-                if observed == expected and ack_native_ok and readings == expected_readings
+                if observed == expected and mhm_ok and readings == expected_readings
                 else "fail"
             ),
             "observed": {

@@ -12,7 +12,7 @@ Shared core and operator surface:
 - `nunchi attention|validate|probe` — one attention judgment, contract
   validation, and installed interface provenance.
 - `nunchi setup|config|diagnose|dashboard|service|uninstall` — the operator
-  surface. `config` has `show|validate|rollback|set-ack|add-room`; `service`
+  surface. `config` has `show|validate|rollback|add-room`; `service`
   has `start|stop|restart|status|logs|reset|install|uninstall`.
 - `nunchi-install init|verify|upgrade|rollback|uninstall|probe` — private
   config and state roots.
@@ -51,13 +51,12 @@ is stable or executable.
 - Native IDs remain strings and canonical IDs are platform-qualified.
 - `self.actor_id` is exact transport/host binding, independent of aliases,
   names, and roles.
-- Attention dispositions are `SUPPRESS`, `ACK`, `WAKE`, and `DEFER`. By
-  default the ACK policy is off, so `ACK` widens to `DEFER` and the
-  participant sends any "mhm" itself. With the policy on, `ACK` adds one
-  configured reaction without a participant turn, and still widens to
-  `DEFER`, never to suppression, when the platform cannot attest the
-  reaction. Bypass and operational error are distinct non-social
-  statuses.
+- Attention dispositions are `SUPPRESS`, `WAKE`, and `DEFER`. A judgment
+  that leans to a "mhm" is `DEFER`, and the participant sends any "mhm"
+  itself; Nunchi never reacts for it (#94 step 7 removed `ACK` and
+  `config set-ack`). Receipt journals written before then still read, and a
+  config that still has an `ack` setting loads with it ignored. Bypass and
+  operational error are distinct non-social statuses.
 - Attention is answered as fixed typed questions (steps 1 and 2 of reading
   the room); the decision records the answers (`I-010B@6`). A chat model and
   a typed decision model answer the same questions.

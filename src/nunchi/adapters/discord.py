@@ -15,7 +15,7 @@ from collections.abc import Mapping, Sequence
 
 from .. import __version__
 from ..errors import NunchiError, ValidationError
-from ..ack import ReactionCapability
+from ..reactions import ReactionCapability
 from ..participant import TransportResult
 from .runtime import CAPABILITIES, ReferenceAdapterRuntime, load_pinned_config
 
@@ -98,8 +98,8 @@ class DiscordPyTransport:
                 permissions = permissions_for(subject)
         except Exception:
             # Capability discovery is an untrusted platform seam. A missing
-            # cache entry or discord.py shape change must widen ACK to DEFER,
-            # never take down ACK or an ordinary participant turn.
+            # cache entry or discord.py shape change must only take the
+            # participant's reaction away, never its turn.
             permissions = None
         allowed = bool(
             permissions is not None
