@@ -71,6 +71,21 @@ def grade(moment: Moment, result: str, *, attention: str | None = None) -> dict[
     return {"visible": visible, "step1": step1}
 
 
+# What attention's most likely move would show the room now: waiting shows
+# nothing yet, so it is graded like staying quiet.
+_VISIBLE_MOVE = {"speak": "speak", "mhm": "mhm", "wait": "stay_quiet", "stay_quiet": "stay_quiet"}
+
+
+def top_move_grade(moment: Moment, move: str) -> str:
+    """Grade attention's own most likely move as if the agent followed it.
+
+    This measures the reading itself, without the agent, so a run with no
+    simulated agent can still compare how well each model reads the moment.
+    """
+
+    return grade(moment, _VISIBLE_MOVE[move])["visible"]
+
+
 def collective_silence(results: list[str]) -> bool:
     """Every participant stayed quiet at the same moment."""
 

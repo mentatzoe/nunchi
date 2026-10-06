@@ -76,7 +76,11 @@ A moment's `during_turn` messages reach the room after the agent's turn
 began, so the agent sees them only by looking at the room again; each
 record says how many new messages it was shown before posting.
 
-Step 1 is graded on attention alone. Scenes with several participants can
+Step 1 is graded on attention alone, and so is attention's own most likely
+move: each record's `top_move` grades it as if the agent followed it, with
+waiting graded like staying quiet, and the summary's *Top move fits / miss*
+column counts them. That compares how well each model reads the moment
+without paying for an agent. Scenes with several participants can
 check for collective silence and for pile-ons, where everyone speaks at
 once. The `behavior-eval` workflow uses `anthropic/claude-haiku-4.5` as the
 agent by default; one fixed agent model keeps differences between runs down
@@ -102,6 +106,32 @@ agent's side of the room:
 
 Moments that need a pause, such as "five minutes later, nobody has
 answered", have no route in today's V2 and are reported as not supported.
+
+## Which run to use
+
+Each run answers one kind of question. Pick the cheapest one that answers
+it. Costs are estimates for eight attention routes over all scenes, three
+runs each, from what the providers reported in run 20.
+
+| Question | Settings | About |
+|---|---|---|
+| Which model should answer steps 1 and 2? | `--agent-model` empty: attention alone, graded on step 1 and on each route's own top move | $1–2 |
+| Did a change to the agent's turn help? | `--agent-model anthropic/claude-haiku-4.5` | $8–10 |
+| Did a change to the reading help? | the same agent, with `--paired` | $15–18 |
+
+The agent's turns cost the most: a Haiku turn costs several times an
+attention call, and `--paired` plays each turn twice.
+
+**The implementation baseline keeps one agent.** Every run that judges a
+step of the plan on [#94](https://github.com/mentatzoe/nunchi/issues/94)
+uses `anthropic/claude-haiku-4.5` as the agent, at least through step 5, so
+before and after compare the same agent. The agent's own moves already vary
+from run to run (23% of moments woken in more than one run got different
+moves across runs), so a second change would hide the step's effect.
+Comparing other agent families, and the real agents on their own quota, is a
+separate refinement track
+([#116](https://github.com/mentatzoe/nunchi/issues/116)) whose results don't
+gate a step.
 
 ## Two routes for attention
 

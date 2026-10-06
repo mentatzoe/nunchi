@@ -66,6 +66,14 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- The README opens with three diagrams: one message's path through the gate,
+  how the parts fit, and where the plan stands. The manual `behavior-eval`
+  workflow no longer plays the paired turn by default; the suite's README
+  says which run answers which question and what it costs, and keeps one
+  agent (Haiku 4.5) for the implementation baseline while other agent
+  families and real agents are a separate track (#116). Each record grades
+  attention's own most likely move (`top_move`), so a run without an agent
+  still compares how well models read the moment.
 - The behavior suite records what each call cost (#86): tokens in and out,
   reasoning tokens, the provider's reported cost, and the provider that
   served it, for attention and for the agent's real and paired plays, with a
