@@ -41,8 +41,8 @@ class MappingTests(unittest.TestCase):
                 self.assertEqual(expected, classifier_disposition(answers))
 
     def test_step_one_suppresses_only_what_is_not_conversation(self):
-        self.assertEqual("SUPPRESS", classifier_disposition(leaning(conversation=0.49)))
-        self.assertNotEqual("SUPPRESS", classifier_disposition(leaning(conversation=0.5)))
+        self.assertEqual("SUPPRESS", classifier_disposition(leaning("SUPPRESS", conversation=0.49)))
+        self.assertNotEqual("SUPPRESS", classifier_disposition(leaning("SUPPRESS", conversation=0.5)))
         # A question to someone else is still conversation: the participant
         # gets a turn and decides, with the reading saying who was asked.
         to_castor = leaning(
@@ -51,6 +51,18 @@ class MappingTests(unittest.TestCase):
             move={"speak": 0, "mhm": 0, "wait": 0, "stay_quiet": 1},
         )
         self.assertEqual("DEFER", classifier_disposition(to_castor))
+
+    def test_step_one_never_hides_what_the_judgment_would_speak_to(self):
+        # Run 35: a CI line Vigil promised to report on read as not
+        # conversation (0.08) while the most likely move was to speak (0.9).
+        promised = leaning(conversation=0.08, move={"speak": 0.9, "mhm": 0.02, "wait": 0.02, "stay_quiet": 0.06})
+        self.assertEqual("WAKE", classifier_disposition(promised))
+        # Waiting, a mhm, or staying quiet on something that is not
+        # conversation is still suppressed.
+        for move in ("mhm", "wait", "stay_quiet"):
+            with self.subTest(move=move):
+                quiet = leaning(conversation=0.08, move={key: 1.0 if key == move else 0.0 for key in ("speak", "mhm", "wait", "stay_quiet")})
+                self.assertEqual("SUPPRESS", classifier_disposition(quiet))
 
     def test_ties_go_to_paying_attention(self):
         self.assertEqual("speak", top_move(leaning(move={"speak": 0.5, "mhm": 0, "wait": 0.5, "stay_quiet": 0})))

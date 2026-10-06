@@ -66,6 +66,15 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- Step 1 no longer hides what the judgment itself would speak to (#94,
+  step 6). A "not conversation" answer suppresses only when the judgment's
+  most likely move is not to speak. Run 35 showed why: a CI line saying the
+  nightly passed, which Vigil had promised to report to Zoe, was read as
+  not conversation (about 0.1) while the most likely move was to speak
+  (0.8 to 0.9), so all 20 judgments hid it from the agent. Two scenes
+  measure it, `build-finishes-after-promise` (the promise in the window)
+  and `build-finishes-long-after-promise` (the promise only in the agent's
+  memory, 73 scenes).
 - The agent reports an approved action's outcome itself (#94, plan step 6;
   Zoe, #90 decision 2 on #94). When an operator's approval settles a
   privileged action after the agent's turn about it ended (done, failed,
