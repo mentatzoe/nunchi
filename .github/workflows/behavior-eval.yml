@@ -25,7 +25,7 @@ on:
         required: true
         default: "0"
       agent_model:
-        description: Model that plays the woken agent's turn (empty grades attention alone)
+        description: Model that plays the woken agent's turn; the implementation baseline is anthropic/claude-haiku-4.5 (empty grades attention alone, for model selection)
         required: false
         default: anthropic/claude-haiku-4.5
       ack:
@@ -37,9 +37,9 @@ on:
           - agent
           - nunchi
       paired:
-        description: Also play each agent turn that carried a reading without it (needs agent_model)
+        description: Also play each agent turn that carried a reading without it, when the reading is what changed (needs agent_model; doubles the agent's cost)
         required: true
-        default: true
+        default: false
         type: boolean
       reading_items:
         description: Ask attention for at most this many reading notes (0 to 4; 0 asks for none)

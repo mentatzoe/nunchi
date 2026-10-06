@@ -854,6 +854,26 @@ class UsageTests(unittest.TestCase):
         )
         self.assertEqual({}, run.call_usage(None))
 
+    def test_attentions_own_top_move_is_graded_without_an_agent(self):
+        # Model selection runs attention alone; the route's own most likely
+        # move is graded as if the agent followed it. Waiting shows nothing
+        # yet, so it is graded like staying quiet.
+        scene = scene_by_id("story-across-messages")
+        job = run.Job(scene, 2, scene.participants[0], "fixture/model", 0)
+        woke = run.judge_moment(job, lambda _: FixedModel("WAKE"), timeout_seconds=5)
+        self.assertEqual({"move": "speak", "grade": "fits"}, woke["top_move"])
+        early = run.judge_moment(run.Job(scene, 0, scene.participants[0], "fixture/model", 0), lambda _: FixedModel("WAKE"), timeout_seconds=5)
+        self.assertEqual("miss", early["top_move"]["grade"])
+        summary = run.summarize(
+            [scene], ["fixture/model"], [woke, early], [],
+            {
+                "started_at": "s", "finished_at": "f", "git_sha": "x", "git_dirty": False,
+                "nunchi_version": "v", "runs": 1, "temperature": 0, "base_url": "u",
+                "calls": 2, "provider_errors": 0, "command": "c",
+            },
+        )
+        self.assertIn("| 1 / 1 of 2 |", summary)
+
     def test_no_usage_means_no_cost_section(self):
         scene = scene_by_id("bot-status-report")
         record = run.judge_moment(run.Job(scene, 0, "vigil", "fixture/model", 0), lambda _: FixedModel("WAKE"), timeout_seconds=5)

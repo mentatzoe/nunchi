@@ -10,13 +10,119 @@ person would: listen, nod, speak, or hold back.
 [Issue #94](https://github.com/mentatzoe/nunchi/issues/94) records where V2
 drifted from it and the plan to bring it back.
 
+## At a glance
+
+### One message, start to finish
+
+```mermaid
+%%{init: {"flowchart": {"wrappingWidth": 360}}}%%
+flowchart TD
+    msg["A message, reaction or join<br/>arrives in a shared room"] --> adapter["The host turns it into<br/>one canonical event"]
+    adapter --> obs["Observation: the room's recent<br/>history and the agent's own<br/>exchange in it"]
+    obs --> s1
+    subgraph attention["Attention: the participant's own model answers typed questions"]
+        s1{"Step 1<br/>Is this conversation<br/>someone like me<br/>could join?"}
+        s2["Step 2: the reading<br/>Who is it addressed to?<br/>Was it answered, and where?<br/>Is the author mid-thought?<br/>Do I have something to add?<br/>Which moves could fit?"]
+        s1 -- "yes, or unsure" --> s2
+    end
+    s1 -- "no: status report, bot noise,<br/>system event, own echo" --> hidden["Suppressed:<br/>the agent never sees it"]
+    s2 --> turn["The agent's turn: the reading,<br/>recent history, the live room"]
+    turn --> decide{"The agent decides:<br/>speak, mhm, or stay quiet"}
+    decide -- "stay quiet" --> silent["Silence, recorded"]
+    decide -- "speak or mhm" --> look{"Before it goes out:<br/>did anyone else post<br/>while it was composing?"}
+    look -- "no" --> send["The host sends it<br/>to the room"]
+    look -- "yes" --> again{"It reads those messages<br/>and decides once more"}
+    again -- "send it as is,<br/>or change it" --> send
+    again -- "drop it" --> silent
+```
+
+Step 1 passes anything that might be conversation: a wrong suppression is
+invisible, a wrong pass costs one turn. Step 2's reading is a
+recommendation; the agent decides, and every visible move, a "mhm"
+included, is its own.
+
+### How the parts fit
+
+```mermaid
+flowchart TB
+    subgraph rooms["Rooms"]
+        direction LR
+        discord["Discord"] ~~~ telegram["Telegram"] ~~~ matrix["Matrix"] ~~~ generic["Any platform via JSONL"]
+    end
+    subgraph hosts["Hosts and integrations: they own the platform and start the agent"]
+        direction LR
+        cc["Claude Code<br/>a per-room gate and a mod"] ~~~ hermes["Hermes plugin"] ~~~ codex["Codex room runner"] ~~~ ref["Reference adapters"]
+    end
+    subgraph core["Shared core: names no agent host, platform or model vendor"]
+        direction LR
+        pipeline["Pipeline"] --> observation["Observation<br/>canonical events,<br/>bounded history"] --> attention["Attention<br/>typed questions,<br/>the reading"] --> host["Participant host<br/>scheduling, room view,<br/>turn protocol, look-again"] --> guard["Authorization,<br/>receipts, contracts"]
+    end
+    subgraph models["Attention model routes"]
+        direction LR
+        chat["Chat models: OpenAI-compatible,<br/>or the host's own model"] ~~~ typed["Typed decision models:<br/>decisions-api, e.g. Jev"]
+    end
+    subgraph agent["The agent"]
+        session["The user's own Claude Code,<br/>Hermes or Codex session"]
+    end
+    rooms <--> hosts
+    hosts -- "events" --> core
+    core -- "typed questions" --> models
+    core -- "a turn with the reading" --> agent
+    agent -- "its action, sent by the host" --> hosts
+```
+
+The shared core never names a host, platform or vendor; hosts plug into it
+and own the platform, the agent session and the sending. Around it, the
+operator CLI, dashboard and service supervisor configure rooms, and the
+behavior suite, conformance scenarios and unit tests check it.
+
+### Where the work stands
+
+As of 2026-10-06. The live plan is
+[#94](https://github.com/mentatzoe/nunchi/issues/94); measurements are on
+[#86](https://github.com/mentatzoe/nunchi/issues/86).
+
+```mermaid
+flowchart TB
+    classDef done fill:#d8f0dc,stroke:#2e7d32,color:#1a1a1a
+    classDef next fill:#fff1c2,stroke:#a67c00,color:#1a1a1a
+    classDef later fill:#e8ecef,stroke:#607080,color:#1a1a1a
+    subgraph build["Implementation: the plan in issue 94"]
+        direction LR
+        p2["2. The reading<br/>on every turn"]:::done
+        p3["3. Live room view,<br/>look again"]:::done
+        p4["4. Typed<br/>questions"]:::done
+        p5["5. Memory and a<br/>social turn prompt"]:::next
+        p6["6. Rhythm:<br/>time, pauses"]:::later
+        p7["7. Remove<br/>Nunchi's nod"]:::later
+        p8["8. More<br/>model APIs"]:::later
+        p2 --> p3 --> p4 --> p5 --> p6 --> p7 --> p8
+    end
+    subgraph measure["Evaluation"]
+        direction LR
+        e1["Behavior suite:<br/>67 scenes, real models"]:::done
+        e2["Implementation baseline:<br/>one fixed agent"]:::done
+        e3["Refinement, later:<br/>other agent families,<br/>real agents"]:::later
+        e1 --> e2 --> e3
+    end
+    p1["1. Zoe reviews the scenes' ranges"]:::next
+    p1 -.-> measure
+    measure -. "judges each step<br/>before and after" .-> build
+```
+
+Green is done, amber is next or ongoing, grey is later. Each step is
+measured with one fixed agent so before and after compare. Trying other
+agent families and the real agents is a separate track
+([#116](https://github.com/mentatzoe/nunchi/issues/116)).
+
 ## How V2 works today
 
 Nunchi is a portable pre-attention gate for turn-aware participants in shared
 conversation. V2 has one path:
 
-`native event -> canonical observation -> participant-bound attention ->
-SUPPRESS, ACK, or one shared participant turn -> host-owned transport`
+`native event -> canonical observation -> participant-bound attention (typed
+questions) -> SUPPRESS, or one shared participant turn with the reading ->
+host-owned transport`
 
 Conversation events are observations, not reply obligations. Only the exact
 participant's delegated attention model may make the social suppression
@@ -38,10 +144,12 @@ supervisor; packaging; generic/Discord/Matrix/Telegram reference adapters; the
 shared Discord MCP transport; and incomplete Hermes, Codex, and Claude Code
 integrations.
 
-The shared core has first-class ACK and one versioned participant protocol.
-ACK adds one exact `👂` reaction without running the participant; unsupported
-ACK widens to DEFER. The attention model is chosen by configuration (`kind`),
-so the core names no agent host, chat platform, or model vendor.
+The shared core has one versioned participant protocol. An ACK judgment (the
+"mhm") gives the agent a turn, and any "mhm" is the agent's own reaction.
+Nunchi's own `👂` reaction remains as an opt-in (`ack.enabled: true`) until
+step 7 of the plan removes it; unsupported ACK widens to DEFER. The attention
+model is chosen by configuration (`kind`), so the core names no agent host,
+chat platform, or model vendor.
 
 **Hermes.** The Hermes integration reuses Nunchi's shared observation,
 attention, scheduling, wake, and receipt behavior around the stock participant.

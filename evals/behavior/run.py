@@ -48,7 +48,7 @@ from nunchi.attention import (
     _validate_model_judgment,
 )
 from nunchi.adapters.decisions_api import DEFAULT_URL as DECISIONS_URL, DecisionsAttentionModel
-from nunchi.attention_questions import answers_leaning
+from nunchi.attention_questions import answers_leaning, top_move
 from nunchi.observation import ObservationProvider, ParticipantBinding
 from nunchi.participant import (
     ConversationOpportunityScheduler,
@@ -60,7 +60,7 @@ from nunchi.pipeline import NunchiV2Pipeline
 from nunchi.receipts import ReceiptJournal
 
 from .scene import SCENES, Moment, Scene, load_scenes, parse_offset, profile_sha256
-from .score import cell, collective_silence, grade, pile_on, visible_result
+from .score import cell, collective_silence, grade, pile_on, top_move_grade, visible_result
 
 
 DEFAULT_MODELS = (
@@ -797,6 +797,9 @@ def judge_moment(
         },
         cited=[bool(evidence & set(fact["events"])) for fact in moment.notice],
     )
+    if decision.get("status") == "ok" and decision.get("answers"):
+        move = top_move(decision["answers"])
+        record["top_move"] = {"move": move, "grade": top_move_grade(moment, move)}
     return record
 
 
@@ -1088,8 +1091,8 @@ def summarize(
     lines += [
         "## Per model",
         "",
-        "| Model | Moments | Fits | Miss | Unlisted | Agent decides | Agent spoke / quiet / mhm | Step 1 over-suppress | Step 1 over-wake | Nunchi-sent mhm | Cited facts | Errors | Median ms |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| Model | Moments | Fits | Miss | Unlisted | Agent decides | Agent spoke / quiet / mhm | Step 1 over-suppress | Step 1 over-wake | Nunchi-sent mhm | Cited facts | Top move fits / miss | Errors | Median ms |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for model in models:
         mine = [record for record in records if record["model"] == model and record["result"] != "unsupported"]
@@ -1098,8 +1101,9 @@ def summarize(
         cited = [flag for record in mine for flag in record.get("cited", [])]
         latencies = [record["latency_ms"] for record in mine if record.get("latency_ms") is not None]
         agent = Counter(record["result"] for record in mine if record.get("by") == "agent")
+        tops = Counter(record["top_move"]["grade"] for record in mine if record.get("top_move"))
         lines.append(
-            "| `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+            "| `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
                 model,
                 len(mine),
                 visible["fits"],
@@ -1111,6 +1115,7 @@ def summarize(
                 step1["over-wake"],
                 sum(1 for record in mine if record.get("by") == "nunchi"),
                 f"{sum(cited)}/{len(cited)}" if cited else "-",
+                f"{tops['fits']} / {tops['miss']} of {sum(tops.values())}" if tops else "-",
                 sum(1 for record in mine if record["provider_error"]),
                 int(statistics.median(latencies)) if latencies else "-",
             )
