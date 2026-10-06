@@ -375,11 +375,7 @@ def participant_turn_prompt(profile: ParticipantProfile) -> str:
         "message; a reply adds target_event_id; a reaction names its exact "
         "target, reaction, and add/remove operation. A privileged action is a "
         "proposal only; the host independently rechecks exact current "
-        "authority immediately before any effect. Your proposals appear in "
-        "memory.own_moves with their proposal_id and status; kind withdraw "
-        "with a proposal_id withdraws one still awaiting approval, for "
-        "example when the person who asked no longer wants it, and counts as "
-        "your action for the turn. Never include credentials, "
+        "authority immediately before any effect. Never include credentials, "
         "authority claims, continuation handles, or cursors."
     )
 
@@ -400,8 +396,18 @@ def participant_turn_instructions(
         separators=(",", ":"),
         ensure_ascii=False,
     )
+    # Only a participant that may propose hears how to withdraw (#90).
+    proposals = (
+        " Your privileged proposals appear in memory.own_moves with their "
+        "proposal_id and status; kind withdraw with a proposal_id withdraws "
+        "one still awaiting approval, for example when the person who asked "
+        "no longer wants it, and counts as your action for the turn."
+        if request["permissions"]["privileged_proposals"]
+        else ""
+    )
     return (
         participant_turn_prompt(profile)
+        + proposals
         + "\n\nAction schema for this turn (JSON Schema; the protocol and "
         "binding values are fixed):\n"
         + schema

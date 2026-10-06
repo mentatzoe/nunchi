@@ -192,6 +192,18 @@ class ProposalOutcomeTests(unittest.TestCase):
         outcome = self.deliver("e1")
         self.assertEqual("unavailable", outcome.opportunities[0].transport.delivery)
 
+    def test_only_a_participant_that_may_propose_hears_how_to_withdraw(self):
+        from nunchi.participant_model import ParticipantTurnProtocol
+        from tests.v2.test_operator_protocol import PROFILE, opportunity, wake
+
+        allowed = opportunity()
+        allowed["permissions"]["privileged_proposals"] = True
+        denied = opportunity()
+        denied["permissions"]["privileged_proposals"] = False
+        withdraw = "kind withdraw with a proposal_id withdraws"
+        self.assertIn(withdraw, ParticipantTurnProtocol(profile=PROFILE, wake=wake(), opportunity=allowed).instructions)
+        self.assertNotIn(withdraw, ParticipantTurnProtocol(profile=PROFILE, wake=wake(), opportunity=denied).instructions)
+
     def test_a_tool_host_withdraws_through_its_own_tool(self):
         request = {
             "permissions": {"ordinary_actions": ["message"], "privileged_proposals": True},
