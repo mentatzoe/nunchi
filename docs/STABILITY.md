@@ -62,7 +62,7 @@ is stable or executable.
   a typed decision model answer the same questions.
 - Attention model configuration selects its implementation with `kind`
   (default `openai-compatible`; the adapters and the Claude Code and Codex
-  runners add `decisions-api`). The `openai-compatible` attention model and
+  runners add `decisions-api`, `messages-api` and `responses-api`). The `openai-compatible` attention model and
   the OpenAI-compatible participant model require an explicit `base_url`;
   there is no default endpoint, and a configuration without one fails
   validation. Operator profiles accept `kind` and an optional

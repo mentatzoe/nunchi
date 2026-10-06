@@ -5,6 +5,7 @@ import argparse
 from contextlib import ExitStack
 import importlib
 import importlib.metadata
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -89,17 +90,21 @@ def main():
         with ExitStack() as stack:
             # Reviewed optional security-download/remote-metadata doubles.
             # Stock native participant, tool dispatch and approval are untouched.
-            stack.enter_context(mock.patch("tools.tirith_security.ensure_installed", return_value=None))
-            security = importlib.import_module("tools.tirith_security")
-            # Moving main moved acquisition into PM. Double its optional
-            # acquisition boundary, never scan_command or native approval.
-            download = "_download_file" if hasattr(security, "_download_file") else "_background_install"
-            stack.enter_context(mock.patch.object(security, download,
-                                                  side_effect=OSError("offline: optional download unavailable")))
-            result["doubles"] = ["tools.tirith_security.ensure_installed",
-                                 f"tools.tirith_security.{download}",
-                                 "agent.model_metadata.fetch_model_metadata"]
+            doubles = []
+            # Hermes main dropped its bundled Tirith scanner (config v50); the
+            # releases still acquire its binary. The network guard still
+            # catches any acquisition path that is not doubled here.
+            if importlib.util.find_spec("tools.tirith_security") is not None:
+                stack.enter_context(mock.patch("tools.tirith_security.ensure_installed", return_value=None))
+                security = importlib.import_module("tools.tirith_security")
+                # Moving main moved acquisition into PM. Double its optional
+                # acquisition boundary, never scan_command or native approval.
+                download = "_download_file" if hasattr(security, "_download_file") else "_background_install"
+                stack.enter_context(mock.patch.object(security, download,
+                                                      side_effect=OSError("offline: optional download unavailable")))
+                doubles += ["tools.tirith_security.ensure_installed", f"tools.tirith_security.{download}"]
             stack.enter_context(mock.patch("agent.model_metadata.fetch_model_metadata", return_value={}))
+            result["doubles"] = doubles + ["agent.model_metadata.fetch_model_metadata"]
             # Stock runtime imports can prepend the host tree (and its tests).
             sys.path.remove(str(root))
             sys.path.insert(0, str(root))

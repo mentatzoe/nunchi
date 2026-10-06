@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import ExitStack
+import importlib.util
 import inspect
 import os
 import socket
@@ -38,11 +39,13 @@ class InstalledStartupTests(unittest.TestCase):
             (secondary_home / ".env").write_text(
                 "DISCORD_BOT_TOKEN=secondary-probe-token\nDISCORD_ALLOWED_USERS=100\n")
         sup.write_nunchi_config(home)
-        # Stock starts this optional binary downloader during tool bootstrap.
-        # Stub installation only; no tool/approval execution is replaced.
-        installer = mock.patch("tools.tirith_security.ensure_installed", return_value=None)
-        installer.start()
-        self.addCleanup(installer.stop)
+        # Stock releases start this optional binary downloader during tool
+        # bootstrap; Hermes main dropped it (config v50). Stub installation
+        # only; no tool/approval execution is replaced.
+        if importlib.util.find_spec("tools.tirith_security") is not None:
+            installer = mock.patch("tools.tirith_security.ensure_installed", return_value=None)
+            installer.start()
+            self.addCleanup(installer.stop)
         loaded = sup.load_nunchi_via_plugin_manager()
         self.addCleanup(sup.unload_nunchi, loaded)
         self.assertIsNone(loaded["state"]["error"])

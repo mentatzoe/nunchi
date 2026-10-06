@@ -59,11 +59,21 @@ names. Host- and vendor-specific behavior enters through these seams:
   adapters, the Claude Code gate and the Codex runner register
   `decisions-api` (`src/nunchi/adapters/decisions_api.py`), a typed decision
   model behind OpenRouter's Decisions API (`model`, optional `url`,
-  `api_key_env`).
+  `api_key_env`), and two routes in `src/nunchi/adapters/model_apis.py` (#94
+  step 8): `messages-api`, the Anthropic Messages API (`POST
+  {base_url}/messages`), and `responses-api`, the OpenAI Responses API
+  (`POST {base_url}/responses`). Both take `model`, an explicit `base_url`,
+  `api_key_env`, and optional `temperature`, `effort`, `max_tokens` (default
+  4096) and `extra_body`; `messages-api` also takes `auth` (`x-api-key`, the
+  default, or `bearer` for a router). Both ask the API to hold the reply to
+  the judgment schema, in the subset structured output accepts (no numeric,
+  length or array bounds; every property required); the engine still checks
+  the bounds. The Responses request asks not to be stored.
 - The OpenAI-compatible participant model (`OpenAICompatibleParticipant`,
   `nunchi.participant_model`) takes the same optional `extra_body`, for
   example a provider's reasoning setting. It, the OpenAI-compatible attention
-  model and the `decisions-api` model keep the provider's last response as
+  model and the `decisions-api`, `messages-api` and `responses-api` models
+  keep the provider's last response as
   `last_response`, so an audit or evaluation can read the served model and
   its token usage.
 - `HostTextAttentionModel(complete, ...)` is for hosts whose completion

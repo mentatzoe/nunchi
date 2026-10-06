@@ -35,6 +35,15 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   questions about the judged message and writes the agent's reading from
   them, so Jev's speed and fit can be compared with the LLM routes. The
   manual `behavior-eval` workflow runs it through OpenRouter, Jev included.
+- Two more attention routes (#94 step 8, #87), as kinds outside the core:
+  `messages-api` through the Anthropic Messages API and `responses-api`
+  through the OpenAI Responses API. Both send the core's prompt, observation
+  text and answer schema, ask the API to hold the reply to the schema in the
+  subset structured output accepts, and hand the reply to the core's
+  decoder. The adapter runtime, the Claude Code gate and the Codex runner
+  offer both beside `decisions-api`; the behavior eval sends a model's
+  attention through one when its name starts with `messages:` or
+  `responses:`.
 - Shared V2 runtime: canonical bounded observation and continuation,
   participant-shaped attention, a coalescing opportunity scheduler (one active
   opportunity plus the newest pending event), participant wake and silence,

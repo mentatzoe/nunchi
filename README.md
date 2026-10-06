@@ -59,7 +59,7 @@ flowchart TB
     end
     subgraph models["Attention model routes"]
         direction LR
-        chat["Chat models: OpenAI-compatible,<br/>or the host's own model"] ~~~ typed["Typed decision models:<br/>decisions-api, e.g. Jev"]
+        chat["Chat models: OpenAI-compatible,<br/>Messages or Responses API,<br/>or the host's own model"] ~~~ typed["Typed decision models:<br/>decisions-api, e.g. Jev"]
     end
     subgraph agent["The agent"]
         session["The user's own Claude Code,<br/>Hermes or Codex session"]
@@ -95,7 +95,7 @@ flowchart TB
         p5["5. Memory and a<br/>social turn prompt"]:::done
         p6["6. Rhythm:<br/>time, pauses"]:::next
         p7["7. Remove<br/>Nunchi's nod"]:::done
-        p8["8. More<br/>model APIs"]:::later
+        p8["8. More<br/>model APIs"]:::done
         p2 --> p3 --> p4 --> p5 --> p6 --> p7 --> p8
     end
     subgraph measure["Evaluation"]

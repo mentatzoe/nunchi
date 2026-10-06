@@ -36,7 +36,7 @@ from ..participant_model import OpenAICompatibleParticipant
 from ..pipeline import AsyncDeliveryLane, DeliveryOutcome, NunchiV2Pipeline
 from ..receipts import ReceiptJournal
 from ..v2_contracts import INTERFACE_VERSIONS
-from .decisions_api import ATTENTION_KINDS
+from .model_apis import ATTENTION_KINDS
 from .v2 import NORMALIZERS
 
 
