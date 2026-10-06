@@ -278,10 +278,15 @@ class ParticipantProtocolTests(unittest.TestCase):
                     (True, None),
                     self.protocol.consume(json.dumps(self.envelope({"kind": "silence", "why": bad})), expand=None),
                 )
-        # Looking around the room is not a move.
+        # Looking around the room is not a move: a reason on it is dropped,
+        # and the look goes ahead (run 25 had a turn fail on this).
+        asked = []
         expand = {"kind": "expand", "direction": "before", "max_events": 5, "max_bytes": 4096, "why": "context"}
-        with self.assertRaises(ParticipantModelError):
-            self.protocol.consume(json.dumps(self.envelope(expand)), expand=lambda **_: {"events": []})
+        done, action = self.protocol.consume(
+            json.dumps(self.envelope(expand)), expand=lambda **request: asked.append(request) or {"events": []}
+        )
+        self.assertEqual((False, None), (done, action))
+        self.assertEqual([{"direction": "before", "max_events": 5, "max_bytes": 4096}], asked)
         schema = participant_action_schema(self.protocol.request["binding"])
         kinds = {
             variant["properties"]["kind"]["const"]: "why" in variant["properties"]

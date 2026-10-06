@@ -485,12 +485,11 @@ def _validate_inner_action(action: Any) -> dict[str, Any]:
         raise ParticipantModelError("participant action must be an object")
     checked = dict(action)
     kind = checked.get("kind")
-    # The reason is the participant's own note; a malformed one is dropped
-    # alone and never fails the move.
+    # The reason is the participant's own note; a malformed one, or one on
+    # a look around the room, which is not a move, is dropped alone and never
+    # fails the action (run 25, #86).
     why = checked.pop("why", None)
-    if kind == "expand" and why is not None:
-        raise ParticipantModelError("expansion action has an invalid closed shape")
-    reason = why if isinstance(why, str) and why.strip() else None
+    reason = why if kind != "expand" and isinstance(why, str) and why.strip() else None
     checked = _validate_move(checked, kind)
     if reason is not None:
         checked["why"] = reason
