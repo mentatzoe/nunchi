@@ -11,7 +11,7 @@ live, integrated, or released status.
 `docs/architecture/v2-selected-design.md` preserve the field inventory selected
 from Aleph Vault at `c834e8c`; the external path is provenance, not a
 contributor dependency. The program-canonical interface names and versions
-(`I-010D`, `I-010F` at `@1`; `I-010A` at `@2`; `I-010E` at `@3`; `I-010C` at `@8`; `I-010B` at `@6`) are this
+(`I-010D`, `I-010F` at `@1`; `I-010A` at `@3`; `I-010E` at `@3`; `I-010C` at `@9`; `I-010B` at `@6`) are this
 slice's vocabulary layered over that inventory. A document the selected design
 declares valid that either validator rejects is a contract defect, never
 resolved by narrowing the corpus.
@@ -20,9 +20,9 @@ resolved by narrowing the corpus.
 
 | Interface | Version | Schema path |
 |---|---|---|
-| `I-010A AttentionRequestV2` | `@2` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
+| `I-010A AttentionRequestV2` | `@3` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
 | `I-010B AttentionDecisionV2` | `@6` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
-| `I-010C ParticipantWakeV2` | `@8` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
+| `I-010C ParticipantWakeV2` | `@9` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
 | `I-010E AttentionReceiptV2` | `@3` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
 | `I-010F PrivilegedActionAuthorizationV2` | `@1` | [`schemas/v2/privileged-action-authorization.schema.json`](../../schemas/v2/privileged-action-authorization.schema.json) |
@@ -111,7 +111,7 @@ python3 -m unittest tests.v2.contract.test_privileged_action_authorization
 uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
 ```
 
-## I-010A AttentionRequestV2@2
+## I-010A AttentionRequestV2@3
 
 A truthful attention request represents:
 
@@ -171,6 +171,12 @@ A truthful attention request represents:
   `own_messages` never exceeds `window_messages` (runtime-adapter-only).
   They are facts, never verdicts. The host's clock is injectable, so a
   replay can place each moment at its own time.
+- **Why it is judged without a new message (@3, #94 step 6)** — optional
+  `occasion`. Absent, the trigger is judged because it just arrived (or, on
+  replay, as it arrived). `pause` means an earlier judgment of the same
+  trigger read it as a moment to wait on, and the room stayed quiet since,
+  so it is judged again as it stands now. `pace.judged_seconds_ago` then
+  says how long the quiet has lasted.
 
 ## I-010B AttentionDecisionV2@6
 
@@ -276,7 +282,7 @@ closed-union change: `@2` consumers must upgrade before receiving ACK.
   occur before a request ID is assignable); an optional `classifier` audit is
   present only when the error occurred after classifier invocation.
 
-## I-010C ParticipantWakeV2@8
+## I-010C ParticipantWakeV2@9
 
 The normal-turn input materializes `self`, `room`, `actors`, `events`,
 `trigger_event_id`, `coverage`, and optional `continuation` directly —
@@ -346,6 +352,10 @@ shows the newest 3, from the authorization coordinator.
 
 Since @8 (#94 step 6) a wake may carry `pace`, the same facts as the attention
 request's, computed for the fresh view the turn is built from.
+
+Since @9 (#94 step 6) a wake may carry `occasion`, copied from the attention
+request it follows: `pause` means the turn comes from a look again after the
+room stayed quiet, not from a new message.
 
 ## I-010D ContextContinuationV2@1
 

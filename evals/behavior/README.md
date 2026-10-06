@@ -28,7 +28,8 @@ Every scene starts as a draft (`"review": "draft: …"`):
   two where a message arrives while the agent is composing
   (`answered-while-composing`, `never-mind-while-composing`), and two where
   the agent's own earlier turn in the scene matters
-  (`addressee-never-answers`, `said-it-would-check`).
+  (`addressee-never-answers`, `said-it-would-check`), and one where looking
+  again after a pause should still stay quiet (`only-they-can-do-it`).
 - `scenes/litmus/` holds 57 scenes converted from the V1 litmus corpus by
   `litmus.py`. Their ranges come from V1 verdicts, and their `review` field
   quotes the V1 rationale. They have no notice facts yet.
@@ -123,8 +124,14 @@ agent's side of the room:
   default: an ACK judgment gives the agent a turn, and any "mhm" is its
   own. `--ack nunchi` turns Nunchi's own nod back on, for comparison.
 
-Moments that need a pause, such as "five minutes later, nobody has
-answered", have no route in today's V2 and are reported as not supported.
+A pause moment, such as "five minutes later, nobody has answered", plays
+the scene through the message before the pause as it happened live: that
+message is judged, and with an agent its turn is played. The scene clock
+then moves on by the pause, and Nunchi looks again (#94 step 6). It looks
+again only when that judgment's most likely move was to wait and the agent
+did not post; otherwise the record counts as staying quiet, by attention.
+Each pause record's `looked_again` says whether it did, and a turn from a
+look again carries `occasion: "pause"`.
 
 ## Which run to use
 

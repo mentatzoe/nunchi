@@ -327,7 +327,21 @@ anchor becomes work. One host-wide deadline begins before attention and spans
 provider waiting, the participant, expansion, authorization, and native
 transport acknowledgement. It invalidates even a participant or transport
 that ignores cancellation; a late transport result remains `unknown` and
-cannot revive work. Before an effect, the host persists a participant-host
+cannot revive work.
+
+Looking again (#94 step 6, `docs/behavior.md`): when a judgment's most
+likely move is to wait, for the addressee or for the speaker to finish, the
+pipeline arms one look again at that message. A new eligible message
+disarms it, and so does a sent or unknown move by the participant about it.
+If the room stays quiet for `look_again_seconds` (300 by default; 0 turns it
+off), the delivery lane's timer judges the same message again with
+`occasion: "pause"`, and the participant may get a turn that carries it. It
+runs only when the lane is idle, so it never displaces a newer message, and
+it happens once per quiet stretch: a look again never arms another. Hosts
+that run through the async delivery lane (Claude Code, Codex, and the
+generic runtime) look again; Hermes does not yet.
+
+Before an effect, the host persists a participant-host
 `unknown` handoff; the transport stage alone settles actual delivery. A receipt
 write that consumes the deadline therefore makes zero native calls.
 Cancellation and expiry are rechecked after every blocking authorization

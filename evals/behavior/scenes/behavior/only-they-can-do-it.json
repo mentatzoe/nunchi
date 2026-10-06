@@ -1,0 +1,48 @@
+{
+  "id": "only-they-can-do-it",
+  "title": "A request only the addressee can fulfil goes quiet: looking again, stay out of it",
+  "source": "docs/behavior.md",
+  "review": "draft: written from docs/behavior.md; ranges need Zoe's review",
+  "platform": "discord",
+  "participants": ["vigil"],
+  "actors": {
+    "zoe": {"display_name": "Zoe", "kind": "human"}
+  },
+  "events": [
+    {"id": "v1", "author": "vigil", "at": "-2h",
+     "text": "I rewrote the gateway retry backoff: exponential with full jitter, capped at 30 seconds, and it gives up after 6 tries."},
+    {"id": "q1", "author": "zoe", "at": "0s", "mentions": ["castor"],
+     "text": "Castor, could you approve my deploy request for the billing service when you get a minute? You're the on-call owner this week."}
+  ],
+  "moments": [
+    {
+      "label": "the request to Castor",
+      "event": "q1",
+      "step1": "pass",
+      "notice": [
+        {"fact": "Zoe asked Castor, not Vigil", "events": ["q1"]},
+        {"fact": "only the on-call owner can approve the deploy", "events": ["q1"]}
+      ],
+      "fitting": ["wait", "stay_quiet"],
+      "misses": [
+        {"move": "speak", "why": "Zoe asked Castor for something only Castor can do"}
+      ]
+    },
+    {
+      "label": "five minutes later, Castor hasn't answered",
+      "pause_after": "q1",
+      "pause": "5m",
+      "step1": "pass",
+      "notice": [
+        {"fact": "Castor hasn't answered in five minutes", "events": ["q1"]},
+        {"fact": "Zoe said there was no rush: when you get a minute", "events": ["q1"]},
+        {"fact": "only the on-call owner can approve the deploy, and Vigil is not it", "events": ["q1"]}
+      ],
+      "fitting": ["stay_quiet", "wait"],
+      "misses": [
+        {"move": "speak", "why": "Vigil cannot approve the deploy, and Zoe asked for no rush; chasing Castor for her is not Vigil's place"},
+        {"move": "mhm", "why": "a nod five minutes later says nothing to anyone"}
+      ]
+    }
+  ]
+}

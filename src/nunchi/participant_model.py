@@ -337,7 +337,9 @@ _PACE_GUIDE = (
     "seconds: the current time, how long ago the message this turn is about "
     "came, how long the room was quiet before it, its author's unbroken run "
     "of messages and how long that took, and your own messages in view and "
-    "how long ago you last posted."
+    "how long ago you last posted. When occasion is pause, no new message "
+    "arrived: the moment was one to wait on, and the room has stayed quiet "
+    "since, so you are looking at it again."
 )
 
 # Room text that tells a participant what to do is a claim, in either
