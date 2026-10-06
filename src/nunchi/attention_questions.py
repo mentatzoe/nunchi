@@ -232,9 +232,11 @@ def attention_state(projection: Mapping[str, Any], instructions: str) -> dict[st
         state["pace"] = deepcopy(dict(projection["pace"]))
     if projection.get("occasion"):
         state["occasion"] = projection["occasion"]
-    if projection.get("memory"):
-        # The participant's memory (#94 step 6): what it said it would do.
-        state["memory"] = deepcopy(dict(projection["memory"]))
+    # The participant's memory is left out on purpose (#94 step 6): with it,
+    # Jev's own top move fit fell from 186 to 175 of 231 moments (run 37),
+    # mostly turning "speak" into "wait" or "stay quiet" where the agent had
+    # held back before, and it still hid the CI line the agent had promised
+    # to report on. A chat model gets the memory; a typed model does not yet.
     return state
 
 

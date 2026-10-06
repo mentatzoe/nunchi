@@ -191,8 +191,10 @@ asks and the pointers (#94 step 5). Since #94 step 6 the judgment also
 carries that memory, the same facts the participant's turn gets, so it reads
 a message as the participant would: a CI line it promised to report on
 concerns it even when nobody addresses it and the promise has left the
-window. Step 1's "not conversation" never suppresses a message the
-judgment's most likely move is to speak to.
+window. A chat model reads it; a typed model is not given it yet, because it
+made Jev hold back where it should speak (run 37). Step 1's "not
+conversation" never suppresses a message the judgment's most likely move is
+to speak to.
 
 There are two routes, and both produce the same answers:
 

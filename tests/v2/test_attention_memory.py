@@ -49,7 +49,7 @@ class AttentionMemoryTests(unittest.TestCase):
         self.assertIn("observation.memory is vigil's own memory of this room", instructions)
         self.assertIn("a status line it said it would report on", instructions)
 
-    def test_the_request_validates_and_a_typed_model_gets_the_memory(self):
+    def test_the_request_validates_and_a_typed_model_does_not_get_the_memory_yet(self):
         self.deliver("z1", text="Vigil, tell me when the nightly finishes?")
         self.pipeline.observation.observe(
             delivery_id="d-v1", event=message("v1", author_id=SELF, text="Will do.", reply_to_event_id="z1"), actors=ZOE
@@ -57,7 +57,9 @@ class AttentionMemoryTests(unittest.TestCase):
         self.pipeline.observation.observe(delivery_id="d-c1", event=message("c1", text="passed"), actors=ZOE)
         request = self.pipeline.observation.build_snapshot("c1", memory=self.pipeline.host.memory_facts("c1"))
         validate_attention_request(request)
-        self.assertEqual(request["memory"], attention_state(request, "x")["memory"])
+        self.assertIn("memory", request)
+        # Run 37: the memory made Jev hold back where it should speak.
+        self.assertNotIn("memory", attention_state(request, "x"))
 
     def test_a_recalled_message_is_judged_with_the_memory_too(self):
         self.deliver("z1", text="Vigil, tell me when the nightly finishes?")

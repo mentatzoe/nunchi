@@ -189,7 +189,7 @@ A truthful attention request represents:
   after that has left the window. The reference host builds it for every
   judgment, including recalled ones; it is absent while the memory is
   empty. The attention prompt explains it only to a judgment that carries
-  it.
+  it. The reference typed route does not pass it to its model yet.
 
 ## I-010B AttentionDecisionV2@7
 
