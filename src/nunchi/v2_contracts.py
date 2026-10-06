@@ -368,6 +368,32 @@ def _observation_fields(doc: Mapping[str, Any], *, require_schema: bool) -> None
             _nes(continuation["expires_at"], "continuation.expires_at")
 
 
+# The room's pace at the snapshot (#94 step 6; I-010A@2, I-010C@8); see
+# ``nunchi.pace``. Counts and durations in whole seconds, never verdicts.
+PACE_COUNTS = ("window_messages", "own_messages")
+PACE_OPTIONAL = (
+    "judged_seconds_ago",
+    "quiet_before_seconds",
+    "author_run_messages",
+    "author_run_seconds",
+    "own_last_seconds_ago",
+)
+
+
+def _pace(value: Any, path: str) -> None:
+    doc = _closed(value, path, required=("now",) + PACE_COUNTS, optional=PACE_OPTIONAL)
+    _nes(doc["now"], f"{path}.now")
+    for name in PACE_COUNTS + PACE_OPTIONAL:
+        if name in doc:
+            item = doc[name]
+            if isinstance(item, bool) or not isinstance(item, int) or item < 0:
+                _fail(f"{path}.{name}", "must be a non-negative integer")
+    if doc["own_messages"] > doc["window_messages"]:
+        _fail(f"{path}.own_messages", "cannot exceed window_messages")
+    if "author_run_messages" in doc and doc["author_run_messages"] < 1:
+        _fail(f"{path}.author_run_messages", "must count the judged message")
+
+
 def validate_attention_request(value: Any) -> dict[str, Any]:
     doc = _closed(
         value,
@@ -382,10 +408,12 @@ def validate_attention_request(value: Any) -> dict[str, Any]:
             "trigger_event_id",
             "coverage",
         ),
-        optional=("continuation",),
+        optional=("continuation", "pace"),
     )
     _nes(doc["request_id"], "request_id")
     _observation_fields(doc, require_schema=True)
+    if "pace" in doc:
+        _pace(doc["pace"], "request.pace")
     return deepcopy(dict(doc))
 
 
@@ -751,8 +779,10 @@ def validate_participant_wake(value: Any) -> dict[str, Any]:
             "coverage",
             "attention",
         ),
-        optional=("continuation", "memory"),
+        optional=("continuation", "memory", "pace"),
     )
+    if "pace" in doc:
+        _pace(doc["pace"], "wake.pace")
     if "memory" in doc:
         # Memory points at messages that may have left the window; the
         # participant can look around them in the room.

@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010C ParticipantWakeV2@7`` (slice 010, T004).
+"""Contract tests for ``I-010C ParticipantWakeV2@8`` (slice 010, T004).
 
 Red cases cover the wake sources, advice-free ``PREATTENTION_BYPASS``
 (010-Preattention-bypass), the FR-013 advice-source violations (advice on
@@ -92,6 +92,15 @@ class MemoryCases(unittest.TestCase):
         empty = make_wake("WAKE")
         empty["memory"] = {}
         assert_schema_verdict(self, "participant-wake", empty, "invalid")
+
+
+class PaceCases(unittest.TestCase):
+    """@8 (#94 step 6): the turn carries the room's pace too."""
+
+    def test_the_wake_may_carry_the_pace(self):
+        pace = {"now": "2026-10-06T09:00:00.000Z", "window_messages": 4, "own_messages": 0, "quiet_before_seconds": 30}
+        assert_schema_verdict(self, "participant-wake", dict(make_wake("WAKE"), pace=pace), "valid")
+        assert_schema_verdict(self, "participant-wake", dict(make_wake("WAKE"), pace=dict(pace, now="")), "invalid")
 
 
 class ThreadCases(unittest.TestCase):

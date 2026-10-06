@@ -11,7 +11,7 @@ live, integrated, or released status.
 `docs/architecture/v2-selected-design.md` preserve the field inventory selected
 from Aleph Vault at `c834e8c`; the external path is provenance, not a
 contributor dependency. The program-canonical interface names and versions
-(`I-010A`, `I-010D`, `I-010F` at `@1`; `I-010E` at `@3`; `I-010C` at `@7`; `I-010B` at `@6`) are this
+(`I-010D`, `I-010F` at `@1`; `I-010A` at `@2`; `I-010E` at `@3`; `I-010C` at `@8`; `I-010B` at `@6`) are this
 slice's vocabulary layered over that inventory. A document the selected design
 declares valid that either validator rejects is a contract defect, never
 resolved by narrowing the corpus.
@@ -20,9 +20,9 @@ resolved by narrowing the corpus.
 
 | Interface | Version | Schema path |
 |---|---|---|
-| `I-010A AttentionRequestV2` | `@1` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
+| `I-010A AttentionRequestV2` | `@2` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
 | `I-010B AttentionDecisionV2` | `@6` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
-| `I-010C ParticipantWakeV2` | `@7` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
+| `I-010C ParticipantWakeV2` | `@8` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
 | `I-010E AttentionReceiptV2` | `@3` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
 | `I-010F PrivilegedActionAuthorizationV2` | `@1` | [`schemas/v2/privileged-action-authorization.schema.json`](../../schemas/v2/privileged-action-authorization.schema.json) |
@@ -111,7 +111,7 @@ python3 -m unittest tests.v2.contract.test_privileged_action_authorization
 uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
 ```
 
-## I-010A AttentionRequestV2@1
+## I-010A AttentionRequestV2@2
 
 A truthful attention request represents:
 
@@ -160,6 +160,17 @@ A truthful attention request represents:
   that constructs the model-facing projection redacts `continuation` down
   to coverage plus expansion-capability booleans before that call. This is
   a runtime-adapter-only behavior, not a schema constraint.
+- **The room's pace (@2, #94 step 6)** — optional `pace`, computed when the
+  snapshot is built: `now`; `window_messages` and `own_messages` (the
+  participant's share of the window's messages); and, when the timestamps
+  allow, `judged_seconds_ago`, `quiet_before_seconds` (since the previous
+  message by anyone), `author_run_messages` and `author_run_seconds` (the
+  judged message's author's unbroken run of messages ending at it; other
+  people's messages break a run, reactions and joins do not), and
+  `own_last_seconds_ago`. All are whole non-negative numbers;
+  `own_messages` never exceeds `window_messages` (runtime-adapter-only).
+  They are facts, never verdicts. The host's clock is injectable, so a
+  replay can place each moment at its own time.
 
 ## I-010B AttentionDecisionV2@6
 
@@ -265,7 +276,7 @@ closed-union change: `@2` consumers must upgrade before receiving ACK.
   occur before a request ID is assignable); an optional `classifier` audit is
   present only when the error occurred after classifier invocation.
 
-## I-010C ParticipantWakeV2@7
+## I-010C ParticipantWakeV2@8
 
 The normal-turn input materializes `self`, `room`, `actors`, `events`,
 `trigger_event_id`, `coverage`, and optional `continuation` directly —
@@ -332,6 +343,9 @@ participant's privileged proposals and what became of it. It carries
 `expired`, `withdrawn`, or `cancelled`), and `at`, and nothing about the
 operation itself. It sits after the message it was about. The reference host
 shows the newest 3, from the authorization coordinator.
+
+Since @8 (#94 step 6) a wake may carry `pace`, the same facts as the attention
+request's, computed for the fresh view the turn is built from.
 
 ## I-010D ContextContinuationV2@1
 

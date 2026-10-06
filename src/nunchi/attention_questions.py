@@ -228,6 +228,8 @@ def attention_state(projection: Mapping[str, Any], instructions: str) -> dict[st
     }
     if projection.get("coverage", {}).get("has_more_before"):
         state["earlier_messages_not_shown"] = True
+    if projection.get("pace"):
+        state["pace"] = deepcopy(dict(projection["pace"]))
     return state
 
 
@@ -420,6 +422,39 @@ def _author(projection: Mapping[str, Any], event_id: str) -> str | None:
     return None
 
 
+def _duration(seconds: int) -> str:
+    """A pause or run in the words a person would use."""
+
+    for unit, size in (("day", 86_400), ("hour", 3_600), ("minute", 60)):
+        if seconds >= size:
+            count = seconds // size
+            return f"{count} {unit}{'' if count == 1 else 's'}"
+    return f"{seconds} second{'' if seconds == 1 else 's'}"
+
+
+def _pace_notes(projection: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """What a person would notice about the pace (#94 step 6), as facts."""
+
+    pace = projection.get("pace") or {}
+    trigger = projection["trigger_event_id"]
+    notes = []
+    quiet = pace.get("quiet_before_seconds")
+    if isinstance(quiet, int) and quiet >= 3_600:
+        notes.append(
+            {"note": f"The room was quiet for {_duration(quiet)} before this message.", "evidence_event_ids": [trigger]}
+        )
+    run, took = pace.get("author_run_messages"), pace.get("author_run_seconds")
+    if isinstance(run, int) and run >= 2 and isinstance(took, int) and took <= 300:
+        author = _author(projection, trigger) or "The author"
+        notes.append(
+            {
+                "note": f"{author} has sent {run} messages in a row over {_duration(took)}.",
+                "evidence_event_ids": [trigger],
+            }
+        )
+    return notes
+
+
 def _is_own(projection: Mapping[str, Any], event_id: str) -> bool:
     own_actor = projection["self"]["actor_id"]
     return any(
@@ -468,6 +503,7 @@ def fact_notes(answers: Mapping[str, Any], projection: Mapping[str, Any]) -> lis
             author = _author(projection, earlier) or "someone"
             text = f"It answers or responds to {author}'s message {earlier}."
         notes.append({"note": text, "evidence_event_ids": [trigger, earlier]})
+    notes += _pace_notes(projection)
     if answers["mid_thought"] >= 0.5:
         notes.append(
             {

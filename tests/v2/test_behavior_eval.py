@@ -948,6 +948,9 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(["reply"], record["agent"]["memory_moves"])
         (wake, _), = agent.turns
         self.assertEqual("Will do.", wake["memory"]["own_moves"][0]["text"])
+        # The turn is at the scene's end, however long the replay took, after
+        # seven quiet hours (#94 step 6).
+        self.assertEqual((0, 7 * 3600), (wake["pace"]["judged_seconds_ago"], wake["pace"]["quiet_before_seconds"]))
         # Zoe's two earlier messages were judged for the memory: her ask has
         # Vigil's reply as its response (the fixture says both ask).
         self.assertEqual({"judged": 2, "failed": 0, "usage": {"calls": 0}}, record["memory_replay"])

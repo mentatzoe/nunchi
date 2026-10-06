@@ -657,7 +657,11 @@ def judge_moment(
         sha256=profile_sha256(profile_doc),
     )
     receipts = ReceiptJournal()
-    observation = ObservationProvider(binding, receipts=receipts)
+    # The room's clock: each earlier message is judged at its own time in the
+    # scene, and the judged moment at the scene's end, as they would be live,
+    # however long the replay takes (#94 step 6: the pace).
+    scene_time = [now]
+    observation = ObservationProvider(binding, receipts=receipts, clock=lambda: scene_time[0])
     transport = EvalTransport()
     ack_policy = AckPolicy(reaction=ACK_REACTION, enabled=ack == "nunchi")
     inner = factory(job.model)
@@ -681,7 +685,7 @@ def judge_moment(
             raw = scene.events[scene.event_index(event_id)]
             observation.observe(
                 delivery_id=f"d-{raw['id']}",
-                event=canonical_event(raw, at=datetime.now(timezone.utc)),
+                event=canonical_event(raw, at=scene_time[0]),
                 actors=_event_actors(scene, raw),
             )
 
@@ -769,6 +773,7 @@ def judge_moment(
         at = None
         if "at" in raw:
             at = now - timedelta(seconds=parse_offset(raw["at"]) - end_offset)
+            scene_time[0] = at
         delivery = {
             "delivery_id": f"d-{raw['id']}",
             "event": canonical_event(raw, at=at),
@@ -806,6 +811,7 @@ def judge_moment(
             )
         engine.last_request = engine.last_decision = None
         model.reset()
+    scene_time[0] = now
     if agent is not None and moment.during_turn:
         agent.arrive = arrive
     if token is None:
