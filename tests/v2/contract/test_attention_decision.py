@@ -1,10 +1,11 @@
-"""Contract tests for ``I-010B AttentionDecisionV2@5`` (slice 010, T003;
-reworked by T028 after rejection R2; @5 for #94 step 4).
+"""Contract tests for ``I-010B AttentionDecisionV2@6`` (slice 010, T003;
+reworked by T028 after rejection R2; @5 for #94 step 4, @6 for step 5).
 
 @5 (Zoe, 2026-10-05) grounds every ``status: ok`` decision in the model's
 typed answers (``answers``): exactly the step 1 and step 2 questions, each a
-finite value in [0,1], choices naming exactly their options, and an optional
-``answered_by`` pointer. The V1-era legacy verdict confidence vector it
+finite value in [0,1], choices naming exactly their options, and optional
+``answered_by`` and (@6) ``responds_to`` pointers. @6 also asks whether the
+judged message ``asks`` someone for something. The V1-era legacy verdict confidence vector it
 replaces is no longer allowed. Red cases include the sentinel-decoded
 ``"NaN"``/``"Infinity"``/``"-Infinity"`` non-finite answers. Further red
 cases cover the closed FR-005 routing audit's cross-field rules (applied
@@ -219,7 +220,8 @@ class RoutingAuditCases(unittest.TestCase):
 class TypedAnswerCases(unittest.TestCase):
     """@5 (Zoe, 2026-10-05, #94 step 4): every ok decision carries the
     model's typed answers, exactly the questions with finite [0,1] values;
-    the V1-era legacy confidence vector is gone."""
+    the V1-era legacy confidence vector is gone. @6 adds asks and
+    responds_to."""
 
     def test_every_ok_decision_requires_answers(self):
         for doc in (
@@ -240,9 +242,11 @@ class TypedAnswerCases(unittest.TestCase):
     def test_a_missing_or_extra_question_rejects(self):
         missing = make_decision_ok()
         del missing["answers"]["mid_thought"]
+        no_asks = make_decision_ok()
+        del no_asks["answers"]["asks"]
         extra = make_decision_ok()
         extra["answers"]["obligation"] = 1.0
-        for doc in (missing, extra):
+        for doc in (missing, no_asks, extra):
             assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_a_choice_names_exactly_its_options(self):
@@ -286,14 +290,15 @@ class TypedAnswerCases(unittest.TestCase):
                 doc["answers"]["answered"] = value
                 assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
-    def test_answered_by_names_one_message(self):
-        assert_schema_verdict(
-            self, "attention-decision", make_decision_ok(answers=make_answers(answered_by="e3")), "valid"
-        )
-        for value in ("", 3, None):
-            with self.subTest(value=value):
-                doc = make_decision_ok(answers=make_answers(answered_by=value))
-                assert_schema_verdict(self, "attention-decision", doc, "invalid")
+    def test_each_pointer_names_one_message(self):
+        for key in ("answered_by", "responds_to"):
+            assert_schema_verdict(
+                self, "attention-decision", make_decision_ok(answers=make_answers(**{key: "e3"})), "valid"
+            )
+            for value in ("", 3, None):
+                with self.subTest(key=key, value=value):
+                    doc = make_decision_ok(answers=make_answers(**{key: value}))
+                    assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
 
 class AdviceRuleCases(unittest.TestCase):

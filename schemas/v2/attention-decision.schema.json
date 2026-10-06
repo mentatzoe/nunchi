@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://nunchi.invalid/schemas/v2/attention-decision.schema.json",
   "title": "AttentionDecisionV2",
-  "description": "I-010B AttentionDecisionV2@5 — the closed host-facing decision union. @5 (Zoe, 2026-10-05, #94 step 4) grounds every status-ok judgment in the model's typed answers (answers): step 1 asks whether the judged message is conversation, step 2 asks who it is addressed to, whether and by which message it was answered, whether its author is mid-thought, whether the participant has something to add, and which kinds of response could fit. answers replaces the V1-era legacy_verdict_confidences vector, which is no longer allowed. @4 let the reading of the room (attention_advice) accompany every status-ok judgment and bounded it to at most 4 items of at most 400 characters each. @3 added first-class ACK classifier and effective dispositions, ACK->ACK and conservative ACK->DEFER transitions, capability-defer routing, and an ACK-only audit binding the exact reaction, trusted policy provenance, and authenticated permission revision. Bypass and error carry no answers or reading because no model judgment exists for them.",
+  "description": "I-010B AttentionDecisionV2@6 — the closed host-facing decision union. @6 (#94 step 5) adds two step-2 answers that the participant's memory builds threads from: asks, whether the judged message asks someone in the room for something, and responds_to, which earlier supplied message it answers or responds to, the participant's own included. @5 (Zoe, 2026-10-05, #94 step 4) grounds every status-ok judgment in the model's typed answers (answers): step 1 asks whether the judged message is conversation, step 2 asks who it is addressed to, whether and by which message it was answered, whether its author is mid-thought, whether the participant has something to add, and which kinds of response could fit. answers replaces the V1-era legacy_verdict_confidences vector, which is no longer allowed. @4 let the reading of the room (attention_advice) accompany every status-ok judgment and bounded it to at most 4 items of at most 400 characters each. @3 added first-class ACK classifier and effective dispositions, ACK->ACK and conservative ACK->DEFER transitions, capability-defer routing, and an ACK-only audit binding the exact reaction, trusted policy provenance, and authenticated permission revision. Bypass and error carry no answers or reading because no model judgment exists for them.",
   "$defs": {
     "nonEmptyString": {
       "type": "string",
@@ -123,10 +123,10 @@
         },
         "classifier": {"$ref": "#/$defs/classifierAudit"},
         "answers": {
-          "$comment": "The model's typed answers behind the judgment (@5). Yes/no questions are the probability of yes; choices give a probability for every option (normalized to sum to 1 by the core); answered_by, when present, names the supplied message that answered or handled the judged message (that cross-document rule is runtime-adapter-only).",
+          "$comment": "The model's typed answers behind the judgment (@5; asks and responds_to since @6). Yes/no questions are the probability of yes; choices give a probability for every option (normalized to sum to 1 by the core); answered_by, when present, names the supplied message that answered or handled the judged message, and responds_to the earlier supplied message the judged message answers or responds to (those cross-document rules are runtime-adapter-only).",
           "type": "object",
           "additionalProperties": false,
-          "required": ["conversation", "addressee", "answered", "mid_thought", "adds_something", "move"],
+          "required": ["conversation", "addressee", "asks", "answered", "mid_thought", "adds_something", "move"],
           "properties": {
             "conversation": {"$ref": "#/$defs/confidence"},
             "addressee": {
@@ -140,8 +140,10 @@
                 "nobody": {"$ref": "#/$defs/confidence"}
               }
             },
+            "asks": {"$ref": "#/$defs/confidence"},
             "answered": {"$ref": "#/$defs/confidence"},
             "answered_by": {"$ref": "#/$defs/nonEmptyString"},
+            "responds_to": {"$ref": "#/$defs/nonEmptyString"},
             "mid_thought": {"$ref": "#/$defs/confidence"},
             "adds_something": {"$ref": "#/$defs/confidence"},
             "move": {

@@ -11,7 +11,7 @@ live, integrated, or released status.
 `docs/architecture/v2-selected-design.md` preserve the field inventory selected
 from Aleph Vault at `c834e8c`; the external path is provenance, not a
 contributor dependency. The program-canonical interface names and versions
-(`I-010A`, `I-010D`, `I-010F` at `@1`; `I-010E` at `@3`; `I-010C` at `@4`; `I-010B` at `@5`) are this
+(`I-010A`, `I-010D`, `I-010F` at `@1`; `I-010E` at `@3`; `I-010C` at `@5`; `I-010B` at `@6`) are this
 slice's vocabulary layered over that inventory. A document the selected design
 declares valid that either validator rejects is a contract defect, never
 resolved by narrowing the corpus.
@@ -21,8 +21,8 @@ resolved by narrowing the corpus.
 | Interface | Version | Schema path |
 |---|---|---|
 | `I-010A AttentionRequestV2` | `@1` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
-| `I-010B AttentionDecisionV2` | `@5` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
-| `I-010C ParticipantWakeV2` | `@4` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
+| `I-010B AttentionDecisionV2` | `@6` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
+| `I-010C ParticipantWakeV2` | `@5` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
 | `I-010E AttentionReceiptV2` | `@3` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
 | `I-010F PrivilegedActionAuthorizationV2` | `@1` | [`schemas/v2/privileged-action-authorization.schema.json`](../../schemas/v2/privileged-action-authorization.schema.json) |
@@ -161,7 +161,7 @@ A truthful attention request represents:
   to coverage plus expansion-capability booleans before that call. This is
   a runtime-adapter-only behavior, not a schema constraint.
 
-## I-010B AttentionDecisionV2@5
+## I-010B AttentionDecisionV2@6
 
 A tagged host-facing union on `status`:
 
@@ -237,10 +237,16 @@ closed-union change: `@2` consumers must upgrade before receiving ACK.
   pointer to the supplied message that answered it, `mid_thought`,
   `adds_something`, and `move` (`speak`, `mhm`, `wait`, `stay_quiet`): the
   most likely move selects `WAKE`, `ACK`, or `DEFER` for wait and stay quiet,
-  with ties going to the move that pays more attention. Yes/no answers are
-  finite numbers in `[0, 1]`; a choice names exactly its options, each in
-  `[0, 1]`, normalized by the core to sum to 1. `answered_by` must name a
-  supplied event (runtime-adapter-only). The V1-era
+  with ties going to the move that pays more attention. Since @6 (#94 step
+  5) step 2 also asks `asks`, whether the judged message asks someone in the
+  room for something, and the optional `responds_to` pointer to the earlier
+  supplied message it answers or responds to, the participant's own
+  included; the participant's memory builds its threads from these. Yes/no
+  answers are finite numbers in `[0, 1]`; a choice names exactly its
+  options, each in `[0, 1]`, normalized by the core to sum to 1.
+  `answered_by` and `responds_to` must name a supplied event
+  (runtime-adapter-only); the core drops a pointer that does not, or that
+  names the judged message, on its own. The V1-era
   `legacy_verdict_confidences` vector that `answers` replaces is no longer
   allowed. A chat model answers the questions as one JSON object; a typed
   decision model answers them natively; both produce the same `answers`.
@@ -259,7 +265,7 @@ closed-union change: `@2` consumers must upgrade before receiving ACK.
   occur before a request ID is assignable); an optional `classifier` audit is
   present only when the error occurred after classifier invocation.
 
-## I-010C ParticipantWakeV2@4
+## I-010C ParticipantWakeV2@5
 
 The normal-turn input materializes `self`, `room`, `actors`, `events`,
 `trigger_event_id`, `coverage`, and optional `continuation` directly —
@@ -292,6 +298,23 @@ Memory is facts with pointers, never a verdict, an obligation, or a work
 queue, and old moves fade: the reference host keeps the newest 8 visible
 moves and the latest 3 silences within a day, and a silence goes once its
 message is no longer retained.
+
+Since @5 (#94 step 5) `memory` may also carry `threads`, and carries
+`own_moves`, `threads`, or both, each a non-empty array when present. A
+thread starts at a message by someone else that attention judged to ask for
+something (`asks` and `conversation` at least 0.5), or at one of the
+participant's own messages that someone responded to. It carries
+`event_id`, `author_id`, `text` (at most 280 characters), optional `at`,
+`addressed_to` (one of the `addressee` options, only on others' asks), and
+`responses`: at most 4 `{event_id, author_id}` pointers to the first later
+messages by others that reply to it on the platform, that attention judged to
+respond to it (`responds_to`), or that attention named as having answered it
+(`answered_by`). An empty `responses` array means none has yet; it is a fact,
+not a request to answer. The reference host keeps the judgments of the newest
+64 messages and shows the newest 6 threads within a day, leaves out the
+message the turn is about (its reading describes it), and forgets the
+judgments on restart. A message observed but never judged, such as one that
+arrived while the participant was mid-turn, starts no thread.
 
 ## I-010D ContextContinuationV2@1
 
@@ -603,7 +626,7 @@ A participant-silence receipt record (the S07 stream ends at this stage):
 `@1` is the first V2 execution version. A breaking edit requires a version
 bump and re-verification of every consumer. `I-010B@5` replaced the
 `legacy_verdict_confidences` vector, fixed for `@1` through `@4` (FR-007),
-with the required typed `answers`; margin retirement still flips only the
+with the required typed `answers`, and `@6` made `asks` a required answer; margin retirement still flips only the
 reported `margin_status`, never the schema. Each runtime must pass its adapter against the same contract corpus
 before integration.
 Evidence for the contract runs lives at

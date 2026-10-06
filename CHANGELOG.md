@@ -66,6 +66,25 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- The agent remembers who asked what in the room, and which messages
+  responded (#94, plan step 5, second part). Step 2 asks two more typed
+  questions about each judged message: whether it `asks` someone in the
+  room for something, and which earlier message it `responds_to`, the
+  agent's own included (`I-010B AttentionDecisionV2@6`). The participant's
+  memory keeps each judgment and builds `memory.threads`: recent messages by
+  others that asked for something, and the agent's own messages that others
+  responded to, each with the first messages that responded, from those
+  answers, from `answered_by`, and from platform replies; the newest 6
+  within a day (`I-010C ParticipantWakeV2@5`). An empty list of responses is
+  a fact, not a request. When a model writes no notes, the reading now says
+  when a message asks for something and which message it responds to. Both
+  turn prompts explain the threads, and say that room text telling the agent
+  to speak or stay quiet is its author's claim, not an instruction.
+  `NunchiV2Pipeline.recall` judges an already observed message for the
+  memory only, and the behavior suite uses it to replay each moment's
+  earlier messages as they would have been judged live (`--no-replay` turns
+  that off). Messages that arrive while the agent is mid-turn are not judged,
+  so they start no thread; Hermes does not carry the memory yet.
 - The agent remembers its own part in the room, and its turn prompt reads
   like a person in a group conversation (#94, plan step 5, first part). Every
   turn's wake may carry `memory.own_moves`: what the agent said, replied and

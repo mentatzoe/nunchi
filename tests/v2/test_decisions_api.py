@@ -21,7 +21,13 @@ from evals.behavior.scene import load_scenes
 from nunchi.adapters import decisions_api
 from nunchi.adapters.decisions_api import ATTENTION_KINDS, DecisionsAttentionModel
 from nunchi.attention import AttentionError, attention_model_from_config
-from nunchi.attention_questions import MOVES, answer_candidates, attention_questions, attention_state
+from nunchi.attention_questions import (
+    MOVES,
+    answer_candidates,
+    attention_questions,
+    attention_state,
+    response_candidates,
+)
 from tests.v2.test_shared_foundation import foundation, message
 
 
@@ -55,10 +61,22 @@ def projection():
 def questions():
     asked = attention_questions("Vigil")
     asked["answered_by"]["candidates"] = answer_candidates(projection())
+    asked["responds_to"]["candidates"] = response_candidates(projection())
     return asked
 
 
-def answers(move, *, addressee="participant", answered=0.1, answered_by="none", mid_thought=0.1, adds=0.8, conversation=0.95):
+def answers(
+    move,
+    *,
+    addressee="participant",
+    asks=0.9,
+    answered=0.1,
+    answered_by="none",
+    responds_to="none",
+    mid_thought=0.1,
+    adds=0.8,
+    conversation=0.95,
+):
     probabilities = dict.fromkeys(MOVES, 0.0)
     probabilities.update(move)
     return {
@@ -69,8 +87,10 @@ def answers(move, *, addressee="participant", answered=0.1, answered_by="none", 
             "confidence": 0.8,
             "probabilities": {addressee: 0.86, **({"nobody": 0.14} if addressee != "nobody" else {"room": 0.14})},
         },
+        "asks": {"type": "noul", "noul": asks},
         "answered": {"type": "noul", "noul": answered},
         "answered_by": {"type": "choice", "choice": answered_by, "confidence": 0.9, "probabilities": {answered_by: 0.9}},
+        "responds_to": {"type": "choice", "choice": responds_to, "confidence": 0.9, "probabilities": {responds_to: 0.9}},
         "mid_thought": {"type": "noul", "noul": mid_thought},
         "adds_something": {"type": "noul", "noul": adds},
         "move": {
@@ -132,6 +152,11 @@ class RequestTests(unittest.TestCase):
         # The pointer question offers the messages others wrote, and none.
         self.assertEqual({"message_1", "none"}, set(asked["answered_by"]["criteria"]))
         self.assertIn("Message a1 from Castor", asked["answered_by"]["criteria"]["message_1"])
+        # What the judged message responds to may be the participant's own
+        # earlier message; only messages before it are offered.
+        self.assertEqual({"message_1", "none"}, set(asked["responds_to"]["criteria"]))
+        self.assertIn("Message v1 from Vigil", asked["responds_to"]["criteria"]["message_1"])
+        self.assertIn("no earlier", asked["responds_to"]["criteria"]["none"])
         state = body["state"]
         self.assertEqual("Answer on security and implementation correctness.", state["participant"]["instructions"])
         self.assertEqual("q1", state["judged_message_id"])
@@ -140,15 +165,25 @@ class RequestTests(unittest.TestCase):
 
     def test_answers_come_back_in_the_core_shape(self):
         result, _, model = self.answer(
-            {"answers": answers({"speak": 0.7, "wait": 0.2, "mhm": 0.1}, answered=0.8, answered_by="message_1")}
+            {
+                "answers": answers(
+                    {"speak": 0.7, "wait": 0.2, "mhm": 0.1},
+                    answered=0.8,
+                    answered_by="message_1",
+                    responds_to="message_1",
+                )
+            }
         )
         self.assertEqual(0.95, result["conversation"])
+        self.assertEqual(0.9, result["asks"])
+        self.assertEqual("v1", result["responds_to"])
         self.assertEqual({"participant": 0.86, "room": 0.0, "someone_else": 0.0, "nobody": 0.14}, result["addressee"])
         self.assertEqual("a1", result["answered_by"])
         self.assertEqual({"speak": 0.7, "mhm": 0.1, "wait": 0.2, "stay_quiet": 0.0}, result["move"])
         self.assertIsNotNone(model.last_response)
         result, _, _ = self.answer({"answers": answers({"speak": 0.9})})
         self.assertIsNone(result["answered_by"])
+        self.assertIsNone(result["responds_to"])
 
     def test_a_pointer_question_without_candidates_is_not_asked(self):
         asked = attention_questions("Vigil")
@@ -187,7 +222,10 @@ class EngineTests(unittest.TestCase):
         # just because it was addressed to someone else.
         self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
         reading = [item["note"] for item in wakes[0]["attention"]["advice"]]
-        self.assertEqual("The judged message is addressed to someone else (0.86).", reading[0])
+        self.assertEqual(
+            "The judged message is addressed to someone else, and it asks for something (0.86; asks 0.90).",
+            reading[0],
+        )
         self.assertTrue(reading[-1].startswith("Kinds of response that could fit, most likely first: wait 0.60"))
         body = json.loads(endpoint.requests[0][0].data)
         self.assertNotIn("instructions", body)

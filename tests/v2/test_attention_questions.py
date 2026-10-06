@@ -15,6 +15,8 @@ import unittest
 from nunchi.attention import AttentionPolicy, participant_attention_prompt
 from nunchi.attention_questions import (
     QUESTION_IDS,
+    answer_evidence,
+    answer_reasons,
     answers_leaning,
     classifier_disposition,
     top_move,
@@ -69,10 +71,21 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(1.0, result["addressee"]["room"])
 
     def test_a_bad_pointer_is_dropped_alone(self):
-        self.assertEqual("a1", self.check(leaning(answered=0.9, answered_by="a1"))["answered_by"])
-        for pointer in ("made-up", "e1", None):
-            with self.subTest(pointer=pointer):
-                self.assertNotIn("answered_by", self.check(leaning(answered_by=pointer)))
+        for key in ("answered_by", "responds_to"):
+            self.assertEqual("a1", self.check(leaning(**{key: "a1"}))[key])
+            for pointer in ("made-up", "e1", None):
+                with self.subTest(key=key, pointer=pointer):
+                    result = self.check(leaning(**{key: pointer}))
+                    self.assertNotIn(key, result)
+                    self.assertEqual(0.8, result["asks"])
+
+    def test_both_pointers_reach_the_reasons_and_evidence(self):
+        answers = self.check(leaning(answered=0.9, answered_by="a1", responds_to="a1"))
+        self.assertEqual(["e1", "a1"], answer_evidence(answers, "e1"))
+        reasons = answer_reasons(answers)
+        self.assertIn("asks 0.80", reasons)
+        self.assertIn("answered_by a1", reasons)
+        self.assertIn("responds_to a1", reasons)
 
     def test_a_plainly_stated_yes_or_no_is_read_as_its_probability(self):
         # Chat models asked for a probability sometimes answer a yes/no
@@ -92,11 +105,14 @@ class ValidationTests(unittest.TestCase):
     def test_malformed_answers_are_rejected(self):
         missing = leaning()
         del missing["mid_thought"]
+        no_asks = leaning()
+        del no_asks["asks"]
         extra = leaning(disposition="WAKE")
         extra["legacy_verdict_confidences"] = {"PASS": 0, "ACK": 0, "ASK": 0, "SPEAK": 1}
         for bad in (
             [],
             missing,
+            no_asks,
             extra,
             leaning(conversation=1.5),
             leaning(conversation=-0.1),
@@ -108,6 +124,7 @@ class ValidationTests(unittest.TestCase):
             leaning(move=[0.7, 0.3]),
             leaning(move={"speak": 1, "shout": 0}),
             leaning(answered_by=7),
+            leaning(responds_to=["a1"]),
         ):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 self.check(bad)
@@ -158,6 +175,7 @@ class RouteTests(unittest.TestCase):
         (questions, state), = model.calls
         self.assertEqual(list(QUESTION_IDS), list(questions))
         self.assertEqual(["a1"], questions["answered_by"]["candidates"])
+        self.assertEqual(["a1"], questions["responds_to"]["candidates"])
         self.assertEqual(pipeline.attention.profile.instructions, state["participant"]["instructions"])
         self.assertEqual("e1", state["judged_message_id"])
         self.assertEqual("WAKE", opportunity.effective_disposition)
@@ -204,6 +222,9 @@ class RouteTests(unittest.TestCase):
         self.assertIn('wrong "not conversation" hides the moment', prompt)
         self.assertIn("This holds whoever it is addressed to.", prompt)
         self.assertIn('"answered": p, "answered_by": "<message id>" or null', prompt)
+        self.assertIn('"responds_to": "<message id>" or null', prompt)
+        self.assertIn("It may be one of", prompt)
+        self.assertIn("Give its id, or null if it responds to none.", prompt)
         self.assertIn('never true, false, "yes", or "no"', prompt)
 
 
@@ -225,8 +246,14 @@ class ContractTests(unittest.TestCase):
 
     def test_an_ok_decision_carries_typed_answers(self):
         validate_attention_decision(self.decision())
-        with_pointer = self.decision(answers={**self.decision()["answers"], "answered_by": "a1"})
-        validate_attention_decision(with_pointer)
+        for key in ("answered_by", "responds_to"):
+            with_pointer = self.decision(answers={**self.decision()["answers"], key: "a1"})
+            validate_attention_decision(with_pointer)
+            with self.subTest(key=key), self.assertRaises(ValidationError):
+                validate_attention_decision(self.decision(answers={**self.decision()["answers"], key: ""}))
+        without_asks = {k: v for k, v in self.decision()["answers"].items() if k != "asks"}
+        with self.assertRaises(ValidationError):
+            validate_attention_decision(self.decision(answers=without_asks))
 
     def test_the_old_confidence_vector_is_gone(self):
         legacy = self.decision(legacy_verdict_confidences={"PASS": 0, "ACK": 0, "ASK": 0, "SPEAK": 1})

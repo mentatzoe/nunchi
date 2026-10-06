@@ -458,19 +458,26 @@ READING_NOTE_MAX_CHARS = 400
 
 # The typed answers behind every model judgment (#94, step 4): step 1 asks
 # whether the judged message is conversation; step 2 asks what is happening
-# and which kinds of response could fit.
+# and which kinds of response could fit. Since @6 (step 5) step 2 also asks
+# whether the message asks someone for something and which earlier message
+# it responds to, so the participant's memory can follow who asked what and
+# what got answered.
 ANSWER_MOVES = ("speak", "mhm", "wait", "stay_quiet")
 ANSWER_ADDRESSEES = ("participant", "room", "someone_else", "nobody")
 ANSWER_QUESTIONS = (
     "conversation",
     "addressee",
+    "asks",
     "answered",
     "answered_by",
+    "responds_to",
     "mid_thought",
     "adds_something",
     "move",
 )
-_ANSWER_YES_NO = ("conversation", "answered", "mid_thought", "adds_something")
+# Pointer answers are optional: no message, or none the model was shown.
+ANSWER_POINTERS = ("answered_by", "responds_to")
+_ANSWER_YES_NO = ("conversation", "asks", "answered", "mid_thought", "adds_something")
 _ANSWER_CHOICES = {"addressee": ANSWER_ADDRESSEES, "move": ANSWER_MOVES}
 
 
@@ -492,8 +499,8 @@ def _answers(
     checked = _closed(
         value,
         path,
-        required=tuple(key for key in ANSWER_QUESTIONS if key != "answered_by"),
-        optional=("answered_by",),
+        required=tuple(key for key in ANSWER_QUESTIONS if key not in ANSWER_POINTERS),
+        optional=ANSWER_POINTERS,
     )
     for key in _ANSWER_YES_NO:
         _unit(checked[key], f"{path}.{key}")
@@ -501,10 +508,11 @@ def _answers(
         choice = _closed(checked[key], f"{path}.{key}", required=options)
         for option in options:
             _unit(choice[option], f"{path}.{key}.{option}")
-    if "answered_by" in checked:
-        _nes(checked["answered_by"], f"{path}.answered_by")
-        if event_ids is not None and checked["answered_by"] not in event_ids:
-            _fail(f"{path}.answered_by", "is an unknown event ID")
+    for key in ANSWER_POINTERS:
+        if key in checked:
+            _nes(checked[key], f"{path}.{key}")
+            if event_ids is not None and checked[key] not in event_ids:
+                _fail(f"{path}.{key}", "is an unknown event ID")
     return deepcopy(dict(checked))
 
 
@@ -641,9 +649,11 @@ def validate_attention_decision(
     return deepcopy(dict(checked))
 
 
-# The participant's own recent moves in the room (#94 step 5); see
-# ``nunchi.memory``. Each kind names exactly the fields it carries.
+# The participant's memory of the room (#94 step 5); see ``nunchi.memory``.
+# Its own recent moves, where each kind names exactly the fields it carries,
+# and the threads: asks and the messages that responded to them.
 MEMORY_TEXT_MAX_CHARS = 280
+THREAD_RESPONSES_MAX = 4
 _OWN_MOVE_FIELDS = {
     "message": (("kind", "event_id", "text"), ("at",)),
     "reply": (("kind", "event_id", "about_event_id", "text"), ("at",)),
@@ -652,12 +662,45 @@ _OWN_MOVE_FIELDS = {
 }
 
 
+def _memory_text(value: Any, path: str) -> None:
+    if not isinstance(value, str):
+        _fail(path, "must be a string")
+    if len(value) > MEMORY_TEXT_MAX_CHARS:
+        _fail(path, f"must be at most {MEMORY_TEXT_MAX_CHARS} characters")
+
+
+def _thread(value: Any, path: str) -> None:
+    thread = _closed(
+        value,
+        path,
+        required=("event_id", "author_id", "text", "responses"),
+        optional=("addressed_to", "at"),
+    )
+    for name in ("event_id", "author_id", "at"):
+        if name in thread:
+            _nes(thread[name], f"{path}.{name}")
+    _memory_text(thread["text"], f"{path}.text")
+    if "addressed_to" in thread and thread["addressed_to"] not in ANSWER_ADDRESSEES:
+        _fail(f"{path}.addressed_to", "must be one of " + ", ".join(ANSWER_ADDRESSEES))
+    responses = thread["responses"]
+    if not isinstance(responses, list) or len(responses) > THREAD_RESPONSES_MAX:
+        _fail(f"{path}.responses", f"must be an array of at most {THREAD_RESPONSES_MAX}")
+    for index, response in enumerate(responses):
+        item = _closed(response, f"{path}.responses[{index}]", required=("event_id", "author_id"))
+        _nes(item["event_id"], f"{path}.responses[{index}].event_id")
+        _nes(item["author_id"], f"{path}.responses[{index}].author_id")
+
+
 def _memory(value: Any, path: str) -> dict[str, Any]:
-    doc = _closed(value, path, required=("own_moves",))
-    moves = doc["own_moves"]
-    if not isinstance(moves, list) or not moves:
-        _fail(f"{path}.own_moves", "must be a non-empty array")
-    for index, move in enumerate(moves):
+    doc = _closed(value, path, required=(), optional=("own_moves", "threads"))
+    if not doc:
+        _fail(path, "must carry own_moves or threads")
+    for key in doc:
+        if not isinstance(doc[key], list) or not doc[key]:
+            _fail(f"{path}.{key}", "must be a non-empty array")
+    for index, thread in enumerate(doc.get("threads", ())):
+        _thread(thread, f"{path}.threads[{index}]")
+    for index, move in enumerate(doc.get("own_moves", ())):
         item = f"{path}.own_moves[{index}]"
         kind = move.get("kind") if isinstance(move, Mapping) else None
         if kind not in _OWN_MOVE_FIELDS:
@@ -668,10 +711,7 @@ def _memory(value: Any, path: str) -> dict[str, Any]:
             if name in move:
                 _nes(move[name], f"{item}.{name}")
         if "text" in move:
-            if not isinstance(move["text"], str):
-                _fail(f"{item}.text", "must be a string")
-            if len(move["text"]) > MEMORY_TEXT_MAX_CHARS:
-                _fail(f"{item}.text", f"must be at most {MEMORY_TEXT_MAX_CHARS} characters")
+            _memory_text(move["text"], f"{item}.text")
     return doc
 
 
