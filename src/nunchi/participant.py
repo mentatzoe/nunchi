@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 import hashlib
@@ -303,9 +303,23 @@ def participant_host_receipt_body(
     }
 
 
+def _is_silence(action: Any) -> bool:
+    """A participant stays silent by returning nothing, or a silence with its reason."""
+
+    return action is None or (isinstance(action, Mapping) and action.get("kind") == "silence")
+
+
 def _validate_action(action: Any) -> dict[str, Any]:
+    """Check one participant action and return it with its reason apart.
+
+    Any action may carry ``why``, the participant's own reason, for its
+    memory only: it is returned under ``why`` and never reaches the room.
+    """
+
     if not isinstance(action, Mapping):
         raise ParticipantError("participant action must be an object or silence")
+    why = action.get("why")
+    action = {key: action[key] for key in action if key != "why"}
     kind = action.get("kind")
     common = {"kind", "origin_event_id"}
     if kind == "message":
@@ -330,6 +344,11 @@ def _validate_action(action: Any) -> dict[str, Any]:
                 raise ParticipantError(f"reaction {name} must be non-empty")
         if action["operation"] not in ("add", "remove"):
             raise ParticipantError("reaction operation must be add or remove")
+    elif kind == "withdraw":
+        if set(action) != common | {"proposal_id"}:
+            raise ParticipantError("withdrawal has an invalid closed shape")
+        if not isinstance(action.get("proposal_id"), str) or not action["proposal_id"]:
+            raise ParticipantError("withdrawal proposal_id must be non-empty")
     elif kind == "privileged":
         allowed = common | {"capability", "resource", "operation"}
         required = allowed
@@ -345,7 +364,10 @@ def _validate_action(action: Any) -> dict[str, Any]:
         raise ParticipantError("participant action kind is unsupported")
     if not isinstance(action.get("origin_event_id"), str) or not action["origin_event_id"]:
         raise ParticipantError("participant action origin_event_id must be non-empty")
-    return deepcopy(dict(action))
+    checked = deepcopy(dict(action))
+    if why is not None:
+        checked["why"] = why
+    return checked
 
 
 def build_participant_wake(
@@ -354,12 +376,14 @@ def build_participant_wake(
     decision: Mapping[str, Any],
     *,
     memory: ConversationMemory | None = None,
+    proposals: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any] | None:
     """Build the fresh bounded facts delivered to any admitted participant.
 
     With ``memory``, the wake also carries the participant's memory of the
     room (#94 step 5): its own recent moves, and the threads before the
-    message this turn is about.
+    message this turn is about. ``proposals`` are its privileged proposals
+    and what became of them (#90), shown among its own moves.
     """
 
     checked_request = validate_attention_request(request)
@@ -419,7 +443,11 @@ def build_participant_wake(
                 attention["judged_through_event_id"] = judged_through
     wake["attention"] = attention
     if memory is not None:
-        facts = memory.facts(observation, current_event_id=wake["trigger_event_id"])
+        facts = memory.facts(
+            observation,
+            current_event_id=wake["trigger_event_id"],
+            proposals=proposals,
+        )
         if facts:
             wake["memory"] = facts
     return validate_participant_wake(wake)
@@ -777,7 +805,19 @@ class ParticipantTurnHost:
         request: Mapping[str, Any],
         decision: Mapping[str, Any],
     ) -> dict[str, Any] | None:
-        return build_participant_wake(self.observation, request, decision, memory=self.memory)
+        return build_participant_wake(
+            self.observation,
+            request,
+            decision,
+            memory=self.memory,
+            proposals=self._proposals(),
+        )
+
+    def _proposals(self) -> tuple[Mapping[str, Any], ...]:
+        """The participant's proposals and their status, when the host keeps them."""
+
+        source = getattr(self.privileged, "proposals", None)
+        return tuple(source()) if callable(source) else ()
 
     def run(
         self,
@@ -924,17 +964,23 @@ class ParticipantTurnHost:
         if not self.scheduler.is_current(token):
             settle_host("unknown")
             return None
-        if raw_action is None:
+        if _is_silence(raw_action):
             settle_host("silent")
             # A silence leaves no trace in the room; the participant's memory
-            # keeps it so a later turn knows where it held back.
-            self.memory.record_silence(about_event_id=wake["trigger_event_id"])
+            # keeps it, with the reason the participant gave, so a later turn
+            # knows where it held back and why.
+            self.memory.record_silence(
+                about_event_id=wake["trigger_event_id"],
+                why=raw_action.get("why") if raw_action is not None else None,
+            )
             return None
         try:
             action = _validate_action(raw_action)
         except ParticipantError:
             settle_host("unknown")
             return TransportResult("failed", "participant returned an invalid action")
+        # The reason is the participant's own memory; it never reaches the room.
+        why = action.pop("why", None)
         if token.cancel_event.is_set() or not self.scheduler.is_current(token):
             settle_host("unknown")
             return None
@@ -998,7 +1044,14 @@ class ParticipantTurnHost:
                             )
                         )
                         return
-                    if action["kind"] == "privileged":
+                    if action["kind"] == "withdraw":
+                        withdraw = getattr(self.privileged, "withdraw", None)
+                        result = (
+                            withdraw(proposal_id=action["proposal_id"], wake=wake)
+                            if callable(withdraw)
+                            else TransportResult("unavailable", "privileged actions are disabled")
+                        )
+                    elif action["kind"] == "privileged":
                         if self.privileged is None:
                             result = TransportResult(
                                 "unavailable",
@@ -1066,6 +1119,7 @@ class ParticipantTurnHost:
         if not isinstance(result, TransportResult):
             result = TransportResult("unknown", "transport returned no attested result")
         self._append_transport_receipt(wake["request_id"], result)
+        self.memory.record_reason(action, why)
         return result
 
     def _append_transport_receipt(

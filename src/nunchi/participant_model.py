@@ -29,12 +29,16 @@ PARTICIPANT_TURN_PROTOCOL_VERSION = 1
 PARTICIPANT_ACTION_SCHEMA_NAME = "nunchi_participant_turn_v1_action"
 DEFAULT_MAX_EXPANSIONS = 3
 
+# Every move, silence included, may say why, for the participant's own memory
+# (#94 step 5); it never reaches the room.
+_WHY: dict[str, Any] = {"type": "string"}
+
 _INNER_ACTION_VARIANTS: list[dict[str, Any]] = [
     {
         "type": "object",
         "additionalProperties": False,
         "required": ["kind"],
-        "properties": {"kind": {"const": "silence"}},
+        "properties": {"kind": {"const": "silence"}, "why": _WHY},
     },
     {
         "type": "object",
@@ -56,6 +60,7 @@ _INNER_ACTION_VARIANTS: list[dict[str, Any]] = [
             "kind": {"const": "message"},
             "origin_event_id": {"type": "string", "minLength": 1},
             "text": {"type": "string"},
+            "why": _WHY,
         },
     },
     {
@@ -67,6 +72,7 @@ _INNER_ACTION_VARIANTS: list[dict[str, Any]] = [
             "origin_event_id": {"type": "string", "minLength": 1},
             "target_event_id": {"type": "string", "minLength": 1},
             "text": {"type": "string"},
+            "why": _WHY,
         },
     },
     {
@@ -85,6 +91,7 @@ _INNER_ACTION_VARIANTS: list[dict[str, Any]] = [
             "target_event_id": {"type": "string", "minLength": 1},
             "reaction": {"type": "string", "minLength": 1},
             "operation": {"enum": ["add", "remove"]},
+            "why": _WHY,
         },
     },
     {
@@ -111,6 +118,18 @@ _INNER_ACTION_VARIANTS: list[dict[str, Any]] = [
                 },
             },
             "operation": {"type": "object"},
+            "why": _WHY,
+        },
+    },
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["kind", "origin_event_id", "proposal_id"],
+        "properties": {
+            "kind": {"const": "withdraw"},
+            "origin_event_id": {"type": "string", "minLength": 1},
+            "proposal_id": {"type": "string", "minLength": 1},
+            "why": _WHY,
         },
     },
 ]
@@ -301,7 +320,8 @@ _SOCIAL_GUIDE = (
 _MEMORY_GUIDE = (
     "When memory.own_moves is present, it is your own part in this room so "
     "far: what you said, replied and reacted to, and where you stayed quiet, "
-    "oldest first, each pointing at the message it was about. When "
+    "oldest first, each pointing at the message it was about, with your "
+    "reason at the time (why) when you gave one. When "
     "memory.threads is present, it is who asked what: recent messages that "
     "asked someone for something, with whom each was addressed to, and your "
     "own messages that others responded to, each with the first messages "
@@ -341,6 +361,9 @@ def participant_turn_prompt(profile: ParticipantProfile) -> str:
         "Return exactly one JSON object matching the supplied action schema. "
         "Copy the protocol and binding objects exactly from the request and "
         "put one action in `action`. Silence is {\"kind\":\"silence\"}. "
+        "Any action but expand may add why: one short sentence in your own "
+        "words on why you chose it. It is never posted; your later turns see "
+        "it with that move in memory.own_moves. "
         "You can look at the room as it is now: `action` may request one "
         "bounded page with kind expand, direction before (older messages), "
         "after (newer than a message), around (near a message), or new "
@@ -373,8 +396,18 @@ def participant_turn_instructions(
         separators=(",", ":"),
         ensure_ascii=False,
     )
+    # Only a participant that may propose hears how to withdraw (#90).
+    proposals = (
+        " Your privileged proposals appear in memory.own_moves with their "
+        "proposal_id and status; kind withdraw with a proposal_id withdraws "
+        "one still awaiting approval, for example when the person who asked "
+        "no longer wants it, and counts as your action for the turn."
+        if request["permissions"]["privileged_proposals"]
+        else ""
+    )
     return (
         participant_turn_prompt(profile)
+        + proposals
         + "\n\nAction schema for this turn (JSON Schema; the protocol and "
         "binding values are fixed):\n"
         + schema
@@ -458,6 +491,18 @@ def _validate_inner_action(action: Any) -> dict[str, Any]:
         raise ParticipantModelError("participant action must be an object")
     checked = dict(action)
     kind = checked.get("kind")
+    # The reason is the participant's own note; a malformed one, or one on
+    # a look around the room, which is not a move, is dropped alone and never
+    # fails the action (run 25, #86).
+    why = checked.pop("why", None)
+    reason = why if kind != "expand" and isinstance(why, str) and why.strip() else None
+    checked = _validate_move(checked, kind)
+    if reason is not None:
+        checked["why"] = reason
+    return checked
+
+
+def _validate_move(checked: dict[str, Any], kind: Any) -> dict[str, Any]:
     if kind == "silence":
         if set(checked) != {"kind"}:
             raise ParticipantModelError("silence action has an invalid closed shape")
@@ -493,6 +538,10 @@ def _validate_inner_action(action: Any) -> dict[str, Any]:
         _nonempty(checked.get("reaction"), "reaction value")
         if checked.get("operation") not in ("add", "remove"):
             raise ParticipantModelError("reaction operation must be add or remove")
+    elif kind == "withdraw":
+        if set(checked) != common | {"proposal_id"}:
+            raise ParticipantModelError("withdrawal has an invalid closed shape")
+        _nonempty(checked.get("proposal_id"), "withdrawal proposal_id")
     elif kind == "privileged":
         if set(checked) != common | {"capability", "resource", "operation"}:
             raise ParticipantModelError("privileged proposal has an invalid closed shape")
@@ -550,7 +599,7 @@ def _bind_action(
     kind = action["kind"]
     if kind in ("message", "reply", "reaction") and kind not in permissions["ordinary_actions"]:
         raise ParticipantModelError("participant action exceeds current ordinary permissions")
-    if kind == "privileged" and not permissions["privileged_proposals"]:
+    if kind in ("privileged", "withdraw") and not permissions["privileged_proposals"]:
         raise ParticipantModelError("participant privileged proposals are disabled")
     if kind not in ("silence", "expand"):
         if action["origin_event_id"] not in visible_event_ids:
@@ -619,7 +668,8 @@ class ParticipantTurnProtocol:
             visible_event_ids=self.visible_event_ids,
         )
         if action["kind"] == "silence":
-            return True, None
+            # A silence with a reason goes to the host, which remembers it.
+            return True, action if "why" in action else None
         if action["kind"] != "expand":
             if action["kind"] in _VISIBLE_KINDS and not self.looked_again and callable(expand):
                 # Look again before speaking: if others posted while the
@@ -771,6 +821,23 @@ PARTICIPANT_TOOL_SPECS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "withdraw": {
+        "description": (
+            "Withdraw one of your privileged proposals still awaiting "
+            "approval, named by its proposal_id in your memory, for example "
+            "when the person who asked no longer wants it. Counts as your one "
+            "room action for this turn."
+        ),
+        "input_schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["proposal_id"],
+            "properties": {
+                "proposal_id": {"type": "string", "minLength": 1},
+                "origin_event_id": _ORIGIN_EVENT_ID,
+            },
+        },
+    },
     "context": {
         "description": (
             "Look at the room as it is now: one bounded page of messages "
@@ -795,7 +862,7 @@ PARTICIPANT_TOOL_SPECS: dict[str, dict[str, Any]] = {
     },
 }
 
-PARTICIPANT_ACTION_TOOL_ROLES = ("send", "react", "propose")
+PARTICIPANT_ACTION_TOOL_ROLES = ("send", "react", "propose", "withdraw")
 
 
 def participant_tool_roles(request: Mapping[str, Any]) -> tuple[str, ...]:
@@ -809,7 +876,7 @@ def participant_tool_roles(request: Mapping[str, Any]) -> tuple[str, ...]:
     if "reaction" in ordinary:
         roles.append("react")
     if permissions["privileged_proposals"]:
-        roles.append("propose")
+        roles += ["propose", "withdraw"]
     roles.append("context")
     return tuple(roles)
 
@@ -864,6 +931,11 @@ def participant_tool_turn_prompt(
             f" {names['propose']} submits a privileged action as a proposal "
             "only; the host independently rechecks exact current authority "
             "immediately before any effect."
+        )
+    if "withdraw" in names:
+        parts.append(
+            f" Your proposals appear in memory.own_moves with their status; "
+            f"{names['withdraw']} withdraws one still awaiting approval."
         )
     if "context" in names:
         parts.append(
@@ -951,6 +1023,8 @@ def participant_tool_action(
             "reaction": args.get("reaction"),
             "operation": args.get("operation", "add"),
         }
+    elif role == "withdraw":
+        action = {"kind": "withdraw", "origin_event_id": origin, "proposal_id": args.get("proposal_id")}
     else:
         action = {
             "kind": "privileged",

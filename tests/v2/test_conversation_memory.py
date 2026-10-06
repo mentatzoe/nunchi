@@ -118,6 +118,60 @@ def judged(memory, event_id, **changes):
     memory.record_judgment(event_id=event_id, answers=answers)
 
 
+class ReasonTests(unittest.TestCase):
+    """A move keeps the participant's own reason at the time (#94 step 5)."""
+
+    def moves(self, events, memory):
+        return memory.own_moves(events, actor_id=SELF, now=NOW)
+
+    def test_a_silence_keeps_its_reason(self):
+        memory = ConversationMemory()
+        memory.record_silence(about_event_id="q1", why="  Zoe asked Castor;\n waiting for him. ")
+        (silence,) = self.moves([message("q1")], memory)
+        self.assertEqual("Zoe asked Castor; waiting for him.", silence["why"])
+
+    def test_a_sent_move_gets_its_reason_when_the_room_shows_it(self):
+        memory = ConversationMemory()
+        memory.record_reason({"kind": "reply", "target_event_id": "q1", "text": "Will do."}, "I can check the build.")
+        memory.record_reason({"kind": "reaction", "target_event_id": "s1", "reaction": "\U0001f442", "operation": "add"}, "Zoe is mid-story.")
+        memory.record_reason({"kind": "message", "text": "Never posted."}, "Lost on the way.")
+        events = [
+            message("q1"),
+            message("v1", author_id=SELF, text="Will do.", reply_to_event_id="q1"),
+            message("s1", text="So then..."),
+            reaction("r1", "s1"),
+            message("v2", author_id=SELF, text="Something else."),
+        ]
+        self.assertEqual(
+            [("v1", "I can check the build."), ("r1", "Zoe is mid-story."), ("v2", None)],
+            [(move["event_id"], move.get("why")) for move in self.moves(events, memory)],
+        )
+
+    def test_a_reason_joins_one_move_only(self):
+        memory = ConversationMemory()
+        memory.record_reason({"kind": "message", "text": "ok"}, "Agreeing.")
+        events = [message("v1", author_id=SELF, text="ok"), message("v2", author_id=SELF, text="ok")]
+        self.assertEqual([None, "Agreeing."], [move.get("why") for move in self.moves(events, memory)])
+
+    def test_no_reason_or_a_blank_one_is_left_out(self):
+        memory = ConversationMemory()
+        memory.record_silence(about_event_id="q1", why="   ")
+        memory.record_reason({"kind": "message", "text": "hi"}, None)
+        (silence, said) = self.moves([message("q1"), message("v1", author_id=SELF, text="hi")], memory)
+        self.assertNotIn("why", silence)
+        self.assertNotIn("why", said)
+
+    def test_long_reasons_are_shortened_and_a_restart_forgets_them(self):
+        memory = ConversationMemory()
+        memory.record_silence(about_event_id="q1", why="because " * 60)
+        (silence,) = self.moves([message("q1")], memory)
+        self.assertLessEqual(len(silence["why"]), 200)
+        memory.record_reason({"kind": "message", "text": "hi"}, "Greeting.")
+        memory.restart()
+        (said,) = self.moves([message("v1", author_id=SELF, text="hi")], memory)
+        self.assertNotIn("why", said)
+
+
 class ThreadTests(unittest.TestCase):
     """Who asked what, and which messages responded: facts with pointers."""
 
@@ -293,6 +347,34 @@ class TurnTests(unittest.TestCase):
         pipeline.handle_delivery(delivery_id="d-q2", event=message("q2"), actors=ZOE)
         self.assertEqual(["q1"], [thread["event_id"] for thread in wakes[0]["memory"]["threads"]])
 
+    def test_the_reason_it_gave_reaches_its_next_turn_and_never_the_room(self):
+        wakes = []
+        replies = iter([
+            {"kind": "silence", "why": "Zoe asked Castor; waiting for him."},
+            {"kind": "reply", "origin_event_id": "q2", "target_event_id": "q2", "text": "It's green.", "why": "Castor never answered."},
+            None,
+        ])
+        pipeline, _, transport, _ = foundation(participant=lambda **turn: wakes.append(turn["wake"]) or next(replies))
+        pipeline.handle_delivery(delivery_id="d-q1", event=message("q1", text="Castor, is the build green?"), actors=ZOE)
+        pipeline.handle_delivery(delivery_id="d-q2", event=message("q2", text="Anyone?"), actors=ZOE)
+        (silence,) = [move for move in wakes[1]["memory"]["own_moves"] if move["kind"] == "silence"]
+        self.assertEqual("Zoe asked Castor; waiting for him.", silence["why"])
+        # The room gets the reply without the reason.
+        self.assertEqual(
+            [{"kind": "reply", "origin_event_id": "q2", "target_event_id": "q2", "text": "It's green."}],
+            [action for action, _ in transport.calls],
+        )
+        # Once the room shows the reply, the memory joins it to its reason.
+        pipeline.observation.observe(
+            delivery_id="d-v1",
+            event=message("v1", author_id=SELF, text="It's green.", reply_to_event_id="q2"),
+            actors={},
+        )
+        pipeline.handle_delivery(delivery_id="d-q3", event=message("q3", text="Thanks!"), actors=ZOE)
+        (reply,) = [move for move in wakes[2]["memory"]["own_moves"] if move["kind"] == "reply"]
+        self.assertEqual("Castor never answered.", reply["why"])
+        validate_participant_wake(wakes[2])
+
     def test_the_runtime_contract_checks_memory(self):
         wakes = []
         pipeline, _, _, _ = foundation(participant=lambda **turn: wakes.append(turn["wake"]) or None)
@@ -305,6 +387,8 @@ class TurnTests(unittest.TestCase):
             {"own_moves": [{"kind": "silence", "about_event_id": "q1"}]},
             {"own_moves": [{"kind": "message", "event_id": "v1", "text": "x" * 281}]},
             {"own_moves": wake["memory"]["own_moves"], "obligations": ["reply to q1"]},
+            {"own_moves": [dict(wake["memory"]["own_moves"][0], why="x" * 201)]},
+            {"own_moves": [dict(wake["memory"]["own_moves"][0], why="")]},
             {},
             {"threads": []},
             {"threads": [{**wake["memory"]["threads"][0], "open": True}]},
@@ -330,6 +414,7 @@ class PromptTests(unittest.TestCase):
                 self.assertIn("a follow-up on something you said you would do", prompt)
                 self.assertIn("memory.own_moves", prompt)
                 self.assertIn("memory.threads", prompt)
+                self.assertIn("with your reason at the time (why)", prompt)
                 self.assertIn("an empty responses list means none", prompt)
                 self.assertIn("a promise is not the thing done", prompt)
                 self.assertIn("not a to-do list", prompt)

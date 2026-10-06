@@ -99,7 +99,7 @@ SCHEMA_FILES = {
 INTERFACE_VERSIONS = {
     "attention-request": ("I-010A", "AttentionRequestV2", 1),
     "attention-decision": ("I-010B", "AttentionDecisionV2", 6),
-    "participant-wake": ("I-010C", "ParticipantWakeV2", 5),
+    "participant-wake": ("I-010C", "ParticipantWakeV2", 7),
     "context-continuation": ("I-010D", "ContextContinuationV2", 1),
     "attention-receipt": ("I-010E", "AttentionReceiptV2", 3),
     "privileged-action-authorization": (
@@ -1261,11 +1261,15 @@ def _validate_decision_error(doc: dict[str, Any]) -> list[str]:
 
 
 _OWN_MOVE_FIELDS = {
-    "message": (("kind", "event_id", "text"), ("at",)),
-    "reply": (("kind", "event_id", "about_event_id", "text"), ("at",)),
-    "reaction": (("kind", "event_id", "about_event_id", "reaction"), ("at",)),
-    "silence": (("kind", "about_event_id", "at"), ()),
+    "message": (("kind", "event_id", "text"), ("at", "why")),
+    "reply": (("kind", "event_id", "about_event_id", "text"), ("at", "why")),
+    "reaction": (("kind", "event_id", "about_event_id", "reaction"), ("at", "why")),
+    "silence": (("kind", "about_event_id", "at"), ("why",)),
+    "proposal": (("kind", "proposal_id", "about_event_id", "capability", "status", "at"), ()),
 }
+PROPOSAL_STATUSES = (
+    "awaiting_approval", "done", "failed", "unknown", "denied", "expired", "withdrawn", "cancelled",
+)
 
 
 def _check_wake_thread(errors: "_Errors", path: str, thread: Any) -> None:
@@ -1314,16 +1318,20 @@ def _check_wake_memory(errors: "_Errors", path: str, value: Any) -> None:
         item = f"{path}.own_moves[{index}]"
         kind = move.get("kind") if isinstance(move, dict) else None
         if kind not in _OWN_MOVE_FIELDS:
-            errors.add(f"{item}.kind", "must be message, reply, reaction or silence")
+            errors.add(f"{item}.kind", "must be message, reply, reaction, silence or proposal")
             continue
         required, optional = _OWN_MOVE_FIELDS[kind]
         if not _check_closed_object(errors, item, move, required, required + optional):
             continue
-        for name in ("event_id", "about_event_id", "reaction", "at"):
+        if kind == "proposal" and move.get("status") not in PROPOSAL_STATUSES:
+            errors.add(f"{item}.status", "must be a proposal status")
+        for name in ("event_id", "about_event_id", "reaction", "at", "proposal_id", "capability"):
             if name in move:
                 _check_nes(errors, f"{item}.{name}", move[name])
         if "text" in move and (not isinstance(move["text"], str) or len(move["text"]) > 280):
             errors.add(f"{item}.text", "must be a string of at most 280 characters")
+        if "why" in move and (not isinstance(move["why"], str) or not 1 <= len(move["why"]) <= 200):
+            errors.add(f"{item}.why", "must be a non-empty string of at most 200 characters")
 
 
 def validate_participant_wake(doc: Any) -> list[str]:

@@ -26,7 +26,9 @@ Every scene starts as a draft (`"review": "draft: …"`):
 
 - `scenes/behavior/` holds the eight scenes from `docs/behavior.md`, plus
   two where a message arrives while the agent is composing
-  (`answered-while-composing`, `never-mind-while-composing`).
+  (`answered-while-composing`, `never-mind-while-composing`), and two where
+  the agent's own earlier turn in the scene matters
+  (`addressee-never-answers`, `said-it-would-check`).
 - `scenes/litmus/` holds 57 scenes converted from the V1 litmus corpus by
   `litmus.py`. Their ranges come from V1 verdicts, and their `review` field
   quotes the V1 rationale. They have no notice facts yet.
@@ -81,9 +83,14 @@ memory of who asked what is built from those judgments. So before a moment
 is judged, attention first judges each earlier message the participant
 would have judged live (messages by others, in order), with the same model.
 These replayed judgments only feed the memory: no turn follows them, and
-they are not graded. Each record's `memory_replay` says how many were
-judged, how many failed, and their usage. `--no-replay` skips them, to
-measure what the memory of others changes.
+they are not graded. With an agent, an earlier moment of the same scene is
+played in full instead: the agent takes that turn, anything it posts enters
+the room as its own message or reaction, and its silences and the reasons it
+gave stay in its memory, as they would live. Only the judged moment is
+graded. Each record's `memory_replay` says how many messages were judged,
+how many failed, their usage, and each played turn's move and reason, with
+the agent's usage for them. `--no-replay` skips all of it, to measure what
+the memory changes.
 
 Step 1 is graded on attention alone, and so is attention's own most likely
 move: each record's `top_move` grades it as if the agent followed it, with
@@ -97,8 +104,9 @@ to attention.
 
 Each agent turn records how the agent got it (a wake, or a defer and why),
 whether attention's reading came with it, which of its own earlier moves
-its memory carried (`memory_moves`), and which threads it carried, each with
-the messages that responded (`memory_threads`). When the turn protocol rejects
+its memory carried (`memory_moves`) with the reasons it had given
+(`memory_reasons`), which threads it carried, each with the messages that
+responded (`memory_threads`), and the reason it gave for this move (`why`). When the turn protocol rejects
 the agent's reply, the record keeps that reply under `raw_reply`, so the
 failure can be read. Two options measure the
 agent's side of the room:

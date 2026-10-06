@@ -654,12 +654,27 @@ def validate_attention_decision(
 # and the threads: asks and the messages that responded to them.
 MEMORY_TEXT_MAX_CHARS = 280
 THREAD_RESPONSES_MAX = 4
+# Since @6 any own move may carry ``why``: the participant's own reason at the
+# time, in its own words, never posted.
+MOVE_REASON_MAX_CHARS = 200
 _OWN_MOVE_FIELDS = {
-    "message": (("kind", "event_id", "text"), ("at",)),
-    "reply": (("kind", "event_id", "about_event_id", "text"), ("at",)),
-    "reaction": (("kind", "event_id", "about_event_id", "reaction"), ("at",)),
-    "silence": (("kind", "about_event_id", "at"), ()),
+    "message": (("kind", "event_id", "text"), ("at", "why")),
+    "reply": (("kind", "event_id", "about_event_id", "text"), ("at", "why")),
+    "reaction": (("kind", "event_id", "about_event_id", "reaction"), ("at", "why")),
+    "silence": (("kind", "about_event_id", "at"), ("why",)),
+    # Since @7: a privileged proposal and what became of it (#90).
+    "proposal": (("kind", "proposal_id", "about_event_id", "capability", "status", "at"), ()),
 }
+PROPOSAL_STATUSES = (
+    "awaiting_approval",
+    "done",
+    "failed",
+    "unknown",
+    "denied",
+    "expired",
+    "withdrawn",
+    "cancelled",
+)
 
 
 def _memory_text(value: Any, path: str) -> None:
@@ -705,14 +720,20 @@ def _memory(value: Any, path: str) -> dict[str, Any]:
         item = f"{path}.own_moves[{index}]"
         kind = move.get("kind") if isinstance(move, Mapping) else None
         if kind not in _OWN_MOVE_FIELDS:
-            _fail(f"{item}.kind", "must be message, reply, reaction or silence")
+            _fail(f"{item}.kind", "must be message, reply, reaction, silence or proposal")
         required, optional = _OWN_MOVE_FIELDS[kind]
         _closed(move, item, required=required, optional=optional)
-        for name in ("event_id", "about_event_id", "reaction", "at"):
+        if kind == "proposal" and move["status"] not in PROPOSAL_STATUSES:
+            _fail(f"{item}.status", "must be one of " + ", ".join(PROPOSAL_STATUSES))
+        for name in ("event_id", "about_event_id", "reaction", "at", "proposal_id", "capability"):
             if name in move:
                 _nes(move[name], f"{item}.{name}")
         if "text" in move:
             _memory_text(move["text"], f"{item}.text")
+        if "why" in move:
+            _nes(move["why"], f"{item}.why")
+            if len(move["why"]) > MOVE_REASON_MAX_CHARS:
+                _fail(f"{item}.why", f"must be at most {MOVE_REASON_MAX_CHARS} characters")
     return doc
 
 

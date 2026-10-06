@@ -56,6 +56,7 @@ TOOL_NAMES = {
     "send": "room_send",
     "react": "room_react",
     "propose": "room_propose",
+    "withdraw": "room_withdraw",
     "context": "room_context",
 }
 WAKE_MARKER = '<nunchi_wake id="{}"/>'
@@ -203,8 +204,8 @@ class GatedParticipant:
         self.guard = guard
         self.registered_roles = tuple(
             role
-            for role in ("send", "react", "propose", "context")
-            if role != "propose" or privileged_enabled
+            for role in ("send", "react", "propose", "withdraw", "context")
+            if role not in ("propose", "withdraw") or privileged_enabled
         )
         self._roles_by_tool = {full_tool_name(role): role for role in self.registered_roles}
         self.result_wait_seconds = result_wait_seconds
