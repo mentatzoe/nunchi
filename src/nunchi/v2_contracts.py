@@ -368,6 +368,10 @@ def _observation_fields(doc: Mapping[str, Any], *, require_schema: bool) -> None
             _nes(continuation["expires_at"], "continuation.expires_at")
 
 
+# Why a moment is judged when no new message arrived (#94 step 6; I-010A@3,
+# I-010C@9): ``pause`` is a look again after the room went quiet.
+OCCASIONS = ("pause",)
+
 # The room's pace at the snapshot (#94 step 6; I-010A@2, I-010C@8); see
 # ``nunchi.pace``. Counts and durations in whole seconds, never verdicts.
 PACE_COUNTS = ("window_messages", "own_messages")
@@ -408,12 +412,14 @@ def validate_attention_request(value: Any) -> dict[str, Any]:
             "trigger_event_id",
             "coverage",
         ),
-        optional=("continuation", "pace"),
+        optional=("continuation", "pace", "occasion"),
     )
     _nes(doc["request_id"], "request_id")
     _observation_fields(doc, require_schema=True)
     if "pace" in doc:
         _pace(doc["pace"], "request.pace")
+    if "occasion" in doc and doc["occasion"] not in OCCASIONS:
+        _fail("request.occasion", "must be one of " + ", ".join(OCCASIONS))
     return deepcopy(dict(doc))
 
 
@@ -779,10 +785,12 @@ def validate_participant_wake(value: Any) -> dict[str, Any]:
             "coverage",
             "attention",
         ),
-        optional=("continuation", "memory", "pace"),
+        optional=("continuation", "memory", "pace", "occasion"),
     )
     if "pace" in doc:
         _pace(doc["pace"], "wake.pace")
+    if "occasion" in doc and doc["occasion"] not in OCCASIONS:
+        _fail("wake.occasion", "must be one of " + ", ".join(OCCASIONS))
     if "memory" in doc:
         # Memory points at messages that may have left the window; the
         # participant can look around them in the room.

@@ -915,7 +915,13 @@ class ObservationProvider:
         request_id: str | None = None,
         continuation: bool = True,
         record_receipt: bool = True,
+        occasion: str | None = None,
     ) -> dict[str, Any]:
+        """Build one bounded request about ``trigger_event_id``.
+
+        ``occasion`` says why it is judged when no new message arrived: since
+        #94 step 6, ``pause`` is a look again after the room went quiet.
+        """
         with self._lock:
             all_events = list(self._events)
             now = self.clock()
@@ -969,6 +975,8 @@ class ObservationProvider:
                     now=now,
                 ),
             }
+            if occasion is not None:
+                request["occasion"] = occasion
             # Interior gaps (left by relation closure, kept older exchange, or
             # age and byte cuts) stay fetchable even when both ends are covered.
             included = set(indices)

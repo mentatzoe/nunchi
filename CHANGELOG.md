@@ -66,6 +66,23 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- Nunchi looks again after a pause (#94, plan step 6, second part). When a
+  judgment's most likely move is to wait, for the addressee or for the
+  speaker to finish, and nothing new is said for five minutes
+  (`look_again_seconds`, 0 turns it off), the delivery lane judges the same
+  message again with `occasion: "pause"` (`I-010A AttentionRequestV2@3`,
+  `I-010C ParticipantWakeV2@9`). The agent may get a turn that knows it is
+  looking again, sees how long the room has been quiet, and remembers why it
+  waited. A new message, or a move the agent sent about that message,
+  disarms it; it runs only when nothing else is running, never displaces a
+  newer message (the scheduler gains an idle-only offer), and happens once
+  per quiet stretch. Claude Code, Codex and the generic runtime look again;
+  Hermes does not yet. The behavior suite now grades pause moments instead
+  of reporting them as unsupported, records `looked_again` (step 1 is
+  graded `not judged` when Nunchi did not look again), and adds a
+  restraint scene where looking again should still stay quiet
+  (`only-they-can-do-it`, 70 scenes). `nunchi probe` now reports the
+  current I-010A, I-010B and I-010C versions; they had been stale.
 - The judgment and the agent's turn notice the room's pace (#94, plan step
   6, first part). Every snapshot carries `pace`: the current time, how long
   ago the judged message came, how long the room was quiet before it, its

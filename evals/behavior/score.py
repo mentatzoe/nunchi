@@ -7,7 +7,7 @@ Attention first decides one of:
 - `mhm`: attention chose ACK and Nunchi reacted for the agent;
 - `woken`: the agent got a turn (WAKE, DEFER, or a provider error under the
   default wake-on-error policy);
-- `unsupported`: today's V2 has no route for this moment (a pause).
+- `unsupported`: no route judged this moment.
 
 When the agent's turn is simulated, a woken agent's own move replaces
 `woken`: `speak` (a message or reply), `mhm` (its own reaction),
@@ -18,10 +18,12 @@ Each run gets two grades:
 
 - `visible`: `fits`, `miss`, or `unlisted` for the move the room saw;
   `agent-decides` when the agent was woken but not simulated. Staying quiet
-  also fits where waiting does, since nothing looks again yet.
+  also fits where waiting does: the room sees nothing either way, and a
+  pause moment grades what happens when Nunchi looks again.
 - `step1`: from attention alone. `ok`, `over-suppress` (suppressed something
-  step 1 must pass, so the agent never saw it), or `over-wake` (woke for
-  something step 1 may suppress, which costs one turn).
+  step 1 must pass, so the agent never saw it), `over-wake` (woke for
+  something step 1 may suppress, which costs one turn), or `not judged`
+  (a pause after which Nunchi did not look again, so step 1 never ran).
 """
 
 from __future__ import annotations
@@ -64,7 +66,9 @@ def grade(moment: Moment, result: str, *, attention: str | None = None) -> dict[
         visible = "miss"
     else:
         visible = "unlisted"
-    if attention == "stay_quiet":
+    if attention == "not judged":
+        step1 = "not judged"
+    elif attention == "stay_quiet":
         step1 = "over-suppress" if moment.step1 == "pass" else "ok"
     else:
         step1 = "over-wake" if moment.step1 == "suppress" else "ok"

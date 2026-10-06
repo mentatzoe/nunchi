@@ -989,6 +989,12 @@ class InstalledSurfaceTests(unittest.TestCase):
         probe = json.loads(output.getvalue())
         self.assertEqual(2, probe["generation"])
         self.assertFalse(probe["v1_fallback"])
+        # The probe reports the versions the schemas declare.
+        from tests.v2.contract.schema_helpers import INTERFACE_VERSIONS
+
+        for interface, _, version in INTERFACE_VERSIONS.values():
+            with self.subTest(interface=interface):
+                self.assertEqual(version, probe["interfaces"][interface])
         with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
             cli.main(["admit"])
 

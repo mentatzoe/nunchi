@@ -382,9 +382,9 @@ def _probe() -> dict[str, Any]:
         "product_version": __version__,
         "generation": 2,
         "interfaces": {
-            "I-010A": 1,
-            "I-010B": 3,
-            "I-010C": 2,
+            "I-010A": 3,
+            "I-010B": 6,
+            "I-010C": 9,
             "I-010D": 1,
             "I-010E": 3,
             "I-010F": 1,

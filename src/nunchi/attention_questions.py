@@ -230,6 +230,8 @@ def attention_state(projection: Mapping[str, Any], instructions: str) -> dict[st
         state["earlier_messages_not_shown"] = True
     if projection.get("pace"):
         state["pace"] = deepcopy(dict(projection["pace"]))
+    if projection.get("occasion"):
+        state["occasion"] = projection["occasion"]
     return state
 
 
@@ -455,6 +457,25 @@ def _pace_notes(projection: Mapping[str, Any]) -> list[dict[str, Any]]:
     return notes
 
 
+def _pause_note(projection: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """On a look again, how long the room has been quiet (#94 step 6)."""
+
+    since = (projection.get("pace") or {}).get("judged_seconds_ago")
+    if projection.get("occasion") != "pause" or not isinstance(since, int):
+        return []
+    events = projection["events"]
+    trigger = projection["trigger_event_id"]
+    position = next((index for index, event in enumerate(events) if event.get("id") == trigger), None)
+    if position is None or any(event.get("type") == "message" for event in events[position + 1:]):
+        return []
+    return [
+        {
+            "note": f"Nothing new has been said for {_duration(since)} since this message.",
+            "evidence_event_ids": [projection["trigger_event_id"]],
+        }
+    ]
+
+
 def _is_own(projection: Mapping[str, Any], event_id: str) -> bool:
     own_actor = projection["self"]["actor_id"]
     return any(
@@ -475,6 +496,7 @@ def fact_notes(answers: Mapping[str, Any], projection: Mapping[str, Any]) -> lis
     else:
         text = f"{_ADDRESSEE_NOTES[who]} ({addressee[who]:.2f})."
     notes.append({"note": text, "evidence_event_ids": [trigger]})
+    notes += _pause_note(projection)
     if answers["conversation"] < 0.5:
         notes.append(
             {

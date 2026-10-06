@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010A AttentionRequestV2@2`` (slice 010, T002; @2 adds the pace, #94 step 6).
+"""Contract tests for ``I-010A AttentionRequestV2@3`` (slice 010, T002; #94 step 6: @2 adds the pace, @3 the occasion).
 
 Red cases cover exact identity (S01), actor mentions versus
 ``mentions_room`` (S02), the runtime-adapter-only relational classes
@@ -73,6 +73,16 @@ class PaceCases(unittest.TestCase):
         ):
             with self.subTest(bad=bad):
                 assert_schema_verdict(self, "attention-request", dict(make_request(), pace=bad), "invalid")
+
+
+class OccasionCases(unittest.TestCase):
+    """@3 (#94 step 6): a look again after a pause says so."""
+
+    def test_a_pause_validates_and_nothing_else_does(self):
+        assert_schema_verdict(self, "attention-request", dict(make_request(), occasion="pause"), "valid")
+        for bad in ("later", "", None, ["pause"]):
+            with self.subTest(bad=bad):
+                assert_schema_verdict(self, "attention-request", dict(make_request(), occasion=bad), "invalid")
 
 
 class ExactIdentityRedCases(unittest.TestCase):

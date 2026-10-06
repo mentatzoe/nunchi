@@ -264,10 +264,24 @@ class JudgeMomentTests(unittest.TestCase):
         self.assertLess(abs(datetime.now(timezone.utc) - times["m1"]), timedelta(minutes=1))
         self.assertEqual(timedelta(hours=7), times["m1"] - times["n3"])
 
-    def test_pause_moments_are_not_supported_today(self):
+    def test_a_pause_after_a_judgment_to_wait_is_looked_at_again(self):
+        # #94 step 6: Zoe asked Castor; attention read it as a moment to
+        # wait on, and five quiet minutes later Nunchi judges it again.
+        record, model = self.judge("addressee-first", 1, "DEFER")
+        self.assertTrue(record["looked_again"])
+        self.assertEqual("woken", record["result"])
+        before, again = model.projections
+        self.assertNotIn("occasion", before)
+        self.assertEqual("pause", again["occasion"])
+        self.assertEqual((0, 300), (before["pace"]["judged_seconds_ago"], again["pace"]["judged_seconds_ago"]))
+
+    def test_no_look_again_unless_the_judgment_was_to_wait(self):
         record, model = self.judge("addressee-first", 1, "WAKE")
-        self.assertEqual("unsupported", record["result"])
-        self.assertEqual([], model.projections)
+        self.assertFalse(record["looked_again"])
+        self.assertEqual(("stay_quiet", "attention"), (record["result"], record["by"]))
+        # Step 1 never ran at the pause, so it is not graded as suppressing.
+        self.assertEqual({"visible": "miss", "step1": "not judged"}, record["grade"])
+        self.assertEqual(1, len(model.projections))
 
     def test_own_event_never_reaches_the_model(self):
         record, model = self.judge("litmus-a-self-echo-alias-author", 0, "WAKE")
@@ -393,6 +407,32 @@ class AgentTurnTests(unittest.TestCase):
         # The model's note, then the kinds of response that could fit.
         self.assertEqual({"source": "WAKE", "reading_items": 2}, record["agent"]["attention"])
         self.assertEqual("WAKE", run.turn_source(record))
+
+    def test_the_agent_looks_again_after_a_pause_and_remembers_why_it_waited(self):
+        def waits_then_answers(wake):
+            if wake.get("occasion") == "pause":
+                return dict(speaks(wake), why="Castor never answered.")
+            return {"kind": "silence", "why": "Zoe asked Castor; waiting for him."}
+
+        record, agent = self.judge("addressee-first", 1, "DEFER", waits_then_answers)
+        self.assertEqual(("speak", "fits"), (record["result"], record["grade"]["visible"]))
+        self.assertEqual(
+            [{"event": "q1", "move": "stay_quiet", "why": "Zoe asked Castor; waiting for him."}],
+            record["memory_replay"]["played"],
+        )
+        wake, _ = agent.turns[-1]
+        self.assertEqual("pause", wake["occasion"])
+        (silence,) = [move for move in wake["memory"]["own_moves"] if move["kind"] == "silence"]
+        self.assertEqual("Zoe asked Castor; waiting for him.", silence["why"])
+        self.assertEqual(300, wake["pace"]["judged_seconds_ago"])
+
+    def test_no_look_again_after_the_agent_already_spoke(self):
+        record, agent = self.judge("addressee-first", 1, "DEFER", speaks)
+        self.assertFalse(record["looked_again"])
+        self.assertEqual(("stay_quiet", "agent"), (record["result"], record["by"]))
+        self.assertEqual("not judged", record["grade"]["step1"])
+        self.assertIn("before the pause was speak", record["detail"])
+        self.assertEqual(1, len(agent.turns))
 
     def test_earlier_moments_are_played_and_remembered_with_their_reasons(self):
         # #94 step 5: live, the agent took the earlier turns of this story;
@@ -593,7 +633,7 @@ class RunTests(unittest.TestCase):
 
     def test_scene_selection(self):
         scenes = load_scenes()
-        self.assertEqual(12, len(run.select_scenes(scenes, "behavior")))
+        self.assertEqual(13, len(run.select_scenes(scenes, "behavior")))
         self.assertEqual(57, len(run.select_scenes(scenes, "litmus")))
         self.assertEqual(5, len(run.select_scenes(scenes, "tool-chrome")))
         self.assertEqual(["did-you-see"], [scene.id for scene in run.select_scenes(scenes, "did-you-see")])

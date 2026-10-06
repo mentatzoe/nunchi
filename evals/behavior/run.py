@@ -624,15 +624,11 @@ def judge_moment(
         "run": job.run,
         "provider_error": False,
     }
-    if moment.is_pause:
-        record.update(
-            result="unsupported",
-            grade=grade(moment, "unsupported"),
-            detail="today's V2 has no route that looks again after a pause",
-        )
-        return record
-
-    last = scene.event_index(moment.seen_through or moment.event)
+    # A pause moment plays the scene through the message before the pause,
+    # then lets the room stay quiet for the pause and looks again (#94 step 6).
+    last = scene.event_index(
+        moment.pause_after if moment.is_pause else (moment.seen_through or moment.event)
+    )
     observed = scene.events[: last + 1]
     # The latest observed event happens now; a judged event may be older than
     # later context (a late judgment), so take the smallest offset.
@@ -709,7 +705,7 @@ def judge_moment(
         observation=observation, attention=engine, host=host, scheduler=scheduler
     )
     token = None
-    judged_index = scene.event_index(moment.event)
+    judged_index = last + 1 if moment.is_pause else scene.event_index(moment.event)
     replayed: list[dict[str, Any]] = []
     # Earlier moments of this scene the agent plays before the judged one.
     played_moments = (
@@ -721,6 +717,10 @@ def judge_moment(
         if replay and agent is not None
         else set()
     )
+    if moment.is_pause:
+        # The message before the pause is judged and played as it was live:
+        # only that judgment can arm the look again.
+        played_moments.add(moment.pause_after)
 
     def play(delivery: Mapping[str, Any], at: datetime | None) -> dict[str, Any]:
         """Take an earlier moment's turn and leave its moves in the room."""
@@ -728,6 +728,13 @@ def judge_moment(
         _, played_token = pipeline.observe_and_offer(**delivery)
         entry: dict[str, Any] = {"event": delivery["event"]["id"], "ok": False, "usage": {}}
         if played_token is None:
+            return entry
+        if agent is None:
+            # Attention alone: the moment is judged, and nobody takes the turn.
+            pipeline.run_opportunities(played_token)
+            decision = engine.last_decision or {}
+            entry["ok"] = decision.get("status") == "ok"
+            entry["usage"] = call_usage(getattr(inner, "last_response", None))
             return entry
         agent.paired = False
         try:
@@ -814,7 +821,36 @@ def judge_moment(
     scene_time[0] = now
     if agent is not None and moment.during_turn:
         agent.arrive = arrive
-    if token is None:
+    if moment.is_pause:
+        scene_time[0] = now + timedelta(seconds=moment.pause_seconds)
+        outcomes = pipeline.look_again(now=True)
+        record["looked_again"] = outcomes is not None
+        if outcomes is None:
+            before = next((item for item in replayed if item.get("event") == moment.pause_after), {})
+            if not before.get("ok"):
+                record.update(
+                    result="woken",
+                    grade=grade(moment, "woken"),
+                    provider_error=True,
+                    error="the judgment before the pause failed, so Nunchi could not look again",
+                )
+            elif before.get("move") in ("speak", "mhm", "other"):
+                # The agent already acted on the message; the pause adds nothing.
+                record.update(
+                    result="stay_quiet",
+                    by="agent",
+                    grade=grade(moment, "stay_quiet", attention="not judged"),
+                    detail=f"the agent's move before the pause was {before['move']}, so Nunchi did not look again",
+                )
+            else:
+                record.update(
+                    result="stay_quiet",
+                    by="attention",
+                    grade=grade(moment, "stay_quiet", attention="not judged"),
+                    detail="the judgment before the pause was not to wait, so Nunchi did not look again",
+                )
+            return record
+    elif token is None:
         # The transport keeps the participant's own events from waking it.
         record.update(
             result="stay_quiet",
@@ -823,8 +859,8 @@ def judge_moment(
             detail="own event: the transport does not wake the participant",
         )
         return record
-
-    outcomes = pipeline.run_opportunities(token)
+    else:
+        outcomes = pipeline.run_opportunities(token)
     decision = engine.last_decision
     if decision is None:
         detail = outcomes[0].operational_error if outcomes else "no opportunity ran"

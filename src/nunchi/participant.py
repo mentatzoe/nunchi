@@ -67,13 +67,18 @@ class ConversationOpportunityScheduler:
         self._expired_generation: int | None = None
         self._lock = threading.RLock()
 
-    def offer(self, anchor_event_id: str) -> OpportunityToken | None:
-        """Return work only for an idle scheduler; otherwise replace pending."""
+    def offer(self, anchor_event_id: str, *, only_if_idle: bool = False) -> OpportunityToken | None:
+        """Return work only for an idle scheduler; otherwise replace pending.
+
+        ``only_if_idle`` leaves pending work alone when busy: a look again
+        never displaces a newer message (#94 step 6).
+        """
         if not isinstance(anchor_event_id, str) or not anchor_event_id:
             raise ValidationError("opportunity anchor must be non-empty")
         with self._lock:
             if self._active:
-                self._pending_anchor = anchor_event_id
+                if not only_if_idle:
+                    self._pending_anchor = anchor_event_id
                 return None
             self._active = True
             self._generation += 1
@@ -422,6 +427,9 @@ def build_participant_wake(
         )
         if key in fresh
     }
+    if "occasion" in checked_request:
+        # The turn knows it comes from a look again, not a new message.
+        wake["occasion"] = checked_request["occasion"]
     attention: dict[str, Any] = {"source": source}
     if source in ("WAKE", "DEFER") and checked_decision["status"] == "ok":
         # The turn carries the model's reading of the room. The wake is built

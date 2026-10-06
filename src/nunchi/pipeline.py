@@ -9,6 +9,7 @@ import time
 from typing import Any
 
 from .attention import AttentionEngine
+from .attention_questions import top_move
 from .observation import (
     ObservationProvider,
     ObservationResult,
@@ -59,6 +60,7 @@ def prepare_opportunity(
     scheduler: ConversationOpportunityScheduler,
     token: Any,
     deadline: float,
+    occasion: str | None = None,
 ) -> OpportunityPreparation | None:
     """Build one valid current participant opportunity or an explicit error.
 
@@ -71,11 +73,11 @@ def prepare_opportunity(
         return None
     reconstructed = False
     try:
-        request = observation.build_snapshot(token.anchor_event_id)
+        request = observation.build_snapshot(token.anchor_event_id, occasion=occasion)
     except SnapshotUnavailable as first_error:
         reconstructed = True
         try:
-            request = observation.build_snapshot(token.anchor_event_id)
+            request = observation.build_snapshot(token.anchor_event_id, occasion=occasion)
         except SnapshotUnavailable as final_error:
             detail = (
                 "attention snapshot unavailable after one reconstruction "
@@ -166,6 +168,11 @@ def prepare_opportunity(
     )
 
 
+# How long the room must stay quiet before Nunchi looks again at a moment
+# judged as one to wait on (#94 step 6); 0 never looks again.
+DEFAULT_LOOK_AGAIN_SECONDS = 300
+
+
 class NunchiV2Pipeline:
     """Synchronous owner of one participant/room scheduling lane.
 
@@ -173,6 +180,13 @@ class NunchiV2Pipeline:
     opportunity; later callers only replace the pending anchor after retaining
     their events.  The active caller then processes at most one fresh pending
     opportunity at a time.
+
+    Looking again (``docs/behavior.md``): when a judgment's most likely move
+    is to wait, for the addressee or for the speaker to finish, the pipeline
+    arms one look again. A new message disarms it. If the room stays quiet
+    for ``look_again_seconds``, ``look_again`` judges the same message again
+    as a ``pause`` and the participant may get a turn with a fresh reading.
+    It looks again once per quiet stretch.
     """
 
     def __init__(
@@ -182,6 +196,7 @@ class NunchiV2Pipeline:
         attention: AttentionEngine,
         host: ParticipantTurnHost,
         scheduler: ConversationOpportunityScheduler,
+        look_again_seconds: float = DEFAULT_LOOK_AGAIN_SECONDS,
     ) -> None:
         if host.observation is not observation:
             raise ValueError("host and pipeline must share one observation provider")
@@ -189,11 +204,22 @@ class NunchiV2Pipeline:
             raise ValueError("host and pipeline must share one scheduler")
         if attention.receipts is not observation.receipts or host.receipts is not observation.receipts:
             raise ValueError("all stages must share one request-correlated receipt journal")
+        if (
+            isinstance(look_again_seconds, bool)
+            or not isinstance(look_again_seconds, (int, float))
+            or look_again_seconds < 0
+        ):
+            raise ValueError("look_again_seconds must be a non-negative number")
         self.observation = observation
         self.attention = attention
         self.host = host
         self.scheduler = scheduler
+        self.look_again_seconds = float(look_again_seconds)
         self._lifecycle_lock = threading.RLock()
+        # (anchor event, monotonic time it is due) of the one armed look again.
+        self._look_again: tuple[str, float] | None = None
+        # The newest eligible event delivered: only it can be looked at again.
+        self._newest_eligible: str | None = None
 
     def handle_delivery(
         self,
@@ -238,14 +264,80 @@ class NunchiV2Pipeline:
         )
         if not observed.wake_eligible or observed.audit.event_id is None:
             return observed, None
+        with self._lifecycle_lock:
+            # Something new was said: the quiet a look again waits for is over.
+            self._look_again = None
+            self._newest_eligible = observed.audit.event_id
         return observed, self.scheduler.offer(observed.audit.event_id)
 
-    def run_opportunities(self, token: Any) -> tuple[OpportunityOutcome, ...]:
-        """Run one active token and every newest-only successor it promotes."""
+    def look_again_due(self) -> float | None:
+        """Seconds until the armed look again is due, or None when none is armed."""
+
+        with self._lifecycle_lock:
+            if self._look_again is None:
+                return None
+            return self._look_again[1] - time.monotonic()
+
+    def look_again(self, *, now: bool = False) -> tuple[OpportunityOutcome, ...] | None:
+        """Judge the armed moment again after the room stayed quiet.
+
+        Returns None when nothing is armed, it is not due yet (unless
+        ``now``), or another opportunity is already running: the room is
+        not quiet then, so the look again is dropped.
+        """
+
+        with self._lifecycle_lock:
+            armed = self._look_again
+            if armed is None or (not now and time.monotonic() < armed[1]):
+                return None
+            self._look_again = None
+        token = self.scheduler.offer(armed[0], only_if_idle=True)
+        if token is None:
+            return None
+        return self.run_opportunities(token, occasion="pause")
+
+    def _arm_look_again(self, token: Any, decision: Mapping[str, Any], occasion: str | None) -> None:
+        """Arm a look again after a judgment to wait; any other judgment disarms."""
+
+        answers = decision.get("answers") if decision.get("status") == "ok" else None
+        with self._lifecycle_lock:
+            if (
+                answers
+                and occasion is None
+                and self.look_again_seconds > 0
+                and answers.get("conversation", 0) >= 0.5
+                and top_move(answers) == "wait"
+                # A message that arrived meanwhile is newer; the quiet is over.
+                and token.anchor_event_id == self._newest_eligible
+            ):
+                self._look_again = (token.anchor_event_id, time.monotonic() + self.look_again_seconds)
+            else:
+                self._look_again = None
+
+    def _stale_look_again(self, token: Any, occasion: str | None) -> bool:
+        """A look again whose message is no longer the newest is not run."""
+
+        with self._lifecycle_lock:
+            return occasion is not None and token.anchor_event_id != self._newest_eligible
+
+    def run_opportunities(
+        self, token: Any, *, occasion: str | None = None
+    ) -> tuple[OpportunityOutcome, ...]:
+        """Run one active token and every newest-only successor it promotes.
+
+        ``occasion`` applies to the first token only; its successors are new
+        messages.
+        """
         opportunities: list[OpportunityOutcome] = []
         while token is not None:
             if not self.scheduler.is_current(token):
                 break
+            if self._stale_look_again(token, occasion):
+                # Something was said between the timer and the snapshot; the
+                # newer message is judged instead.
+                occasion = None
+                token = self.scheduler.complete(token)
+                continue
             deadline = time.monotonic() + self.host.host_timeout_seconds
             prepared = prepare_opportunity(
                 observation=self.observation,
@@ -253,6 +345,7 @@ class NunchiV2Pipeline:
                 scheduler=self.scheduler,
                 token=token,
                 deadline=deadline,
+                occasion=occasion,
             )
             if prepared is None:
                 break
@@ -260,6 +353,8 @@ class NunchiV2Pipeline:
             decision = prepared.decision
             if request is not None and decision is not None:
                 self._remember(request, decision)
+                self._arm_look_again(token, decision, occasion)
+            occasion = None
             if request is None or decision is None:
                 opportunities.append(
                     OpportunityOutcome(
@@ -291,6 +386,12 @@ class NunchiV2Pipeline:
                 if prepared.wake is not None
                 else None
             )
+            if transport is not None and transport.delivery in ("sent", "unknown"):
+                # The participant acted on the moment; there is nothing to
+                # look again for.
+                with self._lifecycle_lock:
+                    if self._look_again is not None and self._look_again[0] == token.anchor_event_id:
+                        self._look_again = None
             opportunities.append(
                 OpportunityOutcome(
                     anchor_event_id=token.anchor_event_id,
@@ -331,6 +432,8 @@ class NunchiV2Pipeline:
         self.host.memory.record_judgment(event_id=trigger, answers=decision["answers"])
 
     def cancel(self) -> None:
+        with self._lifecycle_lock:
+            self._look_again = None
         self.scheduler.cancel()
         privileged = self.host.privileged
         if privileged is not None and hasattr(privileged, "cancel"):
@@ -339,6 +442,8 @@ class NunchiV2Pipeline:
     def restart(self) -> None:
         """Invalidate active/pending work and discard ephemeral authority."""
         with self._lifecycle_lock:
+            self._look_again = None
+            self._newest_eligible = None
             self.scheduler.restart()
             self.observation.restart()
             self.host.memory.restart()
@@ -362,6 +467,8 @@ class AsyncDeliveryLane:
         self._idle = threading.Event()
         self._idle.set()
         self._errors: list[str] = []
+        # The timer for the pipeline's armed look again, if any.
+        self._look_again_timer: threading.Timer | None = None
 
     def submit(
         self,
@@ -407,14 +514,58 @@ class AsyncDeliveryLane:
                 self._workers.discard(threading.current_thread())
                 if not self._workers:
                     self._idle.set()
+            self._schedule_look_again()
+
+    def _schedule_look_again(self) -> None:
+        """Wake when the armed look again is due; a newer arming replaces it."""
+
+        due = self.pipeline.look_again_due()
+        with self._lock:
+            if self._look_again_timer is not None:
+                self._look_again_timer.cancel()
+                self._look_again_timer = None
+            if due is None:
+                return
+            timer = threading.Timer(max(0.0, due), self._fire_look_again)
+            timer.daemon = True
+            self._look_again_timer = timer
+            timer.start()
+
+    def _fire_look_again(self) -> None:
+        with self._lock:
+            self._look_again_timer = None
+            self._idle.clear()
+            worker = threading.current_thread()
+            self._workers.add(worker)
+        try:
+            self.pipeline.look_again()
+        except BaseException:
+            self.pipeline.cancel()
+            with self._lock:
+                self._errors.append("look again failed")
+        finally:
+            with self._lock:
+                self._workers.discard(worker)
+                if not self._workers:
+                    self._idle.set()
+            # Messages that arrived during it may have armed a new one.
+            self._schedule_look_again()
 
     def drain(self, timeout: float | None = None) -> bool:
         return self._idle.wait(timeout)
 
+    def _stop_look_again(self) -> None:
+        with self._lock:
+            if self._look_again_timer is not None:
+                self._look_again_timer.cancel()
+                self._look_again_timer = None
+
     def cancel(self) -> None:
+        self._stop_look_again()
         self.pipeline.cancel()
 
     def restart(self) -> None:
+        self._stop_look_again()
         self.pipeline.restart()
 
     @property

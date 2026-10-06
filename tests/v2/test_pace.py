@@ -140,6 +140,29 @@ class PromptAndReadingTests(unittest.TestCase):
         notes = [item["note"] for item in fact_notes(answers_leaning("WAKE"), self.projection(slow))]
         self.assertFalse([note for note in notes if "quiet for" in note or "in a row" in note])
 
+    def test_a_look_again_says_how_long_the_room_has_been_quiet(self):
+        pace = {"now": "2026-10-06T09:05:00.000Z", "window_messages": 1, "own_messages": 0, "judged_seconds_ago": 300}
+        projection = dict(self.projection(pace), occasion="pause")
+        notes = [item["note"] for item in fact_notes(answers_leaning("WAKE"), projection)]
+        self.assertEqual("Nothing new has been said for 5 minutes since this message.", notes[1])
+        self.assertEqual("pause", attention_state(projection, "x")["occasion"])
+        # A judgment that comes with a new message says nothing of the kind.
+        notes = [item["note"] for item in fact_notes(answers_leaning("WAKE"), self.projection(pace))]
+        self.assertFalse([note for note in notes if note.startswith("Nothing new")])
+        self.assertNotIn("occasion", attention_state(self.projection(pace), "x"))
+        # Nor does a look again that something was said after.
+        later = dict(projection, events=projection["events"] + [
+            {"id": "c1", "type": "message", "author_id": "human:zoe", "text": "Found it."}
+        ])
+        notes = [item["note"] for item in fact_notes(answers_leaning("WAKE"), later)]
+        self.assertFalse([note for note in notes if note.startswith("Nothing new")])
+
+    def test_every_prompt_explains_a_look_again(self):
+        self.assertIn("When observation.occasion is pause", participant_attention_prompt(PROFILE))
+        for prompt in (participant_turn_prompt(PROFILE), participant_tool_turn_prompt(PROFILE, tools={"send": "send"})):
+            with self.subTest(prompt=prompt[:30]):
+                self.assertIn("When occasion is pause, no new message arrived", prompt)
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
