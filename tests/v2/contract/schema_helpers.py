@@ -99,7 +99,7 @@ SCHEMA_FILES = {
 INTERFACE_VERSIONS = {
     "attention-request": ("I-010A", "AttentionRequestV2", 1),
     "attention-decision": ("I-010B", "AttentionDecisionV2", 5),
-    "participant-wake": ("I-010C", "ParticipantWakeV2", 3),
+    "participant-wake": ("I-010C", "ParticipantWakeV2", 4),
     "context-continuation": ("I-010D", "ContextContinuationV2", 1),
     "attention-receipt": ("I-010E", "AttentionReceiptV2", 3),
     "privileged-action-authorization": (
@@ -1256,14 +1256,48 @@ def _validate_decision_error(doc: dict[str, Any]) -> list[str]:
     return list(errors)
 
 
+_OWN_MOVE_FIELDS = {
+    "message": (("kind", "event_id", "text"), ("at",)),
+    "reply": (("kind", "event_id", "about_event_id", "text"), ("at",)),
+    "reaction": (("kind", "event_id", "about_event_id", "reaction"), ("at",)),
+    "silence": (("kind", "about_event_id", "at"), ()),
+}
+
+
+def _check_wake_memory(errors: "_Errors", path: str, value: Any) -> None:
+    """@4: the participant's own recent moves, one closed shape per kind."""
+    if not _check_closed_object(errors, path, value, ("own_moves",), ("own_moves",)):
+        return
+    moves = value.get("own_moves")
+    if not isinstance(moves, list) or not moves:
+        errors.add(f"{path}.own_moves", "must be a non-empty array")
+        return
+    for index, move in enumerate(moves):
+        item = f"{path}.own_moves[{index}]"
+        kind = move.get("kind") if isinstance(move, dict) else None
+        if kind not in _OWN_MOVE_FIELDS:
+            errors.add(f"{item}.kind", "must be message, reply, reaction or silence")
+            continue
+        required, optional = _OWN_MOVE_FIELDS[kind]
+        if not _check_closed_object(errors, item, move, required, required + optional):
+            continue
+        for name in ("event_id", "about_event_id", "reaction", "at"):
+            if name in move:
+                _check_nes(errors, f"{item}.{name}", move[name])
+        if "text" in move and (not isinstance(move["text"], str) or len(move["text"]) > 280):
+            errors.add(f"{item}.text", "must be a string of at most 280 characters")
+
+
 def validate_participant_wake(doc: Any) -> list[str]:
     """Mirror of schemas/v2/participant-wake.schema.json (I-010C)."""
     errors = _Errors()
     required = ("request_id", "self", "room", "actors", "events", "trigger_event_id", "coverage", "attention")
-    allowed = required + ("continuation",)
+    allowed = required + ("continuation", "memory")
     if not _check_closed_object(errors, "wake", doc, required, allowed):
         return list(errors)
     _check_nes(errors, "request_id", doc.get("request_id"))
+    if "memory" in doc:
+        _check_wake_memory(errors, "memory", doc["memory"])
 
     if "self" in doc:
         _check_self(errors, "self", doc.get("self"))

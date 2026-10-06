@@ -313,6 +313,7 @@ class NunchiV2Pipeline:
         with self._lifecycle_lock:
             self.scheduler.restart()
             self.observation.restart()
+            self.host.memory.restart()
             privileged = self.host.privileged
             if privileged is not None and hasattr(privileged, "restart"):
                 privileged.restart()

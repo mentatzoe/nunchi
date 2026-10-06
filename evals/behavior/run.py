@@ -176,6 +176,8 @@ class RecordingAgent:
         self.expansions: list[dict[str, Any]] = []
         self.without_reading: dict[str, Any] | None = None
         self.usage: dict[str, Any] | None = None
+        # The participant's own moves its wake remembered (#94 step 5).
+        self.memory_moves: list[str] = []
 
     def _usage_since(self, start: int) -> dict[str, Any] | None:
         log = getattr(self.inner, "usage_log", None)
@@ -187,6 +189,7 @@ class RecordingAgent:
     def run_protocol(self, *, wake: Mapping[str, Any], expand: Any, **kwargs: Any) -> Any:
         self.called = True
         self.attention = deepcopy(dict(wake.get("attention", {})))
+        self.memory_moves = [move["kind"] for move in (wake.get("memory") or {}).get("own_moves", ())]
         if self.arrive is not None:
             arrive, self.arrive = self.arrive, None
             arrive()
@@ -736,6 +739,8 @@ def judge_moment(
         }
         if agent.usage is not None:
             record["agent"]["usage"] = agent.usage
+        if agent.memory_moves:
+            record["agent"]["memory_moves"] = agent.memory_moves
         if agent.expansions:
             record["agent"]["expansions"] = agent.expansions
         looked_again = [

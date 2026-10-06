@@ -86,8 +86,9 @@ once. The `behavior-eval` workflow uses `anthropic/claude-haiku-4.5` as the
 agent by default; one fixed agent model keeps differences between runs down
 to attention.
 
-Each agent turn records how the agent got it (a wake, or a defer and why)
-and whether attention's reading came with it. When the turn protocol rejects
+Each agent turn records how the agent got it (a wake, or a defer and why),
+whether attention's reading came with it, and which of its own earlier moves
+its memory carried (`memory_moves`). When the turn protocol rejects
 the agent's reply, the record keeps that reply under `raw_reply`, so the
 failure can be read. Two options measure the
 agent's side of the room:

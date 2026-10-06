@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010C ParticipantWakeV2@3`` (slice 010, T004).
+"""Contract tests for ``I-010C ParticipantWakeV2@4`` (slice 010, T004).
 
 Red cases cover the wake sources, advice-free ``PREATTENTION_BYPASS``
 (010-Preattention-bypass), the FR-013 advice-source violations (advice on
@@ -17,6 +17,48 @@ from tests.v2.contract.schema_helpers import (
     make_advice,
     make_wake,
 )
+
+
+class MemoryCases(unittest.TestCase):
+    """@4: the participant's own recent moves, facts with pointers (#94 step 5)."""
+
+    MOVES = [
+        {"kind": "message", "event_id": "v1", "text": "Will do.", "at": "2026-10-06T08:00:00.000Z"},
+        {"kind": "reply", "event_id": "v2", "about_event_id": "q1", "text": "It was the cert."},
+        {"kind": "reaction", "event_id": "r1", "about_event_id": "s1", "reaction": "\U0001f442"},
+        {"kind": "silence", "about_event_id": "q2", "at": "2026-10-06T08:05:00.000Z"},
+    ]
+
+    def wake(self, moves):
+        doc = make_wake("WAKE")
+        doc["memory"] = {"own_moves": moves}
+        return doc
+
+    def test_each_kind_of_move_validates(self):
+        assert_schema_verdict(self, "participant-wake", self.wake(self.MOVES), "valid")
+        for source in ("ACK", "DEFER", "ERROR_FALLBACK"):
+            with self.subTest(source=source):
+                doc = make_wake(source)
+                doc["memory"] = {"own_moves": self.MOVES[:1]}
+                assert_schema_verdict(self, "participant-wake", doc, "valid")
+
+    def test_malformed_memory_rejects(self):
+        too_long = dict(self.MOVES[0], text="x" * 281)
+        silence_with_text = dict(self.MOVES[3], text="I stayed quiet")
+        reply_without_target = {k: v for k, v in self.MOVES[1].items() if k != "about_event_id"}
+        for bad in (
+            [],
+            [{"kind": "verdict", "about_event_id": "q1"}],
+            [too_long],
+            [silence_with_text],
+            [reply_without_target],
+            [dict(self.MOVES[2], reaction="")],
+        ):
+            with self.subTest(bad=bad):
+                assert_schema_verdict(self, "participant-wake", self.wake(bad), "invalid")
+        extra = make_wake("WAKE")
+        extra["memory"] = {"own_moves": self.MOVES, "todo": ["answer q2"]}
+        assert_schema_verdict(self, "participant-wake", extra, "invalid")
 
 
 class WakeSourceCases(unittest.TestCase):

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://nunchi.invalid/schemas/v2/participant-wake.schema.json",
   "title": "ParticipantWakeV2",
-  "description": "I-010C ParticipantWakeV2@3 — the materialized normal-turn or ACK effect facts. @3 lets a DEFER wake carry the model's reading of the room, as a WAKE wake already could, and adds judged_through_event_id: the newest event the reading saw. @2 added ACK as an explicit source without a reading; ERROR_FALLBACK, PREATTENTION_BYPASS, exact identity/room/event facts, bounded coverage, and host-only continuation semantics remain unchanged. No admission meta-answer, composed reply, or social ledger is part of the contract.",
+  "description": "I-010C ParticipantWakeV2@4 — the materialized normal-turn or ACK effect facts. @4 adds an optional memory: the participant's own recent moves in the room (its messages, replies, reactions and silences), each pointing at the message it was about. They are facts with pointers, never a verdict or an obligation, and old moves fade. @3 lets a DEFER wake carry the model's reading of the room, as a WAKE wake already could, and adds judged_through_event_id: the newest event the reading saw. @2 added ACK as an explicit source without a reading; ERROR_FALLBACK, PREATTENTION_BYPASS, exact identity/room/event facts, bounded coverage, and host-only continuation semantics remain unchanged. No admission meta-answer, composed reply, or work queue is part of the contract.",
   "$defs": {
     "nonEmptyString": {
       "type": "string",
@@ -50,6 +50,67 @@
           "then": {"required": ["advice"]}
         }
       ]
+    },
+    "memory": {
+      "$comment": "The participant's own recent moves in this room, oldest first. Pointers may name messages that have left the window.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["own_moves"],
+      "properties": {
+        "own_moves": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "event_id", "text"],
+                "properties": {
+                  "kind": {"const": "message"},
+                  "event_id": {"$ref": "#/$defs/nonEmptyString"},
+                  "text": {"type": "string", "maxLength": 280},
+                  "at": {"$ref": "#/$defs/nonEmptyString"}
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "event_id", "about_event_id", "text"],
+                "properties": {
+                  "kind": {"const": "reply"},
+                  "event_id": {"$ref": "#/$defs/nonEmptyString"},
+                  "about_event_id": {"$ref": "#/$defs/nonEmptyString"},
+                  "text": {"type": "string", "maxLength": 280},
+                  "at": {"$ref": "#/$defs/nonEmptyString"}
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "event_id", "about_event_id", "reaction"],
+                "properties": {
+                  "kind": {"const": "reaction"},
+                  "event_id": {"$ref": "#/$defs/nonEmptyString"},
+                  "about_event_id": {"$ref": "#/$defs/nonEmptyString"},
+                  "reaction": {"$ref": "#/$defs/nonEmptyString"},
+                  "at": {"$ref": "#/$defs/nonEmptyString"}
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "about_event_id", "at"],
+                "properties": {
+                  "kind": {"const": "silence"},
+                  "about_event_id": {"$ref": "#/$defs/nonEmptyString"},
+                  "at": {"$ref": "#/$defs/nonEmptyString"}
+                }
+              }
+            ]
+          }
+        }
+      }
     }
   },
   "type": "object",
@@ -68,6 +129,7 @@
     "trigger_event_id": {"$ref": "#/$defs/nonEmptyString"},
     "coverage": {"$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/coverage"},
     "continuation": {"$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/continuation"},
-    "attention": {"$ref": "#/$defs/attention"}
+    "attention": {"$ref": "#/$defs/attention"},
+    "memory": {"$ref": "#/$defs/memory"}
   }
 }
