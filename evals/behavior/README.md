@@ -110,14 +110,16 @@ answered", have no route in today's V2 and are reported as not supported.
 ## Which run to use
 
 Each run answers one kind of question. Pick the cheapest one that answers
-it. Costs are estimates for eight attention routes over all scenes, three
-runs each, from what the providers reported in run 20.
+it. Costs are what the providers reported for eight attention routes over
+all scenes, three runs each, with Haiku as the agent (run 21, 2026-10-06:
+$1.92 for attention, $7.03 for the agent's turns, $6.60 for the paired
+play).
 
 | Question | Settings | About |
 |---|---|---|
-| Which model should answer steps 1 and 2? | `--agent-model` empty: attention alone, graded on step 1 and on each route's own top move | $1–2 |
-| Did a change to the agent's turn help? | `--agent-model anthropic/claude-haiku-4.5` | $8–10 |
-| Did a change to the reading help? | the same agent, with `--paired` | $15–18 |
+| Which model should answer steps 1 and 2? | `--agent-model` empty: attention alone, graded on step 1 and on each route's own top move | $2 |
+| Did a change to the agent's turn help? | `--agent-model anthropic/claude-haiku-4.5` | $9 |
+| Did a change to the reading help? | the same agent, with `--paired` | $16 |
 
 The agent's turns cost the most: a Haiku turn costs several times an
 attention call, and `--paired` plays each turn twice.
