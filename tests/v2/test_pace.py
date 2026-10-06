@@ -176,8 +176,9 @@ class PromptAndReadingTests(unittest.TestCase):
         self.assertIn("When occasion is outcome, an operator approved an action you proposed", proposing)
         self.assertIn("Nunchi never says it for you", proposing)
         # Each way it can end is named, so the agent's words match it.
-        for status in ("done (it ran)", "failed (it was tried and failed)", "unknown (", "denied ("):
+        for status in ("done means it ran", "failed means it was approved and tried", "unknown means", "denied means"):
             self.assertIn(status, proposing)
+        self.assertIn("The approval was given in every case; only denied means the action was refused.", proposing)
 
     def test_an_outcome_turn_says_the_action_finished(self):
         pace = {"now": "2026-10-06T09:05:00.000Z", "window_messages": 1, "own_messages": 0, "judged_seconds_ago": 900}

@@ -347,10 +347,12 @@ _PACE_GUIDE = (
 _OUTCOME_GUIDE = (
     " When occasion is outcome, an operator approved an action you proposed, "
     "and it settled after your turn about it ended. Its proposal in your "
-    "memory says which message it was about and how it ended: done (it ran), "
-    "failed (it was tried and failed), unknown (it may or may not have run), "
-    "or denied (refused at the final check, so it never ran). Nobody in the "
-    "room has been told; Nunchi never says it for you. Telling the people "
+    "memory says which message it was about and how it ended. done means it "
+    "ran. failed means it was approved and tried, and the action itself "
+    "failed. unknown means it may or may not have run. denied means the final "
+    "check refused it after the approval, so it never ran. The approval was "
+    "given in every case; only denied means the action was refused. Nobody in "
+    "the room has been told; Nunchi never says it for you. Telling the people "
     "who asked, if that still helps, is yours to do, and what you say must "
     "match how it ended."
 )
