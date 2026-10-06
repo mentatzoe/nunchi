@@ -85,8 +85,17 @@ and the allow cannot outlive the expiry that recheck set.
   in `memory.own_moves` as `proposal` moves, pointing at the message that
   prompted them, so nothing happens in the agent's name without it knowing.
   Nunchi never reports an outcome in the room; the agent does, in its own
-  turn. A turn that the outcome itself starts, without a new room message,
-  comes with step 6 of the plan, which also looks again after pauses.
+  turn.
+- **The agent reports completion itself** (Zoe, #90 decision 2 on #94).
+  When an operator's approval settles the action (`done`, `failed`,
+  `unknown`, or `denied` at the recheck), the coordinator tells its outcome
+  listeners. The delivery lane then gives the agent a turn about the message
+  the action was proposed for, with `occasion: "outcome"`, once nothing
+  else is running. Attention reads the room for that turn as advice but
+  cannot keep it from the agent (`outcome-turn`). The turn carries no
+  authority: it is an ordinary turn, and any further privileged action is a
+  new proposal. Withdrawn, expired and cancelled proposals never ran, so
+  they start no turn; the next turn's memory shows them.
 - **The agent can withdraw.** A `withdraw` action (`room_withdraw` for the
   Claude Code gate) names a proposal still awaiting approval. The
   coordinator drops its challenge, so no operator can approve it, and marks

@@ -28,8 +28,10 @@ Every scene starts as a draft (`"review": "draft: …"`):
   two where a message arrives while the agent is composing
   (`answered-while-composing`, `never-mind-while-composing`), and two where
   the agent's own earlier turn in the scene matters
-  (`addressee-never-answers`, `said-it-would-check`), and one where looking
-  again after a pause should still stay quiet (`only-they-can-do-it`).
+  (`addressee-never-answers`, `said-it-would-check`), one where looking
+  again after a pause should still stay quiet (`only-they-can-do-it`), and
+  one where an approval comes through after the agent said it would report
+  back (`approval-comes-through`).
 - `scenes/litmus/` holds 57 scenes converted from the V1 litmus corpus by
   `litmus.py`. Their ranges come from V1 verdicts, and their `review` field
   quotes the V1 rationale. They have no notice facts yet.
@@ -133,6 +135,14 @@ did not post; otherwise the record counts as staying quiet, and step 1,
 which never ran, is graded `not judged`. Each pause record's
 `looked_again` says whether it did, and its `detail` says why not; a turn
 from a look again carries `occasion: "pause"`.
+
+A pause moment with an `outcome` is the turn an approved action starts when
+it settles after the pause (Zoe, #90 decision 2 on #94). The scene's own
+events say the agent asked for approval; a scripted proposal stands in for
+the authorization coordinator, shows it awaiting approval in the agent's
+memory, and settles as the moment says. The agent then gets its outcome
+turn, which carries `occasion: "outcome"`, and its move is graded. Each
+such record has `outcome_turn`.
 
 ## Which run to use
 

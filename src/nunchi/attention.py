@@ -389,7 +389,11 @@ def participant_attention_prompt(
         f"{called}'s own messages in the window and how long ago it last posted."
         " When observation.occasion is pause, no new message arrived: an earlier "
         "judgment read this moment as one to wait on, and the room has stayed "
-        "quiet since; judge it again as it stands now."
+        "quiet since; judge it again as it stands now. When it is outcome, no "
+        f"new message arrived either: an action {called} proposed, usually "
+        "about this message, was approved and has finished since its turn "
+        f"ended, and {called} gets a turn to tell the room if that still "
+        "helps; judge the room as it stands now."
         "\n\n"
         "Participant instructions (trusted host profile):\n"
         f"{profile.instructions}\n\n"
@@ -1137,6 +1141,14 @@ class AttentionEngine:
             valve = "none"
             override = "none"
             ack_audit = None
+        if checked.get("occasion") == "outcome" and disposition in ("SUPPRESS", "ACK"):
+            # An approved action finished after the participant's turn about
+            # it ended. The participant is the one who says so in the room,
+            # so the turn always reaches it, with the reading as advice (Zoe,
+            # #90 decision 2 on #94).
+            effective = "DEFER"
+            valve = "policy-defer"
+            override = "outcome-turn"
 
         routing: dict[str, Any] = {
             "valve": valve,

@@ -157,11 +157,28 @@ class PromptAndReadingTests(unittest.TestCase):
         notes = [item["note"] for item in fact_notes(answers_leaning("WAKE"), later)]
         self.assertFalse([note for note in notes if note.startswith("Nothing new")])
 
-    def test_every_prompt_explains_a_look_again(self):
-        self.assertIn("When observation.occasion is pause", participant_attention_prompt(PROFILE))
+    def test_every_prompt_explains_a_look_again_and_an_outcome_turn(self):
+        attention = participant_attention_prompt(PROFILE)
+        self.assertIn("When observation.occasion is pause", attention)
+        self.assertIn("When it is outcome, no new message arrived either", attention)
         for prompt in (participant_turn_prompt(PROFILE), participant_tool_turn_prompt(PROFILE, tools={"send": "send"})):
             with self.subTest(prompt=prompt[:30]):
                 self.assertIn("When occasion is pause, no new message arrived", prompt)
+                # Only a participant that may propose hears about outcome turns.
+                self.assertNotIn("When occasion is outcome", prompt)
+        proposing = participant_tool_turn_prompt(PROFILE, tools={"send": "send", "propose": "propose"})
+        self.assertIn("When occasion is outcome, an action you proposed", proposing)
+        self.assertIn("Nunchi says nothing in the room for you", proposing)
+
+    def test_an_outcome_turn_says_the_action_finished(self):
+        pace = {"now": "2026-10-06T09:05:00.000Z", "window_messages": 1, "own_messages": 0, "judged_seconds_ago": 900}
+        projection = dict(self.projection(pace), occasion="outcome")
+        notes = [item["note"] for item in fact_notes(answers_leaning("DEFER"), projection)]
+        self.assertEqual(
+            "An action Vigil proposed was approved and has finished; Vigil has a turn to tell the room if that still helps.",
+            notes[1],
+        )
+        self.assertFalse([note for note in notes if note.startswith("Nothing new")])
 
 
 if __name__ == "__main__":  # pragma: no cover

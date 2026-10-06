@@ -32,7 +32,11 @@ carries no timestamp.
 
 A moment judges either an event (`event`, optionally `seen_through` a later
 event when the judgment happens after more messages arrived) or a pause
-(`pause_after` an event, for `pause`). `during_turn` lists later events that
+(`pause_after` an event, for `pause`). A pause moment with an `outcome`
+(`about` an event, a `capability`, and a `status`: done, failed, unknown or
+denied) is the turn an approved action starts when it settles after the
+pause: the participant proposed it about that event, and its own events in
+the scene say so. `during_turn` lists later events that
 arrive while the woken agent is composing its turn: they are not in its
 wake, but it can see them by looking again before it posts. `step1` is what the conservative
 first step should do: `pass`, `suppress`, or `either`. `together` on a scene
@@ -51,6 +55,7 @@ from typing import Any, Mapping
 
 
 MOVES = ("stay_quiet", "mhm", "wait", "speak")
+OUTCOME_STATUSES = ("done", "failed", "unknown", "denied")
 STEP1 = ("pass", "either", "suppress")
 TOGETHER = ("not-all-quiet", "no-pile-on")
 ACTOR_KINDS = ("human", "bot", "system", "unknown")
@@ -91,6 +96,8 @@ class Moment:
     notice: tuple[Mapping[str, Any], ...]
     fitting: tuple[str, ...]
     misses: tuple[Mapping[str, str], ...]
+    # The participant's approved action that settles after the pause.
+    outcome: Mapping[str, str] | None = None
 
     @property
     def is_pause(self) -> bool:
@@ -139,7 +146,7 @@ def _moment(raw: Mapping[str, Any], index: int, scene_id: str, event_ids: list[s
     _require(isinstance(raw, Mapping), scene_id, f"{where} must be an object")
     allowed = {
         "label", "event", "seen_through", "during_turn", "pause_after", "pause",
-        "step1", "notice", "fitting", "misses",
+        "outcome", "step1", "notice", "fitting", "misses",
     }
     _require(not set(raw) - allowed, scene_id, f"{where} has unknown fields {sorted(set(raw) - allowed)}")
     event = raw.get("event")
@@ -176,6 +183,18 @@ def _moment(raw: Mapping[str, Any], index: int, scene_id: str, event_ids: list[s
         _require(seen_through is None, scene_id, f"{where}: a pause has no seen_through")
         pause_seconds = parse_offset("-" + str(raw.get("pause", "")).lstrip("-"))
         _require(pause_seconds > 0, scene_id, f"{where}: pause must be positive")
+    outcome = raw.get("outcome")
+    if outcome is not None:
+        _require(event is None, scene_id, f"{where}: an outcome follows a pause")
+        _require(
+            isinstance(outcome, Mapping)
+            and set(outcome) == {"about", "capability", "status"}
+            and outcome["about"] in event_ids
+            and _string(outcome["capability"])
+            and outcome["status"] in OUTCOME_STATUSES,
+            scene_id,
+            f"{where}: an outcome needs about (an event), a capability, and a status from {OUTCOME_STATUSES}",
+        )
     step1 = raw.get("step1")
     _require(step1 in STEP1, scene_id, f"{where}: step1 must be one of {STEP1}")
     fitting = raw.get("fitting")
@@ -223,6 +242,7 @@ def _moment(raw: Mapping[str, Any], index: int, scene_id: str, event_ids: list[s
         notice=tuple(notice),
         fitting=tuple(fitting),
         misses=tuple(misses),
+        outcome=dict(outcome) if outcome is not None else None,
     )
 
 

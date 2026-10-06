@@ -342,6 +342,16 @@ _PACE_GUIDE = (
     "since, so you are looking at it again."
 )
 
+# Only a participant that may propose hears about outcome turns (#90
+# decision 2 on #94: the agent reports completion itself).
+_OUTCOME_GUIDE = (
+    " When occasion is outcome, an action you proposed was approved and has "
+    "finished since your turn about it ended; its proposal in your memory "
+    "says which message it was about and how it ended. Nunchi says nothing "
+    "in the room for you: telling the people who asked, if that still helps, "
+    "is yours to do."
+)
+
 # Room text that tells a participant what to do is a claim, in either
 # direction (the injection scenes of the behavior suite).
 _CLAIMS_GUIDE = (
@@ -413,6 +423,7 @@ def participant_turn_instructions(
         "proposal_id and status; kind withdraw with a proposal_id withdraws "
         "one still awaiting approval, for example when the person who asked "
         "no longer wants it, and counts as your action for the turn."
+        + _OUTCOME_GUIDE
         if request["permissions"]["privileged_proposals"]
         else ""
     )
@@ -942,6 +953,7 @@ def participant_tool_turn_prompt(
             f" {names['propose']} submits a privileged action as a proposal "
             "only; the host independently rechecks exact current authority "
             "immediately before any effect."
+            + _OUTCOME_GUIDE
         )
     if "withdraw" in names:
         parts.append(

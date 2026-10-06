@@ -368,9 +368,11 @@ def _observation_fields(doc: Mapping[str, Any], *, require_schema: bool) -> None
             _nes(continuation["expires_at"], "continuation.expires_at")
 
 
-# Why a moment is judged when no new message arrived (#94 step 6; I-010A@3,
-# I-010C@9): ``pause`` is a look again after the room went quiet.
-OCCASIONS = ("pause",)
+# Why a moment is judged when no new message arrived (#94 step 6): ``pause``
+# is a look again after the room went quiet (I-010A@3, I-010C@9);
+# ``outcome`` is a turn for an approved action that finished after the
+# participant's turn about it ended (I-010A@4, I-010C@10).
+OCCASIONS = ("pause", "outcome")
 
 # The room's pace at the snapshot (#94 step 6; I-010A@2, I-010C@8); see
 # ``nunchi.pace``. Counts and durations in whole seconds, never verdicts.
@@ -467,6 +469,8 @@ def _routing(value: Any) -> Mapping[str, Any]:
         "suppression-disabled",
         "recoverability-unproven",
         "ack-disabled",
+        # Since I-010B@7: an outcome turn always reaches the participant.
+        "outcome-turn",
     ):
         _fail("routing_audit.override_cause", "does not match policy-defer")
     if valve == "capability-defer" and doc["override_cause"] != "ack-unsupported":
@@ -644,15 +648,25 @@ def validate_attention_decision(
             ("SUPPRESS", "SUPPRESS", "none"),
         ):
             _fail("decision", "contains an invalid disposition transition")
-        if pair == ("ACK", "DEFER", "policy-defer") and routing["override_cause"] != "ack-disabled":
-            _fail("decision.routing_audit.override_cause", "must be ack-disabled for ACK policy widening")
+        if pair == ("ACK", "DEFER", "policy-defer") and routing["override_cause"] not in (
+            "ack-disabled",
+            "outcome-turn",
+        ):
+            _fail("decision.routing_audit.override_cause", "must be ack-disabled or outcome-turn for ACK policy widening")
         if pair == ("ACK", "DEFER", "capability-defer") and routing["override_cause"] != "ack-unsupported":
             _fail("decision.routing_audit.override_cause", "must be ack-unsupported for ACK capability widening")
         if pair == ("SUPPRESS", "DEFER", "policy-defer") and routing["override_cause"] not in (
             "suppression-disabled",
             "recoverability-unproven",
+            "outcome-turn",
         ):
             _fail("decision.routing_audit.override_cause", "must name a suppression policy widening")
+        if request is not None and (routing["override_cause"] == "outcome-turn") != (
+            request.get("occasion") == "outcome" and pair[0] != pair[1]
+        ):
+            # Runtime-adapter-only: only an outcome turn widens for itself,
+            # and it always widens what would not reach the participant.
+            _fail("decision.routing_audit.override_cause", "outcome-turn must match an outcome request")
         _string_list(checked["reasons"], "decision.reasons")
         evidence = _string_list(
             checked["evidence_event_ids"],
@@ -925,13 +939,17 @@ def validate_receipt(value: Any) -> dict[str, Any]:
                 ("SUPPRESS", "SUPPRESS", "none"),
             ):
                 _fail("receipt.body", "contains an invalid disposition transition")
-            if pair == ("ACK", "DEFER", "policy-defer") and routing["override_cause"] != "ack-disabled":
-                _fail("receipt.body.routing_audit.override_cause", "must be ack-disabled for ACK policy widening")
+            if pair == ("ACK", "DEFER", "policy-defer") and routing["override_cause"] not in (
+                "ack-disabled",
+                "outcome-turn",
+            ):
+                _fail("receipt.body.routing_audit.override_cause", "must be ack-disabled or outcome-turn for ACK policy widening")
             if pair == ("ACK", "DEFER", "capability-defer") and routing["override_cause"] != "ack-unsupported":
                 _fail("receipt.body.routing_audit.override_cause", "must be ack-unsupported for ACK capability widening")
             if pair == ("SUPPRESS", "DEFER", "policy-defer") and routing["override_cause"] not in (
                 "suppression-disabled",
                 "recoverability-unproven",
+                "outcome-turn",
             ):
                 _fail("receipt.body.routing_audit.override_cause", "must name a suppression policy widening")
             _nes(checked["policy_provenance"], "receipt.body.policy_provenance")

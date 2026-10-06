@@ -66,6 +66,21 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- The agent reports an approved action's outcome itself (#94, plan step 6;
+  Zoe, #90 decision 2 on #94). When an operator's approval settles a
+  privileged action after the agent's turn about it ended (done, failed,
+  unknown, or denied at the recheck), the authorization coordinator tells
+  its outcome listeners, and the delivery lane gives the agent a turn about
+  the message it proposed the action for, with `occasion: "outcome"`
+  (`I-010A AttentionRequestV2@4`, `I-010C ParticipantWakeV2@10`), as soon
+  as nothing else is running. Attention reads the room as advice; a
+  SUPPRESS or ACK judgment widens to DEFER with the new `outcome-turn`
+  cause (`I-010B AttentionDecisionV2@7`, `I-010E AttentionReceiptV2@4`),
+  and an attention error still gives the turn. Nunchi never reports the
+  outcome in the room. Only a participant that may propose hears about
+  outcome turns in its prompt. The behavior suite adds outcome moments and
+  the `approval-comes-through` scene (71 scenes); `nunchi probe` reports
+  the new versions.
 - Nunchi looks again after a pause (#94, plan step 6, second part). When a
   judgment's most likely move is to wait, for the addressee or for the
   speaker to finish, and nothing new is said for five minutes

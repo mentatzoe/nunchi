@@ -556,7 +556,20 @@ class AuthorizationCoordinator:
         # last, so its next turn knows; never a queue of work.
         self._proposals: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._noting: dict[str, Any] | None = None
+        # Told when an approved action settles after the participant's turn,
+        # so the participant can say so itself (Zoe, #90 decision 2 on #94).
+        self._outcome_listeners: list[Callable[[Mapping[str, Any]], None]] = []
         self._lock = threading.RLock()
+
+    def add_outcome_listener(self, listener: Callable[[Mapping[str, Any]], None]) -> None:
+        """Call ``listener`` with the proposal each time an approval settles.
+
+        It runs after the approved action did (or did not) run, outside the
+        coordinator's lock, with a copy of the proposal record.
+        """
+
+        with self._lock:
+            self._outcome_listeners.append(listener)
 
     def _note_proposal(self, request_id: str, binding: Mapping[str, Any], requested_at: datetime) -> None:
         record = {
@@ -1232,6 +1245,7 @@ class AuthorizationCoordinator:
         The participant's record of the proposal then says what became of it:
         done, failed, unknown, expired, or cancelled.
         """
+        settled = None
         with self._lock:
             pending = self._pending.get(approval_challenge_id)
             result = self._complete_authenticated_approval(
@@ -1251,7 +1265,18 @@ class AuthorizationCoordinator:
                     record["status"] = "cancelled"
                 else:
                     record["status"] = _settled_status(result)
-            return result
+                    settled = deepcopy(record)
+            listeners = tuple(self._outcome_listeners)
+        if settled is not None:
+            for listener in listeners:
+                try:
+                    listener(settled)
+                except Exception:
+                    # The approval's result stands either way, and the
+                    # outcome still reaches the participant's next turn
+                    # through its memory.
+                    pass
+        return result
 
     def _complete_authenticated_approval(
         self,

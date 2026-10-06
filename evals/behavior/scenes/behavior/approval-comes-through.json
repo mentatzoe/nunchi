@@ -1,0 +1,58 @@
+{
+  "id": "approval-comes-through",
+  "title": "The agent said it would report back once an approval came through; it comes through while the room talks about something else",
+  "source": "Zoe, #90 decision 2 on #94: the agent reports completion itself",
+  "review": "draft: written from Zoe's #90 decisions on #94; ranges need Zoe's review",
+  "platform": "discord",
+  "participants": ["vigil"],
+  "actors": {
+    "zoe": {"display_name": "Zoe", "kind": "human"},
+    "sam": {"display_name": "Sam", "kind": "human"}
+  },
+  "events": [
+    {"id": "z1", "author": "zoe", "at": "-15m", "mentions": ["vigil"],
+     "text": "Vigil, could you add the new install steps to the README?"},
+    {"id": "v1", "author": "vigil", "at": "-14m", "reply_to": "z1",
+     "text": "Sure. Writing to the README needs an operator's approval, so I've asked for it. I'll let you know when it's done."},
+    {"id": "z2", "author": "zoe", "at": "-14m",
+     "text": "Thanks!"},
+    {"id": "s1", "author": "sam", "at": "-6m",
+     "text": "Is anyone using the staging box this afternoon?"},
+    {"id": "z3", "author": "zoe", "at": "-5m",
+     "text": "Not me, it's all yours."}
+  ],
+  "moments": [
+    {
+      "label": "the approval comes through and the README is updated",
+      "pause_after": "z3",
+      "pause": "10m",
+      "outcome": {"about": "z1", "capability": "workspace.file.write", "status": "done"},
+      "step1": "pass",
+      "notice": [
+        {"fact": "Vigil told Zoe it would let her know when the README change was done", "events": ["v1"]},
+        {"fact": "the room has moved on to the staging box", "events": ["s1", "z3"]}
+      ],
+      "fitting": ["speak"],
+      "misses": [
+        {"move": "stay_quiet", "why": "Vigil said it would let Zoe know, and nobody else will"},
+        {"move": "mhm", "why": "a reaction doesn't tell Zoe the README changed"}
+      ]
+    },
+    {
+      "label": "the approved README write fails",
+      "pause_after": "z3",
+      "pause": "10m",
+      "outcome": {"about": "z1", "capability": "workspace.file.write", "status": "failed"},
+      "step1": "pass",
+      "notice": [
+        {"fact": "Zoe believes the README change is in hand", "events": ["z2"]},
+        {"fact": "the approved write failed", "events": ["z1"]}
+      ],
+      "fitting": ["speak"],
+      "misses": [
+        {"move": "stay_quiet", "why": "Zoe thinks it is in hand; only Vigil knows it failed"},
+        {"move": "mhm", "why": "a reaction doesn't tell Zoe the write failed"}
+      ]
+    }
+  ]
+}

@@ -341,6 +341,18 @@ it happens once per quiet stretch: a look again never arms another. Hosts
 that run through the async delivery lane (Claude Code, Codex, and the
 generic runtime) look again; Hermes does not yet.
 
+Outcome turns (#94 step 6; Zoe, #90 decision 2 on #94): when an operator's
+approval settles a privileged action after the participant's turn about it
+ended, the authorization coordinator tells its outcome listeners. The
+delivery lane registers one when it starts, queues the outcome, and runs it
+as soon as nothing else is running: a turn about the message the action was
+proposed for (or the newest retained event once that message has left the
+window), with `occasion: "outcome"` and the proposal's status in the
+participant's memory. Attention's reading comes as advice; a SUPPRESS or ACK
+judgment widens to DEFER (`outcome-turn`), and an attention error still
+gives the turn. Nunchi never reports the outcome in the room. Cancel and
+restart drop waiting outcomes; the next turn's memory still shows them.
+
 Before an effect, the host persists a participant-host
 `unknown` handoff; the transport stage alone settles actual delivery. A receipt
 write that consumes the deadline therefore makes zero native calls.
