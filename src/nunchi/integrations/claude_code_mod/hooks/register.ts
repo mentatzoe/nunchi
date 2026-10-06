@@ -7,7 +7,10 @@ import type { EngineInterface, Register } from 'claude-code'
 // and every hook passes straight through. With them, it:
 //   - registers the room tools the gate declares;
 //   - binds each model turn to the wake that started it;
-//   - forwards room tool calls to the gate, which owns the room.
+//   - forwards room tool calls to the gate, which owns the room;
+//   - after each tool call in a room turn, adds what others posted since the
+//     session last looked, so it can fold that into what it is doing
+//     (steering, #94 step 6).
 
 type Gate = { socket: string; secret: string }
 type ToolSpec = { name: string; description: string; inputSchema: Record<string, unknown> }
@@ -25,6 +28,17 @@ async function post<T>($: EngineInterface, gate: Gate, path: string, body: unkno
   })
   if (!response.ok) throw new Error(`the Nunchi gate answered ${response.status}`)
   return JSON.parse(response.text) as T
+}
+
+// What others posted since the session last looked in this turn, or nothing.
+async function news($: EngineInterface, gate: Gate, turnId: string | undefined): Promise<string | null> {
+  if (!turnId) return null
+  try {
+    const answer = await post<{ text?: string | null }>($, gate, '/v1/news', { turn_id: turnId })
+    return typeof answer.text === 'string' && answer.text ? answer.text : null
+  } catch {
+    return null
+  }
 }
 
 export const register: Register = on => {
@@ -60,22 +74,32 @@ export const register: Register = on => {
   })
 
   on('tool.call', async ($, e, next) => {
-    if (!gate || !tools.has(e.tool)) return next(e)
+    if (!gate) return next(e)
+    const room = tools.has(e.tool)
     if (e.agentId !== undefined) {
-      return { deny: 'Only the main conversation can act in the room.' }
+      // A subagent works apart from the room: no room tools, no updates.
+      return room ? { deny: 'Only the main conversation can act in the room.' } : next(e)
     }
-    const input = Object.fromEntries(
-      Object.entries(e).filter(([key]) => !RESERVED.has(key)),
-    )
-    try {
-      const answer = await post<ToolAnswer>($, gate, '/v1/tool', {
-        turn_id: turnId ?? null,
-        tool: e.tool,
-        input,
-      })
-      return answer.ok ? { result: answer.text } : { deny: answer.error }
-    } catch {
-      return { deny: 'The Nunchi gate is unreachable. Nothing was posted.' }
+    let answered
+    if (room) {
+      const input = Object.fromEntries(
+        Object.entries(e).filter(([key]) => !RESERVED.has(key)),
+      )
+      try {
+        const answer = await post<ToolAnswer>($, gate, '/v1/tool', {
+          turn_id: turnId ?? null,
+          tool: e.tool,
+          input,
+        })
+        answered = answer.ok ? { result: answer.text } : { deny: answer.error }
+      } catch {
+        return { deny: 'The Nunchi gate is unreachable. Nothing was posted.' }
+      }
+    } else {
+      answered = await next(e)
     }
+    if (answered.deny !== undefined) return answered
+    const update = await news($, gate, turnId)
+    return update ? { ...answered, context: [...(answered.context ?? []), update] } : answered
   })
 }

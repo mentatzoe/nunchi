@@ -66,6 +66,17 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- The Claude Code participant hears what others post while it works (#94,
+  step 6; Zoe, 2026-10-06). After each tool call the main session makes in
+  a room turn, the mod asks the gate what others posted since the session
+  last looked, and a new message rides that tool's result as context the
+  model reads. The core's room view gains a host-only `news` direction, like
+  `new` but never counted against the participant's own checks and never
+  offered to a model. Each message is shown once, may be answered, and no
+  longer holds the first post. Before, the session saw such a message only
+  when it was about to post. Codex and the generic runtime do not steer yet,
+  and how a live session takes the update needs a live run
+  (`docs/claude-code-live-run.md`, scene 7a).
 - The newest message after a busy turn is judged with the messages it
   replaced, as one moment (#94, step 6; Zoe, 2026-10-06: a person catching
   up reads the newest message and glances back). The attention request lists
