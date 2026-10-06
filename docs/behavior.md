@@ -116,7 +116,9 @@ While the agent is busy answering one person, others keep talking. When it
 is free again, it catches up the way a person does: it reads the newest
 message, then glances back at what it missed. Nunchi reads those messages
 together as one moment, so a question Sam asked meanwhile is not lost
-behind Zoe's "thanks".
+behind Zoe's "thanks". An agent that can take news while it works hears of
+new messages as they come, as a person glances up from what they are
+writing, and can fold them into its reply.
 
 ## Conversation memory
 

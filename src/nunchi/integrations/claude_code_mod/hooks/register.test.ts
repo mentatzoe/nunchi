@@ -119,3 +119,58 @@ describe('inside the gated session', () => {
     expect(ran.deny).toContain('Nothing was posted.')
   })
 })
+
+describe('steering (#94 step 6)', () => {
+  const UPDATE = 'Room update: 1 new message(s) arrived while you were working.'
+
+  test('what others posted rides the next tool result', async ($, on) => {
+    const calls = world(on, {
+      '/v1/attach': ATTACH,
+      '/v1/turn-start': { bound: true },
+      '/v1/news': { text: UPDATE },
+    })
+    on('tool.call', () => ({ result: 'README.md' }))
+    await begin($)
+    const ran = await $.tool.call({ tool: 'Bash', command: 'ls' })
+    expect(ran.result).toBe('README.md')
+    expect(ran.context).toEqual([UPDATE])
+    expect(calls.at(-1)).toEqual(
+      expect.objectContaining({ path: '/v1/news', body: { turn_id: 'turn-1' } }),
+    )
+  })
+
+  test('a room tool answer carries it too', async ($, on) => {
+    world(on, {
+      '/v1/attach': ATTACH,
+      '/v1/turn-start': { bound: true },
+      '/v1/tool': { ok: true, text: 'Done: the room accepted this action.' },
+      '/v1/news': { text: UPDATE },
+    })
+    await begin($)
+    const ran = await $.tool.call({ tool: SEND, text: 'hello room' })
+    expect(ran.result).toBe('Done: the room accepted this action.')
+    expect(ran.context).toEqual([UPDATE])
+  })
+
+  test('nothing new, or an unreachable gate, adds nothing', async ($, on) => {
+    world(on, { '/v1/attach': ATTACH, '/v1/turn-start': { bound: true }, '/v1/news': { text: null } })
+    on('tool.call', () => ({ result: 'README.md' }))
+    await begin($)
+    const ran = await $.tool.call({ tool: 'Bash', command: 'ls' })
+    expect(ran.result).toBe('README.md')
+    expect(ran.context).toBe(undefined)
+  })
+
+  test('a subagent gets no room update', async ($, on) => {
+    const calls = world(on, {
+      '/v1/attach': ATTACH,
+      '/v1/turn-start': { bound: true },
+      '/v1/news': { text: UPDATE },
+    })
+    on('tool.call', () => ({ result: 'README.md' }))
+    await begin($)
+    const ran = await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'helper' })
+    expect(ran.context).toBe(undefined)
+    expect(calls.some(call => call.path === '/v1/news')).toBe(false)
+  })
+})

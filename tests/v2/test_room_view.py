@@ -100,6 +100,22 @@ class ReadRoomTests(unittest.TestCase):
         self.assertEqual(["e1", "e2"], self.ids(fork.expand(direction="before")))
         self.assertIn("e6", view.seen_event_ids)
 
+    def test_news_is_new_for_the_host_and_never_counts(self):
+        # Steering (#94 step 6): the host asks after every tool call, so its
+        # reads must not use up the participant's own checks.
+        from nunchi.participant import _MAX_NEW_CHECKS
+
+        mark = self.observation.arrival_mark()
+        wake = {"request_id": "r1", "trigger_event_id": "e3", "events": [{"id": "e3"}]}
+        view = RoomView(self.observation, wake, turn_began=mark, guard=lambda: None)
+        for _ in range(_MAX_NEW_CHECKS + 2):
+            self.assertEqual([], view.expand(direction="news")["events"])
+        self.assertEqual(0, view.new_checks)
+        observe(self.pipeline, "e6")
+        self.assertEqual(["e6"], self.ids(view.expand(direction="news")))
+        # Shown once: the participant's own look again finds nothing more.
+        self.assertEqual([], view.expand(direction="new")["events"])
+
     def test_a_page_never_fails(self):
         self.assertIn("no longer in the room's retained history", self.read("before", anchor="gone")["note"])
         self.assertIn("Unknown direction", self.read("sideways")["note"])

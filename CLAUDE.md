@@ -21,8 +21,9 @@ The integration is a Claude Code mod plus one Python gate per room
 - The gate owns transport, observation, attention, scheduling, authority, and
   receipts. On `WAKE` it writes one turn into the session over stream-json.
   The mod registers the room tools, binds each turn to its wake, and forwards
-  room tool calls to the gate over a private socket. Silence counts only for a
-  turn the mod bound.
+  room tool calls to the gate over a private socket. After each tool call in a
+  room turn it adds what others posted meanwhile (steering, #94 step 6).
+  Silence counts only for a turn the mod bound.
 - Native tools follow the user's Claude Code permission rules, plus an optional
   configured deny list applied when the session starts.
 - The earlier headless subprocess runner is removed; the channel-plugin

@@ -478,6 +478,12 @@ class RoomView:
     per-turn limit come back as a page with a note. It never repeats an event
     it has shown, and every event it has shown may be an action's origin or
     target. ``guard`` raises when the turn is cancelled or out of time.
+
+    ``news`` is the host's own direction, for steering (#94 step 6; Zoe,
+    2026-10-06): what others posted since the participant last looked, like
+    ``new``, but it never counts against the participant's checks. A host
+    that can reach a running turn delivers it there; models cannot ask for
+    it, since every action schema names only the four model directions.
     """
 
     def __init__(
@@ -520,7 +526,9 @@ class RoomView:
         max_bytes: int = 16_384,
     ) -> Mapping[str, Any]:
         self._guard()
-        if direction == "new":
+        if direction == "news":
+            direction = "new"
+        elif direction == "new":
             if self.new_checks >= _MAX_NEW_CHECKS:
                 raise ParticipantError("look-again call cap exceeded")
             self.new_checks += 1

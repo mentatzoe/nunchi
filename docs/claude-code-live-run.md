@@ -163,6 +163,7 @@ its absence. Receipt stages run `observation` → `attention` →
 | 5 | ACK | a moment that only needs acknowledgement | ACK widens to DEFER by default: a session turn whose reading says a nod could fit; `room_react` if the agent nods |
 | 6 | more context | a question about something said earlier | `room_context` before acting; the action names a fetched event |
 | 7 | cancellation | restart the transport mid-turn | `interrupt` reaches the session; no late post |
+| 7a | steering | while it works on a request that needs a tool (a file read, say), post another question to it | its next tool result carries the room update; it answers both or says why not; no second session turn is needed |
 | 8 | restart | stop the gate, restart, follow up | the session resumes (`--resume`); a continuity gap is recorded first |
 | 9 | secret refusal | ask it to post a value from `withhold_env` | the tool call is refused; nothing posted |
 | 10 | privileged action | configure `authorization`, request a file write | journal entry; executor `sent` with digest; file inside the root |

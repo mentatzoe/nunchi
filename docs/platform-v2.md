@@ -299,6 +299,16 @@ posted meanwhile, the action is held, the participant is shown their
 messages, and it sends, changes, or drops its action. Hermes does not offer
 the view yet.
 
+Steering (#94 step 6; Zoe, 2026-10-06): a host that can reach a running turn
+also tells the participant what others posted while it works, not only when it
+is about to post. The view's host-only `news` direction reads like `new` but
+never counts against the participant's own checks, and no action schema offers
+it to a model. The Claude Code mod asks the gate after each tool call the main
+session makes in a room turn, and a new message rides that tool's result as
+context the model reads, never shown to the user. Each message is shown once,
+becomes a valid origin or target, and no longer holds the first post. Codex
+and the generic runtime do not steer yet.
+
 The host keeps one `RoomView` per turn. Its `fork()` gives a fresh view of
 the same turn, as if nothing had been read yet; the behavior suite uses it to
 play a turn again without the reading, and the host never dispatches a forked

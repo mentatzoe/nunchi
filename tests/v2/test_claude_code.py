@@ -2255,6 +2255,43 @@ class GatedParticipantTests(unittest.TestCase):
         participant.settle("r1", TransportResult("sent", "x"))
         answer_thread.join(5)
 
+    def test_what_arrives_mid_turn_reaches_the_session_after_its_next_tool(self):
+        # Steering (#94 step 6; Zoe, 2026-10-06): the mod asks after each tool
+        # call, and a message others posted rides that tool's result.
+        sam = {
+            "id": "e9",
+            "type": "message",
+            "author_id": "discord:actor:43",
+            "text": "Vigil, is staging still on the old image?",
+            "mentioned_actor_ids": [],
+            "mentions_room": False,
+        }
+        pending = [sam]
+        calls = []
+
+        def expand(**kwargs):
+            calls.append(kwargs["direction"])
+            if kwargs["direction"] == "news" and pending:
+                return {"events": [pending.pop()], "has_next_page": False}
+            return {"events": [], "has_next_page": False}
+
+        participant, session = self._participant()
+        self.assertIsNone(participant.news(turn_id="t1"))
+        thread, box, wake_id, _ = self._start(participant, session, expand=expand)
+        self.assertIsNone(participant.news(turn_id="t1"))  # not bound yet
+        participant.bind_turn(turn_id="t1", wake_id=wake_id)
+        update = participant.news(turn_id="t1")
+        self.assertTrue(update.startswith("Room update: 1 new message(s) arrived while you were working."))
+        self.assertIn("old image", update)
+        self.assertIsNone(participant.news(turn_id="t1"))  # shown once
+        self.assertIsNone(participant.news(turn_id="other"))
+        # Seen through steering, it no longer holds the post, and it may be answered.
+        self._act(participant, SEND, {"text": "Checking staging now.", "reply_to_event_id": "e9"})
+        thread.join(5)
+        self.assertEqual(("reply", "e9"), (box["action"]["kind"], box["action"]["target_event_id"]))
+        self.assertEqual(["news", "news", "new"], calls)
+        participant.settle("r1", TransportResult("sent", "x"))
+
     def test_cancellation_interrupts_the_session_and_is_closed_work(self):
         participant, session = self._participant()
         thread, box, wake_id, cancel = self._start(participant, session)
@@ -2351,6 +2388,12 @@ class GateServerTests(unittest.TestCase):
             [tool["name"] for tool in body["tools"]],
         )
         self.assertTrue(self.participant.attached)
+
+    def test_news_with_no_open_opportunity_is_nothing(self):
+        for body in ({"turn_id": "t1"}, {}, {"turn_id": 3}):
+            with self.subTest(body=body):
+                self.assertEqual((200, {"text": None}), gate_post(self.socket_path, "/v1/news", body, self.secret))
+        self.assertEqual(401, gate_post(self.socket_path, "/v1/news", {"turn_id": "t1"}, "wrong")[0])
 
     def test_a_tool_call_with_no_open_opportunity_posts_nothing(self):
         status, body = gate_post(
