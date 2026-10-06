@@ -66,6 +66,15 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- A participant's result needs only its request's `request_id` in
+  `binding`; the host fills in the rest from the turn's own binding (#94,
+  step 3). A binding field the result does carry must still match exactly,
+  and an unknown one is refused. Runs 20 to 39 lost 16 agent turns, 15 of
+  them posts, because the model dropped a field of its own turn's binding or
+  garbled one of its long IDs. Seven were the report Vigil owed Zoe in
+  `build-finishes-long-after-promise`. The turn prompt and
+  action schema now ask only for `request_id`; `nunchi.participant-turn`
+  stays version 1, since every full binding is still accepted.
 - Attention reads a message with the agent's memory (#94, step 6). The
   attention request carries the same memory the agent's turn gets
   (`I-010A AttentionRequestV2@5`), for every judgment including recalled

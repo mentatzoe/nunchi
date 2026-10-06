@@ -359,6 +359,42 @@ class ParticipantProtocolTests(unittest.TestCase):
         with self.assertRaises(ParticipantModelError):
             self.protocol.consume(boolean_generation, expand=None)
 
+    def test_the_host_fills_in_the_binding_a_model_leaves_out(self):
+        # Runs 37-39: a model dropped trigger_event_id and its report was lost.
+        # A binding that names only its request is the turn's own.
+        binding = self.protocol.request["binding"]
+        action = {"kind": "message", "origin_event_id": "e1", "text": "The nightly passed."}
+        for kept in (["request_id"], [name for name in binding if name != "trigger_event_id"]):
+            with self.subTest(kept=len(kept)):
+                envelope = self.envelope(action)
+                envelope["binding"] = {name: binding[name] for name in kept}
+                parsed = parse_participant_action(envelope, request=self.protocol.request, visible_event_ids={"e1"})
+                self.assertEqual(action, parsed)
+
+    def test_a_binding_must_name_its_request_and_nothing_else(self):
+        binding = self.protocol.request["binding"]
+        unnamed = self.envelope({"kind": "silence"})
+        unnamed["binding"] = {name: value for name, value in binding.items() if name != "request_id"}
+        unknown = self.envelope({"kind": "silence"})
+        unknown["binding"]["session_id"] = "s1"
+        for label, envelope in (("no request_id", unnamed), ("unknown field", unknown)):
+            with self.subTest(label), self.assertRaisesRegex(ParticipantModelError, "binding is invalid"):
+                self.protocol.consume(envelope, expand=None)
+        for bad in ([], "binding", None):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ParticipantModelError, "binding is invalid"):
+                self.protocol.consume(dict(self.envelope({"kind": "silence"}), binding=bad), expand=None)
+        # A field it does carry still binds it exactly, even beside request_id alone.
+        stale = self.envelope({"kind": "silence"})
+        stale["binding"] = {"request_id": binding["request_id"], "trigger_event_id": "e0"}
+        with self.assertRaisesRegex(ParticipantModelError, "does not match this opportunity"):
+            self.protocol.consume(stale, expand=None)
+
+    def test_the_turn_asks_only_for_the_request_id(self):
+        schema = self.protocol.action_schema["properties"]["binding"]
+        self.assertEqual(["request_id"], schema["required"])
+        self.assertEqual(set(self.protocol.request["binding"]), set(schema["properties"]))
+        self.assertIn("`binding` needs only the request's request_id", self.protocol.instructions)
+
     def test_actions_are_fact_and_permission_bound_and_expansion_is_capped(self):
         invisible = self.envelope(
             {"kind": "message", "origin_event_id": "e-missing", "text": "No."}
