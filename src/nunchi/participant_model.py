@@ -320,8 +320,9 @@ _SOCIAL_GUIDE = (
 _MEMORY_GUIDE = (
     "When memory.own_moves is present, it is your own part in this room so "
     "far: what you said, replied and reacted to, and where you stayed quiet, "
-    "oldest first, each pointing at the message it was about, with your "
-    "reason at the time (why) when you gave one. When "
+    "oldest first, each pointing at the message it was about, and saying who "
+    "wrote that message and what it said (about_author_id, about_text), with "
+    "your reason at the time (why) when you gave one. When "
     "memory.threads is present, it is who asked what: recent messages that "
     "asked someone for something, with whom each was addressed to, and your "
     "own messages that others responded to, each with the first messages "

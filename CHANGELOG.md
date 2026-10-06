@@ -66,6 +66,14 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- Attention reads a message with the agent's memory (#94, step 6). The
+  attention request carries the same memory the agent's turn gets
+  (`I-010A AttentionRequestV2@5`), for every judgment including recalled
+  ones, and the attention prompt explains it only when it is there; a typed
+  model gets it in its state. Each of the agent's moves about a message now
+  also says who wrote that message and what it said (`about_author_id`,
+  `about_text`; `I-010C ParticipantWakeV2@11`), so "I'll tell you when it
+  finishes" still makes sense after Zoe's request has left the window.
 - Step 1 no longer hides what the judgment itself would speak to (#94,
   step 6). A "not conversation" answer suppresses only when the judgment's
   most likely move is not to speak. Run 35 showed why: a CI line saying the

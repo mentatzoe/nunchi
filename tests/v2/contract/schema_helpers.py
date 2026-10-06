@@ -97,9 +97,9 @@ SCHEMA_FILES = {
 }
 
 INTERFACE_VERSIONS = {
-    "attention-request": ("I-010A", "AttentionRequestV2", 4),
+    "attention-request": ("I-010A", "AttentionRequestV2", 5),
     "attention-decision": ("I-010B", "AttentionDecisionV2", 7),
-    "participant-wake": ("I-010C", "ParticipantWakeV2", 10),
+    "participant-wake": ("I-010C", "ParticipantWakeV2", 11),
     "context-continuation": ("I-010D", "ContextContinuationV2", 1),
     "attention-receipt": ("I-010E", "AttentionReceiptV2", 4),
     "privileged-action-authorization": (
@@ -887,13 +887,16 @@ def validate_attention_request(doc: Any) -> list[str]:
         "schema_version", "request_id", "self", "room",
         "actors", "events", "trigger_event_id", "coverage",
     )
-    allowed = required + ("continuation", "pace", "occasion")
+    allowed = required + ("continuation", "pace", "occasion", "memory")
     if not _check_closed_object(errors, "request", doc, required, allowed):
         return list(errors)
     if "pace" in doc:
         _check_pace(errors, "pace", doc["pace"])
     if "occasion" in doc:
         _check_occasion(errors, "occasion", doc["occasion"])
+    if "memory" in doc:
+        # I-010A@5: the same memory facts as the participant's turn.
+        _check_wake_memory(errors, "memory", doc["memory"])
     if doc.get("schema_version") != 2:
         errors.add("schema_version", "must be the number 2")
     _check_nes(errors, "request_id", doc.get("request_id"))
@@ -1294,12 +1297,13 @@ def _validate_decision_error(doc: dict[str, Any]) -> list[str]:
     return list(errors)
 
 
+_ABOUT = ("about_author_id", "about_text")  # @11: who wrote the message and what it said
 _OWN_MOVE_FIELDS = {
     "message": (("kind", "event_id", "text"), ("at", "why")),
-    "reply": (("kind", "event_id", "about_event_id", "text"), ("at", "why")),
-    "reaction": (("kind", "event_id", "about_event_id", "reaction"), ("at", "why")),
-    "silence": (("kind", "about_event_id", "at"), ("why",)),
-    "proposal": (("kind", "proposal_id", "about_event_id", "capability", "status", "at"), ()),
+    "reply": (("kind", "event_id", "about_event_id", "text"), ("at", "why") + _ABOUT),
+    "reaction": (("kind", "event_id", "about_event_id", "reaction"), ("at", "why") + _ABOUT),
+    "silence": (("kind", "about_event_id", "at"), ("why",) + _ABOUT),
+    "proposal": (("kind", "proposal_id", "about_event_id", "capability", "status", "at"), _ABOUT),
 }
 PROPOSAL_STATUSES = (
     "awaiting_approval", "done", "failed", "unknown", "denied", "expired", "withdrawn", "cancelled",
@@ -1359,11 +1363,14 @@ def _check_wake_memory(errors: "_Errors", path: str, value: Any) -> None:
             continue
         if kind == "proposal" and move.get("status") not in PROPOSAL_STATUSES:
             errors.add(f"{item}.status", "must be a proposal status")
-        for name in ("event_id", "about_event_id", "reaction", "at", "proposal_id", "capability"):
+        for name in ("event_id", "about_event_id", "reaction", "at", "proposal_id", "capability", "about_author_id"):
             if name in move:
                 _check_nes(errors, f"{item}.{name}", move[name])
-        if "text" in move and (not isinstance(move["text"], str) or len(move["text"]) > 280):
-            errors.add(f"{item}.text", "must be a string of at most 280 characters")
+        for name in ("text", "about_text"):
+            if name in move and (not isinstance(move[name], str) or len(move[name]) > 280):
+                errors.add(f"{item}.{name}", "must be a string of at most 280 characters")
+        if ("about_author_id" in move) != ("about_text" in move):
+            errors.add(item, "about_author_id and about_text come together")
         if "why" in move and (not isinstance(move["why"], str) or not 1 <= len(move["why"]) <= 200):
             errors.add(f"{item}.why", "must be a non-empty string of at most 200 characters")
 

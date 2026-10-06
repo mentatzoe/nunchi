@@ -232,6 +232,9 @@ def attention_state(projection: Mapping[str, Any], instructions: str) -> dict[st
         state["pace"] = deepcopy(dict(projection["pace"]))
     if projection.get("occasion"):
         state["occasion"] = projection["occasion"]
+    if projection.get("memory"):
+        # The participant's memory (#94 step 6): what it said it would do.
+        state["memory"] = deepcopy(dict(projection["memory"]))
     return state
 
 

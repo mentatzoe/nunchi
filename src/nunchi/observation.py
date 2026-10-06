@@ -916,11 +916,14 @@ class ObservationProvider:
         continuation: bool = True,
         record_receipt: bool = True,
         occasion: str | None = None,
+        memory: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Build one bounded request about ``trigger_event_id``.
 
         ``occasion`` says why it is judged when no new message arrived: since
         #94 step 6, ``pause`` is a look again after the room went quiet.
+        ``memory`` is the participant's memory of the room, so the judgment
+        reads the message as the participant would, promises included.
         """
         with self._lock:
             all_events = list(self._events)
@@ -977,6 +980,8 @@ class ObservationProvider:
             }
             if occasion is not None:
                 request["occasion"] = occasion
+            if memory:
+                request["memory"] = deepcopy(dict(memory))
             # Interior gaps (left by relation closure, kept older exchange, or
             # age and byte cuts) stay fetchable even when both ends are covered.
             included = set(indices)

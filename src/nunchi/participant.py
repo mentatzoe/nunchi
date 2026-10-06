@@ -823,6 +823,15 @@ class ParticipantTurnHost:
             proposals=self._proposals(),
         )
 
+    def memory_facts(self, trigger_event_id: str) -> dict[str, Any] | None:
+        """The participant's memory as its turn about ``trigger_event_id`` sees it."""
+
+        return self.memory.facts(
+            self.observation,
+            current_event_id=trigger_event_id,
+            proposals=self._proposals(),
+        )
+
     def _proposals(self) -> tuple[Mapping[str, Any], ...]:
         """The participant's proposals and their status, when the host keeps them."""
 

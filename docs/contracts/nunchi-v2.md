@@ -11,7 +11,7 @@ live, integrated, or released status.
 `docs/architecture/v2-selected-design.md` preserve the field inventory selected
 from Aleph Vault at `c834e8c`; the external path is provenance, not a
 contributor dependency. The program-canonical interface names and versions
-(`I-010D`, `I-010F` at `@1`; `I-010A` at `@4`; `I-010E` at `@4`; `I-010C` at `@10`; `I-010B` at `@7`) are this
+(`I-010D`, `I-010F` at `@1`; `I-010A` at `@5`; `I-010E` at `@4`; `I-010C` at `@11`; `I-010B` at `@7`) are this
 slice's vocabulary layered over that inventory. A document the selected design
 declares valid that either validator rejects is a contract defect, never
 resolved by narrowing the corpus.
@@ -20,9 +20,9 @@ resolved by narrowing the corpus.
 
 | Interface | Version | Schema path |
 |---|---|---|
-| `I-010A AttentionRequestV2` | `@4` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
+| `I-010A AttentionRequestV2` | `@5` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
 | `I-010B AttentionDecisionV2` | `@7` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
-| `I-010C ParticipantWakeV2` | `@10` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
+| `I-010C ParticipantWakeV2` | `@11` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
 | `I-010E AttentionReceiptV2` | `@4` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
 | `I-010F PrivilegedActionAuthorizationV2` | `@1` | [`schemas/v2/privileged-action-authorization.schema.json`](../../schemas/v2/privileged-action-authorization.schema.json) |
@@ -111,7 +111,7 @@ python3 -m unittest tests.v2.contract.test_privileged_action_authorization
 uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
 ```
 
-## I-010A AttentionRequestV2@4
+## I-010A AttentionRequestV2@5
 
 A truthful attention request represents:
 
@@ -182,6 +182,14 @@ A truthful attention request represents:
   the action was proposed about, or the newest retained event once that
   message has left the window. The participant gets a turn to tell the
   room itself, whatever the judgment reads (I-010B@7 `outcome-turn`).
+- **The participant's memory (@5, #94 step 6)** — optional `memory`, the
+  same facts and shape as the I-010C wake's `memory`, built for the same
+  trigger: the participant's own recent moves and the threads. The judgment
+  reads the message as the participant would, with what it said it would do,
+  after that has left the window. The reference host builds it for every
+  judgment, including recalled ones; it is absent while the memory is
+  empty. The attention prompt explains it only to a judgment that carries
+  it.
 
 ## I-010B AttentionDecisionV2@7
 
@@ -294,7 +302,7 @@ closed-union change: `@2` consumers must upgrade before receiving ACK.
   occur before a request ID is assignable); an optional `classifier` audit is
   present only when the error occurred after classifier invocation.
 
-## I-010C ParticipantWakeV2@10
+## I-010C ParticipantWakeV2@11
 
 The normal-turn input materializes `self`, `room`, `actors`, `events`,
 `trigger_event_id`, `coverage`, and optional `continuation` directly —
@@ -371,6 +379,13 @@ room stayed quiet, not from a new message. Since @10 it may also be
 `outcome`: an action the participant proposed was approved and has finished,
 and its `proposal` own move says how it ended. Nunchi never reports the
 outcome in the room; the participant does, if it still helps.
+
+Since @11 (#94 step 6) an own move about a message (`reply`, `reaction`,
+`silence`, `proposal`) may carry `about_author_id` and `about_text`, together:
+who wrote that message and what it said, at most 280 characters, while the
+message is retained and is someone else's. A person remembers what they
+replied to, so the move still makes sense once the message has left the
+window; attention's request (I-010A@5) carries the same memory.
 
 ## I-010D ContextContinuationV2@1
 
