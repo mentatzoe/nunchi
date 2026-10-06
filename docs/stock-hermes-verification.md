@@ -29,7 +29,10 @@ captures native output; it does not authenticate to Discord. Stock dispatch,
 participant execution and native approval are not replaced. Optional remote model
 metadata and Tirith binary acquisition are explicit doubles, recorded by name;
 security scanning/approval are not mocked. Main moved acquisition to PM, so its
-optional `_background_install` replaces the older `_download_file` double.
+optional `_background_install` replaces the older `_download_file` double. Hermes
+main then dropped the bundled Tirith scanner (its config v50), so the Tirith
+doubles apply only where the module exists; the network guard still fails any
+acquisition that is not doubled.
 Startup also doubles network connection and unrelated perpetual/warm-up services;
 the exact list is visible in `tests/v2/test_hermes_startup_installed.py`.
 

@@ -31,7 +31,8 @@ def run(command, *, cwd, env):
 
 
 DISCOVER = '''
-import json, pathlib, socket
+import importlib.util, json, pathlib, socket
+from contextlib import ExitStack
 from unittest import mock
 external=[]
 def deny(*args, **kwargs):
@@ -39,7 +40,11 @@ def deny(*args, **kwargs):
     raise AssertionError('network unavailable in lifecycle discovery')
 socket.socket.connect=deny
 socket.socket.connect_ex=deny
-with mock.patch('tools.tirith_security.ensure_installed', return_value=None), mock.patch('agent.model_metadata.fetch_model_metadata',return_value={}):
+with ExitStack() as stack:
+    # Hermes main dropped its bundled Tirith scanner (config v50).
+    if importlib.util.find_spec('tools.tirith_security') is not None:
+        stack.enter_context(mock.patch('tools.tirith_security.ensure_installed', return_value=None))
+    stack.enter_context(mock.patch('agent.model_metadata.fetch_model_metadata',return_value={}))
     import hermes_cli.plugins as p
     manager=p.PluginManager()
     manager.discover_and_load()
