@@ -66,6 +66,17 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- Messages that arrive while the agent is mid-turn are judged for its memory
+  (#94, step 6). Only the newest still gets the next opportunity, but before
+  it is judged, up to 3 of the messages it replaced are judged for the memory
+  alone (`MIDTURN_RECALL_LIMIT`), so a question Sam asks while Vigil is
+  answering Zoe starts a thread that the newest message's judgment and
+  Vigil's turn both see. Before, those messages were never judged and started
+  no thread. Together they get one attention timeout, so a slow provider
+  delays the newest by at most that. A failed judgment is skipped, and cancel
+  and restart forget them. The behavior suite already judged every earlier
+  message as if live, so this brings the runtime in line with what the suite
+  measured; a new scene, `asked-while-busy`, measures the case (74 scenes).
 - A participant's result needs only its request's `request_id` in
   `binding`; the host fills in the rest from the turn's own binding (#94,
   step 3). A binding field the result does carry must still match exactly,

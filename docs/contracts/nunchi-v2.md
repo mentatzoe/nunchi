@@ -351,8 +351,10 @@ not always an answer. An empty `responses` array means none has yet; it is a
 fact, not a request to answer. The reference host keeps the judgments of the
 newest 64 messages and shows the newest 6 threads within a day, leaves the
 message the turn is about out of the threads and their responses (its reading
-describes it), and forgets the judgments on restart. A message observed but never judged, such as one that
-arrived while the participant was mid-turn, starts no thread.
+describes it), and forgets the judgments on restart. A message observed but
+never judged starts no thread. Since #94 step 6, messages that arrive while the
+participant is mid-turn are judged: the newest gets the next opportunity, and
+up to 3 that it replaced are judged for the memory alone just before it.
 
 Since @6 (#94 step 5) any own move may carry `why`: the participant's own
 reason at the time, in its own words, a non-empty string of at most 200

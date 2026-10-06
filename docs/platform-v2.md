@@ -327,7 +327,11 @@ explicitly without a model call.
 Native live ingress retains and offers each event before returning to the
 platform callback. One worker runs the active opportunity while later anchors
 replace a single pending slot; after the active turn, only the newest retained
-anchor becomes work. One host-wide deadline begins before attention and spans
+anchor becomes work. The anchors it replaced are not lost: before the newest is
+judged, the newest 3 of them are judged, oldest first, for the participant's
+memory alone, so a question asked meanwhile starts a thread (#94 step 6).
+They get no turn of their own, share one attention timeout, and a failed one
+is skipped. One host-wide deadline begins before attention and spans
 provider waiting, the participant, expansion, authorization, and native
 transport acknowledgement. It invalidates even a participant or transport
 that ignores cancellation; a late transport result remains `unknown` and

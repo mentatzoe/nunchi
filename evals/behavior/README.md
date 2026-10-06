@@ -34,7 +34,8 @@ Every scene starts as a draft (`"review": "draft: …"`):
   back (`approval-comes-through`), and two where a CI line arrives that the
   agent promised to report on: while the promise is in attention's window
   (`build-finishes-after-promise`) and after it left
-  (`build-finishes-long-after-promise`).
+  (`build-finishes-long-after-promise`), and one where a question arrives
+  while the agent is answering someone else (`asked-while-busy`).
 - `scenes/litmus/` holds 57 scenes converted from the V1 litmus corpus by
   `litmus.py`. Their ranges come from V1 verdicts, and their `review` field
   quotes the V1 rationale. They have no notice facts yet.
