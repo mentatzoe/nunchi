@@ -33,6 +33,18 @@ DEFAULT_MAX_EXPANSIONS = 3
 # (#94 step 5); it never reaches the room.
 _WHY: dict[str, Any] = {"type": "string"}
 
+# The room message an action answers. The binding no longer hands the model
+# the trigger to copy (#94 step 3); run 41 saw a model put the request_id
+# here, so the schema says what belongs in it.
+_ORIGIN: dict[str, Any] = {
+    "type": "string",
+    "minLength": 1,
+    "description": (
+        "The id of the room message that prompted this action, one you were "
+        "shown; usually wake.trigger_event_id."
+    ),
+}
+
 _INNER_ACTION_VARIANTS: list[dict[str, Any]] = [
     {
         "type": "object",
@@ -58,7 +70,7 @@ _INNER_ACTION_VARIANTS: list[dict[str, Any]] = [
         "required": ["kind", "origin_event_id", "text"],
         "properties": {
             "kind": {"const": "message"},
-            "origin_event_id": {"type": "string", "minLength": 1},
+            "origin_event_id": _ORIGIN,
             "text": {"type": "string"},
             "why": _WHY,
         },
@@ -69,7 +81,7 @@ _INNER_ACTION_VARIANTS: list[dict[str, Any]] = [
         "required": ["kind", "origin_event_id", "target_event_id", "text"],
         "properties": {
             "kind": {"const": "reply"},
-            "origin_event_id": {"type": "string", "minLength": 1},
+            "origin_event_id": _ORIGIN,
             "target_event_id": {"type": "string", "minLength": 1},
             "text": {"type": "string"},
             "why": _WHY,
@@ -87,7 +99,7 @@ _INNER_ACTION_VARIANTS: list[dict[str, Any]] = [
         ],
         "properties": {
             "kind": {"const": "reaction"},
-            "origin_event_id": {"type": "string", "minLength": 1},
+            "origin_event_id": _ORIGIN,
             "target_event_id": {"type": "string", "minLength": 1},
             "reaction": {"type": "string", "minLength": 1},
             "operation": {"enum": ["add", "remove"]},
@@ -106,7 +118,7 @@ _INNER_ACTION_VARIANTS: list[dict[str, Any]] = [
         ],
         "properties": {
             "kind": {"const": "privileged"},
-            "origin_event_id": {"type": "string", "minLength": 1},
+            "origin_event_id": _ORIGIN,
             "capability": {"type": "string", "minLength": 1},
             "resource": {
                 "type": "object",
@@ -127,7 +139,7 @@ _INNER_ACTION_VARIANTS: list[dict[str, Any]] = [
         "required": ["kind", "origin_event_id", "proposal_id"],
         "properties": {
             "kind": {"const": "withdraw"},
-            "origin_event_id": {"type": "string", "minLength": 1},
+            "origin_event_id": _ORIGIN,
             "proposal_id": {"type": "string", "minLength": 1},
             "why": _WHY,
         },
@@ -153,19 +165,7 @@ PARTICIPANT_ACTION_SCHEMA: dict[str, Any] = {
         "binding": {
             "type": "object",
             "additionalProperties": False,
-            "required": [
-                "request_id",
-                "participant_id",
-                "actor_id",
-                "platform",
-                "room_id",
-                "continuity_scope_id",
-                "trigger_event_id",
-                "opportunity_generation",
-                "lifecycle_id",
-                "deadline_id",
-                "permissions_revision",
-            ],
+            "required": ["request_id"],
             "properties": {
                 "request_id": {"type": "string", "minLength": 1},
                 "participant_id": {"type": "string", "minLength": 1},
@@ -186,7 +186,11 @@ PARTICIPANT_ACTION_SCHEMA: dict[str, Any] = {
 
 
 def participant_action_schema(binding: Mapping[str, Any]) -> dict[str, Any]:
-    """Return the shared action schema bound to one exact opportunity."""
+    """Return the shared action schema bound to one exact opportunity.
+
+    Every binding field is a constant, but a result needs only request_id:
+    the host fills in the rest (#94 step 3).
+    """
 
     checked = _validate_binding(binding)
     schema = deepcopy(PARTICIPANT_ACTION_SCHEMA)
@@ -386,8 +390,9 @@ def participant_turn_prompt(profile: ParticipantProfile) -> str:
         "Trusted participant instructions:\n"
         f"{profile.instructions}\n\n"
         "Return exactly one JSON object matching the supplied action schema. "
-        "Copy the protocol and binding objects exactly from the request and "
-        "put one action in `action`. Silence is {\"kind\":\"silence\"}. "
+        "Copy the protocol object exactly from the request. `binding` needs "
+        "only the request's request_id, copied exactly; the host fills in the "
+        "rest. Put one action in `action`. Silence is {\"kind\":\"silence\"}. "
         "Any action but expand may add why: one short sentence in your own "
         "words on why you chose it. It is never posted; your later turns see "
         "it with that move in memory.own_moves. "
@@ -398,7 +403,9 @@ def participant_turn_prompt(profile: ParticipantProfile) -> str:
         "anchor_event_id, max_events, and max_bytes. Before your first "
         "message, reply, or reaction goes out, you are shown anything others "
         "posted while you were composing, once, and you decide again with it "
-        "in view. A contribution uses kind "
+        "in view. Every action but silence and expand names origin_event_id, "
+        "the room message that prompted it, usually wake.trigger_event_id. "
+        "A contribution uses kind "
         "message; a reply adds target_event_id; a reaction names its exact "
         "target, reaction, and add/remove operation. A privileged action is a "
         "proposal only; the host independently rechecks exact current "
@@ -450,8 +457,8 @@ def participant_turn_instructions(
 ) -> str:
     """The turn prompt plus the action schema it promises, bound to this turn.
 
-    The binding values are constants in the schema, so a model only has to
-    copy what it is shown.
+    The binding values are constants in the schema, and only request_id is
+    required, so a model only has to copy one value it is shown.
     """
 
     schema = json.dumps(
@@ -645,8 +652,19 @@ def parse_participant_action(
     protocol = decoded["protocol"]
     if not isinstance(protocol, Mapping) or dict(protocol) != request["protocol"]:
         raise ParticipantModelError("participant action protocol is unknown or changed")
+    # The result names its request; the host fills in the rest of the
+    # binding from the turn's own (#94 step 3). Runs 20-39 lost 16 agent
+    # turns, 15 of them posts, to a dropped field or a garbled long ID. A
+    # field the result does carry must still match exactly.
+    echoed = decoded["binding"]
+    if (
+        not isinstance(echoed, Mapping)
+        or "request_id" not in echoed
+        or not set(echoed) <= set(request["binding"])
+    ):
+        raise ParticipantModelError("participant action binding is invalid")
     try:
-        echoed_binding = _validate_binding(decoded["binding"])
+        echoed_binding = _validate_binding({**request["binding"], **echoed})
     except ValidationError as exc:
         raise ParticipantModelError("participant action binding is invalid") from exc
     if echoed_binding != request["binding"]:

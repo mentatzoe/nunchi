@@ -244,27 +244,22 @@ malformed note or a pointer to an unknown message is dropped on its own.
 
 Every Nunchi-owned participant receives `nunchi.participant-turn` version 1.
 The model returns one closed envelope, copying the request's exact `protocol`
-and `binding` objects:
+object and the `request_id` of its `binding`:
 
 ```json
 {
   "protocol": {"name": "nunchi.participant-turn", "version": 1},
-  "binding": {
-    "request_id": "...",
-    "participant_id": "...",
-    "actor_id": "...",
-    "platform": "...",
-    "room_id": "...",
-    "continuity_scope_id": "...",
-    "trigger_event_id": "...",
-    "opportunity_generation": 7,
-    "lifecycle_id": "...",
-    "deadline_id": "...",
-    "permissions_revision": "..."
-  },
+  "binding": {"request_id": "..."},
   "action": {"kind":"message","origin_event_id":"discord:message:123","text":"..."}
 }
 ```
+
+The request's binding also names the participant, actor, platform, room,
+continuity scope, trigger, opportunity generation, lifecycle, deadline and
+permission revision. The host fills in whichever of these the result leaves
+out from the turn's own binding (#94 step 3). Any it carries must match
+exactly, and an unknown field is refused. Models dropped or miscopied these
+opaque IDs and lost their message; a result names its turn by `request_id`.
 
 The `action` is exactly one `silence`, bounded `expand`, `message`, `reply`,
 `reaction`, privileged proposal, or `withdraw` shape allowed by the supplied

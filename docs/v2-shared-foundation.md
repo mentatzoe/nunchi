@@ -26,7 +26,9 @@ Every Nunchi-owned participant runs `nunchi.participant-turn` version `1` from
 parser, bounded expansion state, and authority binding. The request binds the
 exact request, participant, actor, platform, room, continuity scope, trigger,
 opportunity generation, lifecycle, deadline, and permission revision. A model
-result must copy that protocol and binding exactly around one action. Unknown
+result copies that protocol and the binding's `request_id` around one action;
+the host fills in the rest of the binding, and any binding field the result
+carries must match exactly. Unknown
 versions, changed bindings, invisible origins/targets, and exceeded
 permissions reject before an effect. Asking for room history never fails the
 turn: past the limit the participant is told so once, and only asking again

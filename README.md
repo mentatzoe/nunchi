@@ -92,8 +92,8 @@ flowchart TB
         p2["2. The reading<br/>on every turn"]:::done
         p3["3. Live room view,<br/>look again"]:::done
         p4["4. Typed<br/>questions"]:::done
-        p5["5. Memory and a<br/>social turn prompt"]:::next
-        p6["6. Rhythm:<br/>time, pauses"]:::later
+        p5["5. Memory and a<br/>social turn prompt"]:::done
+        p6["6. Rhythm:<br/>time, pauses"]:::next
         p7["7. Remove<br/>Nunchi's nod"]:::later
         p8["8. More<br/>model APIs"]:::later
         p2 --> p3 --> p4 --> p5 --> p6 --> p7 --> p8
