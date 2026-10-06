@@ -318,7 +318,12 @@ _SOCIAL_GUIDE = (
     "follow-up on something you said you would do. A quick reaction, like a "
     "nod, shows you are following without taking the floor. Holding back "
     "fits when the person addressed has not had a chance to answer yet, when "
-    "someone already answered, or when the speaker is still mid-thought."
+    "someone already answered, or when the speaker is still mid-thought. "
+    "Say only what you know: one clarifying question beats a guess, and a "
+    "guess stated as fact misleads the room. If you have not checked "
+    "something, say so, ask, or say you will check; when someone asks you "
+    "for news you do not have yet, \"not yet\" answers them, and silence "
+    "leaves them waiting."
 )
 
 _MEMORY_GUIDE = (
