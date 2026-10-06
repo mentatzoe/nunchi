@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010C ParticipantWakeV2@6`` (slice 010, T004).
+"""Contract tests for ``I-010C ParticipantWakeV2@7`` (slice 010, T004).
 
 Red cases cover the wake sources, advice-free ``PREATTENTION_BYPASS``
 (010-Preattention-bypass), the FR-013 advice-source violations (advice on
@@ -49,6 +49,28 @@ class MemoryCases(unittest.TestCase):
         for bad in ("", "x" * 201, 7):
             with self.subTest(why=bad):
                 assert_schema_verdict(self, "participant-wake", self.wake([dict(self.MOVES[3], why=bad)]), "invalid")
+
+    def test_a_proposal_and_its_outcome_validate(self):
+        # @7 (#90): what became of a privileged proposal reaches the agent.
+        move = {
+            "kind": "proposal",
+            "proposal_id": "authorization:1",
+            "about_event_id": "q1",
+            "capability": "workspace.file.write",
+            "status": "awaiting_approval",
+            "at": "2026-10-06T08:00:00.000Z",
+        }
+        for status in ("awaiting_approval", "done", "failed", "unknown", "denied", "expired", "withdrawn", "cancelled"):
+            with self.subTest(status=status):
+                assert_schema_verdict(self, "participant-wake", self.wake([dict(move, status=status)]), "valid")
+        for bad in (
+            dict(move, status="approved"),
+            dict(move, operation={"path": "README.md"}),
+            dict(move, why="I asked for it."),
+            {key: value for key, value in move.items() if key != "proposal_id"},
+        ):
+            with self.subTest(bad=bad):
+                assert_schema_verdict(self, "participant-wake", self.wake([bad]), "invalid")
 
     def test_malformed_memory_rejects(self):
         too_long = dict(self.MOVES[0], text="x" * 281)

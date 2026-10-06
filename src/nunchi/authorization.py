@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -68,6 +69,23 @@ def canonical_operation_digest(operation: Mapping[str, Any]) -> dict[str, str]:
         "value": hashlib.sha256(payload).hexdigest(),
         "canonicalization_profile": "nunchi.operation-json.v1",
     }
+
+
+# What became of a participant's proposal, as its memory shows it (#90,
+# #94 step 5): see PROPOSAL_STATUSES. A proposal waits for approval until it
+# is done, fails, is denied, expires, is withdrawn by the participant, or is
+# cancelled by the host.
+_KEPT_PROPOSALS = 16
+
+
+def _settled_status(result: TransportResult) -> str:
+    if result.delivery == "sent":
+        return "done"
+    if result.delivery == "unknown":
+        return "unknown"
+    if result.detail.startswith("privileged action denied"):
+        return "denied"
+    return "failed"
 
 
 def _sanitized_effect_result(result: TransportResult) -> TransportResult:
@@ -534,7 +552,64 @@ class AuthorizationCoordinator:
         self.grant_ttl_seconds = grant_ttl_seconds
         self.approval_ttl_seconds = approval_ttl_seconds
         self._pending: dict[str, _PendingApproval] = {}
+        # The participant's recent proposals and what became of them, newest
+        # last, so its next turn knows; never a queue of work.
+        self._proposals: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._noting: dict[str, Any] | None = None
         self._lock = threading.RLock()
+
+    def _note_proposal(self, request_id: str, binding: Mapping[str, Any], requested_at: datetime) -> None:
+        record = {
+            "proposal_id": request_id,
+            "about_event_id": binding["origin_event_id"],
+            "capability": binding["capability"],
+            "status": "failed",
+            "at": _iso(requested_at),
+        }
+        self._proposals[request_id] = record
+        while len(self._proposals) > _KEPT_PROPOSALS:
+            self._proposals.popitem(last=False)
+        self._noting = record
+
+    def _expire_waiting(self, now: datetime) -> None:
+        """Mark proposals whose approval window closed, and drop their challenges."""
+
+        for challenge_id, item in tuple(self._pending.items()):
+            if item.cancel.is_set() or now >= _parse_time(item.challenge["expires_at"]):
+                self._pending.pop(challenge_id, None)
+                record = self._proposals.get(item.request["request_id"])
+                if record is not None and record["status"] == "awaiting_approval":
+                    record["status"] = "expired"
+
+    def proposals(self) -> tuple[dict[str, Any], ...]:
+        """The participant's recent proposals and their status, oldest first."""
+
+        with self._lock:
+            self._expire_waiting(_now())
+            return tuple(deepcopy(record) for record in self._proposals.values())
+
+    def withdraw(
+        self,
+        *,
+        proposal_id: str,
+        wake: Mapping[str, Any],
+    ) -> TransportResult:
+        """Withdraw one of this participant's proposals still awaiting approval."""
+
+        if wake["self"]["participant_id"] != self.observation.binding.participant_id or (
+            wake["room"]["id"] != self.observation.binding.room_id
+        ):
+            return TransportResult("failed", "withdrawal binding does not match this participant")
+        with self._lock:
+            self._expire_waiting(_now())
+            record = self._proposals.get(proposal_id)
+            if record is None or record["status"] != "awaiting_approval":
+                return TransportResult("failed", "the proposal is not awaiting approval")
+            for challenge_id, item in tuple(self._pending.items()):
+                if item.request["request_id"] == proposal_id:
+                    self._pending.pop(challenge_id, None)
+            record["status"] = "withdrawn"
+            return TransportResult("sent", "privileged proposal withdrawn")
 
     @staticmethod
     def _matching_rule(
@@ -966,7 +1041,29 @@ class AuthorizationCoordinator:
         cancel: threading.Event,
         deadline: float | None = None,
     ) -> TransportResult:
-        """Authorize one proposal; optional deadline uses time.monotonic()."""
+        """Authorize one proposal; optional deadline uses time.monotonic().
+
+        Once audited, the proposal is remembered with its status, so the
+        participant's next turn knows what became of it.
+        """
+        with self._lock:
+            self._noting = None
+            result = self._execute_proposal(
+                proposal=proposal, wake=wake, cancel=cancel, deadline=deadline
+            )
+            record, self._noting = self._noting, None
+            if record is not None and record["status"] != "awaiting_approval":
+                record["status"] = _settled_status(result)
+            return result
+
+    def _execute_proposal(
+        self,
+        *,
+        proposal: Mapping[str, Any],
+        wake: Mapping[str, Any],
+        cancel: threading.Event,
+        deadline: float | None,
+    ) -> TransportResult:
         if deadline is not None and (
             isinstance(deadline, bool)
             or not isinstance(deadline, (int, float))
@@ -995,6 +1092,7 @@ class AuthorizationCoordinator:
                 "requested_at": _iso(requested_at),
             }
             self._persist_contract(request)
+            self._note_proposal(request_id, binding, requested_at)
             if lifetime.is_set():
                 return TransportResult("failed", "privileged proposal was cancelled during audit")
             try:
@@ -1073,6 +1171,7 @@ class AuthorizationCoordinator:
                 if lifetime.is_set():
                     self._pending.pop(challenge_id, None)
                     return TransportResult("failed", "privileged proposal was cancelled before challenge publication")
+                self._proposals[request_id]["status"] = "awaiting_approval"
                 return TransportResult("unavailable", "authenticated operator approval required")
             decision = self._decision(
                 request_id=request_id,
@@ -1108,13 +1207,7 @@ class AuthorizationCoordinator:
     def pending_for_operator(self) -> tuple[dict[str, Any], ...]:
         """Return the exact host-only proposal an operator must inspect."""
         with self._lock:
-            now = _now()
-            for challenge_id, item in tuple(self._pending.items()):
-                if (
-                    item.cancel.is_set()
-                    or now >= _parse_time(item.challenge["expires_at"])
-                ):
-                    self._pending.pop(challenge_id, None)
+            self._expire_waiting(_now())
             return tuple(
                 {
                     "challenge": deepcopy(item.challenge),
@@ -1134,7 +1227,38 @@ class AuthorizationCoordinator:
         approval_challenge_id: str,
         authenticated_approver_id: str,
     ) -> TransportResult:
-        """Complete approval only from a trusted, authenticated operator seam."""
+        """Complete approval only from a trusted, authenticated operator seam.
+
+        The participant's record of the proposal then says what became of it:
+        done, failed, unknown, expired, or cancelled.
+        """
+        with self._lock:
+            pending = self._pending.get(approval_challenge_id)
+            result = self._complete_authenticated_approval(
+                approval_challenge_id=approval_challenge_id,
+                authenticated_approver_id=authenticated_approver_id,
+            )
+            record = (
+                self._proposals.get(pending.request["request_id"]) if pending is not None else None
+            )
+            if record is not None and record["status"] == "awaiting_approval":
+                if result.delivery == "failed" and pending.cancel.is_set():
+                    record["status"] = "cancelled"
+                elif result.delivery == "failed" and _now() >= _parse_time(pending.challenge["expires_at"]):
+                    record["status"] = "expired"
+                elif result.delivery == "failed" and authenticated_approver_id not in pending.challenge["approver_ids"]:
+                    # An unauthorized completion consumes the challenge.
+                    record["status"] = "cancelled"
+                else:
+                    record["status"] = _settled_status(result)
+            return result
+
+    def _complete_authenticated_approval(
+        self,
+        *,
+        approval_challenge_id: str,
+        authenticated_approver_id: str,
+    ) -> TransportResult:
         with self._lock:
             pending = self._pending.pop(approval_challenge_id, None)
             if pending is None:
@@ -1353,6 +1477,10 @@ class AuthorizationCoordinator:
             # Dropping the entries is enough: a pending approval is only
             # reachable through _pending. Setting their events would also set
             # the scheduler token they wrap and strand the room.
+            for item in self._pending.values():
+                record = self._proposals.get(item.request["request_id"])
+                if record is not None and record["status"] == "awaiting_approval":
+                    record["status"] = "cancelled"
             self._pending.clear()
 
     restart = cancel

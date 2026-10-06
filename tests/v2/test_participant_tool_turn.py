@@ -93,7 +93,7 @@ VISIBLE = {"e1", "e2"}
 
 class ToolRolesAndPromptTests(unittest.TestCase):
     def test_permissions_decide_which_roles_a_turn_offers(self):
-        self.assertEqual(("send", "react", "propose", "context"), participant_tool_roles(_request()))
+        self.assertEqual(("send", "react", "propose", "withdraw", "context"), participant_tool_roles(_request()))
         self.assertEqual(
             ("send", "context"),
             participant_tool_roles(_request(ordinary=("message",), privileged=False)),

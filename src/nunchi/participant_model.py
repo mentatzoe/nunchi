@@ -121,6 +121,17 @@ _INNER_ACTION_VARIANTS: list[dict[str, Any]] = [
             "why": _WHY,
         },
     },
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["kind", "origin_event_id", "proposal_id"],
+        "properties": {
+            "kind": {"const": "withdraw"},
+            "origin_event_id": {"type": "string", "minLength": 1},
+            "proposal_id": {"type": "string", "minLength": 1},
+            "why": _WHY,
+        },
+    },
 ]
 
 
@@ -364,7 +375,11 @@ def participant_turn_prompt(profile: ParticipantProfile) -> str:
         "message; a reply adds target_event_id; a reaction names its exact "
         "target, reaction, and add/remove operation. A privileged action is a "
         "proposal only; the host independently rechecks exact current "
-        "authority immediately before any effect. Never include credentials, "
+        "authority immediately before any effect. Your proposals appear in "
+        "memory.own_moves with their proposal_id and status; kind withdraw "
+        "with a proposal_id withdraws one still awaiting approval, for "
+        "example when the person who asked no longer wants it, and counts as "
+        "your action for the turn. Never include credentials, "
         "authority claims, continuation handles, or cursors."
     )
 
@@ -518,6 +533,10 @@ def _validate_move(checked: dict[str, Any], kind: Any) -> dict[str, Any]:
         _nonempty(checked.get("reaction"), "reaction value")
         if checked.get("operation") not in ("add", "remove"):
             raise ParticipantModelError("reaction operation must be add or remove")
+    elif kind == "withdraw":
+        if set(checked) != common | {"proposal_id"}:
+            raise ParticipantModelError("withdrawal has an invalid closed shape")
+        _nonempty(checked.get("proposal_id"), "withdrawal proposal_id")
     elif kind == "privileged":
         if set(checked) != common | {"capability", "resource", "operation"}:
             raise ParticipantModelError("privileged proposal has an invalid closed shape")
@@ -575,7 +594,7 @@ def _bind_action(
     kind = action["kind"]
     if kind in ("message", "reply", "reaction") and kind not in permissions["ordinary_actions"]:
         raise ParticipantModelError("participant action exceeds current ordinary permissions")
-    if kind == "privileged" and not permissions["privileged_proposals"]:
+    if kind in ("privileged", "withdraw") and not permissions["privileged_proposals"]:
         raise ParticipantModelError("participant privileged proposals are disabled")
     if kind not in ("silence", "expand"):
         if action["origin_event_id"] not in visible_event_ids:
@@ -797,6 +816,23 @@ PARTICIPANT_TOOL_SPECS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "withdraw": {
+        "description": (
+            "Withdraw one of your privileged proposals still awaiting "
+            "approval, named by its proposal_id in your memory, for example "
+            "when the person who asked no longer wants it. Counts as your one "
+            "room action for this turn."
+        ),
+        "input_schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["proposal_id"],
+            "properties": {
+                "proposal_id": {"type": "string", "minLength": 1},
+                "origin_event_id": _ORIGIN_EVENT_ID,
+            },
+        },
+    },
     "context": {
         "description": (
             "Look at the room as it is now: one bounded page of messages "
@@ -821,7 +857,7 @@ PARTICIPANT_TOOL_SPECS: dict[str, dict[str, Any]] = {
     },
 }
 
-PARTICIPANT_ACTION_TOOL_ROLES = ("send", "react", "propose")
+PARTICIPANT_ACTION_TOOL_ROLES = ("send", "react", "propose", "withdraw")
 
 
 def participant_tool_roles(request: Mapping[str, Any]) -> tuple[str, ...]:
@@ -835,7 +871,7 @@ def participant_tool_roles(request: Mapping[str, Any]) -> tuple[str, ...]:
     if "reaction" in ordinary:
         roles.append("react")
     if permissions["privileged_proposals"]:
-        roles.append("propose")
+        roles += ["propose", "withdraw"]
     roles.append("context")
     return tuple(roles)
 
@@ -890,6 +926,11 @@ def participant_tool_turn_prompt(
             f" {names['propose']} submits a privileged action as a proposal "
             "only; the host independently rechecks exact current authority "
             "immediately before any effect."
+        )
+    if "withdraw" in names:
+        parts.append(
+            f" Your proposals appear in memory.own_moves with their status; "
+            f"{names['withdraw']} withdraws one still awaiting approval."
         )
     if "context" in names:
         parts.append(
@@ -977,6 +1018,8 @@ def participant_tool_action(
             "reaction": args.get("reaction"),
             "operation": args.get("operation", "add"),
         }
+    elif role == "withdraw":
+        action = {"kind": "withdraw", "origin_event_id": origin, "proposal_id": args.get("proposal_id")}
     else:
         action = {
             "kind": "privileged",

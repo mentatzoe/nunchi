@@ -288,7 +288,15 @@ class ParticipantProtocolTests(unittest.TestCase):
             for variant in schema["properties"]["action"]["oneOf"]
         }
         self.assertEqual(
-            {"silence": True, "expand": False, "message": True, "reply": True, "reaction": True, "privileged": True},
+            {
+                "silence": True,
+                "expand": False,
+                "message": True,
+                "reply": True,
+                "reaction": True,
+                "privileged": True,
+                "withdraw": True,
+            },
             kinds,
         )
         self.assertIn("Any action but expand may add why", self.protocol.instructions)

@@ -662,7 +662,19 @@ _OWN_MOVE_FIELDS = {
     "reply": (("kind", "event_id", "about_event_id", "text"), ("at", "why")),
     "reaction": (("kind", "event_id", "about_event_id", "reaction"), ("at", "why")),
     "silence": (("kind", "about_event_id", "at"), ("why",)),
+    # Since @7: a privileged proposal and what became of it (#90).
+    "proposal": (("kind", "proposal_id", "about_event_id", "capability", "status", "at"), ()),
 }
+PROPOSAL_STATUSES = (
+    "awaiting_approval",
+    "done",
+    "failed",
+    "unknown",
+    "denied",
+    "expired",
+    "withdrawn",
+    "cancelled",
+)
 
 
 def _memory_text(value: Any, path: str) -> None:
@@ -708,10 +720,12 @@ def _memory(value: Any, path: str) -> dict[str, Any]:
         item = f"{path}.own_moves[{index}]"
         kind = move.get("kind") if isinstance(move, Mapping) else None
         if kind not in _OWN_MOVE_FIELDS:
-            _fail(f"{item}.kind", "must be message, reply, reaction or silence")
+            _fail(f"{item}.kind", "must be message, reply, reaction, silence or proposal")
         required, optional = _OWN_MOVE_FIELDS[kind]
         _closed(move, item, required=required, optional=optional)
-        for name in ("event_id", "about_event_id", "reaction", "at"):
+        if kind == "proposal" and move["status"] not in PROPOSAL_STATUSES:
+            _fail(f"{item}.status", "must be one of " + ", ".join(PROPOSAL_STATUSES))
+        for name in ("event_id", "about_event_id", "reaction", "at", "proposal_id", "capability"):
             if name in move:
                 _nes(move[name], f"{item}.{name}")
         if "text" in move:

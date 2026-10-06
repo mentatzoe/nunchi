@@ -2287,7 +2287,7 @@ class GatedParticipantTests(unittest.TestCase):
             [spec["name"] for spec in disabled.tool_specs()],
         )
         self.assertEqual(
-            ["room_send", "room_react", "room_propose", "room_context"],
+            ["room_send", "room_react", "room_propose", "room_withdraw", "room_context"],
             [spec["name"] for spec in enabled.tool_specs()],
         )
 

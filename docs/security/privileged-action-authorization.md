@@ -78,6 +78,20 @@ and the allow cannot outlive the expiry that recheck set.
   approval challenge. Once published, the challenge lives until its own
   `expires_at` (approval TTL, default 300 s), an explicit cancel, or restart.
   Restart drops pending approvals; they are never rebuilt from room history.
+- **The agent knows what became of its proposal** (Zoe, 2026-10-04, on
+  #94). The coordinator keeps the participant's 16 newest proposals with a
+  status: `awaiting_approval`, `done`, `failed`, `unknown`, `denied`,
+  `expired`, `withdrawn`, or `cancelled`. Each later turn shows the newest 3
+  in `memory.own_moves` as `proposal` moves, pointing at the message that
+  prompted them, so nothing happens in the agent's name without it knowing.
+  Nunchi never reports an outcome in the room; the agent does, in its own
+  turn. A turn that the outcome itself starts, without a new room message,
+  comes with step 6 of the plan, which also looks again after pauses.
+- **The agent can withdraw.** A `withdraw` action (`room_withdraw` for the
+  Claude Code gate) names a proposal still awaiting approval. The
+  coordinator drops its challenge, so no operator can approve it, and marks
+  it `withdrawn`. It counts as the turn's one action. Withdrawing anything
+  else, or another participant's proposal, fails and changes nothing.
 - **Deadlines must be finite.** A NaN, infinite, or non-numeric deadline is
   refused before any audit or effect.
 
@@ -92,7 +106,8 @@ revoked, mismatched, replayed, or not durably persisted.
   Hermes does not use the coordinator; its tools keep Hermes's native
   approvals. Only the Claude Code gate has an executor
   (`workspace.file.write`, with a private `workspace_root`); its agent
-  proposes through `mcp__nunchi__room_propose`.
+  proposes through `mcp__nunchi__room_propose` and withdraws through
+  `mcp__nunchi__room_withdraw`.
 - **Authenticated operator approval surface.** `pending_for_operator()` and
   `complete_authenticated_approval()` are library methods. No shipped command,
   dashboard, or transport calls them, so an `APPROVAL_REQUIRED` proposal

@@ -258,7 +258,9 @@ and `binding` objects:
 ```
 
 The `action` is exactly one `silence`, bounded `expand`, `message`, `reply`,
-`reaction`, or privileged proposal shape allowed by the supplied schema. The
+`reaction`, privileged proposal, or `withdraw` shape allowed by the supplied
+schema. `withdraw` names the `proposal_id` of one of the participant's
+proposals still awaiting approval, as its memory shows it. The
 host rejects unknown versions, changed bindings, invisible origins or targets,
 malformed actions, stale opportunities, deadline overruns, and unavailable
 native capabilities. The participant cannot send directly.

@@ -8,7 +8,9 @@ Its own moves: its recent messages, replies and reactions, each pointing at
 the message it was about, and where it stayed quiet. The visible moves come
 from the room's retained history, which the host observes like anyone
 else's. A silence leaves no trace in the room, so the participant host
-records it here when a turn ends without an action. A move may carry the
+records it here when a turn ends without an action. Its privileged proposals
+come from the host that authorizes them, with what became of each: awaiting
+approval, done, denied, expired, withdrawn (#90). A move may carry the
 participant's own reason at the time, in its own words (``why``): a person
 remembers that they held back because someone else was asked, not only that
 they held back. The host keeps the reason it was given; a visible move gets
@@ -44,9 +46,10 @@ from .v2_contracts import (
 )
 
 
-OWN_MOVE_KINDS = ("message", "reply", "reaction", "silence")
+OWN_MOVE_KINDS = ("message", "reply", "reaction", "silence", "proposal")
 DEFAULT_OWN_MOVES = 8
 DEFAULT_SILENCES = 3
+DEFAULT_PROPOSALS = 3
 DEFAULT_THREADS = 6
 DEFAULT_JUDGMENTS = 64
 DEFAULT_MAX_AGE_SECONDS = 86_400
@@ -236,6 +239,7 @@ class ConversationMemory:
         *,
         actor_id: str,
         now: datetime | None = None,
+        proposals: Iterable[Mapping[str, Any]] = (),
     ) -> list[dict[str, Any]]:
         """The newest own moves, in the order they happened.
 
@@ -274,7 +278,24 @@ class ConversationMemory:
             for order, silence in enumerate(silences)
             if silence["about_event_id"] in position and fresh(silence)
         ]
-        ordered = sorted(visible[-self.own_moves_limit :] + quiet, key=lambda item: item[0])
+        proposed = [
+            (
+                position[proposal["about_event_id"]] + 0.5 + order / 1000,
+                {
+                    "kind": "proposal",
+                    "proposal_id": proposal["proposal_id"],
+                    "about_event_id": proposal["about_event_id"],
+                    "capability": proposal["capability"],
+                    "status": proposal["status"],
+                    "at": proposal["at"],
+                },
+            )
+            for order, proposal in enumerate(list(proposals)[-DEFAULT_PROPOSALS:])
+            if proposal.get("about_event_id") in position and fresh(proposal)
+        ]
+        ordered = sorted(
+            visible[-self.own_moves_limit :] + quiet + proposed, key=lambda item: item[0]
+        )
         return [move for _, move in ordered]
 
     def threads(
@@ -366,13 +387,14 @@ class ConversationMemory:
         *,
         now: datetime | None = None,
         current_event_id: str | None = None,
+        proposals: Iterable[Mapping[str, Any]] = (),
     ) -> dict[str, Any] | None:
         """The memory block for a participant's turn, or None when it is empty."""
 
         events = list(observation.retained_events())
         actor_id = observation.binding.actor_id
         facts: dict[str, Any] = {}
-        moves = self.own_moves(events, actor_id=actor_id, now=now)
+        moves = self.own_moves(events, actor_id=actor_id, now=now, proposals=proposals)
         if moves:
             facts["own_moves"] = moves
         threads = self.threads(events, actor_id=actor_id, now=now, exclude_event_id=current_event_id)
