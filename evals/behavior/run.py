@@ -48,6 +48,7 @@ from nunchi.attention import (
     _validate_model_judgment,
 )
 from nunchi.adapters.decisions_api import DEFAULT_URL as DECISIONS_URL, DecisionsAttentionModel
+from nunchi.adapters.model_apis import MessagesAttentionModel, ResponsesAttentionModel
 from nunchi.attention_questions import answers_leaning, top_move
 from nunchi.observation import ObservationProvider, ParticipantBinding
 from nunchi.participant import (
@@ -416,18 +417,38 @@ REASONING_EFFORTS = ("off", "none", "minimal", "low", "medium", "high", "xhigh",
 AGENT_MAX_TOKENS = 4096
 
 
+# A chat model's label may name the API its attention calls go through
+# (#94 step 8): "messages:" for the Messages API, "responses:" for the
+# Responses API. Without one, the chat completions endpoint serves it.
+ROUTES = ("messages", "responses")
+
+
+def model_route(label: str) -> tuple[str | None, str]:
+    """Split a model label into its API route, if named, and the rest."""
+
+    route, colon, rest = label.partition(":")
+    if colon and route in ROUTES:
+        return route, rest
+    return None, label
+
+
 def model_spec(label: str) -> tuple[str, str | None]:
     """Split a model label into the provider's model id and a reasoning effort."""
 
+    route, label = model_route(label)
     model_id, at, effort = label.partition("@")
     if not model_id:
         raise ValueError(f"model {label!r} has no id")
+    if route is not None and is_typed_decision_model(model_id):
+        raise ValueError(f"model {label!r}: a typed decision model has its own API")
     if not at:
         return model_id, None
     if effort not in REASONING_EFFORTS:
         raise ValueError(f"model {label!r}: reasoning effort must be one of {', '.join(REASONING_EFFORTS)}")
     if is_typed_decision_model(model_id):
         raise ValueError(f"model {label!r}: a typed decision model takes no reasoning effort")
+    if route == "messages" and effort in ("off", "none", "minimal"):
+        raise ValueError(f"model {label!r}: the Messages API takes efforts from low upward")
     return model_id, effort
 
 
@@ -448,7 +469,7 @@ def call_usage(response: Any) -> dict[str, Any]:
     if not isinstance(response, Mapping):
         return {}
     usage = response.get("usage") if isinstance(response.get("usage"), Mapping) else {}
-    details = usage.get("completion_tokens_details")
+    details = usage.get("completion_tokens_details", usage.get("output_tokens_details"))
     entry = {
         "model": response.get("model") if isinstance(response.get("model"), str) else None,
         "provider": response.get("provider") if isinstance(response.get("provider"), str) else None,
@@ -500,15 +521,36 @@ def openai_compatible_factory(
     jev_url: str = DECISIONS_URL,
 ) -> ModelFactory:
     """Build each attention model: a typed decision model (``typesafe/``,
-    such as Jev) through the Decisions API, any other model through the
-    OpenAI-compatible chat endpoint. Both answer the same typed questions."""
+    such as Jev) through the Decisions API, a model labelled ``messages:`` or
+    ``responses:`` through that API, and any other model through the
+    OpenAI-compatible chat endpoint. All answer the same typed questions."""
 
     openrouter = "openrouter.ai" in base_url
 
     def build(label: str) -> Any:
+        route, _ = model_route(label)
         model_id, effort = model_spec(label)
         if is_typed_decision_model(model_id):
             return DecisionsAttentionModel(model=model_id, api_key=api_key, url=jev_url)
+        if route == "messages":
+            return MessagesAttentionModel(
+                model=model_id,
+                api_key=api_key,
+                base_url=base_url,
+                auth="bearer" if openrouter else "x-api-key",
+                provider="openrouter" if openrouter else None,
+                temperature=temperature,
+                effort=effort,
+            )
+        if route == "responses":
+            return ResponsesAttentionModel(
+                model=model_id,
+                api_key=api_key,
+                base_url=base_url,
+                provider="openrouter" if openrouter else None,
+                temperature=temperature,
+                effort="none" if effort == "off" else effort,
+            )
         extra: dict[str, Any] = {}
         if openrouter:
             # OpenRouter reports each call's cost only when asked.
@@ -1469,7 +1511,14 @@ def summarize(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--models", default=",".join(DEFAULT_MODELS))
+    parser.add_argument(
+        "--models",
+        default=",".join(DEFAULT_MODELS),
+        help=(
+            "comma-separated model ids; add @low etc. for a reasoning effort, and "
+            "prefix messages: or responses: to send attention through that API"
+        ),
+    )
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--scenes", default="all", help="all, behavior, litmus, a litmus category, or scene ids/prefixes")
     parser.add_argument("--out", default="behavior-eval-out")

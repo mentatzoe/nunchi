@@ -37,7 +37,7 @@ from typing import Any
 import urllib.error
 
 from .. import __version__
-from ..adapters.decisions_api import ATTENTION_KINDS
+from ..adapters.model_apis import ATTENTION_KINDS
 from ..adapters.runtime import load_pinned_config
 from ..attention import (
     AttentionEngine,

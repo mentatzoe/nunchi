@@ -26,6 +26,7 @@ from evals.behavior.scene import (
     parse_scene,
 )
 from evals.behavior.score import cell, grade, visible_result
+from nunchi.adapters.model_apis import MessagesAttentionModel, ResponsesAttentionModel
 from nunchi.attention_questions import answers_leaning
 from nunchi.observation import ObservationLimits
 
@@ -864,6 +865,27 @@ class UsageTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"NUNCHI_OPENROUTER": "k"}), mock.patch("sys.stderr"):
             with self.assertRaises(SystemExit):
                 run.main(["--models", "a/model@fast", "--scenes", "bot-status-report"])
+
+    def test_a_model_label_may_name_its_api_route(self):
+        # #94 step 8: attention through the Messages or Responses API.
+        self.assertEqual(("responses", "openai/gpt-6-luna@low"), run.model_route("responses:openai/gpt-6-luna@low"))
+        self.assertEqual(("openai/gpt-6-luna", "low"), run.model_spec("responses:openai/gpt-6-luna@low"))
+        self.assertEqual((None, "deepseek/model:free"), run.model_route("deepseek/model:free"))
+        for bad in ("messages:typesafe/jev-1.13", "messages:anthropic/claude-haiku-4.5@off"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                run.model_spec(bad)
+        factory = run.openai_compatible_factory(api_key="k", base_url=run.DEFAULT_BASE_URL, temperature=0)
+        messages = factory("messages:anthropic/claude-haiku-4.5")
+        responses = factory("responses:openai/gpt-6-luna@off")
+        self.assertIsInstance(messages, MessagesAttentionModel)
+        self.assertTrue(messages._url.endswith("/messages"))
+        self.assertEqual("bearer", messages._auth)
+        self.assertIsInstance(responses, ResponsesAttentionModel)
+        self.assertEqual(("openai/gpt-6-luna", "none"), (responses.model_id, responses._effort))
+        self.assertEqual(
+            {"reasoning_tokens": 2, "prompt_tokens": 10, "completion_tokens": 5},
+            run.call_usage({"usage": {"input_tokens": 10, "output_tokens": 5, "output_tokens_details": {"reasoning_tokens": 2}}}),
+        )
 
     def test_the_request_asks_for_cost_and_the_effort(self):
         provider = FakeProvider()
