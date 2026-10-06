@@ -222,9 +222,11 @@ class ConversationMemory:
         model judged to ask for something, or at one of the participant's own
         messages that someone responded to. Its responses are later messages
         by others that reply to it on the platform, that the model judged to
-        respond to it, or that the model named as having answered it.
-        ``exclude_event_id`` is the message the turn is about: its own
-        reading already describes it.
+        respond to it, or that the model named as having answered it, each
+        with what it said: a response is not always an answer, and a promise
+        is not the thing done. ``exclude_event_id`` is the message the turn
+        is about: its own reading already describes it, so it neither starts
+        a thread nor appears as a response.
         """
 
         now = now or datetime.now(timezone.utc)
@@ -241,13 +243,15 @@ class ConversationMemory:
                     responses.setdefault(head, set()).add(response)
 
         for event in events:
+            if event["id"] == exclude_event_id:
+                continue
             if event.get("reply_to_event_id"):
                 link(event["reply_to_event_id"], event["id"])
             judged = judgments.get(event["id"])
             if judged and "responds_to" in judged:
                 link(judged["responds_to"], event["id"])
         for judged in judgments.values():
-            if judged.get("answered_by") in position:
+            if judged.get("answered_by") in position and judged["answered_by"] != exclude_event_id:
                 link(judged["event_id"], judged["answered_by"])
 
         threads = []
@@ -277,7 +281,11 @@ class ConversationMemory:
             # remembers; later ones are in the room.
             ordered = sorted(responses.get(event["id"], ()), key=position.__getitem__)
             thread["responses"] = [
-                {"event_id": response, "author_id": events[position[response]]["author_id"]}
+                {
+                    "event_id": response,
+                    "author_id": events[position[response]]["author_id"],
+                    "text": _excerpt(str(events[position[response]].get("text", ""))),
+                }
                 for response in ordered[:THREAD_RESPONSES_MAX]
             ]
             threads.append(thread)

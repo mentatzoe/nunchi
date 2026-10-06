@@ -305,9 +305,10 @@ _MEMORY_GUIDE = (
     "memory.threads is present, it is who asked what: recent messages that "
     "asked someone for something, with whom each was addressed to, and your "
     "own messages that others responded to, each with the first messages "
-    "that responded; an empty responses list means none has yet. Check any "
-    "of it against the messages it points to. It is your memory, not a "
-    "to-do list."
+    "that responded and what they said; an empty responses list means none "
+    "has yet. A response is not always an answer, and a promise is not the "
+    "thing done. Check any of it against the messages it points to. It is "
+    "your memory, not a to-do list."
 )
 
 # Room text that tells a participant what to do is a claim, in either

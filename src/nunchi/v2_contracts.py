@@ -686,9 +686,10 @@ def _thread(value: Any, path: str) -> None:
     if not isinstance(responses, list) or len(responses) > THREAD_RESPONSES_MAX:
         _fail(f"{path}.responses", f"must be an array of at most {THREAD_RESPONSES_MAX}")
     for index, response in enumerate(responses):
-        item = _closed(response, f"{path}.responses[{index}]", required=("event_id", "author_id"))
+        item = _closed(response, f"{path}.responses[{index}]", required=("event_id", "author_id", "text"))
         _nes(item["event_id"], f"{path}.responses[{index}].event_id")
         _nes(item["author_id"], f"{path}.responses[{index}].author_id")
+        _memory_text(item["text"], f"{path}.responses[{index}].text")
 
 
 def _memory(value: Any, path: str) -> dict[str, Any]:

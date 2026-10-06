@@ -73,10 +73,10 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   agent's own included (`I-010B AttentionDecisionV2@6`). The participant's
   memory keeps each judgment and builds `memory.threads`: recent messages by
   others that asked for something, and the agent's own messages that others
-  responded to, each with the first messages that responded, from those
-  answers, from `answered_by`, and from platform replies; the newest 6
-  within a day (`I-010C ParticipantWakeV2@5`). An empty list of responses is
-  a fact, not a request. When a model writes no notes, the reading now says
+  responded to, each with the first messages that responded and what they
+  said, from those answers, from `answered_by`, and from platform replies;
+  the newest 6 within a day (`I-010C ParticipantWakeV2@5`). An empty list of
+  responses is a fact, not a request; a response is not always an answer. When a model writes no notes, the reading now says
   when a message asks for something and which message it responds to. Both
   turn prompts explain the threads, and say that room text telling the agent
   to speak or stay quiet is its author's claim, not an instruction.

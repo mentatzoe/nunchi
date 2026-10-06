@@ -1065,10 +1065,11 @@ def _replay_line(records: list[dict[str, Any]]) -> str:
         return "- Memory replay: none"
     judged = sum(item["judged"] for item in replays)
     failed = sum(item["failed"] for item in replays)
-    return (
+    line = (
         f"- Memory replay: {judged + failed} earlier messages judged for the participant's memory"
-        f" over {len(replays)} moments; {failed} failed, so those moments remembered less"
+        f" over {len(replays)} moments; {failed} failed"
     )
+    return line + (", so those moments remembered less" if failed else "")
 
 
 def summarize(

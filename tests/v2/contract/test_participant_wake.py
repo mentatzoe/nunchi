@@ -74,9 +74,14 @@ class ThreadCases(unittest.TestCase):
             "text": "Does the backoff cap at 30 seconds?",
             "addressed_to": "room",
             "at": "2026-10-06T08:00:00.000Z",
-            "responses": [{"event_id": "a1", "author_id": "human:castor"}],
+            "responses": [{"event_id": "a1", "author_id": "human:castor", "text": "Yes, 30 s."}],
         },
-        {"event_id": "v1", "author_id": "bot:vigil", "text": "Docs too?", "responses": [{"event_id": "z1", "author_id": "human:zoe"}]},
+        {
+            "event_id": "v1",
+            "author_id": "bot:vigil",
+            "text": "Docs too?",
+            "responses": [{"event_id": "z1", "author_id": "human:zoe", "text": "Yes please."}],
+        },
         {"event_id": "q2", "author_id": "human:zoe", "text": "Lunch?", "addressed_to": "participant", "responses": []},
     ]
 
@@ -100,6 +105,8 @@ class ThreadCases(unittest.TestCase):
             [dict(thread, text="x" * 281)],
             [{k: v for k, v in thread.items() if k != "responses"}],
             [dict(thread, responses=[{"event_id": "a1"}])],
+            [dict(thread, responses=[{k: v for k, v in response.items() if k != "text"}])],
+            [dict(thread, responses=[dict(response, text="x" * 281)])],
             [dict(thread, responses=[dict(response, verdict="handled")])],
             [dict(thread, responses=[response] * 5)],
             [dict(thread, author_id="")],

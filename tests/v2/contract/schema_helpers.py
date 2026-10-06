@@ -1288,10 +1288,13 @@ def _check_wake_thread(errors: "_Errors", path: str, thread: Any) -> None:
         return
     for index, response in enumerate(responses):
         item = f"{path}.responses[{index}]"
-        if _check_closed_object(errors, item, response, ("event_id", "author_id"), ("event_id", "author_id")):
+        fields = ("event_id", "author_id", "text")
+        if _check_closed_object(errors, item, response, fields, fields):
             for name in ("event_id", "author_id"):
                 if name in response:
                     _check_nes(errors, f"{item}.{name}", response[name])
+            if "text" in response and (not isinstance(response["text"], str) or len(response["text"]) > 280):
+                errors.add(f"{item}.text", "must be a string of at most 280 characters")
 
 
 def _check_wake_memory(errors: "_Errors", path: str, value: Any) -> None:

@@ -848,8 +848,7 @@ class UsageTests(unittest.TestCase):
         )
         self.assertIn("Reported cost of the whole run: $0.0082", summary)
         self.assertIn(
-            "- Memory replay: 4 earlier messages judged for the participant's memory over 1 moments;"
-            " 0 failed, so those moments remembered less",
+            "- Memory replay: 4 earlier messages judged for the participant's memory over 1 moments; 0 failed\n",
             summary,
         )
 

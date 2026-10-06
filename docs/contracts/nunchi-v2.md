@@ -306,14 +306,15 @@ something (`asks` and `conversation` at least 0.5), or at one of the
 participant's own messages that someone responded to. It carries
 `event_id`, `author_id`, `text` (at most 280 characters), optional `at`,
 `addressed_to` (one of the `addressee` options, only on others' asks), and
-`responses`: at most 4 `{event_id, author_id}` pointers to the first later
+`responses`: at most 4 `{event_id, author_id, text}` items for the first later
 messages by others that reply to it on the platform, that attention judged to
 respond to it (`responds_to`), or that attention named as having answered it
-(`answered_by`). An empty `responses` array means none has yet; it is a fact,
-not a request to answer. The reference host keeps the judgments of the newest
-64 messages and shows the newest 6 threads within a day, leaves out the
-message the turn is about (its reading describes it), and forgets the
-judgments on restart. A message observed but never judged, such as one that
+(`answered_by`), with what each said (at most 280 characters): a response is
+not always an answer. An empty `responses` array means none has yet; it is a
+fact, not a request to answer. The reference host keeps the judgments of the
+newest 64 messages and shows the newest 6 threads within a day, leaves the
+message the turn is about out of the threads and their responses (its reading
+describes it), and forgets the judgments on restart. A message observed but never judged, such as one that
 arrived while the participant was mid-turn, starts no thread.
 
 ## I-010D ContextContinuationV2@1
