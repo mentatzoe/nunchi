@@ -66,6 +66,14 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- The agent's turn guide says what `docs/behavior.md` already holds: one
+  clarifying question beats a guess (#94, step 6 follow-up). Both turn
+  prompts now say to state only what the agent knows, to say so, ask, or
+  offer to check when it has not checked, and that "not yet" answers someone
+  asking for news, where silence leaves them waiting. Run 46 showed why: in
+  `asked-while-busy`, 8 of 10 replies on one route stated a fact the agent
+  could not know. And in `mention-in-busy-room` the agent often stayed quiet
+  for lack of findings.
 - The Claude Code participant hears what others post while it works (#94,
   step 6; Zoe, 2026-10-06). After each tool call the main session makes in
   a room turn, the mod asks the gate what others posted since the session
