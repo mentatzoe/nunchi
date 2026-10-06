@@ -66,6 +66,17 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- The agent remembers its own part in the room, and its turn prompt reads
+  like a person in a group conversation (#94, plan step 5, first part). Every
+  turn's wake may carry `memory.own_moves`: what the agent said, replied and
+  reacted to, and where it stayed quiet, each pointing at its message: the
+  newest 8 visible moves and the latest 3 silences within a day
+  (`src/nunchi/memory.py`). Visible moves come from the
+  room's history; the participant host records silences.
+  `I-010C ParticipantWakeV2@4` adds the field. Both turn prompts now describe
+  a socially aware participant and present the look-again without putting
+  silence at the decision point: since step 3 that wording made the agent
+  quieter on the same wakes (#86). Hermes does not carry the memory yet.
 - The README opens with three diagrams: one message's path through the gate,
   how the parts fit, and where the plan stands. The manual `behavior-eval`
   workflow no longer plays the paired turn by default; the suite's README

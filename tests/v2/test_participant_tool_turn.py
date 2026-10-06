@@ -115,7 +115,7 @@ class ToolRolesAndPromptTests(unittest.TestCase):
 
     def test_the_prompt_never_asks_for_an_admission_verdict(self):
         prompt = participant_tool_turn_prompt(PROFILE, tools=TOOLS)
-        self.assertIn("Do not judge admission again", prompt)
+        self.assertIn("do not judge admission again", prompt)
         for verdict in ("PASS", "SPEAK", "ASK", "confidence"):
             self.assertNotIn(verdict, prompt)
 

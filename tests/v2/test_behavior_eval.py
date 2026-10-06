@@ -874,6 +874,19 @@ class UsageTests(unittest.TestCase):
         )
         self.assertIn("| 1 / 1 of 2 |", summary)
 
+    def test_the_record_shows_what_the_agent_remembered(self):
+        # quiet-for-hours: Vigil said "Will do." seven hours earlier, and its
+        # turn now remembers that reply (#94 step 5).
+        scene = scene_by_id("quiet-for-hours")
+        agent = FakeAgent(lambda wake: None)
+        job = run.Job(scene, 0, scene.participants[0], "fixture/model", 0)
+        record = run.judge_moment(
+            job, lambda _: FixedModel("WAKE"), timeout_seconds=5, agent_factory=lambda profile: agent
+        )
+        self.assertEqual(["reply"], record["agent"]["memory_moves"])
+        (wake, _), = agent.turns
+        self.assertEqual("Will do.", wake["memory"]["own_moves"][0]["text"])
+
     def test_no_usage_means_no_cost_section(self):
         scene = scene_by_id("bot-status-report")
         record = run.judge_moment(run.Job(scene, 0, "vigil", "fixture/model", 0), lambda _: FixedModel("WAKE"), timeout_seconds=5)

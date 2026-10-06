@@ -11,7 +11,7 @@ live, integrated, or released status.
 `docs/architecture/v2-selected-design.md` preserve the field inventory selected
 from Aleph Vault at `c834e8c`; the external path is provenance, not a
 contributor dependency. The program-canonical interface names and versions
-(`I-010A`, `I-010D` at `@1`; `I-010C` at `@2`; `I-010B`, `I-010E` at `@3`) are this
+(`I-010A`, `I-010D`, `I-010F` at `@1`; `I-010E` at `@3`; `I-010C` at `@4`; `I-010B` at `@5`) are this
 slice's vocabulary layered over that inventory. A document the selected design
 declares valid that either validator rejects is a contract defect, never
 resolved by narrowing the corpus.
@@ -21,8 +21,8 @@ resolved by narrowing the corpus.
 | Interface | Version | Schema path |
 |---|---|---|
 | `I-010A AttentionRequestV2` | `@1` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
-| `I-010B AttentionDecisionV2` | `@3` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
-| `I-010C ParticipantWakeV2` | `@2` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
+| `I-010B AttentionDecisionV2` | `@5` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
+| `I-010C ParticipantWakeV2` | `@4` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
 | `I-010E AttentionReceiptV2` | `@3` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
 | `I-010F PrivilegedActionAuthorizationV2` | `@1` | [`schemas/v2/privileged-action-authorization.schema.json`](../../schemas/v2/privileged-action-authorization.schema.json) |
@@ -259,7 +259,7 @@ closed-union change: `@2` consumers must upgrade before receiving ACK.
   occur before a request ID is assignable); an optional `classifier` audit is
   present only when the error occurred after classifier invocation.
 
-## I-010C ParticipantWakeV2@3
+## I-010C ParticipantWakeV2@4
 
 The normal-turn input materializes `self`, `room`, `actors`, `events`,
 `trigger_event_id`, `coverage`, and optional `continuation` directly —
@@ -279,6 +279,19 @@ separate participant "budgets" field — the wake's own `coverage` (computed
 when the packet was materialized for the participant) carries the
 independent participant event/byte budget (S15). The contract contains no
 admission meta-question and no composed reply.
+
+Since @4 (#94 step 5) a wake may carry `memory`: `own_moves`, the
+participant's own recent moves in the room, oldest first. Each move is one
+closed shape: a `message` (`event_id`, `text`), a `reply` or `reaction`
+(`event_id`, `about_event_id`, and `text` or `reaction`), or a `silence`
+(`about_event_id`, `at`); messages, replies and reactions may carry `at`, and
+`text` is at most 280 characters. Visible moves come from the room's
+retained history; the host records a silence when a turn ends without an
+action. The pointers may name messages that have left the wake's window.
+Memory is facts with pointers, never a verdict, an obligation, or a work
+queue, and old moves fade: the reference host keeps the newest 8 visible
+moves and the latest 3 silences within a day, and a silence goes once its
+message is no longer retained.
 
 ## I-010D ContextContinuationV2@1
 

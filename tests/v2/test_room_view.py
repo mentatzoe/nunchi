@@ -227,10 +227,16 @@ class LookAgainTests(unittest.TestCase):
         turn = participant_turn_prompt(PROFILE)
         self.assertIn("or new (what others posted since you last looked)", turn)
         self.assertIn("you are shown anything others posted while you were composing", turn)
+        # The look-again is described without putting silence at the
+        # decision point (#94 step 5: since step 3 that wording made the
+        # agent quieter on the same wakes).
+        self.assertNotIn("stay silent", turn)
+        self.assertNotIn("remain silent if the moment has passed", turn)
         self.assertNotIn("When coverage says more context exists", turn)
         tool = participant_tool_turn_prompt(PROFILE, tools={"send": "send", "context": "context"})
         self.assertIn("context shows the room as it is now", tool)
         self.assertIn("your first post or reaction is not sent", tool)
+        self.assertNotIn("stay silent if the moment has passed", tool)
 
 
 if __name__ == "__main__":  # pragma: no cover

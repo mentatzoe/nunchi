@@ -641,6 +641,40 @@ def validate_attention_decision(
     return deepcopy(dict(checked))
 
 
+# The participant's own recent moves in the room (#94 step 5); see
+# ``nunchi.memory``. Each kind names exactly the fields it carries.
+MEMORY_TEXT_MAX_CHARS = 280
+_OWN_MOVE_FIELDS = {
+    "message": (("kind", "event_id", "text"), ("at",)),
+    "reply": (("kind", "event_id", "about_event_id", "text"), ("at",)),
+    "reaction": (("kind", "event_id", "about_event_id", "reaction"), ("at",)),
+    "silence": (("kind", "about_event_id", "at"), ()),
+}
+
+
+def _memory(value: Any, path: str) -> dict[str, Any]:
+    doc = _closed(value, path, required=("own_moves",))
+    moves = doc["own_moves"]
+    if not isinstance(moves, list) or not moves:
+        _fail(f"{path}.own_moves", "must be a non-empty array")
+    for index, move in enumerate(moves):
+        item = f"{path}.own_moves[{index}]"
+        kind = move.get("kind") if isinstance(move, Mapping) else None
+        if kind not in _OWN_MOVE_FIELDS:
+            _fail(f"{item}.kind", "must be message, reply, reaction or silence")
+        required, optional = _OWN_MOVE_FIELDS[kind]
+        _closed(move, item, required=required, optional=optional)
+        for name in ("event_id", "about_event_id", "reaction", "at"):
+            if name in move:
+                _nes(move[name], f"{item}.{name}")
+        if "text" in move:
+            if not isinstance(move["text"], str):
+                _fail(f"{item}.text", "must be a string")
+            if len(move["text"]) > MEMORY_TEXT_MAX_CHARS:
+                _fail(f"{item}.text", f"must be at most {MEMORY_TEXT_MAX_CHARS} characters")
+    return doc
+
+
 def validate_participant_wake(value: Any) -> dict[str, Any]:
     doc = _closed(
         value,
@@ -655,8 +689,12 @@ def validate_participant_wake(value: Any) -> dict[str, Any]:
             "coverage",
             "attention",
         ),
-        optional=("continuation",),
+        optional=("continuation", "memory"),
     )
+    if "memory" in doc:
+        # Memory points at messages that may have left the window; the
+        # participant can look around them in the room.
+        _memory(doc["memory"], "wake.memory")
     _nes(doc["request_id"], "wake.request_id")
     _observation_fields(doc, require_schema=False)
     attention = _closed(

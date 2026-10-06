@@ -108,8 +108,9 @@ The trigger is an anchor explaining why consideration began. It is not the
 message the participant must answer, a claim that the floor remains open, or a
 status marker. The attention proxy judges the assembled conversation as it
 currently stands. A woken participant receives the freshest bounded factual
-room view available at invocation and is instructed to contribute naturally or
-remain silent if the moment has passed.
+room view available at invocation, its own recent moves in the room, and the
+attention model's reading. Its prompt describes how a socially aware person
+takes part in a group conversation, and it decides (#94 step 5).
 
 Freshness is not decided by a deterministic age cutoff. An older direct mention
 must not disappear merely because newer chatter arrived, and code must not

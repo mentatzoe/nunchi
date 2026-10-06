@@ -210,8 +210,8 @@ this behavior. The rules replaced so far:
 |---|---|
 | Step 1 suppresses only non-conversation | A typed question ("is this conversation?") decides; only a "no" suppresses, and a message addressed to someone else is still conversation |
 | Step 2 gives a social reading with reasons | Typed questions with pointers to messages (addressed to whom, already answered and by which message, mid-thought, something to add, which moves fit); the reading the agent gets on every turn is written from the answers, and ends with the kinds of response that could fit and their probabilities. A chat model or a typed decision model can answer |
-| The agent's turn carries social context | A generic "contribute naturally or stay silent" prompt |
-| Conversation memory | None between judgments; a window of the newest 24 events, plus up to 6 older messages of the agent's direct exchange (mentions of it, replies to it, its own messages) |
+| The agent's turn carries social context | The turn prompt describes how a socially aware person takes part in a group conversation; the turn carries the reading and the agent's own recent moves |
+| Conversation memory | The agent's own moves (what it said, replied and reacted to, and where it stayed quiet), each pointing at its message: the newest 8 visible moves and the latest 3 silences within a day. Facts about others (who asked what, what got answered and by whom, open threads) are next. The judgment itself still sees a window of the newest 24 events, plus up to 6 older messages of the agent's direct exchange |
 | The agent sees the room as it is now | During its turn the agent can read the live room (older, newer, or new since it last looked), and before its first post it is shown what others said meanwhile, once; Hermes does not offer this yet |
 | Pace and pauses | No current time; nothing happens when someone stops talking |
 | The agent sends its own "mhm" | By default an ACK judgment gives the agent a turn and any "mhm" is its own; Nunchi's own 👂 remains as an opt-in (`ack.enabled: true`) |

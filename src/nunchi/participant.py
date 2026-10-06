@@ -22,6 +22,7 @@ from .ack import (
     UNAVAILABLE_REACTION_CAPABILITY,
     reaction_capability,
 )
+from .memory import ConversationMemory
 from .observation import ObservationProvider
 from .receipts import ReceiptJournal
 from .v2_contracts import (
@@ -351,8 +352,14 @@ def build_participant_wake(
     observation: ObservationProvider,
     request: Mapping[str, Any],
     decision: Mapping[str, Any],
+    *,
+    memory: ConversationMemory | None = None,
 ) -> dict[str, Any] | None:
-    """Build the fresh bounded facts delivered to any admitted participant."""
+    """Build the fresh bounded facts delivered to any admitted participant.
+
+    With ``memory``, the wake also carries the participant's own recent moves
+    in the room (#94 step 5).
+    """
 
     checked_request = validate_attention_request(request)
     checked_decision = validate_attention_decision(
@@ -410,6 +417,10 @@ def build_participant_wake(
             if judged_through in event_ids:
                 attention["judged_through_event_id"] = judged_through
     wake["attention"] = attention
+    if memory is not None:
+        facts = memory.facts(observation)
+        if facts:
+            wake["memory"] = facts
     return validate_participant_wake(wake)
 
 
@@ -528,6 +539,7 @@ class ParticipantTurnHost:
         participant_timeout_seconds: float = 300.0,
         ack_policy: AckPolicy | None = None,
         ack_journal: AckJournal | None = None,
+        memory: ConversationMemory | None = None,
     ) -> None:
         if (
             isinstance(participant_timeout_seconds, bool)
@@ -544,6 +556,8 @@ class ParticipantTurnHost:
         self.privileged = privileged
         self.ack_policy = ack_policy or AckPolicy()
         self.ack_journal = ack_journal or AckJournal()
+        # The participant's own moves in this room; every turn carries them.
+        self.memory = memory if memory is not None else ConversationMemory()
         self.participant_timeout_seconds = float(participant_timeout_seconds)
         self.host_timeout_seconds = self.participant_timeout_seconds
         self.invocation_count = 0
@@ -762,7 +776,7 @@ class ParticipantTurnHost:
         request: Mapping[str, Any],
         decision: Mapping[str, Any],
     ) -> dict[str, Any] | None:
-        return build_participant_wake(self.observation, request, decision)
+        return build_participant_wake(self.observation, request, decision, memory=self.memory)
 
     def run(
         self,
@@ -911,6 +925,9 @@ class ParticipantTurnHost:
             return None
         if raw_action is None:
             settle_host("silent")
+            # A silence leaves no trace in the room; the participant's memory
+            # keeps it so a later turn knows where it held back.
+            self.memory.record_silence(about_event_id=wake["trigger_event_id"])
             return None
         try:
             action = _validate_action(raw_action)
