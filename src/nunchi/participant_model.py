@@ -17,7 +17,7 @@ import urllib.request
 
 from .attention import ParticipantProfile
 from .errors import NunchiError, ValidationError
-from .v2_contracts import validate_participant_wake
+from .v2_contracts import shown_event_ids, validate_participant_wake
 
 
 class ParticipantModelError(NunchiError):
@@ -703,9 +703,7 @@ class ParticipantTurnProtocol:
         self.expansions = 0
         self.limit_noted = False
         self.looked_again = False
-        self.visible_event_ids = {
-            event["id"] for event in self.request["wake"]["events"]
-        }
+        self.visible_event_ids = shown_event_ids(self.request["wake"])
 
     @property
     def instructions(self) -> str:

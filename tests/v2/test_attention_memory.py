@@ -81,5 +81,48 @@ class AttentionMemoryTests(unittest.TestCase):
         self.assertEqual(wakes[-1]["memory"], projection["memory"])
 
 
+class RememberedTargetTests(unittest.TestCase):
+    def test_the_agent_may_reply_to_a_request_it_remembers_after_it_left_the_window(self):
+        # Run 38: with the request in its memory, an agent replied to it and
+        # was refused because the request was no longer among the turn's events.
+        from nunchi.observation import ObservationLimits
+
+        replies = []
+
+        def participant(**turn):
+            wake = turn["wake"]
+            if wake["trigger_event_id"] != "c1":
+                return None
+            replies.append(wake)
+            return {"kind": "reply", "origin_event_id": "c1", "target_event_id": "z1", "text": "Zoe, it passed."}
+
+        pipeline, _, transport, _ = foundation(
+            model=FixtureModel("WAKE"), participant=participant, limits=ObservationLimits(snapshot_events=4)
+        )
+        observe = pipeline.observation.observe
+        observe(delivery_id="d-z1", event=message("z1", text="Tell me when the nightly finishes?"), actors=ZOE)
+        observe(delivery_id="d-v1", event=message("v1", author_id=SELF, text="I will.", reply_to_event_id="z1"), actors=ZOE)
+        for index in range(6):
+            observe(delivery_id=f"d-t{index}", event=message(f"t{index}", text=f"Other talk {index}."), actors=ZOE)
+        pipeline.handle_delivery(
+            delivery_id="d-c1",
+            event=message("c1", author_id="bot:ci", text="nightly passed"),
+            actors={"bot:ci": {"kind": "bot"}},
+        )
+        (wake,) = replies
+        self.assertNotIn("z1", [event["id"] for event in wake["events"]])
+        (move,) = [move for move in wake["memory"]["own_moves"] if move["kind"] == "reply"]
+        self.assertEqual(("z1", "Tell me when the nightly finishes?"), (move["about_event_id"], move["about_text"]))
+        ((action, _),) = transport.calls
+        self.assertEqual(("reply", "z1"), (action["kind"], action["target_event_id"]))
+
+    def test_a_target_nobody_showed_the_agent_is_still_refused(self):
+        from nunchi.v2_contracts import shown_event_ids
+
+        wake = {"events": [{"id": "c1"}], "memory": {"own_moves": [
+            {"kind": "reply", "event_id": "v1", "about_event_id": "z1", "text": "I will."}]}}
+        self.assertEqual({"c1", "v1", "z1"}, shown_event_ids(wake))
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

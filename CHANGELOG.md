@@ -73,7 +73,10 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   model gets it in its state. Each of the agent's moves about a message now
   also says who wrote that message and what it said (`about_author_id`,
   `about_text`; `I-010C ParticipantWakeV2@11`), so "I'll tell you when it
-  finishes" still makes sense after Zoe's request has left the window.
+  finishes" still makes sense after Zoe's request has left the window. An
+  action may reply or react to a message the turn's memory points at, as
+  to one in its window: run 38 showed an agent replying to the request it
+  remembered and being refused.
 - Step 1 no longer hides what the judgment itself would speak to (#94,
   step 6). A "not conversation" answer suppresses only when the judgment's
   most likely move is not to speak. Run 35 showed why: a CI line saying the

@@ -38,6 +38,7 @@ import uuid
 from ..attention import ParticipantProfile
 from ..errors import NunchiError
 from ..participant import ParticipantTurnHost, TransportResult
+from ..v2_contracts import shown_event_ids
 from ..participant_model import (
     PARTICIPANT_TOOL_SPECS,
     PARTICIPANT_TURN_PROTOCOL_VERSION,
@@ -154,7 +155,7 @@ class _Turn:
         self.roles = frozenset(roles)
         self.expand = expand
         self.cancel = cancel
-        self.visible_event_ids = {event["id"] for event in request["wake"]["events"]}
+        self.visible_event_ids = shown_event_ids(request["wake"])
         self.looked_again = False
         self.lock = threading.Lock()
         self.turn_id: str | None = None

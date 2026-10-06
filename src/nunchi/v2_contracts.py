@@ -796,6 +796,24 @@ def _memory(value: Any, path: str) -> dict[str, Any]:
     return doc
 
 
+def shown_event_ids(wake: Mapping[str, Any]) -> set[str]:
+    """The messages a turn has shown the participant before it looks around.
+
+    Its events, and every message its memory points at: memory items come
+    from the room's retained history, so a participant may reply to the
+    request it remembers after that request has left the window (#94 step 6).
+    """
+
+    shown = {event["id"] for event in wake["events"]}
+    memory = wake.get("memory") or {}
+    for move in memory.get("own_moves", ()):
+        shown.update(move[key] for key in ("event_id", "about_event_id") if key in move)
+    for thread in memory.get("threads", ()):
+        shown.add(thread["event_id"])
+        shown.update(response["event_id"] for response in thread["responses"])
+    return shown
+
+
 def validate_participant_wake(value: Any) -> dict[str, Any]:
     doc = _closed(
         value,

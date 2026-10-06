@@ -92,7 +92,9 @@ names. Host- and vendor-specific behavior enters through these seams:
   holds each role's description and closed input schema;
   `participant_tool_turn_text(profile, request, tools=...)` renders the turn
   with the names the host registered; `participant_tool_action` turns one
-  call into one bound action, checked against permissions and visible events;
+  call into one bound action, checked against permissions and visible events
+  (the wake's events, the messages its memory points at, and any page the
+  participant read);
   `participant_tool_expansion` turns a context call into expansion arguments.
   The host still commits the action through `ParticipantTurnHost`. The Claude
   Code gate is the first user

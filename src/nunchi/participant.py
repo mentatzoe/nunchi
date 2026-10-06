@@ -26,6 +26,7 @@ from .memory import ConversationMemory
 from .observation import ObservationProvider
 from .receipts import ReceiptJournal
 from .v2_contracts import (
+    shown_event_ids,
     validate_attention_decision,
     validate_attention_request,
     validate_participant_wake,
@@ -488,7 +489,7 @@ class RoomView:
         self.expansion_calls = 0
         self.new_checks = 0
         self._limit_noted = False
-        self.seen_event_ids: set[str] = {event["id"] for event in wake["events"]}
+        self.seen_event_ids: set[str] = shown_event_ids(wake)
 
     def fork(self) -> "RoomView":
         """A fresh view of the same turn, as if nothing had been read yet.
