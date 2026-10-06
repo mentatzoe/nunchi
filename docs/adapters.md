@@ -24,8 +24,8 @@ remove, `matrix` declares reaction add, and `telegram` declares no reactions.
 
 A room on any other platform name is still valid. Its compatibility is
 `unregistered`, and `config show` and `diagnose` warn that its capabilities
-are unknown: reactions count as unsupported, and ACK widens to DEFER, until
-the integration measures them at runtime.
+are unknown: reactions count as unsupported, so the participant cannot react,
+until the integration measures them at runtime.
 
 ## Generic JSONL
 
@@ -79,22 +79,24 @@ response includes a stable message/event identity for the exact target room; a
 successful HTTP envelope with a missing or mismatched native acknowledgement
 remains `unknown`.
 
-ACK capability is current native authority, not configured optimism. The
+Reaction capability is current native authority, not configured optimism. It
+decides whether the participant may react at all, and which reactions it may
+use; Nunchi never reacts on its behalf. The
 shared Discord MCP transport measures the authenticated bot's effective guild
 roles and channel overwrites. Matrix binds `whoami` to the configured actor and
 compares that user with the room's `m.reaction` power level. A denial, missing
-state, identity mismatch, or malformed response is unsupported and widens ACK
-to DEFER before any reaction dispatch.
+state, identity mismatch, or malformed response is unsupported: the turn
+offers the participant no reaction, and it still takes its turn.
 
 The shared Discord MCP transport's probe (`src/nunchi/mcp_discord/rest.py`)
 models guild text channels only. It does not model three cases:
 
 - **Guild owner.** Discord grants the owner every permission; the probe does
   not read `owner_id`, so an owning bot behind a restrictive `@everyone` is
-  reported unable to react and ACK widens to DEFER.
+  reported unable to react.
 - **Member timeout.** The probe ignores `communication_disabled_until`, so a
   timed-out bot can be reported able to react, and the reaction then fails
   at dispatch.
 - **Threads.** A thread payload carries no `permission_overwrites`, so the
-  probe errors and ACK widens to DEFER. This has not been checked against
+  probe errors and the participant cannot react there. This has not been checked against
   live Discord.

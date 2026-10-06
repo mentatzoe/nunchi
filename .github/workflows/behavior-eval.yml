@@ -28,14 +28,6 @@ on:
         description: Model that plays the woken agent's turn; the implementation baseline is anthropic/claude-haiku-4.5 (empty grades attention alone, for model selection)
         required: false
         default: anthropic/claude-haiku-4.5
-      ack:
-        description: Who sends the mhm on an ACK judgment (agent, the default, or nunchi for Nunchi's own nod)
-        required: true
-        default: agent
-        type: choice
-        options:
-          - agent
-          - nunchi
       paired:
         description: Also play each agent turn that carried a reading without it, when the reading is what changed (needs agent_model; doubles the agent's cost)
         required: true
@@ -73,7 +65,6 @@ jobs:
           SCENES: ${{ inputs.scenes }}
           TEMPERATURE: ${{ inputs.temperature }}
           AGENT_MODEL: ${{ inputs.agent_model }}
-          ACK: ${{ inputs.ack }}
           PAIRED: ${{ inputs.paired }}
           READING_ITEMS: ${{ inputs.reading_items }}
           READING_CHARS: ${{ inputs.reading_chars }}
@@ -95,7 +86,6 @@ jobs:
             --scenes "$SCENES" \
             --temperature "$TEMPERATURE" \
             --agent-model "$AGENT_MODEL" \
-            --ack "$ACK" \
             --reading-items "$READING_ITEMS" \
             --reading-chars "$READING_CHARS" \
             "${paired[@]}" \

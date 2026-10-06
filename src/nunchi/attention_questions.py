@@ -49,7 +49,9 @@ _MOVE_WORDS = {
     "wait": "wait",
     "stay_quiet": "stay quiet",
 }
-_MOVE_DISPOSITION = {"speak": "WAKE", "mhm": "ACK", "wait": "DEFER", "stay_quiet": "DEFER"}
+# A mhm is the participant's own move (#94 step 7): it gets the turn, with the
+# reading, and decides for itself.
+_MOVE_DISPOSITION = {"speak": "WAKE", "mhm": "DEFER", "wait": "DEFER", "stay_quiet": "DEFER"}
 
 
 def attention_questions(name: str, *, unattended: bool = False) -> dict[str, dict[str, Any]]:
@@ -399,8 +401,8 @@ def classifier_disposition(answers: Mapping[str, Any]) -> str:
     answers say speaking is most likely, hiding it would be the invisible
     mistake: a wrong suppression is never seen, and a wrong pass costs one
     turn (``docs/behavior.md``; #94 step 6). Otherwise the participant gets
-    a turn: speaking wakes it, a mhm asks for one, and waiting or staying
-    quiet defer to it with the reading. A message that arrived while the
+    a turn: speaking wakes it, and a mhm, waiting or staying quiet defer to
+    it with the reading. A message that arrived while the
     participant was busy and still calls for it is never hidden either.
     """
 
@@ -656,7 +658,8 @@ def answers_leaning(disposition: str, *, close: bool = False) -> dict[str, Any]:
     """Typed answers that map to ``disposition``, for scripted models.
 
     Conformance checks and tests use these to drive the engine through each
-    disposition. They match the chat-model schema exactly, so a host that
+    disposition; ``"mhm"`` leans toward a quick mhm, which defers to the
+    participant. They match the chat-model schema exactly, so a host that
     validates structured output accepts them. ``close`` makes a suppression a
     near call that the margin valve widens to DEFER.
     """
@@ -675,7 +678,7 @@ def answers_leaning(disposition: str, *, close: bool = False) -> dict[str, Any]:
         }
     move = {
         "WAKE": {"speak": 0.7, "mhm": 0.1, "wait": 0.15, "stay_quiet": 0.05},
-        "ACK": {"speak": 0.2, "mhm": 0.6, "wait": 0.15, "stay_quiet": 0.05},
+        "mhm": {"speak": 0.2, "mhm": 0.6, "wait": 0.15, "stay_quiet": 0.05},
         "DEFER": {"speak": 0.25, "mhm": 0.05, "wait": 0.6, "stay_quiet": 0.1},
     }[disposition]
     return {
@@ -685,11 +688,11 @@ def answers_leaning(disposition: str, *, close: bool = False) -> dict[str, Any]:
             if disposition == "DEFER"
             else {"participant": 0.8, "room": 0.1, "someone_else": 0.05, "nobody": 0.05}
         ),
-        "asks": 0.1 if disposition == "ACK" else 0.8,
+        "asks": 0.1 if disposition == "mhm" else 0.8,
         "answered": 0.05,
         "answered_by": None,
         "responds_to": None,
-        "mid_thought": 0.8 if disposition == "ACK" else 0.05,
+        "mid_thought": 0.8 if disposition == "mhm" else 0.05,
         "adds_something": 0.8 if disposition == "WAKE" else 0.3,
         "move": move,
     }

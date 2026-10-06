@@ -74,7 +74,6 @@ Each moment runs through Nunchi's own pipeline: observation, attention, the
 participant host and the transport.
 
 - **Suppress** counts as staying quiet, decided by attention.
-- **ACK** counts as an mhm that Nunchi sent.
 - **Wake** or **defer** gives the agent a turn. With `--agent-model`, that
   model plays the turn through the shared participant protocol, and its
   move is graded: a message or reply is speaking, its own reaction is an
@@ -133,9 +132,6 @@ agent's side of the room:
   is asked for: at most 4 notes of at most 400 characters by default, and
   `--reading-items 0` asks for none. Shorter readings answer faster; the
   paired arm shows what each length changes.
-- `--ack` says who sends the "mhm". The default, `agent`, matches Nunchi's
-  default: an ACK judgment gives the agent a turn, and any "mhm" is its
-  own. `--ack nunchi` turns Nunchi's own nod back on, for comparison.
 
 A pause moment, such as "five minutes later, nobody has answered", plays
 the scene through the message before the pause as it happened live: that

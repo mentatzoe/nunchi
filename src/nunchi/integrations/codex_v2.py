@@ -19,7 +19,6 @@ from typing import Any
 import urllib.error
 
 from .. import __version__
-from ..ack import AckJournal, AckPolicy
 from ..adapters.decisions_api import ATTENTION_KINDS
 from ..adapters.runtime import load_pinned_config
 from ..attention import (
@@ -424,6 +423,8 @@ class CodexRoomRuntime:
             "transport",
             "codex",
         }
+        # "ack" configured Nunchi's own nod, removed in #94 step 7; an older
+        # config that still has it loads, and the setting is ignored.
         if (
             required - set(config)
             or set(config) - (required | {"ack"})
@@ -486,10 +487,6 @@ class CodexRoomRuntime:
             binding=self.binding,
             state_directory=state,
         )
-        try:
-            ack_policy = AckPolicy(**dict(config.get("ack", {})))
-        except (TypeError, ValueError) as exc:
-            raise ValidationError(f"Codex ACK policy is invalid: {exc}") from exc
         transport = MCPDiscordTransport(
             client,
             self.binding.room_id,
@@ -503,8 +500,6 @@ class CodexRoomRuntime:
             transport=transport,
             scheduler=scheduler,
             receipts=receipts,
-            ack_policy=ack_policy,
-            ack_journal=AckJournal(state / "codex-v2-acks.jsonl"),
             participant_timeout_seconds=participant.timeout_seconds + 5,
         )
         attention = AttentionEngine(
@@ -512,8 +507,6 @@ class CodexRoomRuntime:
             model=model,
             policy=policy,
             receipts=receipts,
-            ack_policy=ack_policy,
-            reaction_capability_provider=host.reaction_capability,
         )
         self.pipeline = NunchiV2Pipeline(
             observation=observation,

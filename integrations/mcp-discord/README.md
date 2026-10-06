@@ -64,7 +64,7 @@ restart.
 registered bot identity, reads the configured guild channel, member roles, and
 permission overwrites, and returns only the effective add-reaction capability
 plus a non-secret permission revision. Missing, denied, malformed, or
-mismatched facts fail closed so core widens model ACK to DEFER.
+mismatched facts fail closed: the participant's turn offers no reaction.
 
 ## Configuration
 

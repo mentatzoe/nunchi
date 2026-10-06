@@ -56,7 +56,7 @@ resolves its declared environment sources into a private owner-only state file;
 the generated launchd/systemd definition and dashboard never contain or return
 the values. Re-run `nunchi service install` after rotating one of those values.
 The dashboard and CLI expose the same
-identity, rooms, models, attention/ACK policy, capabilities, compatibility,
+identity, rooms, models, attention policy, capabilities, compatibility,
 health, services, and receipts. Dashboard mutations and service operations
 require the current profile revision.
 
@@ -64,8 +64,8 @@ Declare supervised runners with repeated `--service NAME='COMMAND ...'` setup
 arguments. Then use `nunchi service start|stop|restart|status|logs|reset`
 or install and activate the generated launchd/systemd user definition with
 `nunchi service install`. The worker, rather than the outer service manager,
-enforces the configured restart policy. Profile reset preserves durable ACK
-and receipt journals. `nunchi uninstall --profile NAME` stops its services,
+enforces the configured restart policy. Profile reset preserves durable
+receipt journals. `nunchi uninstall --profile NAME` stops its services,
 deactivates installed definitions, and removes only that profile; package-level
 state purge remains an explicit `nunchi-install uninstall --purge-state`
 operation.
@@ -83,12 +83,12 @@ shim. The current adapter accepts configured Discord and Telegram rooms only.
 Other platforms stay outside Nunchi and use stock Hermes behavior.
 When Nunchi admits a configured turn, stock Hermes keeps its participant
 prompt, main model, memory, post-invocation reactions, cancellation, delivery,
-and platform adapter behind Nunchi's shared core and effect guards. A model
-ACK gives the participant a turn (DEFER), so any reaction is the
-participant's own; Nunchi's own nod is off by default since 2026-10-05. A
-room can turn it back on with `"ack": {"enabled": true}` in its config.
-The [ACK verification record](verification/2026-10-02-hermes-ack.md) covers
-Nunchi's own nod as verified on 2026-10-02, before it was turned off.
+and platform adapter behind Nunchi's shared core and effect guards. A
+judgment that leans to a "mhm" gives the participant a turn (DEFER), so any
+reaction is the participant's own. Nunchi's own nod was removed in #94 step
+7; a room config that still has an `ack` setting loads, and the setting is
+ignored. The [ACK verification record](verification/2026-10-02-hermes-ack.md)
+covers that nod as verified on 2026-10-02.
 Hermes tools retain native authority, with durable at-most-once
 invocation claims and cooperative cancellation; see the
 [native-tool verification record](verification/2026-10-02-native-tools.md).

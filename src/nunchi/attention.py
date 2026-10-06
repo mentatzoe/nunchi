@@ -20,12 +20,6 @@ import urllib.error
 import urllib.request
 
 from .errors import NunchiError, ValidationError
-from .ack import (
-    AckPolicy,
-    ReactionCapability,
-    UNAVAILABLE_REACTION_CAPABILITY,
-    reaction_capability,
-)
 from .attention_questions import (
     ADDRESSEES,
     MOVES,
@@ -910,19 +904,11 @@ class AttentionEngine:
         model: AttentionModel | None,
         policy: AttentionPolicy | None = None,
         receipts: ReceiptJournal | None = None,
-        ack_policy: AckPolicy | None = None,
-        reaction_capability_provider: (
-            ReactionCapability | Callable[[], ReactionCapability] | None
-        ) = None,
     ) -> None:
         self.profile = profile
         self.model = model
         self.policy = policy or AttentionPolicy()
         self.receipts = receipts or ReceiptJournal()
-        self.ack_policy = ack_policy or AckPolicy()
-        self._reaction_capability_provider = (
-            reaction_capability_provider or UNAVAILABLE_REACTION_CAPABILITY
-        )
         self.call_count = 0
         self._lock = threading.Lock()
 
@@ -1149,55 +1135,17 @@ class AttentionEngine:
         if disposition == "WAKE":
             valve = "none"
             override = "none"
-            ack_audit = None
-        elif disposition == "ACK":
-            provider = self._reaction_capability_provider
-            try:
-                capability = reaction_capability(
-                    provider() if callable(provider) else provider
-                )
-            except Exception:
-                capability = UNAVAILABLE_REACTION_CAPABILITY
-            ack_audit = {
-                "reaction": self.ack_policy.reaction,
-                "policy_provenance": self.ack_policy.provenance,
-                "permissions_revision": capability.permissions_revision,
-            }
-            # ACK reacts to the scheduling anchor; only a message can carry
-            # that reaction, so any other anchor makes ACK unsupported here.
-            anchor_is_message = any(
-                event["id"] == checked["trigger_event_id"]
-                and event["type"] == "message"
-                for event in checked["events"]
-            )
-            if not self.ack_policy.enabled:
-                effective = "DEFER"
-                valve = "policy-defer"
-                override = "ack-disabled"
-            elif (
-                not capability.allows(self.ack_policy.reaction, "add")
-                or not anchor_is_message
-            ):
-                effective = "DEFER"
-                valve = "capability-defer"
-                override = "ack-unsupported"
-            else:
-                valve = "none"
-                override = "none"
         elif disposition == "DEFER":
             valve = "classifier-defer"
             override = "none"
-            ack_audit = None
         elif not self.policy.suppression_enabled:
             effective = "DEFER"
             valve = "policy-defer"
             override = "suppression-disabled"
-            ack_audit = None
         elif not self.policy.suppression_recovery_verified:
             effective = "DEFER"
             valve = "policy-defer"
             override = "recoverability-unproven"
-            ack_audit = None
         elif self.policy.margin_status == "active":
             margin_distance = suppression_margin_distance(answers)
             if margin_distance <= float(self.policy.effective_margin):
@@ -1207,12 +1155,10 @@ class AttentionEngine:
             else:
                 valve = "none"
                 override = "none"
-            ack_audit = None
         else:
             valve = "none"
             override = "none"
-            ack_audit = None
-        if checked.get("occasion") == "outcome" and disposition in ("SUPPRESS", "ACK"):
+        if checked.get("occasion") == "outcome" and disposition == "SUPPRESS":
             # An approved action finished after the participant's turn about
             # it ended. The participant is the one who says so in the room,
             # so the turn always reaches it, with the reading as advice (Zoe,
@@ -1261,8 +1207,6 @@ class AttentionEngine:
                     + [event_id for item in reading for event_id in item["evidence_event_ids"]]
                 )
             )
-        if ack_audit is not None:
-            decision["ack"] = ack_audit
         try:
             checked_decision = validate_attention_decision(decision, request=checked)
         except ValidationError:
@@ -1287,7 +1231,6 @@ class AttentionEngine:
                     "evidence_event_ids": list(decision["evidence_event_ids"]),
                     "routing_audit": routing,
                     "policy_provenance": self.policy.provenance,
-                    **({"ack": ack_audit} if ack_audit is not None else {}),
                 },
             },
             writer="attention-engine",

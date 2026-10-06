@@ -77,7 +77,7 @@ class OutcomeTurnTests(ProposalFixture, unittest.TestCase):
         coordinator, _ = self.proposed()
         self.approve(coordinator)
         self.pipeline.report_outcomes()
-        for disposition in ("SUPPRESS", "ACK"):
+        for disposition in ("SUPPRESS", "mhm"):
             with self.subTest(disposition=disposition):
                 self.pipeline.attention.model.disposition = disposition
                 self.pipeline.outcome_arrived(coordinator.proposals()[0])

@@ -4,7 +4,6 @@ Post-merge review of PR #83 (issue #85):
 
 - a turn that misses its deadline must not discard the newest message that
   arrived meanwhile; that message still gets its own attention;
-- an ACK observed after the opportunity ended is never recorded as sent;
 - deadlines must be finite numbers;
 - a commit left open at startup means the process stopped mid-effect, so
   it is UNKNOWN and an approved retry becomes possible;
@@ -22,7 +21,6 @@ import threading
 import time
 import unittest
 
-from nunchi.ack import AckJournal, ReactionCapability
 from nunchi.authorization import AuthorizationJournal
 from nunchi.participant import ConversationOpportunityScheduler, ParticipantError
 from nunchi.receipts import PersistenceError
@@ -99,40 +97,6 @@ class PendingMessageSurvivesDeadlineTests(unittest.TestCase):
         self.assertIsNone(scheduler.complete(token))
 
 
-class LateAckTests(unittest.TestCase):
-    def test_ack_observed_after_the_deadline_is_unknown_not_sent(self) -> None:
-        capability = ReactionCapability(
-            supported=True,
-            authenticated=True,
-            operations=("add", "remove"),
-            reactions=("*",),
-            permissions_revision="rev:1",
-        )
-
-        class SlowTransport(fx.RecordingTransport):
-            def dispatch(self, *, action, wake):
-                time.sleep(0.4)
-                return super().dispatch(action=action, wake=wake)
-
-        pipeline, _, _, receipts = fx.nod_foundation(
-            model=fx.FixtureModel("ACK"),
-            transport=SlowTransport(capability=capability),
-            participant_timeout_seconds=0.2,
-        )
-        outcome = pipeline.handle_delivery(
-            delivery_id="d-ack",
-            event=fx.message("e-ack"),
-            actors={"human:zoe": {"kind": "human"}},
-        )
-        self.assertEqual("unknown", outcome.opportunities[0].transport.delivery)
-        settled = [
-            record
-            for record in pipeline.host.ack_journal.records()
-            if record["state"] == "settled"
-        ]
-        self.assertEqual(["unknown"], [record["delivery"] for record in settled])
-
-
 class FiniteDeadlineTests(unittest.TestCase):
     NON_FINITE = (math.nan, math.inf, -math.inf)
 
@@ -142,14 +106,6 @@ class FiniteDeadlineTests(unittest.TestCase):
                 scheduler = ConversationOpportunityScheduler("room")
                 token = scheduler.offer("e0")
                 self.assertFalse(scheduler.authorize_effect_commit(token, deadline=value))
-
-    def test_ack_journal_refuses_non_finite_deadlines(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            journal = AckJournal(Path(temp) / "ack.jsonl")
-            for value in self.NON_FINITE:
-                with self.subTest(value=value):
-                    with self.assertRaises(PersistenceError):
-                        journal.reserve(_ack_binding(), deadline=value)
 
     def test_host_refuses_a_non_finite_turn_deadline(self) -> None:
         pipeline, _, _, _ = fx.foundation()
@@ -231,24 +187,6 @@ class CoordinatorCancelTests(unittest.TestCase):
         successor = scheduler.complete(token)
         self.assertIsNotNone(successor)
         self.assertEqual("e-next", successor.anchor_event_id)
-
-
-def _ack_binding() -> dict:
-    return {
-        "request_id": "r1",
-        "participant_id": "vigil",
-        "actor_id": "discord:bot:9",
-        "platform": "discord",
-        "room_id": "42",
-        "continuity_scope_id": "discord:channel:42",
-        "target_event_id": "e1",
-        "reaction": "👂",
-        "operation": "add",
-        "opportunity_generation": 1,
-        "lifecycle_id": "lifecycle",
-        "deadline_id": "deadline",
-        "permissions_revision": "rev",
-    }
 
 
 if __name__ == "__main__":  # pragma: no cover

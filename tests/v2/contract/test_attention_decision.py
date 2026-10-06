@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010B AttentionDecisionV2@8`` (slice 010, T003;
+"""Contract tests for ``I-010B AttentionDecisionV2@9`` (slice 010, T003;
 reworked by T028 after rejection R2; @5 for #94 step 4, @6 for step 5, @7 and @8 for step 6).
 
 @5 (Zoe, 2026-10-05) grounds every ``status: ok`` decision in the model's
@@ -48,14 +48,14 @@ class TransitionMatrixCases(unittest.TestCase):
 
     VALID_PAIRS = {
         ("WAKE", "WAKE"): "none",
-        ("ACK", "ACK"): "none",
-        ("ACK", "DEFER"): "capability-defer",
         ("DEFER", "DEFER"): "classifier-defer",
         ("SUPPRESS", "DEFER"): "margin-defer",
         ("SUPPRESS", "SUPPRESS"): "none",
     }
 
     def test_only_declared_ok_pairs_validate(self):
+        # ACK is not a disposition since @9 (#94 step 7): every pair with
+        # it rejects.
         dispositions = ("SUPPRESS", "ACK", "WAKE", "DEFER")
         for classifier in dispositions:
             for effective in dispositions:
@@ -66,38 +66,26 @@ class TransitionMatrixCases(unittest.TestCase):
                     expected = "valid" if pair in self.VALID_PAIRS else "invalid"
                     assert_schema_verdict(self, "attention-decision", doc, expected)
 
-    def test_ack_requires_exact_audit_and_widens_only_by_policy_or_capability(self):
-        direct = make_decision_ok("ACK", "ACK", "none")
-        assert_schema_verdict(self, "attention-decision", direct, "valid")
-        disabled = make_decision_ok("ACK", "DEFER", "policy-defer")
-        assert_schema_verdict(self, "attention-decision", disabled, "valid")
-        unsupported = make_decision_ok("ACK", "DEFER", "capability-defer")
-        assert_schema_verdict(self, "attention-decision", unsupported, "valid")
-        wrong_ack_cause = make_decision_ok("ACK", "DEFER", "policy-defer")
-        wrong_ack_cause["routing_audit"]["override_cause"] = "suppression-disabled"
-        assert_schema_verdict(self, "attention-decision", wrong_ack_cause, "invalid")
-        wrong_suppression_cause = make_decision_ok(
-            "SUPPRESS",
-            "DEFER",
-            "policy-defer",
-        )
-        wrong_suppression_cause["routing_audit"]["override_cause"] = "ack-disabled"
-        assert_schema_verdict(
-            self,
-            "attention-decision",
-            wrong_suppression_cause,
-            "invalid",
-        )
-        for field in ("reaction", "policy_provenance", "permissions_revision"):
-            malformed = make_decision_ok("ACK", "ACK", "none")
-            del malformed["ack"][field]
-            assert_schema_verdict(self, "attention-decision", malformed, "invalid")
-        missing = make_decision_ok("ACK", "ACK", "none")
-        del missing["ack"]
-        assert_schema_verdict(self, "attention-decision", missing, "invalid")
+    def test_nunchis_own_nod_is_gone(self):
+        # @9 (#94 step 7): no ACK disposition, audit, valve, or cause.
+        for classifier, effective, valve in (
+            ("ACK", "ACK", "none"),
+            ("ACK", "DEFER", "policy-defer"),
+            ("ACK", "DEFER", "capability-defer"),
+        ):
+            with self.subTest(pair=(classifier, effective, valve)):
+                doc = make_decision_ok(classifier, effective, valve)
+                assert_schema_verdict(self, "attention-decision", doc, "invalid")
         stray = make_decision_ok()
-        stray["ack"] = direct["ack"]
+        stray["ack"] = make_decision_ok("ACK", "ACK", "none")["ack"]
         assert_schema_verdict(self, "attention-decision", stray, "invalid")
+        for cause in ("ack-disabled", "ack-unsupported"):
+            with self.subTest(cause=cause):
+                doc = make_decision_ok("SUPPRESS", "DEFER", "policy-defer")
+                doc["routing_audit"]["override_cause"] = cause
+                assert_schema_verdict(self, "attention-decision", doc, "invalid")
+        capability = make_decision_ok("SUPPRESS", "DEFER", "capability-defer")
+        assert_schema_verdict(self, "attention-decision", capability, "invalid")
 
     def test_governed_suppression_records_no_applied_valve(self):
         # S05: suppression legitimacy is explicit — valve none, override
@@ -141,14 +129,12 @@ class TransitionMatrixCases(unittest.TestCase):
 
 
 class OutcomeTurnCases(unittest.TestCase):
-    """@7 (#94 step 6): an outcome turn widens SUPPRESS or ACK to DEFER."""
+    """@7 (#94 step 6): an outcome turn widens SUPPRESS to DEFER."""
 
-    def test_outcome_turn_is_a_policy_widening_of_suppress_or_ack(self):
-        for classifier in ("SUPPRESS", "ACK"):
-            with self.subTest(classifier=classifier):
-                doc = make_decision_ok(classifier, "DEFER", "policy-defer")
-                doc["routing_audit"]["override_cause"] = "outcome-turn"
-                assert_schema_verdict(self, "attention-decision", doc, "valid")
+    def test_outcome_turn_is_a_policy_widening_of_suppress(self):
+        doc = make_decision_ok("SUPPRESS", "DEFER", "policy-defer")
+        doc["routing_audit"]["override_cause"] = "outcome-turn"
+        assert_schema_verdict(self, "attention-decision", doc, "valid")
         # It is a policy widening only, never a capability or margin one.
         for valve in ("capability-defer", "margin-defer", "none"):
             with self.subTest(valve=valve):

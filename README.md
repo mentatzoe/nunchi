@@ -94,7 +94,7 @@ flowchart TB
         p4["4. Typed<br/>questions"]:::done
         p5["5. Memory and a<br/>social turn prompt"]:::done
         p6["6. Rhythm:<br/>time, pauses"]:::next
-        p7["7. Remove<br/>Nunchi's nod"]:::later
+        p7["7. Remove<br/>Nunchi's nod"]:::done
         p8["8. More<br/>model APIs"]:::later
         p2 --> p3 --> p4 --> p5 --> p6 --> p7 --> p8
     end
@@ -144,10 +144,9 @@ supervisor; packaging; generic/Discord/Matrix/Telegram reference adapters; the
 shared Discord MCP transport; and incomplete Hermes, Codex, and Claude Code
 integrations.
 
-The shared core has one versioned participant protocol. An ACK judgment (the
-"mhm") gives the agent a turn, and any "mhm" is the agent's own reaction.
-Nunchi's own `👂` reaction remains as an opt-in (`ack.enabled: true`) until
-step 7 of the plan removes it; unsupported ACK widens to DEFER. The attention
+The shared core has one versioned participant protocol. A judgment that leans
+to a "mhm" gives the agent a turn, and any "mhm" is the agent's own reaction;
+Nunchi never reacts for it (step 7 of the plan removed Nunchi's own nod). The attention
 model is chosen by configuration (`kind`), so the core names no agent host,
 chat platform, or model vendor.
 
@@ -174,7 +173,7 @@ On every push to `main` and every PR into it, CI installs stock Hermes 0.19.0,
 0.21.5, and current Hermes `main`. It runs the host-contract lane for Discord
 and Telegram, and normal-attention and startup lanes for Discord. The
 normal-attention lane covers normal turns, ordinary tools, native approval,
-ACK, and attention setup. These lanes use a loopback model and captured
+a mhm as the agent's own turn, and attention setup. These lanes use a loopback model and captured
 platform output, so they are installed-runtime checks, not live ones. Live
 platforms, Telegram normal turns, release, and running-profile adoption remain
 unverified. Historical Hermes evidence is not current proof. See the

@@ -36,6 +36,7 @@ from .operator import (
     build_operator_config,
 )
 from .v2_contracts import (
+    INTERFACE_VERSIONS,
     validate_attention_decision,
     validate_attention_request,
     validate_participant_wake,
@@ -104,8 +105,6 @@ def _build_parser() -> argparse.ArgumentParser:
     setup.add_argument("--participant-provider", default="openai-compatible")
     setup.add_argument("--attention-credential-env", default="NUNCHI_ATTENTION_API_KEY")
     setup.add_argument("--participant-credential-env", default="NUNCHI_PARTICIPANT_API_KEY")
-    setup.add_argument("--ack-reaction", default="👂")
-    setup.add_argument("--ack-disabled", action="store_true")
     setup.add_argument(
         "--service",
         action="append",
@@ -123,12 +122,6 @@ def _build_parser() -> argparse.ArgumentParser:
     rollback = config_commands.add_parser("rollback")
     _operator_roots(rollback)
     rollback.add_argument("revision")
-    ack = config_commands.add_parser("set-ack")
-    _operator_roots(ack)
-    ack_state = ack.add_mutually_exclusive_group()
-    ack_state.add_argument("--enabled", action="store_true")
-    ack_state.add_argument("--disabled", action="store_true")
-    ack.add_argument("--reaction")
     room = config_commands.add_parser("add-room")
     _operator_roots(room)
     room.add_argument("--platform", required=True, help="chat platform name of the room")
@@ -212,8 +205,6 @@ def _setup(args: argparse.Namespace) -> dict[str, Any]:
         participant_provider=args.participant_provider,
         attention_credential_env=args.attention_credential_env,
         participant_credential_env=args.participant_credential_env,
-        ack_enabled=not args.ack_disabled,
-        ack_reaction=args.ack_reaction,
         services=_service_definitions(args.service),
     )
     return store.write(document, expected_revision=expected)
@@ -228,16 +219,6 @@ def _config(args: argparse.Namespace) -> dict[str, Any]:
         return {"status": "valid", "profile_id": args.profile, "revision": revision}
     if args.config_command == "rollback":
         return store.rollback(args.revision)
-    if args.config_command == "set-ack":
-        policy = dict(document["ack_policy"])
-        if args.enabled:
-            policy["enabled"] = True
-        if args.disabled:
-            policy["enabled"] = False
-        if args.reaction is not None:
-            policy["reaction"] = args.reaction
-        document["ack_policy"] = policy
-        return store.write(document, expected_revision=revision)
     if args.config_command == "add-room":
         document["rooms"].append(
             {
@@ -381,19 +362,7 @@ def _probe() -> dict[str, Any]:
         "product": "nunchi",
         "product_version": __version__,
         "generation": 2,
-        "interfaces": {
-            "I-010A": 6,
-            "I-010B": 8,
-            "I-010C": 12,
-            "I-010D": 1,
-            "I-010E": 4,
-            "I-010F": 1,
-            "I-020A": 1,
-            "I-030A": 2,
-            "I-040A": 2,
-            "I-040B": 1,
-            "I-040C": 1,
-        },
+        "interfaces": dict(INTERFACE_VERSIONS),
         "participant_turn_protocol_version": 1,
         "operator_schema_version": 1,
         "v1_fallback": False,

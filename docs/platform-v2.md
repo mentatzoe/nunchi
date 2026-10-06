@@ -3,8 +3,9 @@
 This is the current downstream interface for Hermes and Claude Code, and for
 reference platform integrations. Both platform implementations consume the
 shared owners but have not completed installed and live acceptance.
-First-class ACK and the normal participant-turn protocol are now shared
-interfaces; platform code does not redefine them.
+The normal participant-turn protocol is a shared interface; platform code
+does not redefine it. Nunchi never reacts on the participant's behalf: a "mhm"
+is the participant's own reaction in its own turn (#94 step 7).
 
 ## Required owners
 
@@ -13,7 +14,6 @@ interfaces; platform code does not redefine them.
 | Transport | native delivery | canonical event or explicit gap/error | native identity, route, ordering, delivery semantics |
 | Observation provider | canonical deliveries | bounded attention request and host-only continuation | exact self, actor closure, coverage truth, retention |
 | Attention engine | request plus pinned participant profile | decision | exactly one participant-delegated social judgment |
-| ACK coordinator | ACK decision plus current authenticated reaction capability | one exact reaction or no effect | policy/capability widening, exact binding, durable replay suppression |
 | Scheduler | wake-eligible event anchors | active/newest-pending opportunity | cancellation, coalescing, restart invalidation |
 | Participant host | current decision plus fresh snapshot | normal participant invocation | wake/silence, origin validation, single commit point |
 | Authorization coordinator | privileged proposal plus trusted policy | deny, approval challenge, or exact effect | requester, scope, digest, approval, expiry, revocation, persistence, replay |
@@ -127,16 +127,12 @@ not a sandbox or a zero-syscall guarantee. See
 
 Auto-title is disabled because it can outlive the turn. Native typing, Discord voice
 input, `/thread`, detached participant commands, and handoff into configured
-rooms are disabled for the same lifecycle reason. A model ACK is not a
-participant turn: when the authenticated adapter attests the configured
-reaction, Nunchi adds that one reaction through the shipped adapter method
-and the shared ACK journal. The effect is committed only while that
-opportunity and deadline are still current, and journal waits stay off the
-gateway loop. Unsupported or unknown permission still widens
-ACK to DEFER and runs the normal participant path. These exclusions are not
-a complete V2 lifecycle. See
-[`verification/2026-10-02-hermes-ack.md`](verification/2026-10-02-hermes-ack.md)
-and [`verification/2026-10-02-hermes-ack-repair.md`](verification/2026-10-02-hermes-ack-repair.md).
+rooms are disabled for the same lifecycle reason. A judgment that leans to a
+"mhm" runs the normal participant path like any `DEFER`; Nunchi no longer
+adds its own reaction or probes reaction permission before attention (#94
+step 7; the earlier nod is recorded in
+[`verification/2026-10-02-hermes-ack.md`](verification/2026-10-02-hermes-ack.md)).
+These exclusions are not a complete V2 lifecycle.
 
 The plugin requires Hermes 0.19.0 or newer. It checks the host capability
 contract and installs its compatibility shim transactionally on every
@@ -161,7 +157,8 @@ A consumer of the shared Discord transport must:
 5. submit ordinary live events through the asynchronous active/newest lane;
 6. measure current reaction permission through the authenticated
    `reaction_capability` tool and accept only its exact native room/self
-   binding; unavailable, denied, or malformed facts widen ACK to DEFER;
+   binding; unavailable, denied, or malformed facts take the participant's
+   reaction away, never its turn;
 7. invoke output/history tools only from that authenticated session with a
    fresh exact-operation authorization;
 8. correlate every JSON-RPC response to the exact request and report `sent`
@@ -227,9 +224,9 @@ There are two routes, and both produce the same answers:
 
 The core decides from the answers. A `conversation` below 0.5 selects
 `SUPPRESS`, and the margin valve widens a near call to `DEFER`. Otherwise
-the most likely move decides: `speak` wakes the participant, `mhm` selects
-`ACK` (a participant turn by default), and `wait` or `stay_quiet` defer to
-the participant with the reading. Ties go to the move that pays more
+the most likely move decides: `speak` wakes the participant, and `mhm`,
+`wait` or `stay_quiet` defer to the participant with the reading; any "mhm"
+is the participant's own reaction. Ties go to the move that pays more
 attention. The participant then decides for itself. The decision records
 the answers (`answers`), short audit strings, and every message they cite.
 
@@ -371,7 +368,7 @@ delivery lane registers one when it starts, queues the outcome, and runs it
 as soon as nothing else is running: a turn about the message the action was
 proposed for (or the newest retained event once that message has left the
 window), with `occasion: "outcome"` and the proposal's status in the
-participant's memory. Attention's reading comes as advice; a SUPPRESS or ACK
+participant's memory. Attention's reading comes as advice; a SUPPRESS
 judgment widens to DEFER (`outcome-turn`), and an attention error still
 gives the turn. Nunchi never reports the outcome in the room. Cancel and
 restart drop waiting outcomes; the next turn's memory still shows them.
@@ -416,11 +413,11 @@ add:
 
 - authenticated native self and wrong-route cases;
 - native message, reaction, membership, reply, and explicit absence mapping;
-- SUPPRESS, supported ACK with no participant, disabled/unsupported ACK
-  widening to DEFER, WAKE contribution, WAKE silence, classifier DEFER, margin
-  DEFER, bypass, error fallback, and explicit NO_WAKE error;
-- ACK exact binding, restart replay, cancellation, permission change, and
-  concurrent duplicate suppression;
+- SUPPRESS, a mhm judgment deferring to the participant, WAKE contribution,
+  WAKE silence, classifier DEFER, margin DEFER, bypass, error fallback, and
+  explicit NO_WAKE error;
+- the participant's own reaction only within the attested reaction
+  capability;
 - active-plus-newest-pending coalescing under real concurrency;
 - cancellation ordered before and after the output commit point;
 - restart/backfill without revived work or approval;

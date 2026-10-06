@@ -1,5 +1,5 @@
 """Contract tests for ``I-010D ContextContinuationV2@1`` and
-``I-010E AttentionReceiptV2@4`` (slice 010, T005).
+``I-010E AttentionReceiptV2@5`` (slice 010, T005; @5 reads legacy ACK records only).
 
 Red cases cover host-secret leakage, fetch-time binding validation
 (expired-handle rejection and cross-binding cursor reuse,
@@ -340,7 +340,9 @@ class ReceiptRecordCases(unittest.TestCase):
         del doc["body"]["policy_provenance"]
         assert_schema_verdict(self, "attention-receipt", doc, "invalid")
 
-    def test_ack_receipt_requires_exact_reaction_policy_and_permission_audit(self):
+    def test_a_legacy_ack_receipt_still_reads_with_its_exact_audit(self):
+        # Nunchi's own nod wrote these before I-010E@5 (#94 step 7); an older
+        # journal must still load, so they validate, read-only.
         body = {
             "classifier_disposition": "ACK",
             "effective_disposition": "ACK",
@@ -393,6 +395,23 @@ class ReceiptRecordCases(unittest.TestCase):
                     self,
                     "attention-receipt",
                     malformed,
+                    "invalid",
+                )
+        # The legacy widenings belong to ACK records only.
+        for valve, cause in (("capability-defer", "ack-unsupported"), ("policy-defer", "ack-disabled")):
+            with self.subTest(valve=valve):
+                suppress = deepcopy(widened)
+                del suppress["ack"]
+                suppress["classifier_disposition"] = "SUPPRESS"
+                suppress["routing_audit"] = {
+                    "valve": valve,
+                    "override_cause": cause,
+                    "margin_status": "active",
+                }
+                assert_schema_verdict(
+                    self,
+                    "attention-receipt",
+                    make_receipt("attention", body=suppress),
                     "invalid",
                 )
 

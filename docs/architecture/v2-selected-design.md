@@ -156,13 +156,10 @@ flowchart TB
     Policy -->|"No"| Bypass["PREATTENTION_BYPASS<br/>zero model calls"]
     Policy -->|"Yes"| Proxy["Participant-bound attention proxy"]
     Proxy --> Suppress["SUPPRESS"]
-    Proxy --> Ack["ACK"]
     Proxy --> Wake["WAKE"]
     Proxy --> Defer["DEFER"]
     Proxy --> Error["Operational ERROR"]
     Wake --> Participant["Normal participant turn"]
-    Ack -->|"current native capability"| Reaction["One exact lightweight reaction<br/>no participant turn"]
-    Ack -->|"disabled or unsupported"| Participant
     Defer --> Participant
     Bypass --> Participant
     Error -->|"valid snapshot and wake policy"| Participant
@@ -177,12 +174,11 @@ Only the participant-bound proxy can make the social `SUPPRESS` judgment.
 Uncertainty widens attention through `WAKE` or `DEFER`. Trusted preattention
 bypass is a host policy branch and never fabricates a classifier result.
 
-`ACK` is a complete core outcome, not a platform heuristic. The host rechecks
-the exact configured reaction and authenticated permission revision, durably
-reserves the participant/room/message/reaction binding, and invokes no full
-participant. Disabled or unsupported ACK widens to DEFER. Replay, restart,
-cancellation, concurrency, and an uncertain native acknowledgement cannot
-produce a second reaction.
+The selected design made `ACK` a core outcome: one reaction Nunchi added for
+the participant without running it. Since #94 step 7 (Zoe, 2026-10-05:
+every visible move is the participant's own) that outcome is gone. A
+judgment that leans to a "mhm" is `DEFER`; the participant takes the turn and
+reacts itself, within the platform's attested reaction capability.
 
 The participant produces its real room action or silence in the same normal
 turn. There is no admission meta-answer and no send-time social

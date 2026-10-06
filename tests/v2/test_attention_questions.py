@@ -35,7 +35,7 @@ def leaning(disposition="WAKE", **changes):
 
 class MappingTests(unittest.TestCase):
     def test_each_move_maps_to_a_disposition(self):
-        for move, expected in (("speak", "WAKE"), ("mhm", "ACK"), ("wait", "DEFER"), ("stay_quiet", "DEFER")):
+        for move, expected in (("speak", "WAKE"), ("mhm", "DEFER"), ("wait", "DEFER"), ("stay_quiet", "DEFER")):
             with self.subTest(move=move):
                 answers = leaning(move={key: 1.0 if key == move else 0.0 for key in ("speak", "mhm", "wait", "stay_quiet")})
                 self.assertEqual(expected, classifier_disposition(answers))

@@ -100,9 +100,9 @@ Then it decides, and it acts.
 **Every visible move is the agent's own act, including a "mhm".** Nunchi
 never posts on the agent's behalf. If Nunchi nodded for an agent that never
 knew, the room would believe the agent was listening when the agent has no
-memory of it. Since 2026-10-05 Nunchi's own nod is off by default: an ACK
-judgment gives the agent a turn, and any "mhm" is the agent's own. The
-setting that turns Nunchi's nod back on goes away in step 7 of the plan.
+memory of it. A judgment that a "mhm" could fit gives the agent a turn, and
+any "mhm" is the agent's own. Nunchi's own nod was off by default from
+2026-10-05 and was removed in step 7 of the plan.
 
 ### Looking again
 
@@ -208,7 +208,7 @@ this behavior. The rules replaced so far:
   worth waking for now";
 - the ban on naming a social move;
 - the ban on any social memory (a work queue is still out);
-- ACK as a cheaper answer that Nunchi sends itself;
+- ACK as a cheaper answer that Nunchi sends itself (removed in #94 step 7);
 - ASK as its own kind of move (Zoe, 2026-10-05: too specific; speaking
   covers asking);
 - advice only on WAKE (030 FR-005, 010 FR-013). Zoe, 2026-10-05: the
@@ -229,7 +229,7 @@ this behavior. The rules replaced so far:
 | Conversation memory | The agent's own moves (what it said, replied and reacted to, and where it stayed quiet), each pointing at its message: the newest 8 visible moves and the latest 3 silences within a day. The threads: who asked what, and which messages responded, from attention's answers about each message it judged and from platform replies, plus the agent's own messages that others responded to; the newest 6 within a day. Each move may carry the agent's own reason at the time, in its words, never posted; the Claude Code participant keeps its reasons in its own session transcript instead. Its privileged proposals appear among its moves with what became of them, and it can withdraw one still awaiting approval (#90). When an operator's approval settles one, the agent gets a turn to tell the room itself, without a new message. Each move about a message also says who wrote it and what it said, so a promise still makes sense after the request has left the window. Attention's judgment carries the same memory, so it reads a message as the agent would; a typed model is not given it yet. Not yet: memory on Hermes. Messages that arrive while the agent is mid-turn wait: only the newest gets the next turn, but up to 3 it replaced are judged for the memory first, so a question asked meanwhile starts a thread; the newest one's judgment and turn then read them with it as one moment, attention names any that still calls for the agent, and step 1 never hides it (Zoe, 2026-10-06). The judgment itself still sees a window of the newest 24 events, plus up to 6 older messages of the agent's direct exchange |
 | The agent sees the room as it is now | During its turn the agent can read the live room (older, newer, or new since it last looked), and before its first post it is shown what others said meanwhile, once; Hermes does not offer this yet |
 | Pace and pauses | The judgment and the agent's turn get the room's pace as facts: the current time, how long ago the judged message came, how long the room was quiet before it, its author's run of quick messages, and the agent's own share and last post; a reading written from typed answers notes a quiet of an hour or more and a run of messages within five minutes. When the judgment's most likely move is to wait, and nothing new is said for five minutes, Nunchi looks again: it judges the same message again as a pause, and the agent may get a turn that knows it is looking again and remembers why it waited. It looks again once per quiet stretch; Hermes does not yet. When an approved action finishes after the agent's turn, the agent gets a turn to say so; Nunchi never says it for the agent |
-| The agent sends its own "mhm" | By default an ACK judgment gives the agent a turn and any "mhm" is its own; Nunchi's own 👂 remains as an opt-in (`ack.enabled: true`) |
+| The agent sends its own "mhm" | A judgment that leans to a "mhm" gives the agent a turn and any "mhm" is its own; Nunchi never reacts for it, and an older setting that turned Nunchi's nod on is ignored |
 
 The defects and the full history are in
 [#94](https://github.com/mentatzoe/nunchi/issues/94).

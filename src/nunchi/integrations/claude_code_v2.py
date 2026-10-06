@@ -37,7 +37,6 @@ from typing import Any
 import urllib.error
 
 from .. import __version__
-from ..ack import AckJournal, AckPolicy
 from ..adapters.decisions_api import ATTENTION_KINDS
 from ..adapters.runtime import load_pinned_config
 from ..attention import (
@@ -389,6 +388,8 @@ class ClaudeCodeRoomRuntime:
             "transport",
             "claude_code",
         }
+        # "ack" configured Nunchi's own nod, removed in #94 step 7; an older
+        # config that still has it loads, and the setting is ignored.
         optional = {"authorization", "ack"}
         supplied = set(config)
         if not required <= supplied or supplied - (required | optional):
@@ -523,10 +524,6 @@ class ClaudeCodeRoomRuntime:
         )
         session.on_turn_end = participant.turn_ended
         self.participant = participant
-        try:
-            ack_policy = AckPolicy(**dict(config.get("ack", {})))
-        except (TypeError, ValueError) as exc:
-            raise ValidationError(f"Claude Code ACK policy is invalid: {exc}") from exc
         host = GatedTurnHost(
             observation=observation,
             participant=participant,
@@ -534,8 +531,6 @@ class ClaudeCodeRoomRuntime:
             scheduler=scheduler,
             receipts=receipts,
             privileged=privileged,
-            ack_policy=ack_policy,
-            ack_journal=AckJournal(state / "claude-code-v2-acks.jsonl"),
             participant_timeout_seconds=self.settings["timeout_seconds"],
         )
         attention = AttentionEngine(
@@ -543,8 +538,6 @@ class ClaudeCodeRoomRuntime:
             model=model,
             policy=policy,
             receipts=receipts,
-            ack_policy=ack_policy,
-            reaction_capability_provider=host.reaction_capability,
         )
         self.privileged = privileged
         self.pipeline = NunchiV2Pipeline(

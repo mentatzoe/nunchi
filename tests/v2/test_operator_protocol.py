@@ -27,6 +27,7 @@ from nunchi.operator import (
     OperatorStore,
     ServiceManager,
     build_operator_config,
+    validate_operator_config,
 )
 from nunchi.participant_model import (
     PARTICIPANT_TURN_PROTOCOL,
@@ -576,10 +577,21 @@ class OperatorSurfaceTests(unittest.TestCase):
                 "rooms",
                 "models",
                 "attention_policy",
-                "ack_policy",
                 "services",
             ):
                 self.assertIn(field, snapshot["config"])
+            # Nunchi's own nod is gone (#94 step 7): a profile written before
+            # then still reads, and its setting is dropped.
+            self.assertNotIn("ack_policy", snapshot["config"])
+            legacy = {
+                **deepcopy(snapshot["config"]),
+                "ack_policy": {
+                    "enabled": True,
+                    "reaction": "👂",
+                    "provenance": "trusted:ack-policy/vigil@1",
+                },
+            }
+            self.assertNotIn("ack_policy", validate_operator_config(legacy))
             self.assertIn("discord:42", snapshot["capabilities"])
             self.assertIn("discord:42", snapshot["compatibility"])
             self.assertEqual([], snapshot["recent_receipts"])
@@ -619,7 +631,7 @@ class OperatorSurfaceTests(unittest.TestCase):
                 self.assertEqual("DENY", response.getheader("X-Frame-Options"))
 
                 changed = deepcopy(snapshot["config"])
-                changed["ack_policy"]["enabled"] = False
+                changed["rooms"][0]["name"] = "delivery-renamed"
                 body = json.dumps(changed).encode()
                 connection.request(
                     "PUT",
@@ -634,7 +646,7 @@ class OperatorSurfaceTests(unittest.TestCase):
                 update = connection.getresponse()
                 update.read()
                 self.assertEqual(200, update.status)
-                self.assertFalse(store.read()[0]["ack_policy"]["enabled"])
+                self.assertEqual("delivery-renamed", store.read()[0]["rooms"][0]["name"])
 
                 connection.request(
                     "PUT",
@@ -900,7 +912,7 @@ class ServiceAndInstallLifecycleTests(unittest.TestCase):
             self.assertEqual("started", restarted["status"])
             self.assertNotEqual(first_pid, restarted["pid"])
 
-            durable = store.paths.state_directory / "ack.jsonl"
+            durable = store.paths.state_directory / "receipts.jsonl"
             durable.write_text("durable\n", encoding="utf-8")
             reset = manager.reset("room")
             self.assertEqual("reset", reset["status"])

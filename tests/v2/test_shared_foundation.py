@@ -13,9 +13,7 @@ import time
 import unittest
 from unittest import mock
 
-from nunchi.ack import (
-    AckJournal,
-    AckPolicy,
+from nunchi.reactions import (
     ReactionCapability,
     UNAVAILABLE_REACTION_CAPABILITY,
 )
@@ -56,29 +54,6 @@ from nunchi.v2_contracts import classifier_projection, validate_receipt_stream
 from tests.v2.contract.schema_helpers import (
     validate_privileged_action_authorization_flow,
 )
-
-
-def _reserve_ack_in_process(path, start, results):
-    binding = {
-        "request_id": "process-request",
-        "participant_id": "vigil",
-        "actor_id": "discord:bot:9",
-        "platform": "discord",
-        "room_id": "42",
-        "continuity_scope_id": "discord:channel:42",
-        "target_event_id": "e-process",
-        "reaction": "👂",
-        "operation": "add",
-        "opportunity_generation": 1,
-        "lifecycle_id": "process-lifecycle",
-        "deadline_id": "process-deadline",
-        "permissions_revision": "process-permissions",
-    }
-    journal = AckJournal(path)
-    if not start.wait(10):
-        results.put("timeout")
-        return
-    results.put(journal.reserve(binding)[1])
 
 
 def message(
@@ -144,8 +119,6 @@ def foundation(
     limits=None,
     transport=None,
     participant_timeout_seconds=300,
-    ack_policy=None,
-    ack_journal=None,
     binding=None,
 ):
     binding = binding or ParticipantBinding(
@@ -165,7 +138,6 @@ def foundation(
     )
     model = model or FixtureModel()
     transport = transport or RecordingTransport()
-    ack_policy = ack_policy or AckPolicy()
     attention = AttentionEngine(
         profile=ParticipantProfile(
             profile_id="vigil-default",
@@ -178,12 +150,6 @@ def foundation(
         model=model,
         policy=policy,
         receipts=receipts,
-        ack_policy=ack_policy,
-        reaction_capability_provider=getattr(
-            transport,
-            "reaction_capability",
-            lambda: UNAVAILABLE_REACTION_CAPABILITY,
-        ),
     )
     scheduler = ConversationOpportunityScheduler(
         f"{binding.participant_id}:{binding.continuity_scope_id}"
@@ -195,8 +161,6 @@ def foundation(
         scheduler=scheduler,
         receipts=receipts,
         participant_timeout_seconds=participant_timeout_seconds,
-        ack_policy=ack_policy,
-        ack_journal=ack_journal,
     )
     pipeline = NunchiV2Pipeline(
         observation=observation,
@@ -205,17 +169,6 @@ def foundation(
         scheduler=scheduler,
     )
     return pipeline, model, transport, receipts
-
-
-def nod_foundation(**kwargs):
-    """A foundation with Nunchi's own nod turned on.
-
-    The nod is off by default since 2026-10-05 (the agent sends its own
-    "mhm"); tests of the nod's mechanics opt in until step 7 removes it.
-    """
-
-    kwargs.setdefault("ack_policy", AckPolicy(enabled=True))
-    return foundation(**kwargs)
 
 
 class ObservationTests(unittest.TestCase):
@@ -2034,151 +1987,111 @@ class AuthorizationTests(unittest.TestCase):
             canonical_operation_digest({"value": float("nan")})
 
 
-class AckOutcomeTests(unittest.TestCase):
+class CapturingParticipant:
+    """A participant that records each turn's opportunity and returns one action."""
+
+    def __init__(self, action=None):
+        self.action = action
+        self.opportunities = []
+        self.wakes = []
+
+    def run_protocol(self, *, wake, opportunity, expand, cancel):
+        self.wakes.append(deepcopy(wake))
+        self.opportunities.append(deepcopy(opportunity))
+        return deepcopy(self.action)
+
+
+class MhmTests(unittest.TestCase):
+    """A mhm is the participant's own move (#94 step 7)."""
+
     @staticmethod
-    def capability(revision="discord-reactions:v1"):
+    def capability(reactions=("*",), revision="discord-reactions:v1"):
         return ReactionCapability(
             supported=True,
             authenticated=True,
             operations=("add", "remove"),
-            reactions=("*",),
+            reactions=reactions,
             permissions_revision=revision,
         )
 
-    def test_ack_emits_one_exact_reaction_without_running_participant(self):
-        participant_calls = []
+    @staticmethod
+    def own_mhm(event_id, reaction="👂"):
+        return {
+            "kind": "reaction",
+            "origin_event_id": event_id,
+            "target_event_id": event_id,
+            "reaction": reaction,
+            "operation": "add",
+        }
+
+    def test_a_mhm_judgment_gives_the_participant_its_turn(self):
         transport = RecordingTransport(capability=self.capability())
-        pipeline, _, _, receipts = nod_foundation(
-            model=FixtureModel("ACK"),
-            participant=lambda **kwargs: participant_calls.append(kwargs),
+        participant = CapturingParticipant(self.own_mhm("e-mhm"))
+        pipeline, _, _, receipts = foundation(
+            model=FixtureModel("mhm"),
+            participant=participant,
             transport=transport,
         )
 
         outcome = pipeline.handle_delivery(
-            delivery_id="d-ack",
-            event=message("e-ack"),
+            delivery_id="d-mhm",
+            event=message("e-mhm"),
             actors={"human:zoe": {"kind": "human"}},
         )
 
-        self.assertEqual("ACK", outcome.opportunities[0].effective_disposition)
-        self.assertEqual([], participant_calls)
-        self.assertEqual(1, len(transport.calls))
-        action, wake = transport.calls[0]
-        self.assertEqual(
-            {
-                "kind": "reaction",
-                "origin_event_id": "e-ack",
-                "target_event_id": "e-ack",
-                "reaction": "👂",
-                "operation": "add",
-            },
-            action,
+        self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
+        self.assertEqual(1, len(participant.wakes))
+        wake = participant.wakes[0]
+        self.assertEqual("DEFER", wake["attention"]["source"])
+        self.assertTrue(any("mhm" in item["note"] for item in wake["attention"]["advice"]))
+        self.assertIn("reaction", participant.opportunities[0]["permissions"]["ordinary_actions"])
+        self.assertEqual([self.own_mhm("e-mhm")], [action for action, _wake in transport.calls])
+        attention = receipts.records(outcome.opportunities[0].request_id)[1]
+        self.assertEqual("DEFER", attention["body"]["classifier_disposition"])
+        self.assertEqual("classifier-defer", attention["body"]["routing_audit"]["valve"])
+        self.assertNotIn("ack", attention["body"])
+        host = receipts.records(outcome.opportunities[0].request_id)[2]
+        self.assertEqual("DEFER", host["body"]["wake_source"])
+        self.assertTrue(host["body"]["invoked"])
+
+    def test_a_reaction_the_platform_does_not_permit_is_refused(self):
+        transport = RecordingTransport(capability=self.capability(reactions=("👍",)))
+        participant = CapturingParticipant(self.own_mhm("e-other-emoji"))
+        pipeline, _, _, receipts = foundation(
+            model=FixtureModel("mhm"),
+            participant=participant,
+            transport=transport,
         )
-        self.assertEqual("ACK", wake["attention"]["source"])
-        records = receipts.all_records()
-        validate_receipt_stream(list(records))
-        attention = next(record for record in records if record["stage"] == "attention")
-        host = next(record for record in records if record["stage"] == "participant-host")
-        self.assertEqual("ACK", attention["body"]["classifier_disposition"])
-        self.assertEqual("discord-reactions:v1", attention["body"]["ack"]["permissions_revision"])
-        self.assertFalse(host["body"]["invoked"])
-        self.assertEqual("ACK", host["body"]["wake_source"])
 
-    def test_disabled_or_unsupported_ack_widens_to_defer(self):
-        cases = (
-            (
-                AckPolicy(enabled=False),
-                self.capability(),
-                "policy-defer",
-                "ack-disabled",
-            ),
-            (
-                AckPolicy(enabled=True),
-                UNAVAILABLE_REACTION_CAPABILITY,
-                "capability-defer",
-                "ack-unsupported",
-            ),
+        outcome = pipeline.handle_delivery(
+            delivery_id="d-other-emoji",
+            event=message("e-other-emoji"),
+            actors={"human:zoe": {"kind": "human"}},
         )
-        for ack_policy, capability, valve, cause in cases:
-            with self.subTest(cause=cause):
-                participant_calls = []
-                transport = RecordingTransport(capability=capability)
-                pipeline, _, _, receipts = nod_foundation(
-                    model=FixtureModel("ACK"),
-                    participant=lambda **kwargs: participant_calls.append(kwargs),
-                    transport=transport,
-                    ack_policy=ack_policy,
-                )
-                outcome = pipeline.handle_delivery(
-                    delivery_id=f"d-{cause}",
-                    event=message(f"e-{cause}"),
-                    actors={"human:zoe": {"kind": "human"}},
-                )
-                self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
-                self.assertEqual(1, len(participant_calls))
-                self.assertEqual([], transport.calls)
-                attention = next(
-                    record
-                    for record in receipts.all_records()
-                    if record["stage"] == "attention"
-                )
-                self.assertEqual(valve, attention["body"]["routing_audit"]["valve"])
-                self.assertEqual(cause, attention["body"]["routing_audit"]["override_cause"])
 
-    def test_ack_on_a_non_message_anchor_widens_to_defer(self):
-        anchors = (
-            {
-                "id": "e-reaction",
-                "type": "reaction",
-                "author_id": "human:zoe",
-                "target_event_id": "e-said",
-                "reaction": "✅",
-                "operation": "add",
-            },
-            {
-                "id": "e-membership",
-                "type": "membership",
-                "scope": {"kind": "room", "id": "42"},
-                "subject_actor_id": "human:zoe",
-                "change": "join",
-            },
+        # The participant may react, but only with what the platform attests.
+        self.assertIn("reaction", participant.opportunities[0]["permissions"]["ordinary_actions"])
+        self.assertEqual([], transport.calls)
+        self.assertEqual("unavailable", outcome.opportunities[0].transport.delivery)
+
+    def test_without_reaction_capability_the_participant_cannot_react(self):
+        participant = CapturingParticipant(self.own_mhm("e-no-reactions"))
+        pipeline, _, transport, _ = foundation(
+            model=FixtureModel("mhm"),
+            participant=participant,
         )
-        for anchor in anchors:
-            with self.subTest(anchor=anchor["type"]):
-                participant_calls = []
-                transport = RecordingTransport(capability=self.capability())
-                pipeline, _, _, receipts = nod_foundation(
-                    model=FixtureModel("ACK"),
-                    participant=lambda **kwargs: participant_calls.append(kwargs),
-                    transport=transport,
-                )
-                actors = {"human:zoe": {"kind": "human"}}
-                pipeline.observation.observe(
-                    delivery_id="d-said",
-                    event=message("e-said"),
-                    actors=actors,
-                )
-                outcome = pipeline.handle_delivery(
-                    delivery_id=f"d-{anchor['type']}",
-                    event=anchor,
-                    actors=actors,
-                )
 
-                self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
-                self.assertEqual(1, len(participant_calls))
-                self.assertEqual([], transport.calls)
-                records = receipts.all_records()
-                validate_receipt_stream(list(records))
-                attention = next(r for r in records if r["stage"] == "attention")
-                self.assertEqual("ACK", attention["body"]["classifier_disposition"])
-                self.assertEqual("DEFER", attention["body"]["effective_disposition"])
-                routing = attention["body"]["routing_audit"]
-                self.assertEqual("capability-defer", routing["valve"])
-                self.assertEqual("ack-unsupported", routing["override_cause"])
-                host = next(r for r in records if r["stage"] == "participant-host")
-                self.assertEqual("DEFER", host["body"]["wake_source"])
+        outcome = pipeline.handle_delivery(
+            delivery_id="d-no-reactions",
+            event=message("e-no-reactions"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
 
-    def test_measured_discord_permission_denial_reaches_defer(self):
+        self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
+        self.assertNotIn("reaction", participant.opportunities[0]["permissions"]["ordinary_actions"])
+        self.assertEqual([], transport.calls)
+
+    def test_measured_discord_permission_denial_removes_the_reaction_action(self):
         class Client:
             def __init__(self):
                 self.calls = []
@@ -2218,10 +2131,10 @@ class AckOutcomeTests(unittest.TestCase):
             "discord:actor:9",
             b"y" * 32,
         )
-        participant_calls = []
-        pipeline, _, _, receipts = nod_foundation(
-            model=FixtureModel("ACK"),
-            participant=lambda **kwargs: participant_calls.append(kwargs),
+        participant = CapturingParticipant()
+        pipeline, _, _, receipts = foundation(
+            model=FixtureModel("mhm"),
+            participant=participant,
             transport=transport,
         )
 
@@ -2232,7 +2145,13 @@ class AckOutcomeTests(unittest.TestCase):
         )
 
         self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
-        self.assertEqual(1, len(participant_calls))
+        # The participant still gets its turn, without a reaction action:
+        # the platform measured that it may not react here.
+        self.assertEqual(1, len(participant.opportunities))
+        self.assertNotIn(
+            "reaction",
+            participant.opportunities[0]["permissions"]["ordinary_actions"],
+        )
         self.assertTrue(client.calls)
         self.assertEqual(
             {"reaction_capability"},
@@ -2243,7 +2162,7 @@ class AckOutcomeTests(unittest.TestCase):
             [record["stage"] for record in receipts.all_records()],
         )
 
-    def test_measured_matrix_permission_denial_reaches_defer(self):
+    def test_measured_matrix_permission_denial_removes_the_reaction_action(self):
         binding = ParticipantBinding(
             participant_id="vigil",
             actor_id="matrix:actor:@vigil:example",
@@ -2274,10 +2193,10 @@ class AckOutcomeTests(unittest.TestCase):
             raise AssertionError(f"unexpected Matrix call: {method} {path}")
 
         transport._request = request
-        participant_calls = []
-        pipeline, _, _, receipts = nod_foundation(
-            model=FixtureModel("ACK"),
-            participant=lambda **kwargs: participant_calls.append(kwargs),
+        participant = CapturingParticipant()
+        pipeline, _, _, receipts = foundation(
+            model=FixtureModel("mhm"),
+            participant=participant,
             transport=transport,
             binding=binding,
         )
@@ -2289,253 +2208,19 @@ class AckOutcomeTests(unittest.TestCase):
         )
 
         self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
-        self.assertEqual(1, len(participant_calls))
+        # The participant still gets its turn, without a reaction action:
+        # the platform measured that it may not react here.
+        self.assertEqual(1, len(participant.opportunities))
+        self.assertNotIn(
+            "reaction",
+            participant.opportunities[0]["permissions"]["ordinary_actions"],
+        )
         self.assertTrue(native_calls)
         self.assertEqual({"GET"}, {method for method, _path, _body in native_calls})
         self.assertEqual(
             ["observation", "attention", "participant-host"],
             [record["stage"] for record in receipts.all_records()],
         )
-
-    def test_malformed_capability_widens_ack_to_defer(self):
-        participant_calls = []
-
-        class MalformedCapabilityTransport(RecordingTransport):
-            def reaction_capability(self):
-                return {"supported": True}
-
-        transport = MalformedCapabilityTransport()
-        pipeline, _, _, receipts = nod_foundation(
-            model=FixtureModel("ACK"),
-            participant=lambda **kwargs: participant_calls.append(kwargs),
-            transport=transport,
-        )
-        outcome = pipeline.handle_delivery(
-            delivery_id="d-malformed-capability",
-            event=message("e-malformed-capability"),
-            actors={"human:zoe": {"kind": "human"}},
-        )
-        self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
-        self.assertEqual(1, len(participant_calls))
-        self.assertEqual([], transport.calls)
-        self.assertEqual(
-            ["observation", "attention", "participant-host"],
-            [record["stage"] for record in receipts.all_records()],
-        )
-
-    def test_ack_settlement_failure_after_dispatch_still_writes_transport_receipt(self):
-        journal = AckJournal()
-        transport = RecordingTransport(capability=self.capability())
-        pipeline, _, _, receipts = nod_foundation(
-            model=FixtureModel("ACK"),
-            transport=transport,
-            ack_journal=journal,
-        )
-        with mock.patch.object(
-            journal,
-            "settle",
-            side_effect=PersistenceError("disk full at settle time"),
-        ):
-            outcome = pipeline.handle_delivery(
-                delivery_id="d-lost-ack-settlement",
-                event=message("e-lost-ack-settlement"),
-                actors={"human:zoe": {"kind": "human"}},
-            )
-        self.assertEqual(1, len(transport.calls))
-        self.assertEqual("unknown", outcome.opportunities[0].transport.delivery)
-        self.assertEqual(
-            ["observation", "attention", "participant-host", "transport"],
-            [record["stage"] for record in receipts.all_records()],
-        )
-        self.assertEqual(
-            "unknown",
-            receipts.all_records()[-1]["body"]["delivery"],
-        )
-
-    def test_restart_replay_and_concurrency_cannot_duplicate_ack(self):
-        with tempfile.TemporaryDirectory() as directory:
-            journal_path = Path(directory) / "ack.jsonl"
-            transport = RecordingTransport(capability=self.capability())
-            first, _, _, _ = nod_foundation(
-                model=FixtureModel("ACK"),
-                transport=transport,
-                ack_journal=AckJournal(journal_path),
-            )
-            first.handle_delivery(
-                delivery_id="d-first",
-                event=message("e-stable"),
-                actors={"human:zoe": {"kind": "human"}},
-            )
-            restored, _, _, _ = nod_foundation(
-                model=FixtureModel("ACK"),
-                transport=transport,
-                ack_journal=AckJournal(journal_path),
-            )
-            replay = restored.handle_delivery(
-                delivery_id="d-replay",
-                event=message("e-stable"),
-                actors={"human:zoe": {"kind": "human"}},
-            )
-            self.assertEqual(1, len(transport.calls))
-            self.assertIn("duplicate ACK", replay.opportunities[0].transport.detail)
-
-            shared_journal = AckJournal(Path(directory) / "concurrent.jsonl")
-            concurrent_transport = RecordingTransport(capability=self.capability())
-            pipelines = [
-                nod_foundation(
-                    model=FixtureModel("ACK"),
-                    transport=concurrent_transport,
-                    ack_journal=shared_journal,
-                )[0]
-                for _ in range(2)
-            ]
-            barrier = threading.Barrier(2)
-
-            def deliver(index):
-                barrier.wait()
-                pipelines[index].handle_delivery(
-                    delivery_id=f"d-concurrent-{index}",
-                    event=message("e-concurrent"),
-                    actors={"human:zoe": {"kind": "human"}},
-                )
-
-            workers = [threading.Thread(target=deliver, args=(index,)) for index in range(2)]
-            for worker in workers:
-                worker.start()
-            for worker in workers:
-                worker.join(10)
-                self.assertFalse(worker.is_alive())
-            self.assertEqual(1, len(concurrent_transport.calls))
-
-    def test_separate_processes_cannot_reserve_the_same_ack_twice(self):
-        with tempfile.TemporaryDirectory() as directory:
-            context = multiprocessing.get_context("spawn")
-            start = context.Event()
-            results = context.Queue()
-            path = str(Path(directory) / "process-concurrent.jsonl")
-            workers = [
-                context.Process(
-                    target=_reserve_ack_in_process,
-                    args=(path, start, results),
-                )
-                for _ in range(2)
-            ]
-            for worker in workers:
-                worker.start()
-            start.set()
-            observed = [results.get(timeout=15) for _ in workers]
-            for worker in workers:
-                worker.join(15)
-                self.assertEqual(0, worker.exitcode)
-            self.assertEqual([False, True], sorted(observed))
-            self.assertEqual(1, len(AckJournal(path).records()))
-
-    def test_permissions_change_after_attention_blocks_ack_with_receipts(self):
-        revisions = iter((self.capability("cap:v1"), self.capability("cap:v2")))
-
-        class ChangingTransport(RecordingTransport):
-            def reaction_capability(self):
-                try:
-                    return next(revisions)
-                except StopIteration:
-                    return self.capability
-
-        transport = ChangingTransport(capability=self.capability("cap:v2"))
-        pipeline, _, _, receipts = nod_foundation(
-            model=FixtureModel("ACK"),
-            transport=transport,
-        )
-        outcome = pipeline.handle_delivery(
-            delivery_id="d-stale-capability",
-            event=message("e-stale-capability"),
-            actors={"human:zoe": {"kind": "human"}},
-        )
-        self.assertEqual("unavailable", outcome.opportunities[0].transport.delivery)
-        self.assertEqual([], transport.calls)
-        stages = [record["stage"] for record in receipts.all_records()]
-        self.assertEqual(
-            ["observation", "attention", "participant-host", "transport"],
-            stages,
-        )
-
-    def test_cancellation_before_ack_commit_reserves_and_sends_nothing(self):
-        checked = threading.Event()
-        release = threading.Event()
-
-        class BlockingCapabilityTransport(RecordingTransport):
-            def __init__(self, capability):
-                super().__init__(capability=capability)
-                self.capability_checks = 0
-
-            def reaction_capability(self):
-                self.capability_checks += 1
-                if self.capability_checks == 2:
-                    checked.set()
-                    release.wait(10)
-                return self.capability
-
-        with tempfile.TemporaryDirectory() as directory:
-            journal = AckJournal(Path(directory) / "cancelled.jsonl")
-            transport = BlockingCapabilityTransport(self.capability())
-            pipeline, _, _, _ = nod_foundation(
-                model=FixtureModel("ACK"),
-                transport=transport,
-                ack_journal=journal,
-            )
-            outcome = []
-            worker = threading.Thread(
-                target=lambda: outcome.append(
-                    pipeline.handle_delivery(
-                        delivery_id="d-cancelled-ack",
-                        event=message("e-cancelled-ack"),
-                        actors={"human:zoe": {"kind": "human"}},
-                    )
-                )
-            )
-            worker.start()
-            self.assertTrue(checked.wait(5))
-            pipeline.cancel()
-            release.set()
-            worker.join(10)
-            self.assertFalse(worker.is_alive())
-            self.assertEqual([], transport.calls)
-            self.assertEqual((), journal.records())
-            self.assertFalse(pipeline.scheduler.active)
-
-    def test_permission_change_at_ack_dispatch_boundary_sends_nothing(self):
-        revisions = iter(
-            (
-                self.capability("cap:v1"),
-                self.capability("cap:v1"),
-                self.capability("cap:v1"),
-                self.capability("cap:v2"),
-            )
-        )
-
-        class LastMomentChangeTransport(RecordingTransport):
-            def reaction_capability(self):
-                return next(revisions)
-
-        with tempfile.TemporaryDirectory() as directory:
-            journal = AckJournal(Path(directory) / "last-moment.jsonl")
-            transport = LastMomentChangeTransport(capability=self.capability("cap:v2"))
-            pipeline, _, _, _ = nod_foundation(
-                model=FixtureModel("ACK"),
-                transport=transport,
-                ack_journal=journal,
-            )
-            outcome = pipeline.handle_delivery(
-                delivery_id="d-last-moment",
-                event=message("e-last-moment"),
-                actors={"human:zoe": {"kind": "human"}},
-            )
-            self.assertEqual("unavailable", outcome.opportunities[0].transport.delivery)
-            self.assertEqual([], transport.calls)
-            self.assertEqual(
-                ["reserved", "settled"],
-                [record["state"] for record in journal.records()],
-            )
-            self.assertEqual("unavailable", journal.records()[-1]["delivery"])
 
 
 class ReceiptTests(unittest.TestCase):
@@ -2568,6 +2253,110 @@ class ReceiptTests(unittest.TestCase):
         forged[0]["writer"] = "transport"
         with self.assertRaises(ValidationError):
             validate_receipt_stream(forged)
+
+    def test_a_journal_with_records_of_nunchis_removed_nod_still_loads(self):
+        # #94 step 7 removed Nunchi's own nod; journals it wrote must still
+        # load at startup, or the surface would not start.
+        observation = self.observation_record("r-nod")
+        legacy = [
+            observation,
+            {
+                "request_id": "r-nod",
+                "stage": "attention",
+                "writer": "attention-engine",
+                "body": {
+                    "classifier_disposition": "ACK",
+                    "effective_disposition": "ACK",
+                    "classifier": {"name": "fixture"},
+                    "evidence_event_ids": ["e"],
+                    "routing_audit": {"valve": "none", "override_cause": "none", "margin_status": "active"},
+                    "policy_provenance": "trusted:attention-policy/default@1",
+                    "ack": {
+                        "reaction": "👂",
+                        "policy_provenance": "trusted:ack-policy/default@1",
+                        "permissions_revision": "rev:1",
+                    },
+                },
+            },
+            {
+                "request_id": "r-nod",
+                "stage": "participant-host",
+                "writer": "participant-host",
+                "body": {
+                    "wake_source": "ACK",
+                    "packet_event_count": 1,
+                    "packet_byte_count": 10,
+                    "delivered_event_ids": ["e"],
+                    "expansion_calls": 0,
+                    "invoked": False,
+                    "outcome": "unknown",
+                },
+            },
+            {
+                "request_id": "r-nod",
+                "stage": "transport",
+                "writer": "transport",
+                "body": {"delivery": "sent", "detail": "native:1"},
+            },
+        ]
+        widened = [
+            self.observation_record("r-widened"),
+            {
+                "request_id": "r-widened",
+                "stage": "attention",
+                "writer": "attention-engine",
+                "body": {
+                    "classifier_disposition": "ACK",
+                    "effective_disposition": "DEFER",
+                    "classifier": {"name": "fixture"},
+                    "evidence_event_ids": ["e"],
+                    "routing_audit": {
+                        "valve": "policy-defer",
+                        "override_cause": "ack-disabled",
+                        "margin_status": "active",
+                    },
+                    "policy_provenance": "trusted:attention-policy/default@1",
+                    "ack": {
+                        "reaction": "👂",
+                        "policy_provenance": "trusted:ack-policy/default@1",
+                        "permissions_revision": "unavailable",
+                    },
+                },
+            },
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "receipts.jsonl"
+            path.write_text(
+                "".join(json.dumps(record) + "\n" for record in legacy + widened),
+                encoding="utf-8",
+            )
+            journal = ReceiptJournal(path)
+            self.assertEqual(4, len(journal.records("r-nod")))
+            self.assertEqual(2, len(journal.records("r-widened")))
+
+    @staticmethod
+    def observation_record(request_id):
+        return {
+            "request_id": request_id,
+            "stage": "observation",
+            "writer": "observation-provider",
+            "body": {
+                "schema_version": 2,
+                "trigger_event_id": "e",
+                "continuity_scope_id": "scope",
+                "event_count": 1,
+                "byte_count": 10,
+                "coverage": {
+                    "has_more_before": False,
+                    "has_more_after": False,
+                    "has_gaps": False,
+                    "truncated_by": [],
+                    "continuity": "session-only",
+                    "has_restart_gap": False,
+                },
+                "included_event_ids": ["e"],
+            },
+        }
 
 
 if __name__ == "__main__":

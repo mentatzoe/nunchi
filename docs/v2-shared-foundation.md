@@ -15,11 +15,11 @@ The changed portable interfaces are:
 | Interface | Version | Change |
 |---|---:|---|
 | `I-010A AttentionRequestV2` | `@6` | the room's pace at the snapshot: the current time, the quiet before the judged message, its author's run, and the participant's own share (@2); the `pause` occasion, a look again after the room stayed quiet (@3); the `outcome` occasion, a turn for an approved action that finished (@4); the participant's memory, the same as its turn's (@5); the messages that arrived while the participant was busy, read with the newest as one moment (@6) |
-| `I-010B AttentionDecisionV2` | `@8` | first-class `ACK`, ACK audit, and safe ACK-to-DEFER widening (@3); the reading of the room on every judgment (@4); the model's typed answers in place of the legacy confidence vector (@5); the `asks` answer and the `responds_to` pointer (@6); the `outcome-turn` widening, so an outcome turn always reaches the participant (@7); the `calls_for_participant` pointer, which message that arrived while the participant was busy still calls for it (@8) |
-| `I-010C ParticipantWakeV2` | `@12` | `ACK` wake/effect source without a reading (@2); the reading on `DEFER` wakes and `judged_through_event_id` (@3); the participant's own recent moves in `memory` (@4); the threads, who asked what and which messages responded, in `memory` (@5); the participant's own reason with each move (@6); its privileged proposals and what became of them (@7); the room's pace for the turn (@8); the `pause` occasion of a turn from a look again (@9); the `outcome` occasion of a turn for an approved action that finished (@10); who wrote the message each own move was about, and what it said (@11); the messages that arrived while the participant was busy (@12) |
-| `I-010E AttentionReceiptV2` | `@4` | ACK disposition, authority audit, and ACK host source (@3); the `outcome-turn` widening (@4) |
-| `I-030A AttentionEngineV2` | `@2` | shared ACK selection and capability/policy widening |
-| `I-040A ParticipantTurnHostV2` | `@2` | one core-owned participant protocol and durable ACK commit path |
+| `I-010B AttentionDecisionV2` | `@9` | first-class `ACK`, ACK audit, and safe ACK-to-DEFER widening (@3); the reading of the room on every judgment (@4); the model's typed answers in place of the legacy confidence vector (@5); the `asks` answer and the `responds_to` pointer (@6); the `outcome-turn` widening, so an outcome turn always reaches the participant (@7); the `calls_for_participant` pointer, which message that arrived while the participant was busy still calls for it (@8); Nunchi's own nod removed: no ACK disposition, audit, or capability valve, and a judgment that leans to a "mhm" is `DEFER` (@9) |
+| `I-010C ParticipantWakeV2` | `@13` | `ACK` wake/effect source without a reading (@2); the reading on `DEFER` wakes and `judged_through_event_id` (@3); the participant's own recent moves in `memory` (@4); the threads, who asked what and which messages responded, in `memory` (@5); the participant's own reason with each move (@6); its privileged proposals and what became of them (@7); the room's pace for the turn (@8); the `pause` occasion of a turn from a look again (@9); the `outcome` occasion of a turn for an approved action that finished (@10); who wrote the message each own move was about, and what it said (@11); the messages that arrived while the participant was busy (@12); the ACK source removed, so every wake is a turn the participant takes (@13) |
+| `I-010E AttentionReceiptV2` | `@5` | ACK disposition, authority audit, and ACK host source (@3); the `outcome-turn` widening (@4); no new record carries ACK, and records written before @5 still read (@5) |
+| `I-030A AttentionEngineV2` | `@3` | shared ACK selection and capability/policy widening (@2); removed with Nunchi's own nod, so the engine takes no ACK policy or reaction capability (@3) |
+| `I-040A ParticipantTurnHostV2` | `@3` | one core-owned participant protocol and durable ACK commit path (@2); the ACK commit path removed, and the participant's own reaction checked against the attested capability (@3) |
 
 Every Nunchi-owned participant runs `nunchi.participant-turn` version `1` from
 `src/nunchi/participant_model.py`. Core owns its prompt, request, action schema,
@@ -41,9 +41,8 @@ its dedicated session and the mod that turns room tool calls into actions
 through the core's tool-turn helpers. Reference platform transports supply authenticated
 capability facts and native effects. They do not own a prompt, parser,
 expansion policy, social decision, or participant turn protocol. Hermes
-consumes the same attention decision. When its authenticated adapter attests
-the configured reaction, it adds that one reaction and does not run the
-participant. Unsupported or unknown permission still widens ACK to DEFER.
+consumes the same attention decision and runs its stock participant turn for
+`WAKE` and `DEFER`.
 
 ## Attention model selection
 
@@ -68,27 +67,20 @@ out of the shared core.
 ## Core outcomes
 
 - `SUPPRESS` ends at attention. There is no participant or native call.
-- `ACK` gives the participant a normal turn by default: the ACK policy is
-  off, so it widens to `DEFER` and any "mhm" is the participant's own
-  (Zoe, 2026-10-05). With `ack.enabled: true`, Nunchi instead adds the
-  configured reaction (default `👂`) to the exact trigger and does not run
-  the full participant.
 - `WAKE` runs one normal participant turn through the shared protocol.
 - `DEFER` runs that same normal participant path, with the model's reading
-  of the room when the judgment gave one.
-- Disabled ACK or absent/unauthenticated native reaction capability converts
-  `ACK` to `DEFER`, with the exact policy or capability cause in receipts.
+  of the room when the judgment gave one. A judgment whose most likely move
+  is a "mhm" is `DEFER`: the participant takes the turn, and any "mhm" is its
+  own reaction.
 
-An ACK decision records its reaction, trusted policy provenance, and native
-permission revision. Immediately before dispatch the host rechecks those
-facts. Hermes consumes the same check again at native entry, before the
-network await, and does not hold the scheduler lock across that await. It
-durably reserves an ACK key bound to participant, actor, platform,
-room, continuity scope, target message, reaction, and operation. Request,
-generation, lifecycle, deadline, and permission revision remain in the durable
-reservation audit. A restart, replay, concurrent opportunity, cancellation, or
-lost acknowledgement cannot emit a second reaction. Uncertain effects remain
-`unknown`; they are never retried as if definitely absent.
+Nunchi never reacts on the participant's behalf (#94 step 7; Zoe,
+2026-10-05). The `ACK` disposition, its reaction policy, its durable
+reservation journal, and the reaction probe it ran before attention are gone.
+The participant's own reaction still needs the adapter's attested reaction
+capability: without it the turn offers no reaction, and a reaction the
+capability does not name is refused before dispatch. Receipt journals written
+before the removal keep their ACK records, and those still read. A config that
+still has an `ack` setting loads, and the setting is ignored.
 
 ## Operator flow
 
@@ -126,8 +118,7 @@ platform is accepted with an `unregistered` status and a warning that its
 capabilities, including reactions, are unknown until measured at runtime.
 
 The CLI and `/api/v1/operator` dashboard endpoint return the same validated
-schema and snapshot: identity, rooms, models, attention policy, ACK policy,
-services, platform capabilities, compatibility, credential presence, health,
+schema and snapshot: identity, rooms, models, attention policy, services, platform capabilities, compatibility, credential presence, health,
 warnings, and recent receipts. Dashboard writes require the current revision
 through `If-Match`; stale writes reject. The dashboard is loopback-only and
 applies no-store, framing, content-type, and content-security protections.
@@ -151,7 +142,7 @@ installs and activates launchd or systemd user definitions without overriding
 the worker's restart policy. Persistent install resolves declared environment
 sources into a private owner-only state file; credential values are absent from
 the generated unit and dashboard, and reinstall refreshes them after rotation.
-Reset removes ephemeral supervisor state only; ACK and receipt journals survive.
+Reset removes ephemeral supervisor state only; receipt journals survive.
 Profile uninstall stops and deactivates its services before removing only the
 named profile. Package install metadata supports verified upgrade, rollback,
 and an explicit state-purge boundary.
@@ -160,12 +151,12 @@ and an explicit state-purge boundary.
 
 | Surface | Shared behavior available | Remaining platform work |
 |---|---|---|
-| Generic channel / Discord | full shared protocol; Discord MCP measures exact bot, room, roles, and permission overwrites before ACK | platform-specific live validation and acceptance |
-| Matrix | shared protocol; exact `whoami` and room power-level measurement before add-reaction ACK | platform-specific live validation and acceptance |
-| Telegram | shared protocol; unsupported ACK widens to DEFER | native ACK support only if a future verified adapter supplies it |
+| Generic channel / Discord | full shared protocol; Discord MCP measures exact bot, room, roles, and permission overwrites before the participant may react | platform-specific live validation and acceptance |
+| Matrix | shared protocol; exact `whoami` and room power-level measurement before the participant may react | platform-specific live validation and acceptance |
+| Telegram | shared protocol; no attested reaction capability, so the participant cannot react | native reactions only if a future verified adapter supplies them |
 | Codex | shared protocol and operator schema; the merged runner is reduced to Discord with Codex tools disabled | draft PR #71; parity issues #59–#65; live proof |
 | Claude Code | the per-room gate, dedicated session, and mod (issue #43) use the shared host and the core tool-turn helpers | Discord only; #57, #58, and live proof in #39 |
-| Hermes | shared attention ACK when the authenticated adapter attests the configured reaction; otherwise ACK widens to DEFER | issues #38, #42, and #44 platform closure |
+| Hermes | shared attention; `WAKE` and `DEFER` run the stock participant turn | issues #38, #42, and #44 platform closure |
 
 Issue #41 remains the combined acceptance gate. Security assurance, release
 work, final acceptance, and platform-specific live proof remain separate. Being

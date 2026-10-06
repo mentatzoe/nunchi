@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://nunchi.invalid/schemas/v2/attention-decision.schema.json",
   "title": "AttentionDecisionV2",
-  "description": "I-010B AttentionDecisionV2@8 — the closed host-facing decision union. @8 (#94 step 6; Zoe, 2026-10-06) adds the optional answer calls_for_participant, asked only when the request lists unattended_event_ids: which of those messages still calls for the participant, asked of it or of the room and not yet answered; it must name one of the request's unattended messages (runtime-adapter-only cross-check), and step 1 never suppresses a judgment that names one. @7 (#94 step 6) adds the policy-defer override cause outcome-turn: on a request whose occasion is outcome, a SUPPRESS or ACK judgment widens to DEFER, because the participant reports what its approved action did, and only such a request may use it (runtime-adapter-only cross-check). @6 (#94 step 5) adds two step-2 answers that the participant's memory builds threads from: asks, whether the judged message asks someone in the room for something, and responds_to, which earlier supplied message it answers or responds to, the participant's own included. @5 (Zoe, 2026-10-05, #94 step 4) grounds every status-ok judgment in the model's typed answers (answers): step 1 asks whether the judged message is conversation, step 2 asks who it is addressed to, whether and by which message it was answered, whether its author is mid-thought, whether the participant has something to add, and which kinds of response could fit. answers replaces the V1-era legacy_verdict_confidences vector, which is no longer allowed. @4 let the reading of the room (attention_advice) accompany every status-ok judgment and bounded it to at most 4 items of at most 400 characters each. @3 added first-class ACK classifier and effective dispositions, ACK->ACK and conservative ACK->DEFER transitions, capability-defer routing, and an ACK-only audit binding the exact reaction, trusted policy provenance, and authenticated permission revision. Bypass and error carry no answers or reading because no model judgment exists for them.",
+  "description": "I-010B AttentionDecisionV2@9 — the closed host-facing decision union. @9 (#94 step 7) removes Nunchi's own nod: the ACK classifier and effective dispositions, the ACK->ACK and ACK->DEFER transitions, the capability-defer valve, the ack-disabled and ack-unsupported causes, and the ack audit are no longer allowed; a judgment whose most likely move is a mhm is DEFER, so the participant takes its turn and any mhm is its own. @8 (#94 step 6; Zoe, 2026-10-06) adds the optional answer calls_for_participant, asked only when the request lists unattended_event_ids: which of those messages still calls for the participant, asked of it or of the room and not yet answered; it must name one of the request's unattended messages (runtime-adapter-only cross-check), and step 1 never suppresses a judgment that names one. @7 (#94 step 6) adds the policy-defer override cause outcome-turn: on a request whose occasion is outcome, a SUPPRESS judgment (or, before @9, an ACK judgment) widens to DEFER, because the participant reports what its approved action did, and only such a request may use it (runtime-adapter-only cross-check). @6 (#94 step 5) adds two step-2 answers that the participant's memory builds threads from: asks, whether the judged message asks someone in the room for something, and responds_to, which earlier supplied message it answers or responds to, the participant's own included. @5 (Zoe, 2026-10-05, #94 step 4) grounds every status-ok judgment in the model's typed answers (answers): step 1 asks whether the judged message is conversation, step 2 asks who it is addressed to, whether and by which message it was answered, whether its author is mid-thought, whether the participant has something to add, and which kinds of response could fit. answers replaces the V1-era legacy_verdict_confidences vector, which is no longer allowed. @4 let the reading of the room (attention_advice) accompany every status-ok judgment and bounded it to at most 4 items of at most 400 characters each. @3 added first-class ACK classifier and effective dispositions, ACK->ACK and conservative ACK->DEFER transitions, capability-defer routing, and an ACK-only audit binding the exact reaction, trusted policy provenance, and authenticated permission revision; @9 removed them. Bypass and error carry no answers or reading because no model judgment exists for them.",
   "$defs": {
     "nonEmptyString": {
       "type": "string",
       "minLength": 1
     },
-    "disposition": {"enum": ["SUPPRESS", "ACK", "WAKE", "DEFER"]},
+    "disposition": {"enum": ["SUPPRESS", "WAKE", "DEFER"]},
     "confidence": {
       "$comment": "Finite [0,1]. The contradictory-bounds not-clause rejects NaN, which vacuously satisfies every numeric comparison keyword; strict JSON cannot carry non-finite literals, but sentinel-decoded corpus instances can.",
       "type": "number",
@@ -42,13 +42,13 @@
       }
     },
     "routingAudit": {
-      "$comment": "The closed FR-005 routing audit with its per-combination rules: a margin counts as applied exactly on valve margin-defer — the effective margin is then required and is forbidden on every other valve, override cause must be margin, and the margin status must be active (a retired margin cannot apply); the trusted margin source may appear only on that margin-applied decision (optional there); valves none and classifier-defer pair with override cause none; valve policy-defer pairs with override cause suppression-disabled, recoverability-unproven, ack-disabled, or (@7) outcome-turn.",
+      "$comment": "The closed FR-005 routing audit with its per-combination rules: a margin counts as applied exactly on valve margin-defer — the effective margin is then required and is forbidden on every other valve, override cause must be margin, and the margin status must be active (a retired margin cannot apply); the trusted margin source may appear only on that margin-applied decision (optional there); valves none and classifier-defer pair with override cause none; valve policy-defer pairs with override cause suppression-disabled, recoverability-unproven, or (@7) outcome-turn.",
       "type": "object",
       "additionalProperties": false,
       "required": ["valve", "override_cause", "margin_status"],
       "properties": {
-        "valve": {"enum": ["none", "classifier-defer", "margin-defer", "policy-defer", "capability-defer"]},
-        "override_cause": {"enum": ["none", "margin", "suppression-disabled", "recoverability-unproven", "ack-disabled", "ack-unsupported", "outcome-turn"]},
+        "valve": {"enum": ["none", "classifier-defer", "margin-defer", "policy-defer"]},
+        "override_cause": {"enum": ["none", "margin", "suppression-disabled", "recoverability-unproven", "outcome-turn"]},
         "margin_status": {"enum": ["active", "retired"]},
         "effective_margin": {
           "$comment": "Finite [0, 1] (@2 amendment A2, c834e8c 'a transition margin, when active, is a finite number within [0,1]'; the accepted @1 shape wrongly used exclusiveMinimum, excluding the exact boundary the retained inclusive <= comparison relies on). The contradictory-bounds not-clause rejects NaN exactly as $defs/confidence does.",
@@ -84,11 +84,7 @@
         },
         {
           "if": {"required": ["valve"], "properties": {"valve": {"const": "policy-defer"}}},
-          "then": {"properties": {"override_cause": {"enum": ["suppression-disabled", "recoverability-unproven", "ack-disabled", "outcome-turn"]}}}
-        },
-        {
-          "if": {"required": ["valve"], "properties": {"valve": {"const": "capability-defer"}}},
-          "then": {"properties": {"override_cause": {"const": "ack-unsupported"}}}
+          "then": {"properties": {"override_cause": {"enum": ["suppression-disabled", "recoverability-unproven", "outcome-turn"]}}}
         }
       ]
     },
@@ -165,16 +161,6 @@
           "type": "array",
           "maxItems": 4,
           "items": {"$ref": "#/$defs/attentionAdvice"}
-        },
-        "ack": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["reaction", "policy_provenance", "permissions_revision"],
-          "properties": {
-            "reaction": {"$ref": "#/$defs/nonEmptyString"},
-            "policy_provenance": {"$ref": "#/$defs/nonEmptyString"},
-            "permissions_revision": {"$ref": "#/$defs/nonEmptyString"}
-          }
         }
       },
       "oneOf": [
@@ -184,33 +170,6 @@
             "classifier_disposition": {"const": "WAKE"},
             "effective_disposition": {"const": "WAKE"},
             "routing_audit": {"properties": {"valve": {"const": "none"}}}
-          }
-        },
-        {
-          "$comment": "ACK->ACK: one core-selected lightweight reaction with current authenticated native capability.",
-          "required": ["ack"],
-          "properties": {
-            "classifier_disposition": {"const": "ACK"},
-            "effective_disposition": {"const": "ACK"},
-            "routing_audit": {"properties": {"valve": {"const": "none"}}}
-          }
-        },
-        {
-          "$comment": "ACK->DEFER: disabled ACK policy conservatively wakes the participant path; since @7 an outcome turn also widens (outcome-turn).",
-          "required": ["ack"],
-          "properties": {
-            "classifier_disposition": {"const": "ACK"},
-            "effective_disposition": {"const": "DEFER"},
-            "routing_audit": {"properties": {"valve": {"const": "policy-defer"}, "override_cause": {"enum": ["ack-disabled", "outcome-turn"]}}}
-          }
-        },
-        {
-          "$comment": "ACK->DEFER: unavailable authenticated reaction capability conservatively wakes the participant path.",
-          "required": ["ack"],
-          "properties": {
-            "classifier_disposition": {"const": "ACK"},
-            "effective_disposition": {"const": "DEFER"},
-            "routing_audit": {"properties": {"valve": {"const": "capability-defer"}, "override_cause": {"const": "ack-unsupported"}}}
           }
         },
         {
@@ -230,7 +189,7 @@
           }
         },
         {
-          "$comment": "SUPPRESS->DEFER: widened by disabled suppression, unproven recovery, or (@7) an outcome turn, never by ACK policy.",
+          "$comment": "SUPPRESS->DEFER: widened by disabled suppression, unproven recovery, or (@7) an outcome turn.",
           "properties": {
             "classifier_disposition": {"const": "SUPPRESS"},
             "effective_disposition": {"const": "DEFER"},
@@ -244,14 +203,6 @@
             "effective_disposition": {"const": "SUPPRESS"},
             "routing_audit": {"properties": {"valve": {"const": "none"}}}
           }
-        }
-      ],
-      "allOf": [
-        {
-          "$comment": "The exact reaction and authority revision accompany ACK and no other classifier selection.",
-          "if": {"required": ["classifier_disposition"], "properties": {"classifier_disposition": {"const": "ACK"}}},
-          "then": {"required": ["ack"]},
-          "else": {"not": {"required": ["ack"]}}
         }
       ]
     },

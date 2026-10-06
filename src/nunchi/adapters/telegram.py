@@ -15,7 +15,7 @@ import urllib.request
 
 from .. import __version__
 from ..errors import NunchiError, ValidationError
-from ..ack import ReactionCapability
+from ..reactions import ReactionCapability
 from ..participant import TransportResult
 from .runtime import CAPABILITIES, ReferenceAdapterRuntime, load_pinned_config
 

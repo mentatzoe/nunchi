@@ -77,7 +77,7 @@ class LookAgainTests(unittest.TestCase):
         self.assertIsNone(pipeline.look_again(now=True))
 
     def test_only_a_judgment_to_wait_arms_it(self):
-        for disposition in ("WAKE", "ACK", "SUPPRESS"):
+        for disposition in ("WAKE", "mhm", "SUPPRESS"):
             with self.subTest(disposition=disposition):
                 pipeline, _, _ = self.pipeline(disposition)
                 self.deliver(pipeline, "q1")
