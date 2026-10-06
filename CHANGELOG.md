@@ -74,7 +74,10 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   garbled one of its long IDs. Seven were the report Vigil owed Zoe in
   `build-finishes-long-after-promise`. The turn prompt and
   action schema now ask only for `request_id`; `nunchi.participant-turn`
-  stays version 1, since every full binding is still accepted.
+  stays version 1, since every full binding is still accepted. They also
+  say what `origin_event_id` is: the message that prompted the action,
+  usually the trigger. Without the trigger in the binding to copy from, a
+  model put the `request_id` there in 2 of 486 moments (run 41).
 - Attention reads a message with the agent's memory (#94, step 6). The
   attention request carries the same memory the agent's turn gets
   (`I-010A AttentionRequestV2@5`), for every judgment including recalled

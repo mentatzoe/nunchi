@@ -33,6 +33,18 @@ DEFAULT_MAX_EXPANSIONS = 3
 # (#94 step 5); it never reaches the room.
 _WHY: dict[str, Any] = {"type": "string"}
 
+# The room message an action answers. The binding no longer hands the model
+# the trigger to copy (#94 step 3); run 41 saw a model put the request_id
+# here, so the schema says what belongs in it.
+_ORIGIN: dict[str, Any] = {
+    "type": "string",
+    "minLength": 1,
+    "description": (
+        "The id of the room message that prompted this action, one you were "
+        "shown; usually wake.trigger_event_id."
+    ),
+}
+
 _INNER_ACTION_VARIANTS: list[dict[str, Any]] = [
     {
         "type": "object",
@@ -58,7 +70,7 @@ _INNER_ACTION_VARIANTS: list[dict[str, Any]] = [
         "required": ["kind", "origin_event_id", "text"],
         "properties": {
             "kind": {"const": "message"},
-            "origin_event_id": {"type": "string", "minLength": 1},
+            "origin_event_id": _ORIGIN,
             "text": {"type": "string"},
             "why": _WHY,
         },
@@ -69,7 +81,7 @@ _INNER_ACTION_VARIANTS: list[dict[str, Any]] = [
         "required": ["kind", "origin_event_id", "target_event_id", "text"],
         "properties": {
             "kind": {"const": "reply"},
-            "origin_event_id": {"type": "string", "minLength": 1},
+            "origin_event_id": _ORIGIN,
             "target_event_id": {"type": "string", "minLength": 1},
             "text": {"type": "string"},
             "why": _WHY,
@@ -87,7 +99,7 @@ _INNER_ACTION_VARIANTS: list[dict[str, Any]] = [
         ],
         "properties": {
             "kind": {"const": "reaction"},
-            "origin_event_id": {"type": "string", "minLength": 1},
+            "origin_event_id": _ORIGIN,
             "target_event_id": {"type": "string", "minLength": 1},
             "reaction": {"type": "string", "minLength": 1},
             "operation": {"enum": ["add", "remove"]},
@@ -106,7 +118,7 @@ _INNER_ACTION_VARIANTS: list[dict[str, Any]] = [
         ],
         "properties": {
             "kind": {"const": "privileged"},
-            "origin_event_id": {"type": "string", "minLength": 1},
+            "origin_event_id": _ORIGIN,
             "capability": {"type": "string", "minLength": 1},
             "resource": {
                 "type": "object",
@@ -127,7 +139,7 @@ _INNER_ACTION_VARIANTS: list[dict[str, Any]] = [
         "required": ["kind", "origin_event_id", "proposal_id"],
         "properties": {
             "kind": {"const": "withdraw"},
-            "origin_event_id": {"type": "string", "minLength": 1},
+            "origin_event_id": _ORIGIN,
             "proposal_id": {"type": "string", "minLength": 1},
             "why": _WHY,
         },
@@ -391,7 +403,9 @@ def participant_turn_prompt(profile: ParticipantProfile) -> str:
         "anchor_event_id, max_events, and max_bytes. Before your first "
         "message, reply, or reaction goes out, you are shown anything others "
         "posted while you were composing, once, and you decide again with it "
-        "in view. A contribution uses kind "
+        "in view. Every action but silence and expand names origin_event_id, "
+        "the room message that prompted it, usually wake.trigger_event_id. "
+        "A contribution uses kind "
         "message; a reply adds target_event_id; a reaction names its exact "
         "target, reaction, and add/remove operation. A privileged action is a "
         "proposal only; the host independently rechecks exact current "

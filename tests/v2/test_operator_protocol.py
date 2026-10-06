@@ -395,6 +395,17 @@ class ParticipantProtocolTests(unittest.TestCase):
         self.assertEqual(set(self.protocol.request["binding"]), set(schema["properties"]))
         self.assertIn("`binding` needs only the request's request_id", self.protocol.instructions)
 
+    def test_the_turn_says_what_origin_event_id_is(self):
+        # Run 41: with no trigger in the binding to copy, a model put the
+        # request_id in origin_event_id and its reply was refused.
+        variants = self.protocol.action_schema["properties"]["action"]["oneOf"]
+        origins = [variant["properties"]["origin_event_id"] for variant in variants
+                   if "origin_event_id" in variant["properties"]]
+        self.assertEqual(5, len(origins))
+        for origin in origins:
+            self.assertIn("usually wake.trigger_event_id", origin["description"])
+        self.assertIn("names origin_event_id, the room message that prompted it", self.protocol.instructions)
+
     def test_actions_are_fact_and_permission_bound_and_expansion_is_capped(self):
         invisible = self.envelope(
             {"kind": "message", "origin_event_id": "e-missing", "text": "No."}
