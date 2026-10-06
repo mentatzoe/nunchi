@@ -650,7 +650,7 @@ class RunTests(unittest.TestCase):
 
     def test_scene_selection(self):
         scenes = load_scenes()
-        self.assertEqual(14, len(run.select_scenes(scenes, "behavior")))
+        self.assertEqual(16, len(run.select_scenes(scenes, "behavior")))
         self.assertEqual(57, len(run.select_scenes(scenes, "litmus")))
         self.assertEqual(5, len(run.select_scenes(scenes, "tool-chrome")))
         self.assertEqual(["did-you-see"], [scene.id for scene in run.select_scenes(scenes, "did-you-see")])

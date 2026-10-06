@@ -1,0 +1,262 @@
+{
+  "id": "build-finishes-long-after-promise",
+  "title": "A CI line Vigil promised to report on, after the promise left attention's window",
+  "source": "docs/behavior.md (conversation memory: what the agent said it would do)",
+  "review": "draft: written from docs/behavior.md; ranges need Zoe's review",
+  "platform": "discord",
+  "participants": [
+    "vigil"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    },
+    "sam": {
+      "display_name": "Sam",
+      "kind": "human"
+    },
+    "mira": {
+      "display_name": "Mira",
+      "kind": "human"
+    },
+    "ci": {
+      "display_name": "CI",
+      "kind": "bot"
+    }
+  },
+  "events": [
+    {
+      "id": "z1",
+      "author": "zoe",
+      "at": "-3h",
+      "mentions": [
+        "vigil"
+      ],
+      "text": "Vigil, can you keep an eye on the nightly build and tell me when it finishes? It usually takes about three hours."
+    },
+    {
+      "id": "v1",
+      "author": "vigil",
+      "at": "-179m",
+      "reply_to": "z1",
+      "text": "Sure, I'll tell you when it finishes."
+    },
+    {
+      "id": "a1",
+      "author": "sam",
+      "at": "-150m",
+      "mentions": [
+        "vigil"
+      ],
+      "text": "Vigil, what's the default timeout for the payments client?"
+    },
+    {
+      "id": "r1",
+      "author": "vigil",
+      "at": "-149m",
+      "reply_to": "a1",
+      "text": "30 seconds, with three retries."
+    },
+    {
+      "id": "a2",
+      "author": "sam",
+      "at": "-135m",
+      "mentions": [
+        "vigil"
+      ],
+      "text": "Vigil, which branch has the new rate limiter?"
+    },
+    {
+      "id": "r2",
+      "author": "vigil",
+      "at": "-134m",
+      "reply_to": "a2",
+      "text": "It's on feature/rate-limit, not merged yet."
+    },
+    {
+      "id": "a3",
+      "author": "sam",
+      "at": "-120m",
+      "mentions": [
+        "vigil"
+      ],
+      "text": "Vigil, can you remind me what the staging URL is?"
+    },
+    {
+      "id": "r3",
+      "author": "vigil",
+      "at": "-119m",
+      "reply_to": "a3",
+      "text": "staging.internal.example, behind the VPN."
+    },
+    {
+      "id": "t1",
+      "author": "mira",
+      "at": "-100m",
+      "text": "Has anyone tried the new standup format yet?"
+    },
+    {
+      "id": "t2",
+      "author": "zoe",
+      "at": "-95m",
+      "text": "Not yet, Thursday will be the first one."
+    },
+    {
+      "id": "t3",
+      "author": "sam",
+      "at": "-90m",
+      "text": "I like that it's shorter."
+    },
+    {
+      "id": "t4",
+      "author": "mira",
+      "at": "-85m",
+      "text": "Same. Fifteen minutes is plenty."
+    },
+    {
+      "id": "t5",
+      "author": "zoe",
+      "at": "-80m",
+      "text": "Can someone review the onboarding doc before Friday?"
+    },
+    {
+      "id": "t6",
+      "author": "mira",
+      "at": "-75m",
+      "text": "I can take it this afternoon."
+    },
+    {
+      "id": "t7",
+      "author": "zoe",
+      "at": "-70m",
+      "text": "Thanks Mira."
+    },
+    {
+      "id": "t8",
+      "author": "sam",
+      "at": "-65m",
+      "text": "Lunch order is going in at noon if anyone wants in."
+    },
+    {
+      "id": "t9",
+      "author": "mira",
+      "at": "-60m",
+      "text": "Count me in, the usual."
+    },
+    {
+      "id": "t10",
+      "author": "zoe",
+      "at": "-55m",
+      "text": "Me too, no onions please."
+    },
+    {
+      "id": "t11",
+      "author": "sam",
+      "at": "-50m",
+      "text": "Got it."
+    },
+    {
+      "id": "t12",
+      "author": "mira",
+      "at": "-45m",
+      "text": "The design review moved to 3pm, by the way."
+    },
+    {
+      "id": "t13",
+      "author": "zoe",
+      "at": "-40m",
+      "text": "Ok, I'll update the calendar invite."
+    },
+    {
+      "id": "t14",
+      "author": "sam",
+      "at": "-35m",
+      "text": "Is the projector in room B fixed?"
+    },
+    {
+      "id": "t15",
+      "author": "mira",
+      "at": "-30m",
+      "text": "Facilities said tomorrow."
+    },
+    {
+      "id": "t16",
+      "author": "sam",
+      "at": "-25m",
+      "text": "We'll use room C then."
+    },
+    {
+      "id": "t17",
+      "author": "zoe",
+      "at": "-20m",
+      "text": "Fine by me."
+    },
+    {
+      "id": "t18",
+      "author": "mira",
+      "at": "-15m",
+      "text": "Onboarding doc reviewed, left a few comments."
+    },
+    {
+      "id": "t19",
+      "author": "zoe",
+      "at": "-10m",
+      "text": "Great, I'll go through them."
+    },
+    {
+      "id": "t20",
+      "author": "sam",
+      "at": "-5m",
+      "text": "Back from lunch."
+    },
+    {
+      "id": "c1",
+      "author": "ci",
+      "at": "0s",
+      "text": "nightly #812: passed in 2h58m (2,311 tests, 0 failures)"
+    }
+  ],
+  "moments": [
+    {
+      "label": "the nightly finishes",
+      "event": "c1",
+      "step1": "pass",
+      "notice": [
+        {
+          "fact": "Vigil told Zoe it would tell her when the nightly finishes",
+          "events": [
+            "z1",
+            "v1"
+          ]
+        },
+        {
+          "fact": "this CI line says the nightly finished and passed",
+          "events": [
+            "c1"
+          ]
+        },
+        {
+          "fact": "the promise was three hours ago, before the room talked about other things",
+          "events": [
+            "z1",
+            "t1"
+          ]
+        }
+      ],
+      "fitting": [
+        "speak"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "Vigil promised to tell Zoe when it finished, and she should not have to ask"
+        },
+        {
+          "move": "mhm",
+          "why": "a reaction on a CI line doesn't tell Zoe the build passed"
+        }
+      ]
+    }
+  ]
+}
