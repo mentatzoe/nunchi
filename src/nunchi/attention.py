@@ -46,6 +46,7 @@ from .receipts import ReceiptJournal
 from .v2_contracts import (
     READING_MAX_ITEMS,
     READING_NOTE_MAX_CHARS,
+    UNATTENDED_POINTER,
     classifier_projection,
     validate_attention_decision,
     validate_attention_request,
@@ -325,6 +326,28 @@ ATTENTION_JUDGMENT_SCHEMA: dict[str, Any] = {
 }
 
 
+def attention_judgment_schema(*, unattended: bool = False) -> dict[str, Any]:
+    """The chat-model answer schema; with ``unattended``, one more pointer."""
+
+    schema = deepcopy(ATTENTION_JUDGMENT_SCHEMA)
+    if unattended:
+        schema["properties"][UNATTENDED_POINTER] = {"type": ["string", "null"]}
+        schema["required"].append(UNATTENDED_POINTER)
+    return schema
+
+
+# Messages that arrived while the participant was busy (#94 step 6), explained
+# only to a judgment that has them, like an occasion.
+_UNATTENDED_PROMPT = (
+    " observation.unattended_event_ids lists messages that arrived while "
+    "{called} was busy with its previous turn and got no turn of their own, "
+    "newest first. Judge this moment as a whole, the way a person catching up "
+    "reads the newest message and glances back at what they missed: the move "
+    "fits the whole moment, and " + UNATTENDED_POINTER + " names the one of "
+    "them, if any, that still calls for {called}."
+)
+
+
 # What a judgment without a new message means (#94 step 6). Only that
 # judgment hears it, so ordinary judgments are not nudged by it.
 _OCCASION_PROMPTS = {
@@ -367,6 +390,7 @@ def participant_attention_prompt(
     name: str | None = None,
     occasion: str | None = None,
     memory: bool = False,
+    unattended: bool = False,
 ) -> str:
     """Return the shared instructions for a participant's chat-model attention.
 
@@ -379,13 +403,15 @@ def participant_attention_prompt(
     prompt depends only on the trusted profile, and the observation names the
     participant. ``occasion`` adds what a judgment without a new message
     means, only to that judgment (#94 step 6); ``memory`` explains the
-    participant's memory, only to a judgment that carries one.
+    participant's memory, only to a judgment that carries one; ``unattended``
+    adds the messages that arrived while it was busy, and the question about
+    them, only to a judgment that has some.
     """
 
     called = name or profile.participant_id
-    questions = attention_questions(called)
+    questions = attention_questions(called, unattended=unattended)
     lines = []
-    for key in QUESTION_IDS:
+    for key in questions:
         question = questions[key]
         if question["kind"] == "yes_no":
             text = (
@@ -427,6 +453,7 @@ def participant_attention_prompt(
         f"{called}'s own messages in the window and how long ago it last posted."
         + _OCCASION_PROMPTS.get(occasion or "", "").format(called=called)
         + (_MEMORY_PROMPT.format(called=called) if memory else "")
+        + (_UNATTENDED_PROMPT.format(called=called) if unattended else "")
         + "\n\n"
         "Participant instructions (trusted host profile):\n"
         f"{profile.instructions}\n\n"
@@ -441,7 +468,7 @@ def participant_attention_prompt(
 
 def _answers_shape(questions: Mapping[str, Mapping[str, Any]], *, notes: bool) -> str:
     fields = []
-    for key in QUESTION_IDS:
+    for key in questions:
         question = questions[key]
         if question["kind"] == "yes_no":
             value = "p"
@@ -737,7 +764,9 @@ class HostStructuredAttentionModel:
         result = self._complete(
             instructions=instructions,
             input=[{"type": "text", "text": attention_input_text(projection)}],
-            json_schema=ATTENTION_JUDGMENT_SCHEMA,
+            json_schema=attention_judgment_schema(
+                unattended=bool(projection.get("unattended_event_ids"))
+            ),
             schema_name="nunchi_v2_attention",
             provider=self.provider,
             model=self.model_id,
@@ -796,6 +825,7 @@ def _validate_model_judgment(
     trigger_event_id: str,
     reading_items: int = READING_MAX_ITEMS,
     reading_note_chars: int = READING_NOTE_MAX_CHARS,
+    unattended: tuple[str, ...] | list[str] = (),
 ) -> dict[str, Any]:
     """Check a model's typed answers and keep its usable notes.
 
@@ -812,6 +842,7 @@ def _validate_model_judgment(
             body,
             event_ids=event_ids,
             trigger_event_id=trigger_event_id,
+            unattended=unattended,
         )
     except ValueError as exc:
         raise AttentionError(f"model {exc}") from exc
@@ -974,9 +1005,12 @@ class AttentionEngine:
         def invoke() -> None:
             try:
                 if callable(typed):
-                    questions = attention_questions(name)
+                    waiting = list(projection.get("unattended_event_ids", ()))
+                    questions = attention_questions(name, unattended=bool(waiting))
                     questions["answered_by"]["candidates"] = answer_candidates(projection)
                     questions["responds_to"]["candidates"] = response_candidates(projection)
+                    if waiting:
+                        questions[UNATTENDED_POINTER]["candidates"] = waiting
                     result = typed(
                         questions=questions,
                         state=attention_state(projection, self.profile.instructions),
@@ -990,6 +1024,7 @@ class AttentionEngine:
                             reading_note_chars=self.policy.reading_note_chars,
                             occasion=projection.get("occasion"),
                             memory=bool(projection.get("memory")),
+                            unattended=bool(projection.get("unattended_event_ids")),
                         ),
                         projection=projection,
                         timeout_seconds=provider_timeout,
@@ -1082,6 +1117,7 @@ class AttentionEngine:
                 trigger_event_id=checked["trigger_event_id"],
                 reading_items=self.policy.reading_items,
                 reading_note_chars=self.policy.reading_note_chars,
+                unattended=checked.get("unattended_event_ids", ()),
             )
         except HostAttentionPermissionError as exc:
             # The host refused before any model ran, so no classifier audit.

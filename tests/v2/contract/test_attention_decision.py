@@ -1,5 +1,5 @@
-"""Contract tests for ``I-010B AttentionDecisionV2@7`` (slice 010, T003;
-reworked by T028 after rejection R2; @5 for #94 step 4, @6 for step 5, @7 for step 6).
+"""Contract tests for ``I-010B AttentionDecisionV2@8`` (slice 010, T003;
+reworked by T028 after rejection R2; @5 for #94 step 4, @6 for step 5, @7 and @8 for step 6).
 
 @5 (Zoe, 2026-10-05) grounds every ``status: ok`` decision in the model's
 typed answers (``answers``): exactly the step 1 and step 2 questions, each a
@@ -309,7 +309,8 @@ class TypedAnswerCases(unittest.TestCase):
                 assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_each_pointer_names_one_message(self):
-        for key in ("answered_by", "responds_to"):
+        # calls_for_participant since @8 (#94 step 6): asked only with unattended messages.
+        for key in ("answered_by", "responds_to", "calls_for_participant"):
             assert_schema_verdict(
                 self, "attention-decision", make_decision_ok(answers=make_answers(**{key: "e3"})), "valid"
             )

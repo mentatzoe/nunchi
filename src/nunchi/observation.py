@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -19,6 +19,7 @@ from .errors import NunchiError, ValidationError
 from .pace import pace_facts
 from .receipts import PersistenceError, ReceiptJournal
 from .v2_contracts import (
+    UNATTENDED_MAX,
     validate_attention_request,
     validate_canonical_event,
 )
@@ -917,6 +918,7 @@ class ObservationProvider:
         record_receipt: bool = True,
         occasion: str | None = None,
         memory: Mapping[str, Any] | None = None,
+        unattended: Sequence[str] = (),
     ) -> dict[str, Any]:
         """Build one bounded request about ``trigger_event_id``.
 
@@ -924,6 +926,9 @@ class ObservationProvider:
         #94 step 6, ``pause`` is a look again after the room went quiet.
         ``memory`` is the participant's memory of the room, so the judgment
         reads the message as the participant would, promises included.
+        ``unattended`` names messages that arrived while the participant was
+        busy with its previous turn and got no turn of their own; those still
+        in the snapshot's events are listed newest first (#94 step 6).
         """
         with self._lock:
             all_events = list(self._events)
@@ -982,6 +987,20 @@ class ObservationProvider:
                 request["occasion"] = occasion
             if memory:
                 request["memory"] = deepcopy(dict(memory))
+            shown = {
+                event["id"]
+                for event in events
+                if event["type"] == "message" and event["author_id"] != self.binding.actor_id
+            }
+            position = {event["id"]: index for index, event in enumerate(events)}
+            waiting = sorted(
+                (event_id for event_id in set(unattended) if event_id in shown and event_id != trigger_event_id),
+                key=position.__getitem__,
+                reverse=True,
+            )
+            if waiting:
+                # Newest first, in the order they were retained.
+                request["unattended_event_ids"] = waiting[:UNATTENDED_MAX]
             # Interior gaps (left by relation closure, kept older exchange, or
             # age and byte cuts) stay fetchable even when both ends are covered.
             included = set(indices)

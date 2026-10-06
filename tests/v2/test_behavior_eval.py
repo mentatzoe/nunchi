@@ -1021,6 +1021,20 @@ class UsageTests(unittest.TestCase):
         self.assertNotIn("memory_replay", without)
         self.assertNotIn("memory_threads", without["agent"])
 
+    def test_a_question_asked_while_busy_is_read_with_the_newest(self):
+        # asked-while-busy (#94 step 6): Sam's question arrived while Vigil was
+        # busy, so Zoe's thanks is judged as the newest, with it.
+        scene = scene_by_id("asked-while-busy")
+        agent = FakeAgent(lambda wake: None)
+        job = run.Job(scene, 0, scene.participants[0], "fixture/model", 0)
+        record = run.judge_moment(
+            job, lambda _: FixedModel("WAKE"), timeout_seconds=5, agent_factory=lambda profile: agent
+        )
+        (wake, _), = agent.turns
+        self.assertEqual(("z2", ["s1"]), (wake["trigger_event_id"], wake["unattended_event_ids"]))
+        # z1 by the replay, s1 by Nunchi itself before the newest: both count.
+        self.assertEqual(2, record["memory_replay"]["judged"])
+
     def test_no_usage_means_no_cost_section(self):
         scene = scene_by_id("bot-status-report")
         record = run.judge_moment(run.Job(scene, 0, "vigil", "fixture/model", 0), lambda _: FixedModel("WAKE"), timeout_seconds=5)

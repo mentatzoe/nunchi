@@ -28,6 +28,7 @@ from .v2_contracts import (
     ANSWER_QUESTIONS,
     READING_MAX_ITEMS,
     READING_NOTE_MAX_CHARS,
+    UNATTENDED_POINTER,
 )
 
 
@@ -51,16 +52,18 @@ _MOVE_WORDS = {
 _MOVE_DISPOSITION = {"speak": "WAKE", "mhm": "ACK", "wait": "DEFER", "stay_quiet": "DEFER"}
 
 
-def attention_questions(name: str) -> dict[str, dict[str, Any]]:
+def attention_questions(name: str, *, unattended: bool = False) -> dict[str, dict[str, Any]]:
     """The fixed typed questions, worded for the participant called ``name``.
 
     Each question has a ``kind``: ``yes_no`` (a probability that the answer
     is yes), ``choice`` (a probability for every option), or ``event`` (the
     id of one supplied message, or none). ``step`` says which step of
-    reading the room it belongs to.
+    reading the room it belongs to. With ``unattended``, the judgment also
+    covers messages that arrived while the participant was busy, and one more
+    question asks which of them still calls for it (#94 step 6).
     """
 
-    return {
+    questions = {
         "conversation": {
             "step": 1,
             "kind": YES_NO,
@@ -162,6 +165,19 @@ def attention_questions(name: str) -> dict[str, dict[str, Any]]:
             },
         },
     }
+    if unattended:
+        questions[UNATTENDED_POINTER] = {
+            "step": 2,
+            "kind": EVENT,
+            "ask": (
+                f"Which of the messages that arrived while {name} was busy with its "
+                f"previous turn still calls for {name}: asked of it or of the room, and "
+                "not yet answered?"
+            ),
+            "none": "null if none does",
+            "no_message": f"None of them still calls for {name}.",
+        }
+    return questions
 
 
 def participant_name(projection: Mapping[str, Any]) -> str:
@@ -232,6 +248,9 @@ def attention_state(projection: Mapping[str, Any], instructions: str) -> dict[st
         state["pace"] = deepcopy(dict(projection["pace"]))
     if projection.get("occasion"):
         state["occasion"] = projection["occasion"]
+    if projection.get("unattended_event_ids"):
+        # Arrived while the participant was busy, newest first (#94 step 6).
+        state["unattended_message_ids"] = list(projection["unattended_event_ids"])
     # The participant's memory is left out on purpose (#94 step 6): with it,
     # Jev's own top move fit fell from 186 to 175 of 231 moments (run 37),
     # mostly turning "speak" into "wait" or "stay quiet" where the agent had
@@ -323,6 +342,7 @@ def validate_answers(
     *,
     event_ids: set[str],
     trigger_event_id: str,
+    unattended: tuple[str, ...] | list[str] = (),
 ) -> dict[str, Any]:
     """Check one set of typed answers and return it in the core's shape.
 
@@ -330,13 +350,14 @@ def validate_answers(
     answer written as a boolean, a word, or a yes/no split is read as the
     probability it states. A choice is normalized to sum to 1. A pointer to
     a message the model was not given, or to the judged message itself, is
-    dropped on its own rather than failing the judgment.
+    dropped on its own rather than failing the judgment. The answer about
+    unattended messages is kept only when it names one of ``unattended``.
     """
 
     if not isinstance(raw, Mapping):
         raise ValueError("answers must be an object")
     required = set(QUESTION_IDS) - set(ANSWER_POINTERS)
-    if required - set(raw) or set(raw) - set(QUESTION_IDS):
+    if required - set(raw) or set(raw) - set(QUESTION_IDS) - {UNATTENDED_POINTER}:
         raise ValueError("answers have a missing or unexpected question")
     answers: dict[str, Any] = {
         "conversation": _yes_no(raw["conversation"], "conversation"),
@@ -353,7 +374,13 @@ def validate_answers(
             raise ValueError(f"answer {key} must be a message id or null")
         if pointer and pointer in event_ids and pointer != trigger_event_id:
             answers[key] = pointer
-    return {key: answers[key] for key in QUESTION_IDS if key in answers}
+    waiting = raw.get(UNATTENDED_POINTER)
+    if waiting is not None and not isinstance(waiting, str):
+        raise ValueError(f"answer {UNATTENDED_POINTER} must be a message id or null")
+    kept = {key: answers[key] for key in QUESTION_IDS if key in answers}
+    if waiting and waiting in unattended:
+        kept[UNATTENDED_POINTER] = waiting
+    return kept
 
 
 def top_move(answers: Mapping[str, Any]) -> str:
@@ -373,11 +400,12 @@ def classifier_disposition(answers: Mapping[str, Any]) -> str:
     mistake: a wrong suppression is never seen, and a wrong pass costs one
     turn (``docs/behavior.md``; #94 step 6). Otherwise the participant gets
     a turn: speaking wakes it, a mhm asks for one, and waiting or staying
-    quiet defer to it with the reading.
+    quiet defer to it with the reading. A message that arrived while the
+    participant was busy and still calls for it is never hidden either.
     """
 
     move = top_move(answers)
-    if answers["conversation"] < 0.5 and move != "speak":
+    if answers["conversation"] < 0.5 and move != "speak" and not answers.get(UNATTENDED_POINTER):
         return "SUPPRESS"
     return _MOVE_DISPOSITION[move]
 
@@ -400,7 +428,7 @@ def answer_reasons(answers: Mapping[str, Any]) -> list[str]:
         f"asks {answers['asks']:.2f}",
         f"answered {answers['answered']:.2f}",
     ]
-    for key in ANSWER_POINTERS:
+    for key in ANSWER_POINTERS + (UNATTENDED_POINTER,):
         if answers.get(key):
             reasons.append(f"{key} {answers[key]}")
     reasons += [
@@ -413,7 +441,7 @@ def answer_reasons(answers: Mapping[str, Any]) -> list[str]:
 
 def answer_evidence(answers: Mapping[str, Any], trigger_event_id: str) -> list[str]:
     evidence = [trigger_event_id]
-    for key in ANSWER_POINTERS:
+    for key in ANSWER_POINTERS + (UNATTENDED_POINTER,):
         if answers.get(key) and answers[key] not in evidence:
             evidence.append(answers[key])
     return evidence
@@ -602,6 +630,21 @@ def reading_from_answers(
     if max_items <= 0:
         return []
     described = list(notes) if notes else fact_notes(answers, projection)
+    waiting = answers.get(UNATTENDED_POINTER)
+    if waiting:
+        # The core says it on both routes, first: it is why this moment may
+        # call for the participant even when the newest message does not.
+        author = _author(projection, waiting) or "someone"
+        described.insert(
+            0,
+            {
+                "note": (
+                    f"{author}'s message {waiting} arrived while you were busy with your "
+                    "previous turn, and it still calls for you."
+                ),
+                "evidence_event_ids": [waiting],
+            },
+        )
     reading = described[: max_items - 1] + [moves_note(answers, projection["trigger_event_id"])]
     return [
         {"note": item["note"][:max_chars], "evidence_event_ids": list(item["evidence_event_ids"])}

@@ -97,9 +97,9 @@ SCHEMA_FILES = {
 }
 
 INTERFACE_VERSIONS = {
-    "attention-request": ("I-010A", "AttentionRequestV2", 5),
-    "attention-decision": ("I-010B", "AttentionDecisionV2", 7),
-    "participant-wake": ("I-010C", "ParticipantWakeV2", 11),
+    "attention-request": ("I-010A", "AttentionRequestV2", 6),
+    "attention-decision": ("I-010B", "AttentionDecisionV2", 8),
+    "participant-wake": ("I-010C", "ParticipantWakeV2", 12),
     "context-continuation": ("I-010D", "ContextContinuationV2", 1),
     "attention-receipt": ("I-010E", "AttentionReceiptV2", 4),
     "privileged-action-authorization": (
@@ -145,6 +145,8 @@ VERDICT_KEYS = ("PASS", "ACK", "ASK", "SPEAK")
 # and responds_to since @6, step 5).
 ANSWER_YES_NO = ("conversation", "asks", "answered", "mid_thought", "adds_something")
 ANSWER_POINTERS = ("answered_by", "responds_to")
+# Asked only when the request lists unattended messages (@8, #94 step 6).
+ANSWER_OPTIONAL_POINTERS = ANSWER_POINTERS + ("calls_for_participant",)
 ANSWER_CHOICES = {
     "addressee": ("participant", "room", "someone_else", "nobody"),
     "move": ("speak", "mhm", "wait", "stay_quiet"),
@@ -887,9 +889,11 @@ def validate_attention_request(doc: Any) -> list[str]:
         "schema_version", "request_id", "self", "room",
         "actors", "events", "trigger_event_id", "coverage",
     )
-    allowed = required + ("continuation", "pace", "occasion", "memory")
+    allowed = required + ("continuation", "pace", "occasion", "memory", "unattended_event_ids")
     if not _check_closed_object(errors, "request", doc, required, allowed):
         return list(errors)
+    if "unattended_event_ids" in doc:
+        _check_unattended(errors, "unattended_event_ids", doc["unattended_event_ids"])
     if "pace" in doc:
         _check_pace(errors, "pace", doc["pace"])
     if "occasion" in doc:
@@ -947,6 +951,17 @@ def _check_pace(errors: _Errors, path: str, value: Any) -> None:
             minimum = 1 if name == "author_run_messages" else 0
             if isinstance(item, bool) or not isinstance(item, int) or item < minimum:
                 errors.add(f"{path}.{name}", f"must be an integer of at least {minimum}")
+
+
+def _check_unattended(errors: _Errors, path: str, value: Any) -> None:
+    """I-010A@6 / I-010C@12: 1 to 3 unique message ids, newest first."""
+    if not isinstance(value, list) or not 1 <= len(value) <= 3:
+        errors.add(path, "must be an array of 1 to 3 event IDs")
+        return
+    for index, item in enumerate(value):
+        _check_nes(errors, f"{path}[{index}]", item)
+    if len(set(map(str, value))) != len(value):
+        errors.add(path, "must not contain duplicates")
 
 
 def _check_occasion(errors: _Errors, path: str, value: Any) -> None:
@@ -1186,7 +1201,7 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
 
     answers = doc.get("answers")
     if "answers" in doc and _check_closed_object(
-        errors, "answers", answers, ANSWER_KEYS, ANSWER_KEYS + ANSWER_POINTERS
+        errors, "answers", answers, ANSWER_KEYS, ANSWER_KEYS + ANSWER_OPTIONAL_POINTERS
     ):
         for key in ANSWER_YES_NO:
             if key in answers:
@@ -1196,7 +1211,7 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
                 for option in options:
                     if option in answers[key]:
                         _check_confidence(errors, f"answers.{key}.{option}", answers[key][option])
-        for key in ANSWER_POINTERS:
+        for key in ANSWER_OPTIONAL_POINTERS:
             if key in answers:
                 _check_nes(errors, f"answers.{key}", answers[key])
 
@@ -1379,9 +1394,11 @@ def validate_participant_wake(doc: Any) -> list[str]:
     """Mirror of schemas/v2/participant-wake.schema.json (I-010C)."""
     errors = _Errors()
     required = ("request_id", "self", "room", "actors", "events", "trigger_event_id", "coverage", "attention")
-    allowed = required + ("continuation", "memory", "pace", "occasion")
+    allowed = required + ("continuation", "memory", "pace", "occasion", "unattended_event_ids")
     if not _check_closed_object(errors, "wake", doc, required, allowed):
         return list(errors)
+    if "unattended_event_ids" in doc:
+        _check_unattended(errors, "unattended_event_ids", doc["unattended_event_ids"])
     if "pace" in doc:
         _check_pace(errors, "pace", doc["pace"])
     if "occasion" in doc:

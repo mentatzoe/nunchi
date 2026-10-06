@@ -331,7 +331,12 @@ anchor becomes work. The anchors it replaced are not lost: before the newest is
 judged, the newest 3 of them are judged, oldest first, for the participant's
 memory alone, so a question asked meanwhile starts a thread (#94 step 6).
 They get no turn of their own, share one attention timeout, and a failed one
-is skipped. One host-wide deadline begins before attention and spans
+is skipped. The newest one's judgment then reads them with it as one moment
+(Zoe, 2026-10-06): the request lists them newest first
+(`unattended_event_ids`), attention says which, if any, still calls for the
+participant (`calls_for_participant`), step 1 never hides that moment, the
+reading names the message first, and the turn lists them too. One host-wide
+deadline begins before attention and spans
 provider waiting, the participant, expansion, authorization, and native
 transport acknowledgement. It invalidates even a participant or transport
 that ignores cancellation; a late transport result remains `unknown` and

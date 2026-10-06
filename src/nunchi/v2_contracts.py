@@ -374,6 +374,31 @@ def _observation_fields(doc: Mapping[str, Any], *, require_schema: bool) -> None
 # participant's turn about it ended (I-010A@4, I-010C@10).
 OCCASIONS = ("pause", "outcome")
 
+# Messages that arrived while the participant was busy with its previous turn
+# and got no turn of their own (#94 step 6; I-010A@6, I-010C@12): the judgment
+# and the turn read them with the newest, newest first, as a person catching up
+# does. At most this many, besides the newest.
+UNATTENDED_MAX = 3
+
+
+def _unattended(value: Any, doc: Mapping[str, Any], path: str) -> list[str]:
+    """Messages by others in the supplied events, newest first, not the trigger."""
+
+    ids = _string_list(value, path, unique=True)
+    if not 1 <= len(ids) <= UNATTENDED_MAX:
+        _fail(path, f"must list 1 to {UNATTENDED_MAX} messages")
+    order = {event["id"]: index for index, event in enumerate(doc["events"])}
+    own = doc["self"]["actor_id"]
+    for event_id in ids:
+        event = next((item for item in doc["events"] if item["id"] == event_id), None)
+        if event is None or event["type"] != "message" or event["author_id"] == own:
+            _fail(path, "must name supplied messages by others")
+        if event_id == doc["trigger_event_id"]:
+            _fail(path, "must not name the trigger")
+    if [order[event_id] for event_id in ids] != sorted((order[event_id] for event_id in ids), reverse=True):
+        _fail(path, "must be newest first")
+    return ids
+
 # The room's pace at the snapshot (#94 step 6; I-010A@2, I-010C@8); see
 # ``nunchi.pace``. Counts and durations in whole seconds, never verdicts.
 PACE_COUNTS = ("window_messages", "own_messages")
@@ -414,10 +439,12 @@ def validate_attention_request(value: Any) -> dict[str, Any]:
             "trigger_event_id",
             "coverage",
         ),
-        optional=("continuation", "pace", "occasion", "memory"),
+        optional=("continuation", "pace", "occasion", "memory", "unattended_event_ids"),
     )
     _nes(doc["request_id"], "request_id")
     _observation_fields(doc, require_schema=True)
+    if "unattended_event_ids" in doc:
+        _unattended(doc["unattended_event_ids"], doc, "request.unattended_event_ids")
     if "memory" in doc:
         # I-010A@5: the participant's memory, the same facts its turn gets.
         _memory(doc["memory"], "request.memory")
@@ -518,6 +545,9 @@ ANSWER_QUESTIONS = (
 )
 # Pointer answers are optional: no message, or none the model was shown.
 ANSWER_POINTERS = ("answered_by", "responds_to")
+# Asked only when the request lists unattended messages (@8, #94 step 6):
+# which of them still calls for the participant.
+UNATTENDED_POINTER = "calls_for_participant"
 _ANSWER_YES_NO = ("conversation", "asks", "answered", "mid_thought", "adds_something")
 _ANSWER_CHOICES = {"addressee": ANSWER_ADDRESSEES, "move": ANSWER_MOVES}
 
@@ -541,7 +571,7 @@ def _answers(
         value,
         path,
         required=tuple(key for key in ANSWER_QUESTIONS if key not in ANSWER_POINTERS),
-        optional=ANSWER_POINTERS,
+        optional=ANSWER_POINTERS + (UNATTENDED_POINTER,),
     )
     for key in _ANSWER_YES_NO:
         _unit(checked[key], f"{path}.{key}")
@@ -549,7 +579,7 @@ def _answers(
         choice = _closed(checked[key], f"{path}.{key}", required=options)
         for option in options:
             _unit(choice[option], f"{path}.{key}.{option}")
-    for key in ANSWER_POINTERS:
+    for key in ANSWER_POINTERS + (UNATTENDED_POINTER,):
         if key in checked:
             _nes(checked[key], f"{path}.{key}")
             if event_ids is not None and checked[key] not in event_ids:
@@ -680,7 +710,14 @@ def validate_attention_decision(
             _fail("decision.evidence_event_ids", "contains an unknown event ID")
         _classifier(checked["classifier"])
         # The model's typed answers behind the judgment (@5).
-        _answers(checked["answers"], event_ids, "decision.answers")
+        answers = _answers(checked["answers"], event_ids, "decision.answers")
+        if (
+            request is not None
+            and UNATTENDED_POINTER in answers
+            and answers[UNATTENDED_POINTER] not in request.get("unattended_event_ids", ())
+        ):
+            # Runtime-adapter-only: it names one of the request's unattended messages.
+            _fail(f"decision.answers.{UNATTENDED_POINTER}", "must name an unattended message")
         if "attention_advice" in checked:
             # The model's reading of the room may accompany any judgment; it
             # reaches the participant only on a turn it takes (WAKE or DEFER).
@@ -828,7 +865,7 @@ def validate_participant_wake(value: Any) -> dict[str, Any]:
             "coverage",
             "attention",
         ),
-        optional=("continuation", "memory", "pace", "occasion"),
+        optional=("continuation", "memory", "pace", "occasion", "unattended_event_ids"),
     )
     if "pace" in doc:
         _pace(doc["pace"], "wake.pace")
@@ -840,6 +877,8 @@ def validate_participant_wake(value: Any) -> dict[str, Any]:
         _memory(doc["memory"], "wake.memory")
     _nes(doc["request_id"], "wake.request_id")
     _observation_fields(doc, require_schema=False)
+    if "unattended_event_ids" in doc:
+        _unattended(doc["unattended_event_ids"], doc, "wake.unattended_event_ids")
     attention = _closed(
         doc["attention"],
         "wake.attention",

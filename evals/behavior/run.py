@@ -461,6 +461,20 @@ def call_usage(response: Any) -> dict[str, Any]:
     return {key: value for key, value in entry.items() if value is not None}
 
 
+def usage_sum(first: Mapping[str, Any], second: Mapping[str, Any]) -> dict[str, Any]:
+    """Two usage totals added up."""
+
+    total: dict[str, Any] = {"calls": first.get("calls", 0) + second.get("calls", 0)}
+    for key in ("prompt_tokens", "completion_tokens", "reasoning_tokens", "cost"):
+        if key in first or key in second:
+            value = first.get(key, 0) + second.get(key, 0)
+            total[key] = round(value, 8) if key == "cost" else value
+    providers = sorted(set(first.get("providers", ())) | set(second.get("providers", ())))
+    if providers:
+        total["providers"] = providers
+    return total
+
+
 def usage_total(calls: list[Mapping[str, Any]]) -> dict[str, Any]:
     """The usage of several calls added up, with the providers that served them."""
 
@@ -821,6 +835,21 @@ def judge_moment(
         agent.reset()
         return entry
 
+    # The agent's previous turn, still running when the unattended events
+    # arrive (#94 step 6): Nunchi receives them, and the judged event, while
+    # busy, and judges the judged event as the newest of them when it ends.
+    busy = None
+    # Nunchi then judges the unattended events for the memory first; their
+    # calls count with the memory replay.
+    midturn: list[dict[str, Any]] = []
+    recall = pipeline.recall
+
+    def counted_recall(event_id: str, **kwargs: Any) -> Mapping[str, Any]:
+        decision = recall(event_id, **kwargs)
+        midturn.append(
+            {"ok": decision.get("status") == "ok", "usage": call_usage(getattr(inner, "last_response", None))}
+        )
+        return decision
     for index, raw in enumerate(observed):
         at = None
         if "at" in raw:
@@ -831,8 +860,15 @@ def judge_moment(
             "event": canonical_event(raw, at=at),
             "actors": _event_actors(scene, raw),
         }
+        if raw["id"] in moment.unattended:
+            if busy is None:
+                busy = scheduler.offer(raw["id"])
+            pipeline.observe_and_offer(**delivery)
+            continue
         if raw["id"] == moment.event:
             _, token = pipeline.observe_and_offer(**delivery)
+            if busy is not None:
+                token = scheduler.complete(busy)
             continue
         if raw["id"] in played_moments:
             replayed.append(play(delivery, at))
@@ -864,6 +900,8 @@ def judge_moment(
         engine.last_request = engine.last_decision = None
         model.reset()
     scene_time[0] = now
+    # From here on, only the judged moment's own mid-turn recalls run.
+    pipeline.recall = counted_recall
     if agent is not None and moment.during_turn:
         agent.arrive = arrive
     if moment.outcome is not None:
@@ -913,6 +951,11 @@ def judge_moment(
         return record
     else:
         outcomes = pipeline.run_opportunities(token)
+    if midturn:
+        replay = record.setdefault("memory_replay", {"judged": 0, "failed": 0, "usage": {}})
+        replay["judged"] += sum(item["ok"] for item in midturn)
+        replay["failed"] += sum(not item["ok"] for item in midturn)
+        replay["usage"] = usage_sum(replay["usage"], usage_total([item["usage"] for item in midturn if item["usage"]]))
     decision = engine.last_decision
     if decision is None:
         detail = outcomes[0].operational_error if outcomes else "no opportunity ran"

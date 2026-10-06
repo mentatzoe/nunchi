@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010A AttentionRequestV2@5`` (slice 010, T002; #94 step 6: @2 adds the pace, @3 the pause occasion, @4 the outcome one, @5 the memory).
+"""Contract tests for ``I-010A AttentionRequestV2@6`` (slice 010, T002; #94 step 6: @2 adds the pace, @3 the pause occasion, @4 the outcome one, @5 the memory, @6 the unattended messages).
 
 Red cases cover exact identity (S01), actor mentions versus
 ``mentions_room`` (S02), the runtime-adapter-only relational classes
@@ -107,6 +107,16 @@ class MemoryCases(unittest.TestCase):
         for bad in ({}, {"own_moves": [{"kind": "verdict"}]}, {"notes": []}):
             with self.subTest(bad=bad):
                 assert_schema_verdict(self, "attention-request", dict(make_request(), memory=bad), "invalid")
+
+
+class UnattendedCases(unittest.TestCase):
+    """@6 (#94 step 6; Zoe, 2026-10-06): the newest is judged with what it replaced."""
+
+    def test_one_to_three_unique_ids_validate(self):
+        assert_schema_verdict(self, "attention-request", dict(make_request(), unattended_event_ids=["e1"]), "valid")
+        for bad in ([], ["e1", "e1"], ["e1", "e2", "e3", "e4"], [""], None):
+            with self.subTest(bad=bad):
+                assert_schema_verdict(self, "attention-request", dict(make_request(), unattended_event_ids=bad), "invalid")
 
 
 class ExactIdentityRedCases(unittest.TestCase):

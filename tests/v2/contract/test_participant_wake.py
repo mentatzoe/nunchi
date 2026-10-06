@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010C ParticipantWakeV2@11`` (slice 010, T004).
+"""Contract tests for ``I-010C ParticipantWakeV2@12`` (slice 010, T004; @12 the unattended messages).
 
 Red cases cover the wake sources, advice-free ``PREATTENTION_BYPASS``
 (010-Preattention-bypass), the FR-013 advice-source violations (advice on
@@ -110,6 +110,16 @@ class OccasionCases(unittest.TestCase):
         assert_schema_verdict(self, "participant-wake", dict(make_wake("DEFER"), occasion="pause"), "valid")
         assert_schema_verdict(self, "participant-wake", dict(make_wake("DEFER"), occasion="outcome"), "valid")
         assert_schema_verdict(self, "participant-wake", dict(make_wake("DEFER"), occasion="soon"), "invalid")
+
+
+class UnattendedCases(unittest.TestCase):
+    """@12 (#94 step 6): messages that arrived while the participant was busy."""
+
+    def test_the_wake_may_list_them_and_the_list_is_bounded(self):
+        assert_schema_verdict(self, "participant-wake", dict(make_wake("DEFER"), unattended_event_ids=["e1"]), "valid")
+        for bad in ([], ["e1", "e1"], ["e1", "e2", "e3", "e4"], [""], "e1"):
+            with self.subTest(bad=bad):
+                assert_schema_verdict(self, "participant-wake", dict(make_wake("DEFER"), unattended_event_ids=bad), "invalid")
 
 
 class MoveAboutCases(unittest.TestCase):
