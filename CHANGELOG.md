@@ -66,6 +66,19 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- The newest message after a busy turn is judged with the messages it
+  replaced, as one moment (#94, step 6; Zoe, 2026-10-06: a person catching
+  up reads the newest message and glances back). The attention request lists
+  them newest first (`unattended_event_ids`, `I-010A AttentionRequestV2@6`),
+  and attention answers one more question, only then: which of them still
+  calls for the participant (`calls_for_participant`, `I-010B
+  AttentionDecisionV2@8`), on the chat and the typed route alike. Step 1
+  never hides a moment that names one, the reading names that message first,
+  and the turn lists them too (`I-010C ParticipantWakeV2@12`) and may reply
+  to any. Run 45 showed why: in `asked-while-busy`, with only Zoe's "Thanks!"
+  judged as the moment, Vigil answered Sam's mid-turn question 3 or 4 times
+  in 10. Scenes can now mark events as `unattended`, and the suite feeds them
+  through the scheduler while a turn runs.
 - Messages that arrive while the agent is mid-turn are judged for its memory
   (#94, step 6). Only the newest still gets the next opportunity, but before
   it is judged, up to 3 of the messages it replaced are judged for the memory

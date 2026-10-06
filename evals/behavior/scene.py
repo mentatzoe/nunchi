@@ -38,7 +38,11 @@ denied) is the turn an approved action starts when it settles after the
 pause: the participant proposed it about that event, and its own events in
 the scene say so. `during_turn` lists later events that
 arrive while the woken agent is composing its turn: they are not in its
-wake, but it can see them by looking again before it posts. `step1` is what the conservative
+wake, but it can see them by looking again before it posts. `unattended`
+lists earlier events that arrived while the agent was busy with its
+previous turn: Nunchi receives them while a turn runs, so the judged event
+comes as the newest of them, and its judgment reads them with it as one
+moment (#94 step 6). `step1` is what the conservative
 first step should do: `pass`, `suppress`, or `either`. `together` on a scene
 with several participants names collective checks: `not-all-quiet`
 (collective silence) and `no-pile-on` (everyone speaking at once).
@@ -98,6 +102,8 @@ class Moment:
     misses: tuple[Mapping[str, str], ...]
     # The participant's approved action that settles after the pause.
     outcome: Mapping[str, str] | None = None
+    # Earlier events that arrived while the participant was busy.
+    unattended: tuple[str, ...] = ()
 
     @property
     def is_pause(self) -> bool:
@@ -146,7 +152,7 @@ def _moment(raw: Mapping[str, Any], index: int, scene_id: str, event_ids: list[s
     _require(isinstance(raw, Mapping), scene_id, f"{where} must be an object")
     allowed = {
         "label", "event", "seen_through", "during_turn", "pause_after", "pause",
-        "outcome", "step1", "notice", "fitting", "misses",
+        "outcome", "unattended", "step1", "notice", "fitting", "misses",
     }
     _require(not set(raw) - allowed, scene_id, f"{where} has unknown fields {sorted(set(raw) - allowed)}")
     event = raw.get("event")
@@ -177,6 +183,15 @@ def _moment(raw: Mapping[str, Any], index: int, scene_id: str, event_ids: list[s
             all(item in event_ids and event_ids.index(item) > last for item in during_turn),
             scene_id,
             f"{where}: during_turn must name events after the moment",
+        )
+    unattended = raw.get("unattended", [])
+    _require(isinstance(unattended, list), scene_id, f"{where}: unattended must be a list")
+    if unattended:
+        _require(event is not None and seen_through is None, scene_id, f"{where}: unattended needs a plain event moment")
+        _require(
+            all(item in event_ids and event_ids.index(item) < event_ids.index(event) for item in unattended),
+            scene_id,
+            f"{where}: unattended must name events before the moment",
         )
     if event is None:
         _require(pause_after in event_ids, scene_id, f"{where}: unknown pause_after")
@@ -243,6 +258,7 @@ def _moment(raw: Mapping[str, Any], index: int, scene_id: str, event_ids: list[s
         fitting=tuple(fitting),
         misses=tuple(misses),
         outcome=dict(outcome) if outcome is not None else None,
+        unattended=tuple(unattended),
     )
 
 

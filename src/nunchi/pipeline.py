@@ -64,6 +64,7 @@ def prepare_opportunity(
     deadline: float,
     occasion: str | None = None,
     memory: Callable[[str], Mapping[str, Any] | None] | None = None,
+    unattended: tuple[str, ...] = (),
 ) -> OpportunityPreparation | None:
     """Build one valid current participant opportunity or an explicit error.
 
@@ -78,11 +79,15 @@ def prepare_opportunity(
     # The judgment reads the message with the participant's memory (#94 step 6).
     remembered = memory(token.anchor_event_id) if memory is not None else None
     try:
-        request = observation.build_snapshot(token.anchor_event_id, occasion=occasion, memory=remembered)
+        request = observation.build_snapshot(
+            token.anchor_event_id, occasion=occasion, memory=remembered, unattended=unattended
+        )
     except SnapshotUnavailable as first_error:
         reconstructed = True
         try:
-            request = observation.build_snapshot(token.anchor_event_id, occasion=occasion, memory=remembered)
+            request = observation.build_snapshot(
+            token.anchor_event_id, occasion=occasion, memory=remembered, unattended=unattended
+        )
         except SnapshotUnavailable as final_error:
             detail = (
                 "attention snapshot unavailable after one reconstruction "
@@ -420,7 +425,7 @@ class NunchiV2Pipeline:
                 occasion = None
                 token = self.scheduler.complete(token)
                 continue
-            self._recall_midturn(token)
+            unattended = self._recall_midturn(token)
             deadline = time.monotonic() + self.host.host_timeout_seconds
             turn_occasion, occasion = occasion, None
             prepared = prepare_opportunity(
@@ -431,6 +436,7 @@ class NunchiV2Pipeline:
                 deadline=deadline,
                 occasion=turn_occasion,
                 memory=self._memory_for,
+                unattended=unattended,
             )
             if prepared is None:
                 break
@@ -506,7 +512,7 @@ class NunchiV2Pipeline:
         self._remember(request, decision)
         return decision
 
-    def _recall_midturn(self, token: Any) -> None:
+    def _recall_midturn(self, token: Any) -> tuple[str, ...]:
         """Judge, for the memory, the messages this token's anchor replaced.
 
         They arrived while a turn was running, and only the newest gets an
@@ -515,20 +521,26 @@ class NunchiV2Pipeline:
         timeout, so a slow provider delays the anchor by at most that. A
         failed judgment, or a message no longer retained, is skipped; the
         anchor is judged either way.
+
+        Returns them, oldest first: the anchor's judgment reads them with it,
+        as one moment, the way a person catching up reads the newest message
+        and glances back (Zoe, 2026-10-06).
         """
 
         with self._lifecycle_lock:
             waiting = [event_id for event_id in self._arrived_midturn if event_id != token.anchor_event_id]
             self._arrived_midturn.clear()
+        waiting = waiting[-MIDTURN_RECALL_LIMIT:]
         budget = time.monotonic() + float(self.attention.policy.timeout_seconds)
-        for event_id in waiting[-MIDTURN_RECALL_LIMIT:]:
+        for event_id in waiting:
             remaining = budget - time.monotonic()
             if remaining <= 0 or not self.scheduler.is_current(token):
-                return
+                break
             try:
                 self.recall(event_id, timeout_seconds=remaining)
             except NunchiError:
                 continue
+        return tuple(waiting)
 
     def _memory_for(self, trigger_event_id: str) -> Mapping[str, Any] | None:
         """The participant's memory for a judgment, when its host keeps one."""

@@ -11,7 +11,7 @@ live, integrated, or released status.
 `docs/architecture/v2-selected-design.md` preserve the field inventory selected
 from Aleph Vault at `c834e8c`; the external path is provenance, not a
 contributor dependency. The program-canonical interface names and versions
-(`I-010D`, `I-010F` at `@1`; `I-010A` at `@5`; `I-010E` at `@4`; `I-010C` at `@11`; `I-010B` at `@7`) are this
+(`I-010D`, `I-010F` at `@1`; `I-010A` at `@6`; `I-010E` at `@4`; `I-010C` at `@12`; `I-010B` at `@8`) are this
 slice's vocabulary layered over that inventory. A document the selected design
 declares valid that either validator rejects is a contract defect, never
 resolved by narrowing the corpus.
@@ -20,9 +20,9 @@ resolved by narrowing the corpus.
 
 | Interface | Version | Schema path |
 |---|---|---|
-| `I-010A AttentionRequestV2` | `@5` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
-| `I-010B AttentionDecisionV2` | `@7` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
-| `I-010C ParticipantWakeV2` | `@11` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
+| `I-010A AttentionRequestV2` | `@6` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
+| `I-010B AttentionDecisionV2` | `@8` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
+| `I-010C ParticipantWakeV2` | `@12` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
 | `I-010E AttentionReceiptV2` | `@4` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
 | `I-010F PrivilegedActionAuthorizationV2` | `@1` | [`schemas/v2/privileged-action-authorization.schema.json`](../../schemas/v2/privileged-action-authorization.schema.json) |
@@ -111,7 +111,7 @@ python3 -m unittest tests.v2.contract.test_privileged_action_authorization
 uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
 ```
 
-## I-010A AttentionRequestV2@5
+## I-010A AttentionRequestV2@6
 
 A truthful attention request represents:
 
@@ -190,8 +190,17 @@ A truthful attention request represents:
   judgment, including recalled ones; it is absent while the memory is
   empty. The attention prompt explains it only to a judgment that carries
   it. The reference typed route does not pass it to its model yet.
+- **Messages that arrived while the participant was busy (@6, #94 step 6;
+  Zoe, 2026-10-06)** — optional `unattended_event_ids`: 1 to 3 messages by
+  others, in `events` and newest first, that arrived while the participant
+  was busy with its previous turn and got no turn of their own. The trigger
+  is the newest message that arrived meanwhile, and the judgment reads these
+  with it as one moment, the way a person catching up reads the newest
+  message and glances back. Never the trigger; membership, authorship and
+  order are runtime-adapter-only. The attention prompt explains them, and
+  I-010B@8 asks one more question, only on a request that has them.
 
-## I-010B AttentionDecisionV2@7
+## I-010B AttentionDecisionV2@8
 
 A tagged host-facing union on `status`:
 
@@ -283,7 +292,13 @@ closed-union change: `@2` consumers must upgrade before receiving ACK.
   options, each in `[0, 1]`, normalized by the core to sum to 1.
   `answered_by` and `responds_to` must name a supplied event
   (runtime-adapter-only); the core drops a pointer that does not, or that
-  names the judged message, on its own. The V1-era
+  names the judged message, on its own. Since @8 (#94 step 6), a request
+  with `unattended_event_ids` adds the optional `calls_for_participant`
+  pointer: which of those messages still calls for the participant, asked of
+  it or of the room and not yet answered. It must name one of the request's
+  unattended messages (runtime-adapter-only); the core drops it otherwise.
+  Step 1 never suppresses a judgment that names one, and the reading names
+  it first, on both routes. The V1-era
   `legacy_verdict_confidences` vector that `answers` replaces is no longer
   allowed. A chat model answers the questions as one JSON object; a typed
   decision model answers them natively; both produce the same `answers`.
@@ -302,7 +317,7 @@ closed-union change: `@2` consumers must upgrade before receiving ACK.
   occur before a request ID is assignable); an optional `classifier` audit is
   present only when the error occurred after classifier invocation.
 
-## I-010C ParticipantWakeV2@11
+## I-010C ParticipantWakeV2@12
 
 The normal-turn input materializes `self`, `room`, `actors`, `events`,
 `trigger_event_id`, `coverage`, and optional `continuation` directly —
@@ -388,6 +403,13 @@ who wrote that message and what it said, at most 280 characters, while the
 message is retained and is someone else's. A person remembers what they
 replied to, so the move still makes sense once the message has left the
 window; attention's request (I-010A@5) carries the same memory.
+
+Since @12 (#94 step 6; Zoe, 2026-10-06) the wake may carry
+`unattended_event_ids`, copied from the attention request (I-010A@6) for
+those still in the fresh view: messages by others that arrived while the
+participant was busy with its previous turn and got no turn of their own,
+newest first. The turn reads them with its trigger as one moment, and a
+reply may target any of them.
 
 ## I-010D ContextContinuationV2@1
 

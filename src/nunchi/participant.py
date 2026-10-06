@@ -431,6 +431,12 @@ def build_participant_wake(
     if "occasion" in checked_request:
         # The turn knows it comes from a look again, not a new message.
         wake["occasion"] = checked_request["occasion"]
+    shown = {event["id"] for event in wake["events"]}
+    waiting = [event_id for event_id in checked_request.get("unattended_event_ids", ()) if event_id in shown]
+    if waiting:
+        # The turn reads what arrived while the participant was busy with the
+        # newest message, as one moment (#94 step 6).
+        wake["unattended_event_ids"] = waiting
     attention: dict[str, Any] = {"source": source}
     if source in ("WAKE", "DEFER") and checked_decision["status"] == "ok":
         # The turn carries the model's reading of the room. The wake is built

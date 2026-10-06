@@ -85,6 +85,13 @@ A moment's `during_turn` messages reach the room after the agent's turn
 began, so the agent sees them only by looking at the room again; each
 record says how many new messages it was shown before posting.
 
+A moment's `unattended` messages arrived earlier, while the agent was busy
+with its previous turn. The suite hands them, and the judged message, to
+Nunchi while a stand-in turn runs, then ends that turn, as the scheduler
+would live. So the judged message comes as the newest of them, Nunchi judges
+them for the memory first, and the judgment and the turn read them with it
+as one moment.
+
 Live, attention judges each message as it arrives, and the participant's
 memory of who asked what is built from those judgments. So before a moment
 is judged, attention first judges each earlier message the participant

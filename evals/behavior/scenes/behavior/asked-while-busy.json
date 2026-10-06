@@ -1,6 +1,6 @@
 {
   "id": "asked-while-busy",
-  "title": "Sam asks Vigil something while Vigil is answering Zoe; Zoe's thanks comes next",
+  "title": "Sam asks Vigil something while Vigil is answering Zoe; Zoe's thanks comes next, and Nunchi reads both",
   "source": "docs/behavior.md",
   "review": "draft: written from docs/behavior.md (#94 step 6, messages that arrive mid-turn); ranges need Zoe's review",
   "platform": "discord",
@@ -23,6 +23,7 @@
     {
       "label": "Zoe's thanks, with Sam's question still open",
       "event": "z2",
+      "unattended": ["s1"],
       "step1": "pass",
       "notice": [
         {"fact": "Sam asked Vigil about the staging image while Vigil was answering Zoe", "events": ["s1"]},

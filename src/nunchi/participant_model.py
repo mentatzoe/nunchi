@@ -451,6 +451,25 @@ def outcome_turn_note(request: Mapping[str, Any]) -> str:
     )
 
 
+def unattended_turn_note(request: Mapping[str, Any]) -> str:
+    """When messages arrived while the participant was busy, say so; else ''.
+
+    Only the newest of them got this turn (#94 step 6). A person catching up
+    reads the newest message and glances back at what they missed.
+    """
+
+    waiting = request["wake"].get("unattended_event_ids")
+    if not waiting:
+        return ""
+    return (
+        "\n\nThis turn is about more than its trigger: while you were busy with your "
+        f"previous turn, {len(waiting)} other message(s) arrived and got no turn of "
+        "their own. wake.unattended_event_ids lists them, newest first. Read the "
+        "newest message, then glance back at these, and decide what, if anything, the "
+        "moment as a whole calls for from you; a reply can target any of them."
+    )
+
+
 def participant_turn_instructions(
     profile: ParticipantProfile,
     request: Mapping[str, Any],
@@ -481,6 +500,7 @@ def participant_turn_instructions(
         participant_turn_prompt(profile)
         + proposals
         + outcome_turn_note(request)
+        + unattended_turn_note(request)
         + "\n\nAction schema for this turn (JSON Schema; the protocol and "
         "binding values are fixed):\n"
         + schema
@@ -1052,6 +1072,7 @@ def participant_tool_turn_text(
     return (
         participant_tool_turn_prompt(profile, tools=tools)
         + outcome_turn_note(request)
+        + unattended_turn_note(request)
         + f"\n\n<nunchi_participant_turn_v1>{document}</nunchi_participant_turn_v1>"
     )
 
