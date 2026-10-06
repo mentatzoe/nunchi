@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010C ParticipantWakeV2@10`` (slice 010, T004).
+"""Contract tests for ``I-010C ParticipantWakeV2@11`` (slice 010, T004).
 
 Red cases cover the wake sources, advice-free ``PREATTENTION_BYPASS``
 (010-Preattention-bypass), the FR-013 advice-source violations (advice on
@@ -110,6 +110,22 @@ class OccasionCases(unittest.TestCase):
         assert_schema_verdict(self, "participant-wake", dict(make_wake("DEFER"), occasion="pause"), "valid")
         assert_schema_verdict(self, "participant-wake", dict(make_wake("DEFER"), occasion="outcome"), "valid")
         assert_schema_verdict(self, "participant-wake", dict(make_wake("DEFER"), occasion="soon"), "invalid")
+
+
+class MoveAboutCases(unittest.TestCase):
+    """@11 (#94 step 6): a move may say who wrote the message it was about, and what it said."""
+
+    def test_the_about_pair_comes_together(self):
+        move = {"kind": "silence", "about_event_id": "e1", "at": "2026-10-06T09:00:00.000Z",
+                "about_author_id": "human:zoe", "about_text": "Vigil, tell me when the nightly finishes?"}
+        wake = dict(make_wake("DEFER"), memory={"own_moves": [move]})
+        assert_schema_verdict(self, "participant-wake", wake, "valid")
+        for missing in ("about_author_id", "about_text"):
+            with self.subTest(missing=missing):
+                alone = {key: value for key, value in move.items() if key != missing}
+                assert_schema_verdict(self, "participant-wake", dict(make_wake("DEFER"), memory={"own_moves": [alone]}), "invalid")
+        message = {"kind": "message", "event_id": "v1", "text": "hi", "about_author_id": "human:zoe", "about_text": "x"}
+        assert_schema_verdict(self, "participant-wake", dict(make_wake("DEFER"), memory={"own_moves": [message]}), "invalid")
 
 
 class ThreadCases(unittest.TestCase):

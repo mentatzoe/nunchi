@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 import threading
 import time
@@ -62,6 +62,7 @@ def prepare_opportunity(
     token: Any,
     deadline: float,
     occasion: str | None = None,
+    memory: Callable[[str], Mapping[str, Any] | None] | None = None,
 ) -> OpportunityPreparation | None:
     """Build one valid current participant opportunity or an explicit error.
 
@@ -73,12 +74,14 @@ def prepare_opportunity(
     if not scheduler.is_current(token):
         return None
     reconstructed = False
+    # The judgment reads the message with the participant's memory (#94 step 6).
+    remembered = memory(token.anchor_event_id) if memory is not None else None
     try:
-        request = observation.build_snapshot(token.anchor_event_id, occasion=occasion)
+        request = observation.build_snapshot(token.anchor_event_id, occasion=occasion, memory=remembered)
     except SnapshotUnavailable as first_error:
         reconstructed = True
         try:
-            request = observation.build_snapshot(token.anchor_event_id, occasion=occasion)
+            request = observation.build_snapshot(token.anchor_event_id, occasion=occasion, memory=remembered)
         except SnapshotUnavailable as final_error:
             detail = (
                 "attention snapshot unavailable after one reconstruction "
@@ -408,6 +411,7 @@ class NunchiV2Pipeline:
                 token=token,
                 deadline=deadline,
                 occasion=turn_occasion,
+                memory=self._memory_for,
             )
             if prepared is None:
                 break
@@ -477,11 +481,17 @@ class NunchiV2Pipeline:
         Returns the decision, which may be an operational error.
         """
 
-        request = self.observation.build_snapshot(event_id)
+        request = self.observation.build_snapshot(event_id, memory=self._memory_for(event_id))
         seconds = self.host.host_timeout_seconds if timeout_seconds is None else timeout_seconds
         decision = self.attention.judge(request, deadline=time.monotonic() + seconds)
         self._remember(request, decision)
         return decision
+
+    def _memory_for(self, trigger_event_id: str) -> Mapping[str, Any] | None:
+        """The participant's memory for a judgment, when its host keeps one."""
+
+        facts = getattr(self.host, "memory_facts", None)
+        return facts(trigger_event_id) if callable(facts) else None
 
     def _remember(self, request: Mapping[str, Any], decision: Mapping[str, Any]) -> None:
         """Keep what a judgment found about its message for the memory."""

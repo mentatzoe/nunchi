@@ -17,7 +17,7 @@ import urllib.request
 
 from .attention import ParticipantProfile
 from .errors import NunchiError, ValidationError
-from .v2_contracts import validate_participant_wake
+from .v2_contracts import shown_event_ids, validate_participant_wake
 
 
 class ParticipantModelError(NunchiError):
@@ -320,8 +320,9 @@ _SOCIAL_GUIDE = (
 _MEMORY_GUIDE = (
     "When memory.own_moves is present, it is your own part in this room so "
     "far: what you said, replied and reacted to, and where you stayed quiet, "
-    "oldest first, each pointing at the message it was about, with your "
-    "reason at the time (why) when you gave one. When "
+    "oldest first, each pointing at the message it was about, and saying who "
+    "wrote that message and what it said (about_author_id, about_text), with "
+    "your reason at the time (why) when you gave one. When "
     "memory.threads is present, it is who asked what: recent messages that "
     "asked someone for something, with whom each was addressed to, and your "
     "own messages that others responded to, each with the first messages "
@@ -702,9 +703,7 @@ class ParticipantTurnProtocol:
         self.expansions = 0
         self.limit_noted = False
         self.looked_again = False
-        self.visible_event_ids = {
-            event["id"] for event in self.request["wake"]["events"]
-        }
+        self.visible_event_ids = shown_event_ids(self.request["wake"])
 
     @property
     def instructions(self) -> str:

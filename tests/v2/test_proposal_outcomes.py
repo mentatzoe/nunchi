@@ -116,6 +116,8 @@ class ProposalOutcomeTests(ProposalFixture, unittest.TestCase):
                 "capability": "workspace.file.write",
                 "status": "awaiting_approval",
                 "at": record["at"],
+                "about_author_id": "human:zoe",
+                "about_text": "Vigil, please update the README.",
             },
             waiting,
         )

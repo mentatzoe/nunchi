@@ -66,6 +66,27 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- Attention reads a message with the agent's memory (#94, step 6). The
+  attention request carries the same memory the agent's turn gets
+  (`I-010A AttentionRequestV2@5`), for every judgment including recalled
+  ones, and the attention prompt explains it only when it is there. A typed
+  model does not get it yet: with it, Jev's own top move fit fell from 186
+  to 175 of 231 moments (run 37), and it still hid the promised CI line. Each of the agent's moves about a message now
+  also says who wrote that message and what it said (`about_author_id`,
+  `about_text`; `I-010C ParticipantWakeV2@11`), so "I'll tell you when it
+  finishes" still makes sense after Zoe's request has left the window. An
+  action may reply or react to a message the turn's memory points at, as
+  to one in its window: run 38 showed an agent replying to the request it
+  remembered and being refused.
+- Step 1 no longer hides what the judgment itself would speak to (#94,
+  step 6). A "not conversation" answer suppresses only when the judgment's
+  most likely move is not to speak. Run 35 showed why: a CI line saying the
+  nightly passed, which Vigil had promised to report to Zoe, was read as
+  not conversation (about 0.1) while the most likely move was to speak
+  (0.8 to 0.9), so all 20 judgments hid it from the agent. Two scenes
+  measure it, `build-finishes-after-promise` (the promise in the window)
+  and `build-finishes-long-after-promise` (the promise only in the agent's
+  memory, 73 scenes).
 - The agent reports an approved action's outcome itself (#94, plan step 6;
   Zoe, #90 decision 2 on #94). When an operator's approval settles a
   privileged action after the agent's turn about it ended (done, failed,

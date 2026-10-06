@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010A AttentionRequestV2@4`` (slice 010, T002; #94 step 6: @2 adds the pace, @3 the pause occasion, @4 the outcome one).
+"""Contract tests for ``I-010A AttentionRequestV2@5`` (slice 010, T002; #94 step 6: @2 adds the pace, @3 the pause occasion, @4 the outcome one, @5 the memory).
 
 Red cases cover exact identity (S01), actor mentions versus
 ``mentions_room`` (S02), the runtime-adapter-only relational classes
@@ -85,6 +85,28 @@ class OccasionCases(unittest.TestCase):
         for bad in ("later", "", None, ["pause"]):
             with self.subTest(bad=bad):
                 assert_schema_verdict(self, "attention-request", dict(make_request(), occasion=bad), "invalid")
+
+
+class MemoryCases(unittest.TestCase):
+    """@5 (#94 step 6): the judgment may carry the participant's memory."""
+
+    MEMORY = {
+        "own_moves": [
+            {"kind": "reply", "event_id": "v1", "about_event_id": "e1", "text": "I'll tell you when it finishes.",
+             "at": "2026-10-06T09:00:00.000Z", "why": "Zoe asked me to watch the nightly."},
+        ],
+        "threads": [
+            {"event_id": "e1", "author_id": "human:zoe", "text": "Tell me when the nightly finishes?",
+             "addressed_to": "participant", "responses": [
+                 {"event_id": "v1", "author_id": "discord:bot:9", "text": "I'll tell you when it finishes."}]},
+        ],
+    }
+
+    def test_memory_validates_like_the_turns(self):
+        assert_schema_verdict(self, "attention-request", dict(make_request(), memory=self.MEMORY), "valid")
+        for bad in ({}, {"own_moves": [{"kind": "verdict"}]}, {"notes": []}):
+            with self.subTest(bad=bad):
+                assert_schema_verdict(self, "attention-request", dict(make_request(), memory=bad), "invalid")
 
 
 class ExactIdentityRedCases(unittest.TestCase):

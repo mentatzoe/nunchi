@@ -56,8 +56,11 @@ class OwnMovesTests(unittest.TestCase):
         ]
         self.assertEqual(
             [
-                {"kind": "reply", "event_id": "v1", "about_event_id": "q1", "text": "Will do.", "at": at(29)},
-                {"kind": "reaction", "event_id": "r1", "about_event_id": "c1", "reaction": "\U0001f442"},
+                # Each move about a message says who wrote it and what it said (#94 step 6).
+                {"kind": "reply", "event_id": "v1", "about_event_id": "q1", "text": "Will do.", "at": at(29),
+                 "about_author_id": "human:zoe", "about_text": "Vigil, can you check the build?"},
+                {"kind": "reaction", "event_id": "r1", "about_event_id": "c1", "reaction": "\U0001f442",
+                 "about_author_id": "human:castor", "about_text": "Thanks Vigil"},
                 {"kind": "message", "event_id": "v2", "text": "Build is green."},
             ],
             self.moves(events),
@@ -68,7 +71,11 @@ class OwnMovesTests(unittest.TestCase):
         memory.record_silence(about_event_id="q1", at=NOW - timedelta(minutes=5))
         events = [message("q1"), message("v1", author_id=SELF, text="Later answer.")]
         self.assertEqual(["silence", "message"], [move["kind"] for move in self.moves(events, memory)])
-        self.assertEqual({"kind": "silence", "about_event_id": "q1", "at": at(5)}, self.moves(events, memory)[0])
+        self.assertEqual(
+            {"kind": "silence", "about_event_id": "q1", "at": at(5),
+             "about_author_id": "human:zoe", "about_text": "Could you look at this?"},
+            self.moves(events, memory)[0],
+        )
 
     def test_old_moves_fade(self):
         memory = ConversationMemory(own_moves=2, max_age_seconds=3600)

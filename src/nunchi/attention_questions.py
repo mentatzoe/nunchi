@@ -232,6 +232,11 @@ def attention_state(projection: Mapping[str, Any], instructions: str) -> dict[st
         state["pace"] = deepcopy(dict(projection["pace"]))
     if projection.get("occasion"):
         state["occasion"] = projection["occasion"]
+    # The participant's memory is left out on purpose (#94 step 6): with it,
+    # Jev's own top move fit fell from 186 to 175 of 231 moments (run 37),
+    # mostly turning "speak" into "wait" or "stay quiet" where the agent had
+    # held back before, and it still hid the CI line the agent had promised
+    # to report on. A chat model gets the memory; a typed model does not yet.
     return state
 
 
@@ -361,14 +366,20 @@ def top_move(answers: Mapping[str, Any]) -> str:
 def classifier_disposition(answers: Mapping[str, Any]) -> str:
     """Map the answers onto the contract's classifier disposition.
 
-    Step 1 suppresses only what is more likely not conversation. Otherwise
-    the participant gets a turn: speaking wakes it, a mhm asks for one, and
-    waiting or staying quiet defer to it with the reading.
+    Step 1 suppresses only what is more likely not conversation, and only
+    when the judgment's own most likely move is not to speak. A CI line the
+    participant promised to report on is not conversation, but if the
+    answers say speaking is most likely, hiding it would be the invisible
+    mistake: a wrong suppression is never seen, and a wrong pass costs one
+    turn (``docs/behavior.md``; #94 step 6). Otherwise the participant gets
+    a turn: speaking wakes it, a mhm asks for one, and waiting or staying
+    quiet defer to it with the reading.
     """
 
-    if answers["conversation"] < 0.5:
+    move = top_move(answers)
+    if answers["conversation"] < 0.5 and move != "speak":
         return "SUPPRESS"
-    return _MOVE_DISPOSITION[top_move(answers)]
+    return _MOVE_DISPOSITION[move]
 
 
 def suppression_margin_distance(answers: Mapping[str, Any]) -> float:

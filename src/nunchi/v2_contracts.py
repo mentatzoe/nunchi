@@ -414,10 +414,13 @@ def validate_attention_request(value: Any) -> dict[str, Any]:
             "trigger_event_id",
             "coverage",
         ),
-        optional=("continuation", "pace", "occasion"),
+        optional=("continuation", "pace", "occasion", "memory"),
     )
     _nes(doc["request_id"], "request_id")
     _observation_fields(doc, require_schema=True)
+    if "memory" in doc:
+        # I-010A@5: the participant's memory, the same facts its turn gets.
+        _memory(doc["memory"], "request.memory")
     if "pace" in doc:
         _pace(doc["pace"], "request.pace")
     if "occasion" in doc and doc["occasion"] not in OCCASIONS:
@@ -705,13 +708,16 @@ THREAD_RESPONSES_MAX = 4
 # Since @6 any own move may carry ``why``: the participant's own reason at the
 # time, in its own words, never posted.
 MOVE_REASON_MAX_CHARS = 200
+# Since @11 a move about a message may carry that message's author and text
+# (``about_author_id``, ``about_text``), together (#94 step 6).
+_ABOUT = ("about_author_id", "about_text")
 _OWN_MOVE_FIELDS = {
     "message": (("kind", "event_id", "text"), ("at", "why")),
-    "reply": (("kind", "event_id", "about_event_id", "text"), ("at", "why")),
-    "reaction": (("kind", "event_id", "about_event_id", "reaction"), ("at", "why")),
-    "silence": (("kind", "about_event_id", "at"), ("why",)),
+    "reply": (("kind", "event_id", "about_event_id", "text"), ("at", "why") + _ABOUT),
+    "reaction": (("kind", "event_id", "about_event_id", "reaction"), ("at", "why") + _ABOUT),
+    "silence": (("kind", "about_event_id", "at"), ("why",) + _ABOUT),
     # Since @7: a privileged proposal and what became of it (#90).
-    "proposal": (("kind", "proposal_id", "about_event_id", "capability", "status", "at"), ()),
+    "proposal": (("kind", "proposal_id", "about_event_id", "capability", "status", "at"), _ABOUT),
 }
 PROPOSAL_STATUSES = (
     "awaiting_approval",
@@ -778,11 +784,34 @@ def _memory(value: Any, path: str) -> dict[str, Any]:
                 _nes(move[name], f"{item}.{name}")
         if "text" in move:
             _memory_text(move["text"], f"{item}.text")
+        if ("about_author_id" in move) != ("about_text" in move):
+            _fail(item, "about_author_id and about_text come together")
+        if "about_author_id" in move:
+            _nes(move["about_author_id"], f"{item}.about_author_id")
+            _memory_text(move["about_text"], f"{item}.about_text")
         if "why" in move:
             _nes(move["why"], f"{item}.why")
             if len(move["why"]) > MOVE_REASON_MAX_CHARS:
                 _fail(f"{item}.why", f"must be at most {MOVE_REASON_MAX_CHARS} characters")
     return doc
+
+
+def shown_event_ids(wake: Mapping[str, Any]) -> set[str]:
+    """The messages a turn has shown the participant before it looks around.
+
+    Its events, and every message its memory points at: memory items come
+    from the room's retained history, so a participant may reply to the
+    request it remembers after that request has left the window (#94 step 6).
+    """
+
+    shown = {event["id"] for event in wake["events"]}
+    memory = wake.get("memory") or {}
+    for move in memory.get("own_moves", ()):
+        shown.update(move[key] for key in ("event_id", "about_event_id") if key in move)
+    for thread in memory.get("threads", ()):
+        shown.add(thread["event_id"])
+        shown.update(response["event_id"] for response in thread["responses"])
+    return shown
 
 
 def validate_participant_wake(value: Any) -> dict[str, Any]:

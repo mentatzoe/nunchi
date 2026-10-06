@@ -1,0 +1,89 @@
+{
+  "id": "build-finishes-after-promise",
+  "title": "A CI line Vigil promised to report on, while the promise is still in view",
+  "source": "docs/behavior.md (conversation memory: what the agent said it would do)",
+  "review": "draft: written from docs/behavior.md; ranges need Zoe's review",
+  "platform": "discord",
+  "participants": [
+    "vigil"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    },
+    "sam": {
+      "display_name": "Sam",
+      "kind": "human"
+    },
+    "ci": {
+      "display_name": "CI",
+      "kind": "bot"
+    }
+  },
+  "events": [
+    {
+      "id": "z1",
+      "author": "zoe",
+      "at": "-50m",
+      "mentions": [
+        "vigil"
+      ],
+      "text": "Vigil, can you keep an eye on the nightly build and tell me when it finishes?"
+    },
+    {
+      "id": "v1",
+      "author": "vigil",
+      "at": "-49m",
+      "reply_to": "z1",
+      "text": "Sure, I'll tell you when it finishes."
+    },
+    {
+      "id": "s1",
+      "author": "sam",
+      "at": "-30m",
+      "text": "I'm heading out for lunch, back in an hour."
+    },
+    {
+      "id": "c1",
+      "author": "ci",
+      "at": "0s",
+      "text": "nightly #812: passed in 48m (2,311 tests, 0 failures)"
+    }
+  ],
+  "moments": [
+    {
+      "label": "the nightly finishes",
+      "event": "c1",
+      "step1": "pass",
+      "notice": [
+        {
+          "fact": "Vigil told Zoe it would tell her when the nightly finishes",
+          "events": [
+            "z1",
+            "v1"
+          ]
+        },
+        {
+          "fact": "this CI line says the nightly finished and passed",
+          "events": [
+            "c1"
+          ]
+        }
+      ],
+      "fitting": [
+        "speak"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "Vigil promised to tell Zoe when it finished, and she should not have to ask"
+        },
+        {
+          "move": "mhm",
+          "why": "a reaction on a CI line doesn't tell Zoe the build passed"
+        }
+      ]
+    }
+  ]
+}

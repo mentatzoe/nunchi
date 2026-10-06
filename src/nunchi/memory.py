@@ -296,6 +296,15 @@ class ConversationMemory:
         ordered = sorted(
             visible[-self.own_moves_limit :] + quiet + proposed, key=lambda item: item[0]
         )
+        # What each move was about, as a person remembers what they replied
+        # to: who wrote it and what it said, so the move still makes sense
+        # once that message has left the window (#94 step 6).
+        by_id = {event["id"]: event for event in events}
+        for _, move in ordered:
+            about = by_id.get(move.get("about_event_id"))
+            if about is not None and about.get("type") == "message" and about.get("author_id") != actor_id:
+                move["about_author_id"] = about["author_id"]
+                move["about_text"] = _excerpt(str(about.get("text", "")))
         return [move for _, move in ordered]
 
     def threads(
