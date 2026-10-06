@@ -1357,7 +1357,12 @@ class AttentionAndHostTests(unittest.TestCase):
         release.set()
         thread.join(3)
         self.assertFalse(thread.is_alive())
-        self.assertEqual(2, len(model.calls))
+        # One fresh opportunity; the newest few it replaced are judged for
+        # the memory alone, first (#94 step 6).
+        self.assertEqual(
+            ["e0", "e17", "e18", "e19", "e20"],
+            [projection["trigger_event_id"] for _, projection in model.calls],
+        )
         self.assertEqual(2, len(seen_wakes))
         self.assertEqual("e20", seen_wakes[-1]["trigger_event_id"])
         self.assertEqual([f"e{i}" for i in range(21)], [

@@ -1102,11 +1102,12 @@ class SchedulingAndCancellationTests(unittest.TestCase):
                 first.join(10)
                 runtime.lane.drain(timeout=10)
                 # Every event was retained, but the three that arrived during
-                # the active turn produced at most one further opportunity.
+                # the active turn produced at most one further opportunity;
+                # the two it replaced are judged for the memory alone.
                 self.assertEqual(
                     4, len(runtime.pipeline.observation.retained_events())
                 )
-                self.assertLessEqual(len(model.calls), 3)
+                self.assertLessEqual(len(model.calls), 4)
 
     def _deliver(self, harness, delivery_id="d1", event_id="discord:message:1"):
         harness.runtime.handle(

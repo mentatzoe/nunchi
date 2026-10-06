@@ -11,6 +11,7 @@ from typing import Any
 
 from .attention import AttentionEngine
 from .attention_questions import top_move
+from .errors import NunchiError
 from .observation import (
     ObservationProvider,
     ObservationResult,
@@ -178,6 +179,10 @@ def prepare_opportunity(
 # judged as one to wait on (#94 step 6); 0 never looks again.
 DEFAULT_LOOK_AGAIN_SECONDS = 300
 
+# How many messages that arrived during a turn, besides the newest, are
+# judged for the participant's memory before the newest is (#94 step 6).
+MIDTURN_RECALL_LIMIT = 3
+
 
 class NunchiV2Pipeline:
     """Synchronous owner of one participant/room scheduling lane.
@@ -193,6 +198,12 @@ class NunchiV2Pipeline:
     for ``look_again_seconds``, ``look_again`` judges the same message again
     as a ``pause`` and the participant may get a turn with a fresh reading.
     It looks again once per quiet stretch.
+
+    Messages that arrive mid-turn: only the newest gets the next opportunity,
+    but the ones it replaced are not lost. Before the newest is judged, up to
+    ``MIDTURN_RECALL_LIMIT`` of them are judged for the participant's memory
+    alone, oldest first, so a question asked while the participant was busy
+    starts a thread that the newest message's judgment and turn both see.
 
     Outcome turns (Zoe, #90 decision 2 on #94): when an approved action
     settles after the participant's turn about it ended, ``outcome_arrived``
@@ -234,6 +245,9 @@ class NunchiV2Pipeline:
         self._newest_eligible: str | None = None
         # Settled proposals whose outcome turn has not run yet, oldest first.
         self._outcomes: deque[dict[str, Any]] = deque()
+        # Eligible messages that arrived while a turn was running, oldest
+        # first; all but the newest are judged for the memory only.
+        self._arrived_midturn: deque[str] = deque(maxlen=MIDTURN_RECALL_LIMIT + 1)
 
     def handle_delivery(
         self,
@@ -282,7 +296,11 @@ class NunchiV2Pipeline:
             # Something new was said: the quiet a look again waits for is over.
             self._look_again = None
             self._newest_eligible = observed.audit.event_id
-        return observed, self.scheduler.offer(observed.audit.event_id)
+            token = self.scheduler.offer(observed.audit.event_id)
+            if token is None:
+                # A turn is running; this message waits behind it.
+                self._arrived_midturn.append(observed.audit.event_id)
+        return observed, token
 
     def look_again_due(self) -> float | None:
         """Seconds until the armed look again is due, or None when none is armed."""
@@ -402,6 +420,7 @@ class NunchiV2Pipeline:
                 occasion = None
                 token = self.scheduler.complete(token)
                 continue
+            self._recall_midturn(token)
             deadline = time.monotonic() + self.host.host_timeout_seconds
             turn_occasion, occasion = occasion, None
             prepared = prepare_opportunity(
@@ -487,6 +506,30 @@ class NunchiV2Pipeline:
         self._remember(request, decision)
         return decision
 
+    def _recall_midturn(self, token: Any) -> None:
+        """Judge, for the memory, the messages this token's anchor replaced.
+
+        They arrived while a turn was running, and only the newest gets an
+        opportunity. Without this, a question asked meanwhile is never judged
+        and starts no thread (#94 step 6). Together they get one attention
+        timeout, so a slow provider delays the anchor by at most that. A
+        failed judgment, or a message no longer retained, is skipped; the
+        anchor is judged either way.
+        """
+
+        with self._lifecycle_lock:
+            waiting = [event_id for event_id in self._arrived_midturn if event_id != token.anchor_event_id]
+            self._arrived_midturn.clear()
+        budget = time.monotonic() + float(self.attention.policy.timeout_seconds)
+        for event_id in waiting[-MIDTURN_RECALL_LIMIT:]:
+            remaining = budget - time.monotonic()
+            if remaining <= 0 or not self.scheduler.is_current(token):
+                return
+            try:
+                self.recall(event_id, timeout_seconds=remaining)
+            except NunchiError:
+                continue
+
     def _memory_for(self, trigger_event_id: str) -> Mapping[str, Any] | None:
         """The participant's memory for a judgment, when its host keeps one."""
 
@@ -507,6 +550,7 @@ class NunchiV2Pipeline:
     def cancel(self) -> None:
         with self._lifecycle_lock:
             self._look_again = None
+            self._arrived_midturn.clear()
             # A dropped outcome turn still reaches the participant's next
             # turn through its memory.
             self._outcomes.clear()
@@ -521,6 +565,7 @@ class NunchiV2Pipeline:
             self._look_again = None
             self._newest_eligible = None
             self._outcomes.clear()
+            self._arrived_midturn.clear()
             self.scheduler.restart()
             self.observation.restart()
             self.host.memory.restart()
