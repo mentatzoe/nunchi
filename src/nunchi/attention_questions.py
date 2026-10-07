@@ -328,6 +328,20 @@ def _yes_no(value: Any, label: str) -> float:
     return _probability(value, label)
 
 
+def _answered(value: Any, asks: float) -> float:
+    """Whether someone else already answered or handled it, as a probability.
+
+    The question's own "no" covers a message that asks for nothing. Chat
+    models sometimes write that case as null instead of 0 (#87, run 53). When
+    the same answers say the message asks for nothing, null states that "no".
+    Beside a message that does ask, null says nothing, and fails as before.
+    """
+
+    if value is None and asks < 0.5:
+        return 0.0
+    return _yes_no(value, "answered")
+
+
 def _distribution(value: Any, options: tuple[str, ...], label: str) -> dict[str, float]:
     if not isinstance(value, Mapping) or set(value) - set(options):
         raise ValueError(f"answer {label} must give probabilities for {', '.join(options)}")
@@ -361,11 +375,12 @@ def validate_answers(
     required = set(QUESTION_IDS) - set(ANSWER_POINTERS)
     if required - set(raw) or set(raw) - set(QUESTION_IDS) - {UNATTENDED_POINTER}:
         raise ValueError("answers have a missing or unexpected question")
+    asks = _yes_no(raw["asks"], "asks")
     answers: dict[str, Any] = {
         "conversation": _yes_no(raw["conversation"], "conversation"),
         "addressee": _distribution(raw["addressee"], ADDRESSEES, "addressee"),
-        "asks": _yes_no(raw["asks"], "asks"),
-        "answered": _yes_no(raw["answered"], "answered"),
+        "asks": asks,
+        "answered": _answered(raw["answered"], asks),
         "mid_thought": _yes_no(raw["mid_thought"], "mid_thought"),
         "adds_something": _yes_no(raw["adds_something"], "adds_something"),
         "move": _distribution(raw["move"], MOVES, "move"),

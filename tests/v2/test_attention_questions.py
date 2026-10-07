@@ -114,6 +114,20 @@ class ValidationTests(unittest.TestCase):
                 result = self.check(leaning(answered=written, conversation=written))
                 self.assertEqual((expected, expected), (result["answered"], result["conversation"]))
 
+    def test_a_null_answered_is_no_when_nothing_was_asked(self):
+        # Run 53: on bot status lines and CI reports, a chat model answered
+        # "answered": null with "asks" at 0 or 0.05. The question's own "no"
+        # covers a message that asks for nothing.
+        for asks in (0, 0.05, 0.49):
+            with self.subTest(asks=asks):
+                result = self.check(leaning(asks=asks, answered=None))
+                self.assertEqual(0.0, result["answered"])
+        # Beside a message that asks, null is unknown, not no.
+        for asks in (0.5, 0.8, True):
+            with self.subTest(asks=asks):
+                with self.assertRaisesRegex(ValueError, "answered must be a probability"):
+                    self.check(leaning(asks=asks, answered=None))
+
     def test_malformed_answers_are_rejected(self):
         missing = leaning()
         del missing["mid_thought"]
