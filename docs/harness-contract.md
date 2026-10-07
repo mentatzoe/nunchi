@@ -221,7 +221,7 @@ maintainers.
 | Silence | a bound turn ends without an action | a bound turn ends without an action (bound from `turn/start`'s answer once the room server is ready) | `[SILENT]` on the injected turn | silence action |
 | Look again before posting | send tool holds | send tool holds | `transform_llm_output` silences the draft; the plugin injects a fresh run with the draft and the new messages (verified offline, `a50406d9`). Needs streaming off: Discord's default, while Telegram streams unless `display.platforms.telegram.streaming` is false | action held |
 | Steering | mod, after each tool call | with each room tool's result; `turn/steer` after every other tool call | `transform_tool_result` | between room views |
-| Pause and outcome turns | library | library | `inject_message` | library |
+| Pause and outcome turns | library | library | `inject_message`, like every turn | library |
 | Catching up | library | library | library | library |
 | Cancel | stream-json interrupt | `turn/interrupt` | no plugin interrupt: the library silences the answer at `transform_llm_output`; tools already run stay run | drop the reply |
 | Own message in memory | transport id | transport id | the library records it in the room log with an id of its own (no delivery id; Hermes drops the bot's own messages before hooks) | transport id |
@@ -233,8 +233,10 @@ maintainers.
 ## Conformance kit (step 9d)
 
 `nunchi-turn-conformance` (`nunchi.turn_conformance`) runs it. A scripted
-agent plays one turn per scenario through an integration's real path, and the
-kit owns the room, attention, the host, and the checks. An integration takes
+agent plays each scenario's turns through an integration's real path, and the
+kit owns the room, attention, the host, and the checks. Two scenarios per
+posting style have a second turn that the library starts itself, with no new
+message: one after a pause, and one about an approved action's outcome. An integration takes
 part with a `KitIntegration`: the participant the host invokes, wired so that
 starting its agent plays the script through the integration's own surface.
 The kit builds the room with the same `Room` the integrations use.
@@ -260,12 +262,16 @@ both):
 | one-action: one room action per turn | pass | n/a | pass | n/a | pass |
 | secret: a withheld secret never reaches the room | pass | n/a | pass | n/a | pass |
 | cancel: a cancelled turn posts nothing | pass | n/a | pass | n/a | pass |
+| pause: after a pause the library starts a turn with no new message, and the agent can post | pass | n/a | pass | n/a | pass |
+| outcome: an approved action's outcome starts a turn, and the agent reports it | pass | n/a | pass | n/a | pass |
 | final-deliver: the final answer is the post, committed for the harness to deliver, and remembered | n/a | pass | n/a | pass | n/a |
 | final-silence: the silence marker is silence, and the agent's thinking is its reason | n/a | pass | n/a | pass | n/a |
 | final-look-again: the final answer is held once when someone posted meanwhile | n/a | pass | n/a | pass | n/a |
 | final-thinking: thinking is never posted | n/a | pass | n/a | pass | n/a |
 | final-secret: a withheld secret is refused once, and the agent answers again | n/a | pass | n/a | pass | n/a |
 | final-cancel: a cancelled turn's final answer is silent | n/a | pass | n/a | pass | n/a |
+| final-pause: after a pause the library starts a turn with no new message, and its answer is the post | n/a | pass | n/a | pass | n/a |
+| final-outcome: an approved action's outcome starts a turn, and the agent's answer reports it | n/a | pass | n/a | pass | n/a |
 
 Through Codex the integration binds a run itself, from `turn/start`'s answer,
 so the scripted agent cannot leave it unbound: the Codex column's
@@ -273,13 +279,20 @@ so the scripted agent cannot leave it unbound: the Codex column's
 MCP server, and the integration fails the turn because the room tools never
 reached the run.
 
+In the pause and outcome scenarios the second turn reaches the agent through
+the same `start` as the first, and the agent reads in its text that the turn
+is a pause or an outcome. The pause is the library's look again, called when
+due rather than after five minutes. In the outcome scenarios the room
+authorizes one privileged action, so each integration offers `propose`, as it
+would with an `authorization` section. An operator approves the proposal, the
+action runs, and the delivery lane starts the outcome turn on its own worker.
+
 The final-answer scenarios exercise no room tools, so steering, the room
 view and reactions through Hermes are checked by
 `tests/v2/test_hermes_plugin.py` instead. Steering after Codex's own tools
 (`turn/steer`), declined approvals, trust and resuming are checked by
-`tests/v2/test_codex_app_server.py`. Still to add: the behavior scenes through each integration,
-pause and outcome turns, and running each harness from a clean, pinned
-install.
+`tests/v2/test_codex_app_server.py`. Still to add: the behavior scenes through
+each integration, and the leak count.
 
 The plan for the kit, as accepted:
 

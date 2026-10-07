@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
-from nunchi import turn, turn_conformance as kit
+from nunchi import pipeline, turn, turn_conformance as kit
 from nunchi.integrations.claude_code_conformance import ClaudeCodeKitIntegration
 
 
@@ -31,6 +31,60 @@ class TurnConformanceTests(unittest.TestCase):
             results = _run([kit.ReferenceIntegration("tools"), kit.ReferenceIntegration("final-answer")])
         failed = {r["scenario"] for r in results if r["status"] == "fail"}
         self.assertEqual({"look-again", "steering", "secret", "final-look-again", "final-secret"}, failed)
+
+    def test_the_pause_and_outcome_checks_catch_a_library_that_does_not_start_them(self):
+        later = {"pause", "outcome", "final-pause", "final-outcome"}
+
+        def run_later():
+            integrations = [kit.ReferenceIntegration("tools"), kit.ReferenceIntegration("final-answer")]
+            return {
+                result["scenario"]: result
+                for result in (kit.run_scenario(name, integration) for integration in integrations for name in later)
+                if result["status"] != "n/a"
+            }
+
+        with mock.patch.object(pipeline.NunchiV2Pipeline, "_arm_look_again", lambda *args: None):
+            results = run_later()
+        self.assertEqual({"pause", "final-pause"}, {name for name, r in results.items() if r["status"] == "fail"})
+        with mock.patch.object(pipeline.AsyncDeliveryLane, "outcome_arrived", lambda *args: None):
+            results = run_later()
+        self.assertEqual({"outcome", "final-outcome"}, {name for name, r in results.items() if r["status"] == "fail"})
+        self.assertIn("the outcome turn never reached the agent", results["outcome"]["failures"][0])
+        # The agent must be told why the library started the turn.
+        run = pipeline.NunchiV2Pipeline.run_opportunities
+        with mock.patch.object(
+            pipeline.NunchiV2Pipeline, "run_opportunities", lambda self, token, occasion=None: run(self, token)
+        ):
+            results = run_later()
+        self.assertEqual(later, {name for name, r in results.items() if r["status"] == "fail"})
+
+    def test_an_integration_that_cannot_offer_privileged_actions_fails_the_outcome_scenario(self):
+        class NoPrivileged(kit.ReferenceIntegration):
+            def participant(self, *, profile, guard, agent):
+                return super().participant(profile=profile, guard=guard, agent=agent)
+
+        result = kit.run_scenario("outcome", NoPrivileged("tools"))
+        self.assertEqual("fail", result["status"])
+        self.assertIn("cannot offer privileged actions", result["failures"][0])
+        self.assertEqual("pass", kit.run_scenario("post", NoPrivileged("tools"))["status"])
+
+    def test_the_scripted_agent_plays_one_turn_per_start_and_counts_the_rest(self):
+        surfaces = []
+
+        class Surface:
+            def bind(self, turn_id):
+                surfaces.append(turn_id)
+                return True
+
+        agent = kit.ScriptedAgent([("bind",)], lambda text: text, later=[[("bind",)]])
+        first, second = object(), object()
+        for key in (first, first, second, second):
+            agent.play_once(key, Surface)
+        self.assertTrue(agent.done.wait(5))
+        agent.play(Surface())
+        # Each turn plays in its own thread, so the order may vary.
+        self.assertEqual(["turn-1", "turn-2"], sorted(surfaces))
+        self.assertEqual(1, agent.unexpected)
 
     def test_the_parity_table_has_a_row_per_scenario_and_a_column_per_integration(self):
         results = _run([kit.ReferenceIntegration("tools")])

@@ -42,11 +42,14 @@ class _UnixConnection(http.client.HTTPConnection):
 class _SocketSurface:
     """What the mod sends: the gate's routes, with the launch secret."""
 
-    def __init__(self, socket_path: Path, secret: str, wake_id: str, session: "_ScriptedSession") -> None:
+    def __init__(
+        self, socket_path: Path, secret: str, wake_id: str, session: "_ScriptedSession", text: str
+    ) -> None:
         self.socket_path = socket_path
         self.secret = secret
         self.wake_id = wake_id
         self.session = session
+        self.text = text
 
     def _post(self, route: str, body: Mapping[str, Any]) -> dict[str, Any]:
         connection = _UnixConnection(str(self.socket_path))
@@ -63,6 +66,10 @@ class _SocketSurface:
 
     def bind(self, turn_id: str) -> bool:
         return bool(self._post("/v1/turn-start", {"turn_id": turn_id, "wake_id": self.wake_id}).get("bound"))
+
+    def read(self, turn_id: str) -> str:
+        # What the gate wrote to the session.
+        return self.text
 
     def call(self, turn_id: str, role: str, arguments: Mapping[str, Any]) -> tuple[bool, str]:
         answer = self._post("/v1/tool", {"turn_id": turn_id, "tool": full_tool_name(role), "input": dict(arguments)})
@@ -95,7 +102,7 @@ class _ScriptedSession:
         match = _WAKE.match(text)
         if match is None:
             raise AssertionError("the gate's turn does not start with its wake marker")
-        self.agent.play(_SocketSurface(self.socket_path, self.secret, match.group(1), self))
+        self.agent.play(_SocketSurface(self.socket_path, self.secret, match.group(1), self, text))
 
     def interrupt(self) -> None:
         pass
@@ -112,7 +119,9 @@ class ClaudeCodeKitIntegration:
         self._directory: str | None = None
         self._server: GateServer | None = None
 
-    def participant(self, *, profile: ParticipantProfile, guard: CoreSecretGuard, agent: ScriptedAgent) -> Any:
+    def participant(
+        self, *, profile: ParticipantProfile, guard: CoreSecretGuard, agent: ScriptedAgent, privileged: bool = False
+    ) -> Any:
         self._directory = tempfile.mkdtemp(prefix="ncc-kit-")
         socket_path = Path(self._directory) / "gate.sock"
         secret = secrets.token_urlsafe(24)
@@ -121,7 +130,7 @@ class ClaudeCodeKitIntegration:
             profile=profile,
             session=session,
             guard=guard,  # the kit's guard: its withheld values
-            privileged_enabled=False,
+            privileged_enabled=privileged,
             result_wait_seconds=5,
         )
         session.on_turn_end = participant.turn_ended

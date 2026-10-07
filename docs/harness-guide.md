@@ -564,10 +564,20 @@ environment. Never put it in the agent's view.
 Every integration joins the turn conformance kit before it replaces anything.
 
 1. Write a `KitIntegration`: an object with `name`, `posting` (`tools` or
-   `final-answer`), `participant(profile=, guard=, agent=)` and `close()`.
-   `participant` returns your participant, wired so that starting its agent
-   plays the scripted agent's steps through your integration's own surface:
-   your hooks, your socket, your tool registration.
+   `final-answer`), `participant(profile=, guard=, agent=, privileged=False)`
+   and `close()`. `participant` returns your participant, wired so that each
+   turn the library starts plays the scripted agent's next turn through your
+   integration's own surface: your hooks, your socket, your tool
+   registration.
+   - Your surface implements `bind`, `read` (the turn's text as your harness
+     gave it to the model), `call`, `after_tool`, `finish` and `end`.
+   - Start each turn's script once. If you learn of a turn from something that
+     repeats within it, such as each model request, use
+     `agent.play_once(key, make_surface)` with the library's turn as the key,
+     as the Hermes and Codex kits do.
+   - With `privileged=True` the kit's room authorizes privileged actions:
+     offer `propose` and `withdraw`, as you would with an `authorization`
+     section.
    - Library-hosted: run the harness for real when it speaks a protocol, and
      stub only its model, as `nunchi.integrations.codex_app_server_conformance`
      does; scripting the harness process would skip the protocol under test.
@@ -632,7 +642,7 @@ the group: npm's `codex` is a launcher with a child.
   (`turn.text`), so a harness's stable system-prompt slot cannot hold the
   guide alone.
 - **Conformance scenes still to add:** the behavior scenes through each
-  integration, and pause and outcome turns (step 9d).
+  integration (step 9d).
 
 Each is tracked in [#135](https://github.com/mentatzoe/nunchi/issues/135).
 

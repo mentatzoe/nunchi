@@ -379,6 +379,18 @@ def _output_text(request: Mapping[str, Any], call_id: str) -> str | None:
     return None
 
 
+def _input_text(request: Mapping[str, Any]) -> str:
+    """The newest user message Codex gave the model: the turn's text."""
+
+    for item in reversed(request.get("input", ())):
+        if isinstance(item, Mapping) and item.get("type", "message") == "message" and item.get("role") == "user":
+            content = item.get("content")
+            if isinstance(content, str):
+                return content
+            return "\n".join(part.get("text", "") for part in content or () if isinstance(part, Mapping))
+    return ""
+
+
 class CodexSurface:
     """One turn, as the model inside a real Codex run reaches it."""
 
@@ -386,6 +398,8 @@ class CodexSurface:
         self.harness = harness
         self.turn = turn
         self.news: str | None = None
+        # Made at the turn's first model request: what Codex gave the model.
+        self.shown = _input_text(harness.model.latest())
 
     @property
     def codex_turn(self) -> str | None:
@@ -402,6 +416,9 @@ class CodexSurface:
         while self.codex_turn is None and time.monotonic() < deadline:
             time.sleep(0.02)
         return self.codex_turn is not None
+
+    def read(self, turn_id: str) -> str:
+        return self.shown
 
     def call(self, turn_id: str, role: str, arguments: Mapping[str, Any]) -> tuple[bool, str]:
         model = self.harness.model
@@ -452,18 +469,24 @@ class CodexKitIntegration:
         self.name = f"Codex app-server ({codex_version()})"
         self.harness: CodexHarness | None = None
 
-    def participant(self, *, profile: ParticipantProfile, guard: SecretGuard, agent: ScriptedAgent) -> Any:
+    def participant(
+        self, *, profile: ParticipantProfile, guard: SecretGuard, agent: ScriptedAgent, privileged: bool = False
+    ) -> Any:
         # An unbound run is one without the room tools (see the module docstring).
         unbound = not any(step[0] == "bind" for step in agent.steps)
+        roles = ("send", "react", "context")
         self.harness = harness = CodexHarness(
-            profile=profile, guard=guard, user_config=_ROOM_SERVER_DISABLED if unbound else ""
+            profile=profile,
+            guard=guard,
+            user_config=_ROOM_SERVER_DISABLED if unbound else "",
+            roles=(*roles, "propose", "withdraw") if privileged else roles,
         )
-        playing = threading.Lock()
 
         def first_request() -> None:
-            # Codex asked the model for the first time in this turn: the script starts.
-            if playing.acquire(blocking=False):
-                agent.play(CodexSurface(harness, harness.integration.participant.active))
+            # Codex asked the model for the first time in a turn: that turn's script starts.
+            turn = harness.integration.participant.active
+            if turn is not None:
+                agent.play_once(turn, lambda: CodexSurface(harness, turn))
 
         harness.model.on_request = first_request
         return harness.integration.participant

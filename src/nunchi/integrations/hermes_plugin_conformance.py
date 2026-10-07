@@ -99,6 +99,7 @@ def register_for_kit(ctx: Any) -> None:
         route=_PENDING["route"],
         result_wait_seconds=_PENDING.get("result_wait_seconds", 5.0),
         start_timeout_seconds=_PENDING.get("start_timeout_seconds", 30.0),
+        roles=_PENDING.get("roles", ("react", "context")),
         # The kit builds its own Room; an end-to-end test lets the plugin build one.
         room_factory=_PENDING.get("room_factory"),
     )
@@ -426,11 +427,16 @@ class HermesSurface:
         self.plugin = plugin
         self.turn = turn
         self.news: str | None = None
+        # Made at the turn's first model request: what Hermes gave the model.
+        self.shown = _user_text(model.latest())
 
     def bind(self, turn_id: str) -> bool:
         # Hermes binds in `pre_llm_call`, before it asks the model; the script
         # starts when Hermes first asks, so the binding has happened if it will.
         return self.turn.turn_id is not None
+
+    def read(self, turn_id: str) -> str:
+        return self.shown
 
     def _next_request(self, before: int) -> bool:
         deadline = time.monotonic() + _STEP_SECONDS
@@ -508,6 +514,7 @@ class HermesHarness:
         result_wait_seconds: float = 5.0,
         platform_actions: bool = False,
         display: Mapping[str, Any] | None = None,
+        roles: tuple[str, ...] = ("react", "context"),
     ) -> None:
         if not hermes_available():
             raise RuntimeError("Hermes is not installed in this Python environment")
@@ -521,6 +528,7 @@ class HermesHarness:
             room_factory=room_factory,
             start_timeout_seconds=start_timeout_seconds,
             result_wait_seconds=result_wait_seconds,
+            roles=roles,
         )
         try:
             self.gateway = HermesGateway(
@@ -591,15 +599,22 @@ class HermesKitIntegration:
         self.tool_search = tool_search
         self.harness: HermesHarness | None = None
 
-    def participant(self, *, profile: ParticipantProfile, guard: SecretGuard, agent: ScriptedAgent) -> Any:
-        self.harness = harness = HermesHarness(profile=profile, guard=guard, tool_search=self.tool_search)
+    def participant(
+        self, *, profile: ParticipantProfile, guard: SecretGuard, agent: ScriptedAgent, privileged: bool = False
+    ) -> Any:
+        self.harness = harness = HermesHarness(
+            profile=profile,
+            guard=guard,
+            tool_search=self.tool_search,
+            roles=("react", "context", "propose", "withdraw") if privileged else ("react", "context"),
+        )
         plugin = harness.plugin
-        playing = threading.Lock()
 
         def first_request() -> None:
-            # Hermes asked the model for the first time in this turn: the script starts.
-            if playing.acquire(blocking=False):
-                agent.play(HermesSurface(harness.gateway, harness.model, plugin, plugin.participant.active))
+            # Hermes asked the model for the first time in a turn: that turn's script starts.
+            turn = plugin.participant.active
+            if turn is not None:
+                agent.play_once(turn, lambda: HermesSurface(harness.gateway, harness.model, plugin, turn))
 
         harness.model.on_request = first_request
         return plugin.participant
