@@ -54,16 +54,36 @@ not as the intended behavior.
 - **Continuity without revival.** Restarts and backfill restore facts, never
   missed moments or stale turns.
 
-## The core is agent- and provider-agnostic
+## One library, every harness
+
+Nunchi is a library that any agent harness can use. Every behavior in
+`docs/behavior.md` is implemented once, in the shared core, and reaches each
+harness through the same interfaces. A harness should not need its own copy
+of a behavior to get it (Zoe, 2026-10-07).
 
 The shared core is `src/nunchi` outside `integrations/` and `adapters/`, plus
 `schemas/` and `docs/contracts/`. It must not know about any specific agent
 host (Hermes, Codex, Claude Code), chat platform, or model vendor.
 
-Integrations plug in through core interfaces and own their platform text,
-paths, configuration, and lifecycle details. If a core change only makes sense
-for one host or one vendor, it belongs in that integration, or the core needs a
-neutral interface instead.
+An integration adapts one harness to the core: how that harness is installed,
+configured, started, and given its turns. It holds no social behavior of its
+own. When a behavior seems to need integration code, the core is missing an
+interface; add it there. If a core change only makes sense for one host or
+one vendor, the core needs a neutral interface instead.
+
+- **Same behavior everywhere.** Building and testing a behavior through one
+  harness first is fine. Until every supported harness has it, record the gap
+  where users will see it, and treat closing it as library work, not that
+  harness's backlog.
+- **Stock harnesses.** Integrations use each harness's public extension
+  points (plugins, hooks, configuration, protocols) and work with a stock
+  install of a supported version. They do not patch the harness. Users keep
+  their own setup, models, tools, and customizations.
+- **Missing extension points.** When a harness lacks one we need, open an
+  issue here first, with the gap and the alternatives considered. Zoe decides
+  whether to ask the harness's maintainers.
+- **Independent evidence.** Tests, evaluations, and benchmarks run on clean,
+  pinned installs of each harness, never on anyone's own setup.
 
 ## Read first
 
@@ -137,15 +157,14 @@ Say which checks have passed.
 
 ## Ownership
 
-Default owners say who normally does the work. They are not gates; Zoe can
-redirect any work.
+Zoe owns product scope and the final completion decision. Engineering work is
+not divided by agent, model family, or harness: whoever takes a task carries
+it through the core and every integration it affects, and anyone may change
+any part of this repository. Review each other's work on its merits.
 
-| Work | Default owner |
-|---|---|
-| Shared core, transport, Codex, reference adapters, packaging | Codex |
-| Hermes integration | Aleph |
-| Claude Code integration and security assurance | Claude |
-| Product scope and final completion decision | Zoe |
+Each person's or agent's own installation of a harness or of Nunchi (Aleph's
+Hermes, for example) belongs to them. Nunchi's code and its evidence never
+depend on one.
 
 ## Product invariants
 
@@ -168,6 +187,8 @@ redirect any work.
 - Privileged effects require current, provenance-bound authorization for the
   exact action immediately before dispatch.
 - The shared core names no agent host, chat platform, or model vendor.
+- Social behavior lives in the shared core; integrations only adapt a harness
+  to it.
 - No executable V1 path remains.
 
 ## Verification

@@ -149,10 +149,13 @@ contract and installs its compatibility shim transactionally on every
 activation. A changed required interface fails closed until Nunchi evolves its
 shim; a new package version alone is not an incompatibility.
 
-This is the intended Hermes participant implementation for the contract. The
-plugin must not recreate shared Nunchi behavior with a second attention model
-call, copied prompt, copied model selection, copied opportunity lifecycle, or
-direct send path.
+This is the current Hermes participant implementation, not the intended one:
+it misses the behaviors the shared turn carries, and it patches Hermes
+internals through a compatibility shim. Step 9 of
+[#94](https://github.com/mentatzoe/nunchi/issues/94) replaces it with a plugin
+on Hermes's public hooks. Either way, the plugin must not recreate shared
+Nunchi behavior with a second attention model call, copied prompt, copied
+model selection, copied opportunity lifecycle, or direct send path.
 
 ## Shared Discord consumer contract
 

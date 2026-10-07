@@ -32,8 +32,13 @@ the action `ParticipantTurnHost` commits. See
 
 ## Native host pipeline
 
-Some hosts run their own participant pipeline, as Hermes does. They do not
-use `ParticipantTurnHost`. Instead they wrap their own turn with the shared
+Some hosts run their own participant pipeline, as Hermes does today. They do
+not use `ParticipantTurnHost`, so they miss the behaviors the shared turn
+carries (memory, catching up, looking again, steering). That gap is a design
+problem, not the intended shape: see "One library, every harness" in
+[`AGENTS.md`](../AGENTS.md) and step 9 of
+[#94](https://github.com/mentatzoe/nunchi/issues/94), which replaces this path
+with a plugin on Hermes's public hooks. Instead they wrap their own turn with the shared
 owners: observation, attention, the scheduler, shared opportunity preparation
 and wake facts (`nunchi.pipeline.prepare_opportunity`), and shared receipts (`participant_host_receipt_body`). Nunchi decides before the
 host starts visible work, hands an admitted turn the bounded wake facts, and
