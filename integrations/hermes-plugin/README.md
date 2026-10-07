@@ -21,7 +21,8 @@ harness-hosted, consume-and-start shape with final-answer posting
 
 | Step | Hermes surface | What happens |
 |---|---|---|
-| Ingress | `post_gateway_admission` | Every message in the bound chat goes to the room; Hermes runs no turn of its own on it. Messages in other chats are left to Hermes. |
+| Message facts | `pre_gateway_dispatch` | For each message in the bound chat, the plugin notes what the admission payload leaves out: the message it replies to, when it was sent, who it mentions (Hermes takes the bot's own Discord mention out of the text), whether its author is a bot, and whether the platform says it was meant for the bot. Dispatch goes on unchanged. |
+| Ingress | `post_gateway_admission` | Every message in the bound chat goes to the room, with those facts; Hermes runs no turn of its own on it. Messages in other chats are left to Hermes. |
 | Start | `ctx.inject_message(origin=...)` | When the library gives the agent a turn, the plugin injects the turn's text into the chat as its own message. |
 | Bind | `pre_llm_call` | The run whose message carries the turn's wake marker is bound to the turn. |
 | Steering | `transform_tool_result` | What others posted meanwhile is added to every tool result in a bound run. |
@@ -146,9 +147,18 @@ display:
   it committed for Hermes in the room log itself, with an id of its own, as a
   reply to the message the turn was about. So memory, threads and the room's
   pace see it, but nothing can target it on the platform.
-- **Thin ingress.** Hermes's admission payload carries no mentions, reply
-  target, timestamp, or bot flag. The plugin delivers empty mentions and actor
-  kind `unknown`.
+- **Mentions under `plugins.isolation: host`.** Mentions and the bot flag come
+  from the platform's own message object, which does not cross into the plugin
+  host. There a message reads as mentioning nobody, and on Discord Hermes has
+  taken the bot's own mention out of its text, so the room cannot tell the
+  agent was named. Run the plugin in-process (the default) for mentions. The
+  reply target and whether the platform said the message was meant for the bot
+  still cross; the time does not, so the room uses the time it saw the
+  message. Tracked on [#135](https://github.com/mentatzoe/nunchi/issues/135).
+- **Telegram mentions by @username** carry no user id, so only a mention that
+  names a user (Telegram's `text_mention`) counts. A Discord mention or a
+  Telegram text mention of the bot addresses the agent when the binding's
+  `actor_id` is `<platform>:user:<the bot's user id>`.
 - **No interrupt.** Hermes gives plugins no way to stop a run. Nunchi closes
   a cancelled turn, so its answer is silenced; tools it already ran stay run.
 - **Reactions** are add-only (Hermes's `platform_actions`) and were checked up

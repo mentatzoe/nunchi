@@ -10,9 +10,11 @@ installed.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 
 from nunchi.attention import AttentionPolicy, ParticipantProfile
@@ -118,8 +120,8 @@ class RegistrationTest(unittest.TestCase):
             self.assertTrue(entry["schema"]["description"])
         self.assertEqual(
             set(ctx.hooks),
-            {"post_gateway_admission", "pre_llm_call", "transform_tool_result", "post_api_request",
-             "transform_llm_output", "on_session_end"},
+            {"pre_gateway_dispatch", "post_gateway_admission", "pre_llm_call", "transform_tool_result",
+             "post_api_request", "transform_llm_output", "on_session_end"},
         )
 
     def test_platform_token_shapes_are_withheld(self):
@@ -146,6 +148,53 @@ class IngressTest(unittest.TestCase):
         self.assertEqual(event["author_id"], "telegram:user:u1")
         # Hermes's admission payload does not say whether the author is a bot.
         self.assertEqual(delivery["actors"]["telegram:user:u1"]["kind"], "unknown")
+
+    def _dispatch(self, plugin, message_id, *, chat_id=ROOM, **fields):
+        source = SimpleNamespace(platform=SimpleNamespace(value="telegram"), chat_id=chat_id, thread_id=None)
+        self.assertIsNone(plugin.on_dispatch(event=SimpleNamespace(source=source, message_id=message_id, **fields)))
+
+    def test_what_hermes_knew_at_dispatch_reaches_the_room(self):
+        room = _StubRoom()
+        plugin = _plugin(room)
+        raw = SimpleNamespace(
+            mentions=[SimpleNamespace(id="bot-7"), SimpleNamespace(id="u2")],
+            mention_everyone=False,
+            author=SimpleNamespace(bot=True),
+        )
+        sent = datetime(2026, 10, 7, 21, 5, 3, 250000, tzinfo=timezone.utc)
+        self._dispatch(plugin, "101", reply_to_message_id="100", timestamp=sent, raw_message=raw)
+        self._admit(plugin, platform="telegram", source={"chat_id": ROOM, "user_id": "u3", "user_name": "CI"},
+                    message_id="101", text="can you look?")
+        (delivery,) = room.delivered
+        event = validate_canonical_event(delivery["event"])
+        # Hermes took the bot's own mention out of the text; the mention is kept.
+        self.assertEqual(["telegram:user:bot-7", "telegram:user:u2"], event["mentioned_actor_ids"])
+        self.assertEqual("telegram:message:100", event["reply_to_event_id"])
+        self.assertEqual("2026-10-07T21:05:03.250Z", event["timestamp"])
+        self.assertEqual("bot", delivery["actors"]["telegram:user:u3"]["kind"])
+
+    def test_a_message_meant_for_the_bot_mentions_it(self):
+        room = _StubRoom()
+        plugin = _plugin(room)
+        class Placeholder:
+            """What the plugin host gets for a live object (Hermes's `Opaque`)."""
+
+            def __getattr__(self, name):
+                raise AttributeError(f"{name} is not available inside the plugin host")
+
+        # Under plugins.isolation: host the platform's message is a placeholder.
+        self._dispatch(plugin, "102", reply_expected=True, reply_to_message_id="101", raw_message=Placeholder())
+        self._admit(plugin, platform="telegram", source={"chat_id": ROOM, "user_id": "u1"},
+                    message_id="102", text="and this one?")
+        (delivery,) = room.delivered
+        self.assertEqual([PROFILE.actor_id], delivery["event"]["mentioned_actor_ids"])
+        self.assertEqual("telegram:message:101", delivery["event"]["reply_to_event_id"])
+        self.assertEqual("unknown", delivery["actors"]["telegram:user:u1"]["kind"])
+
+    def test_messages_elsewhere_are_not_noted(self):
+        plugin = _plugin(_StubRoom())
+        self._dispatch(plugin, "103", chat_id="elsewhere", reply_to_message_id="9")
+        self.assertEqual({}, dict(plugin._noted))
 
     def test_other_chats_are_left_to_hermes(self):
         room = _StubRoom()
@@ -317,6 +366,26 @@ class HermesGatewayTest(unittest.TestCase):
             with self.subTest(name):
                 result = kit.run_scenario(name, HermesKitIntegration())
                 self.assertEqual(result["status"], "pass", result.get("failures"))
+
+    def test_the_room_sees_hermess_reply_target_time_and_mentions(self):
+        harness = self._harness()
+        sent = datetime(2026, 10, 7, 21, 5, 3, tzinfo=timezone.utc)
+        harness.person_says(
+            "Can someone look at the failing deploy?",
+            message_id="101",
+            reply_to_message_id="100",
+            timestamp=sent,
+            raw_message=SimpleNamespace(mentions=[SimpleNamespace(id="bot-7")], author=SimpleNamespace(bot=False)),
+        )
+        self.assertTrue(harness.wait_observed("telegram:message:101"))
+        (event,) = [
+            event for event in harness.plugin.room.observation.retained_events()
+            if event["id"] == "telegram:message:101"
+        ]
+        self.assertEqual(
+            (["telegram:user:bot-7"], "telegram:message:100", "2026-10-07T21:05:03.000Z"),
+            (event["mentioned_actor_ids"], event["reply_to_event_id"], event["timestamp"]),
+        )
 
     def test_a_person_speaks_and_the_agent_answers_through_the_room(self):
         harness = self._harness()

@@ -213,7 +213,7 @@ maintainers.
 | Behavior | Claude Code | Codex (app-server) | Hermes (plugin) | One-reply |
 |---|---|---|---|---|
 | Topology, posting | library-hosted, tools | library-hosted, tools | harness-hosted (consume and start), final answer | library-hosted, tools |
-| Gate before the agent runs | library | library | `post_gateway_admission` consumes every message (`handled`, no reply); the library starts turns with `inject_message` | library |
+| Gate before the agent runs | library | library | `post_gateway_admission` consumes every message (`handled`, no reply), with the reply target, time, mentions and bot flag noted at `pre_gateway_dispatch` (mentions and bot flag in-process only); the library starts turns with `inject_message` | library |
 | Guide | session prompt | with every turn's text (`developerInstructions` would replace the user's own; the library gives one text per turn) | `register_system_prompt_section` | request |
 | Turn context | turn text | `turn/start` input | the injected turn text, plus `pre_llm_call` | request |
 | Room view | mod tool | per-thread MCP server in `thread/start` config (stable); client tools need an experimental opt-in | `register_tool` | room-view action |

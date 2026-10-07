@@ -516,7 +516,12 @@ table names the Hermes hooks for each step.
    on the first message the gateway admits.
 2. **Ingress.** Every message in the room reaches the plugin's ingress hook.
    The plugin hands it to `room.deliver` and tells the harness it is handled,
-   with no reply, even when the hand-over failed.
+   with no reply, even when the hand-over failed. Give the room every fact the
+   harness has: who a message mentions, the message it replies to, when it was
+   sent, and whether its author is a bot. When the ingress hook's payload
+   lacks them, look for an earlier hook that has them: the Hermes plugin
+   notes them in `pre_gateway_dispatch`. A message whose mentions are missing
+   reads as addressed to nobody.
 3. **Start.** The library calls `driver.start(turn)`. The driver asks the
    harness to start a run with `<nunchi_wake id="…"/>` and `turn.text`, as
    the plugin's own message.

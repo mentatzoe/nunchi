@@ -359,12 +359,16 @@ class HermesGateway:
         runner._install_plugin_message_injector()
         return runner, adapter
 
-    async def person_says(self, text: str, *, user_id: str = "u1", user_name: str = "Sam", message_id: str) -> None:
+    async def person_says(
+        self, text: str, *, user_id: str = "u1", user_name: str = "Sam", message_id: str, **fields: Any
+    ) -> None:
+        """A message as the platform adapter hands it to Hermes; ``fields`` are more `MessageEvent` fields."""
+
         from gateway.platforms.base import MessageEvent, MessageType
 
         source = self.adapter.build_source(chat_id=ROOM, chat_type="group", user_id=user_id, user_name=user_name)
         await self.adapter.handle_message(
-            MessageEvent(text=text, message_type=MessageType.TEXT, source=source, message_id=message_id)
+            MessageEvent(text=text, message_type=MessageType.TEXT, source=source, message_id=message_id, **fields)
         )
 
     def idle(self) -> bool:
@@ -547,8 +551,12 @@ class HermesHarness:
             raise RuntimeError("Hermes did not load the plugin")
         self.plugin: HermesRoomPlugin = plugin
 
-    def person_says(self, text: str, *, message_id: str, user_id: str = "u1", user_name: str = "Sam") -> None:
-        self.gateway.run(self.gateway.person_says(text, user_id=user_id, user_name=user_name, message_id=message_id))
+    def person_says(
+        self, text: str, *, message_id: str, user_id: str = "u1", user_name: str = "Sam", **fields: Any
+    ) -> None:
+        self.gateway.run(
+            self.gateway.person_says(text, user_id=user_id, user_name=user_name, message_id=message_id, **fields)
+        )
 
     def wait_observed(self, event_id: str, timeout: float = _STEP_SECONDS) -> bool:
         """Hermes hands a message to its admission hook asynchronously; wait for the room."""
