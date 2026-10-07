@@ -13,6 +13,12 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- Attention on Hermes's own model in the Hermes plugin (#94 step 9e): an
+  attention model of kind `hermes-host` asks Hermes (`ctx.llm`) for the
+  configured provider and model, through the core's
+  `HostStructuredAttentionModel`, so a Hermes room needs no separate
+  attention credentials. A refusal says how to allow the model under
+  `plugins.entries.nunchi-room.llm`.
 - The agent's own message in the room log, when its harness never shows it
   (#94 step 9e): `HarnessDelivery` now takes `room_shows_own_messages`. When
   it is false, as for Hermes, the host records each message it committed for

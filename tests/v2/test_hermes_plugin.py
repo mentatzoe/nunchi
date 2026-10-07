@@ -219,6 +219,80 @@ def _tool_text(request) -> str:
     return next(m["content"] for m in reversed(request["messages"]) if m["role"] == "tool")
 
 
+class HostModelAttentionTest(unittest.TestCase):
+    """Attention on Hermes's own model (`ctx.llm`), instead of a configured route."""
+
+    class _Llm:
+        def __init__(self, error=None):
+            self.calls = []
+            self.error = error
+
+        def complete_structured(self, **kwargs):
+            self.calls.append(kwargs)
+            if self.error is not None:
+                raise self.error
+            return type("Result", (), {"provider": "example", "model": "small", "parsed": {"ok": True}})()
+
+    def _config(self, directory: Path) -> dict:
+        import hashlib
+
+        raw = json.dumps({
+            "profile_id": PROFILE.profile_id,
+            "participant_id": PROFILE.participant_id,
+            "actor_id": PROFILE.actor_id,
+            "instructions": PROFILE.instructions,
+            "provenance": "test",
+        }).encode()
+        (directory / "profile.json").write_bytes(raw)
+        return {
+            "schema_version": 2,
+            "binding": {
+                "participant_id": BINDING.participant_id,
+                "actor_id": BINDING.actor_id,
+                "platform": "telegram",
+                "room_id": ROOM,
+                "continuity_scope_id": BINDING.continuity_scope_id,
+            },
+            "profile": {"path": str(directory / "profile.json"), "sha256": hashlib.sha256(raw).hexdigest()},
+            "attention": {
+                "policy": {"preattention_enabled": True},
+                "model": {"kind": "hermes-host", "provider": "example", "model": "small"},
+            },
+            "limits": {},
+            "state_directory": str(directory / "state"),
+            "hermes": {"platform": "telegram", "chat_id": ROOM, "turn_user_id": TURN_USER},
+        }
+
+    def _room(self, llm):
+        from nunchi.integrations.hermes_plugin import build_plugin
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        plugin = build_plugin(self._config(Path(directory.name)))
+        context = _StubContext()
+        context.llm = llm
+        plugin.register(context)
+        return plugin._ensure_room()
+
+    def test_attention_asks_hermes_for_the_configured_model(self):
+        from nunchi.attention import HostStructuredAttentionModel
+
+        llm = self._Llm()
+        room = self._room(llm)
+        model = room.attention.model
+        self.assertIsInstance(model, HostStructuredAttentionModel)
+        self.assertEqual({"ok": True}, dict(model.judge(instructions="i", projection={}, timeout_seconds=5)))
+        self.assertEqual(("example", "small"), (llm.calls[0]["provider"], llm.calls[0]["model"]))
+
+    def test_a_hermes_refusal_says_how_to_allow_the_model(self):
+        from nunchi.attention import HostAttentionPermissionError
+
+        room = self._room(self._Llm(error=PermissionError("not allowed")))
+        with self.assertRaises(HostAttentionPermissionError) as raised:
+            room.attention.model.judge(instructions="i", projection={}, timeout_seconds=5)
+        self.assertIn("plugins.entries.nunchi-room.llm", str(raised.exception))
+
+
 @unittest.skipUnless(hermes_available(), "requires an installed Hermes (hermes-agent)")
 class HermesGatewayTest(unittest.TestCase):
     """The plugin in a real Hermes gateway, with only the model scripted."""

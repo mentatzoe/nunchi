@@ -42,6 +42,7 @@ import time
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from nunchi.attention import AttentionModelSelection, HostStructuredAttentionModel
 from nunchi.participant import TransportResult
 from nunchi.reactions import UNAVAILABLE_REACTION_CAPABILITY, ReactionCapability
 from nunchi.turn import HarnessDelivery, SecretGuard, Turn, TurnParticipant
@@ -80,6 +81,14 @@ _REACTION_TIMEOUT_SECONDS = 20.0
 # abandons a transform hook after `plugins.hook_callback_timeout` (30 s by
 # default) and then delivers the raw draft, so stay well under it.
 DEFAULT_RESULT_WAIT_SECONDS = 20.0
+# Attention on Hermes's own model (`ctx.llm`), instead of a configured route.
+HOST_MODEL_KIND = "hermes-host"
+HOST_MODEL_REFUSED = (
+    "Hermes refused the attention provider/model this plugin asked for. Allow it "
+    "under plugins.entries.nunchi-room.llm (allow_provider_override, "
+    "allow_model_override, allowed_providers, allowed_models), then restart "
+    "Hermes. No other attention model was used."
+)
 _THINKING = re.compile(r"<thinking>.*?(?:</thinking>|\Z)", re.S | re.I)
 
 
@@ -581,6 +590,23 @@ def withheld_values(names: Iterable[str]) -> list[str]:
     return [value for name in names if (value := os.environ.get(name))]
 
 
+def _host_model_selection(model: Mapping[str, Any] | None) -> AttentionModelSelection | None:
+    """The provider and model to ask Hermes for, when attention uses Hermes's own model."""
+
+    if not isinstance(model, Mapping) or model.get("kind") != HOST_MODEL_KIND:
+        return None
+    return AttentionModelSelection.from_trusted_config(
+        {key: value for key, value in model.items() if key != "kind"}
+    )
+
+
+def _hermes_refused(exc: BaseException) -> bool:
+    """Hermes refuses a provider or model the operator has not allowed with a bare
+    PermissionError; an OS permission failure carries an errno."""
+
+    return isinstance(exc, PermissionError) and exc.errno is None
+
+
 def build_plugin(config: Mapping[str, Any]) -> HermesRoomPlugin:
     """The plugin for one Nunchi config (`docs/harness-guide.md`, step 1)."""
 
@@ -588,6 +614,7 @@ def build_plugin(config: Mapping[str, Any]) -> HermesRoomPlugin:
     from nunchi.room import Room, RoomSettings
 
     settings = RoomSettings.from_config(config, label="Hermes plugin", sections=(SECTION,))
+    host_model = _host_model_selection(settings.attention_model)
     section = settings.sections[SECTION]
     route = HermesRoute.from_section(section)
     env_names = section.get("withheld_env", DEFAULT_WITHHELD_ENV)
@@ -597,6 +624,14 @@ def build_plugin(config: Mapping[str, Any]) -> HermesRoomPlugin:
         roles += ["propose", "withdraw"]
 
     def room_factory(plugin: HermesRoomPlugin) -> Room:
+        attention_model = None
+        if host_model is not None and settings.attention.preattention_enabled:
+            attention_model = HostStructuredAttentionModel(
+                plugin.ctx.llm,
+                host_model,
+                is_denial=_hermes_refused,
+                denied_detail=HOST_MODEL_REFUSED,
+            )
         return Room(
             settings,
             participant=plugin.participant,
@@ -605,6 +640,7 @@ def build_plugin(config: Mapping[str, Any]) -> HermesRoomPlugin:
             # plugins, and reactions and membership never reach a plugin hook.
             event_visibility={"message": "live-only", "reaction": "unavailable", "membership": "unavailable"},
             state_prefix="hermes-plugin-",
+            attention_model=attention_model,
             attention_kinds=ATTENTION_KINDS,
         )
 
