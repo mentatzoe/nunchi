@@ -74,6 +74,22 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- The rules of a turn for agents that act through tools live in the core,
+  in `nunchi.turn` (#94 step 9c): binding a model turn to its wake, one room
+  action per turn, looking again before the first post, steering, silence
+  only for a bound turn, and the secret guard. Before, they lived only in
+  the Claude Code gate, so no other harness could use them. The gate now runs
+  on the core `Turn` and keeps only its session, the mod's tool names, and a
+  platform token's shape for the guard. `ParticipantTurnHost` tells a waiting
+  participant what became of its action (`settle`), which the gate's own
+  host subclass did before. Behavior is unchanged.
+- The one-reply turn (`ParticipantTurnProtocol`, used by the behavior eval
+  and Codex) drives the same core `Turn` (#94 step 9c), so the eval measures
+  the rules every harness gets. Looking again before the first post is now
+  one implementation. A one-reply participant may pass a `SecretGuard`: a
+  refused action is shown to the model once, and a second refusal fails the
+  turn. A failed look-again now lets the action go instead of failing the
+  turn, as it already did for agents that act through tools.
 - The agent's turn guide says what `docs/behavior.md` already holds: one
   clarifying question beats a guess (#94, step 6 follow-up). Both turn
   prompts now say to state only what the agent knows, to say so, ask, or

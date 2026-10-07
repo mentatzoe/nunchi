@@ -52,7 +52,7 @@ from ..authorization import (
 )
 from ..errors import NunchiError, ValidationError
 from ..observation import ObservationLimits, ObservationProvider, ParticipantBinding
-from ..participant import ConversationOpportunityScheduler, TransportResult
+from ..participant import ConversationOpportunityScheduler, ParticipantTurnHost, TransportResult
 from ..pipeline import AsyncDeliveryLane, DeliveryOutcome, NunchiV2Pipeline
 from ..receipts import ReceiptJournal
 from ..v2_contracts import validate_canonical_event
@@ -62,7 +62,6 @@ from .claude_code_gate import (
     SOCKET_ENV,
     ClaudeCodeSession,
     GatedParticipant,
-    GatedTurnHost,
     GateServer,
     SecretGuard,
     full_tool_name,
@@ -524,7 +523,7 @@ class ClaudeCodeRoomRuntime:
         )
         session.on_turn_end = participant.turn_ended
         self.participant = participant
-        host = GatedTurnHost(
+        host = ParticipantTurnHost(
             observation=observation,
             participant=participant,
             transport=transport,

@@ -1,7 +1,10 @@
 # Harness contract
 
 **Status: accepted by Zoe, 2026-10-07 ([#94](https://github.com/mentatzoe/nunchi/issues/94),
-steps 9a and 9b). Step 9c builds it; nothing here is built yet.** The harness
+steps 9a and 9b). Step 9c is building it.** The `Turn` is in the core
+(`nunchi.turn`). The Claude Code gate and the one-reply style (the behavior
+eval, Codex) both drive it. Final-answer posting and the local protocol come
+next. The harness
 facts were checked against upstream source on 2026-10-07: Hermes main
 `a50406d9` and Codex `a513012`. The key Hermes and Codex behaviors were then
 run (see "Runtime checks"). The conformance kit (step 9d) checks the cells
@@ -326,8 +329,8 @@ per-thread MCP server.
 
 | Today | After |
 |---|---|
-| Turn rules inside the Claude Code gate | The library's `Turn`; the gate keeps only the session and the mod |
-| `ParticipantTurnProtocol` as a separate turn | The one-reply driver of the same `Turn` |
+| Turn rules inside the Claude Code gate | The library's `Turn`; the gate keeps only the session and the mod (done in step 9c) |
+| `ParticipantTurnProtocol` as a separate turn | The one-reply driver of the same `Turn` (done in step 9c) |
 | The Hermes integration's shims over Hermes internals | A plugin on Hermes's public hooks |
 | Codex with its tools turned off | The app-server with the user's own configuration and room tools |
 
