@@ -3,8 +3,9 @@
 **Status: draft for review ([#94](https://github.com/mentatzoe/nunchi/issues/94),
 steps 9a and 9b). Nothing here is built yet.** The harness facts were checked
 against upstream source on 2026-10-07: Hermes main `a50406d9` and Codex
-`a513012`. Cells marked *to verify* still need a runtime check with a stand-in
-model before this contract is frozen.
+`a513012`. The key Hermes and Codex behaviors were then run (see "Runtime
+checks"). Cells marked *to verify* still need a runtime check before this
+contract is frozen.
 
 ## Why
 
@@ -208,7 +209,7 @@ maintainers.
 | Room view | mod tool | per-thread MCP server in `thread/start` config (stable); client tools need an experimental opt-in | `register_tool` | room-view action |
 | Reaction | mod tool | the same MCP server | a tool calling `platform_actions.add_reaction`, if the user grants it | action |
 | Silence | a bound turn ends without an action | a turn ends without an action | `[SILENT]` on the injected turn | silence action |
-| Look again before posting | send tool holds | send tool holds | `transform_llm_output` silences the draft; the library injects a fresh turn with the draft and the new messages *(to verify; needs streaming off in the room)* | action held |
+| Look again before posting | send tool holds | send tool holds | `transform_llm_output` silences the draft; the library injects a fresh turn with the draft and the new messages *(to verify)*. Needs streaming off: Discord's default, while Telegram streams unless `display.platforms.telegram.streaming` is false | action held |
 | Steering | mod, after each tool call | `turn/steer` (stable) | `transform_tool_result` | between room views |
 | Pause and outcome turns | library | library | `inject_message` | library |
 | Catching up | library | library | library | library |
@@ -217,7 +218,7 @@ maintainers.
 | Attention routes | all | all | all, plus the host's model through `ctx.llm` | all |
 | Native tool approvals | user's rules; prompts declined | user's rules; approval requests declined | Hermes's own approvals | — |
 | Runs without patching the harness | yes | yes | yes, also under `plugins.isolation: host` *(to verify)* | yes |
-| Operator grants needed | none | none | `allow_gateway_injection`; an authorized identity for injected turns; `gateway.platform_actions` for reactions | none |
+| Operator setup needed | none | the project's trust level per thread (see gap 5) | `allow_gateway_injection`; the injected turns' identity among the platform's allowed users; per-user group sessions (Hermes's default); `gateway.platform_actions` for reactions | none |
 
 ## Conformance kit (step 9d)
 
@@ -246,7 +247,10 @@ None goes to a harness's maintainers without Zoe's decision.
      turn that carries the draft and the new messages. The cost is a second
      agent turn, only when someone posted meanwhile.
    - Requirement: streaming off in Nunchi rooms, since a streamed draft is
-     already visible before the transform. *To verify.*
+     already visible before the transform. Discord does not stream by
+     default; Telegram does, so a Telegram room needs
+     `display.platforms.telegram.streaming: false`
+     (`hermes_cli/config_defaults.py`).
    - Not adopted: middleware substituting a synthetic tool call
      (undocumented, and it can't hide streamed text).
 2. **Hermes, the id of the message it delivered.** There is no hook, ledger
@@ -261,11 +265,12 @@ None goes to a harness's maintainers without Zoe's decision.
    `ctx.dispatch_tool("discord", {"action": "fetch_messages", ...})` reads
    history, but it relies on dispatch skipping the toolset check, which is
    fragile. The library's own persisted log is the main source. *To verify.*
-5. **Codex, trusting the working directory.** `thread/start` with a `cwd` can
-   write `trust_level = "trusted"` into the user's own Codex config
-   (`app-server/src/request_processors/thread_processor.rs`). The integration
-   must not change the user's config. *To verify:* the safe way to start a
-   thread without that write.
+5. **Codex, trusting the working directory.** `thread/start` with a `cwd` and
+   a writable sandbox writes `trust_level = "trusted"` into the user's own
+   Codex config (`app-server/src/request_processors/thread_processor.rs`;
+   reproduced, see Runtime checks). **Resolved:** the integration passes the
+   project's trust level in the thread's own `config` map, which leaves the
+   user's config untouched and keeps write access.
 6. **Codex, profiles and environment keys.** The app-server rejects
    `--profile` and ignores `CODEX_API_KEY`, so it runs with the user's default
    profile and stored login. This is acceptable if documented.
@@ -276,6 +281,43 @@ Resolved during 9b:
   running turn steers it.
 - **Codex room tools:** a per-thread MCP server in `thread/start`'s `config`
   is stable and sits on top of the user's own servers.
+
+## Runtime checks (2026-10-07)
+
+Throwaway installs only, never anyone's own setup.
+
+**Hermes main `a50406d9`.** The tests use Hermes's own gateway test pattern:
+the real `GatewayRunner` and adapter ingress with a recording transport, and
+only the model call stubbed. The spike file is kept with the step 9b notes.
+
+| Check | Result |
+|---|---|
+| `post_gateway_admission` returning `handled` with no reply | The person's message is consumed: no run, no reply. |
+| A plugin-injected turn that answers `[SILENT]` | Nothing is sent. |
+| A plugin-injected turn that answers with text | The text is delivered, and the injected turns share one session. |
+| A person posts while an injected turn runs (per-user group sessions, the default) | The hook sees the message, and no run of its own starts. |
+| The same with shared group sessions | The message takes the busy path and the hook never sees it. **So Nunchi rooms need per-user group sessions.** |
+| An injected turn's identity outside the platform's allowed users | Hermes refuses the injection. **So that identity must be allowed.** |
+
+Hermes's own tests show that `transform_llm_output`'s replacement is the final
+answer the gateway receives and stores, and that `transform_tool_result`
+replaces a tool's result. Together with the checks above, looking again
+(silence the draft, then inject a fresh turn) and steering hold.
+
+**Codex CLI 0.160.1, `codex app-server`.** `thread/start` with a fresh Codex
+home and a git working directory, no model call:
+
+| Thread start | Writes trust into the user's config |
+|---|---|
+| `cwd`, workspace-write sandbox | yes |
+| `cwd`, read-only sandbox | no |
+| no `cwd`, workspace-write | no |
+| `cwd`, workspace-write, trust level `trusted` in the thread's `config` | no |
+| `cwd`, workspace-write, trust level `untrusted` in the thread's `config` | no |
+
+Still to run: the Hermes plugin under `plugins.isolation: host`, reading
+history through `ctx.dispatch_tool`, and a Codex turn with room tools from a
+per-thread MCP server.
 
 ## What this replaces (step 9e)
 
