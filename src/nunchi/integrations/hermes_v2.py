@@ -1746,7 +1746,9 @@ class _RoomRuntime:
                     self._native_threads[tid] = count
                 else:
                     del self._native_threads[tid]
-            self.native_invocations.finish(identity, outcome)
+                # Under the lock reserve holds, so this process's journal writes
+                # never wait on each other past SQLite's short busy timeout.
+                self.native_invocations.finish(identity, outcome)
 
     def expire_stock_turn(self, trace: _StockTurnTrace) -> None:
         with trace.lock:

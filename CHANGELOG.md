@@ -365,6 +365,12 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Fixed
 
+- Hermes: two concurrent native tool calls no longer refuse each other on a
+  slow disk. One call's journal write could hold SQLite's lock past the
+  journal's 0.25 s budget, so the other call was refused with "native
+  invocation could not be bound and persisted". The runtime now records both
+  the start and the end of a native call under one lock. Cancellation can
+  wait for one short write.
 - A chat model's `"answered": null` no longer fails the judgment when the
   same answers say the message asks for nothing (`asks` below 0.5); it reads
   as 0, the question's own "no" (#87). In run 53 Haiku on chat completions

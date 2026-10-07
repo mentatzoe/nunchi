@@ -10,6 +10,7 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
+import time
 import types
 import unittest
 from unittest import mock
@@ -78,7 +79,7 @@ class NativeToolTests(unittest.TestCase):
     def test_concurrent_distinct_native_calls_reserve_and_finish_without_loss(self):
         with self.active_turn() as (_, runtime, trace, middleware), ThreadPoolExecutor(2) as pool:
             # Repeat the actual middleware lock order: reserve under _lock,
-            # run the host outside it, finish after releasing it again.
+            # run the host outside it, finish under it again.
             assert trace is not None
             trace.deadline += 30
             calls = []
@@ -97,6 +98,32 @@ class NativeToolTests(unittest.TestCase):
             self.assertTrue(all(record["invocation"] == "returned" for record in records))
             self.assertTrue(all(record["effect"] == "unknown" for record in records))
             self.assertEqual({}, runtime._native_threads)
+
+    def test_a_slow_finish_does_not_refuse_another_call(self):
+        with self.active_turn() as (_, runtime, trace, middleware), ThreadPoolExecutor(2) as pool:
+            assert trace is not None
+            trace.deadline += 30
+            journal = runtime.native_invocations
+            original_finish = journal.finish
+            finishing = threading.Event()
+            slow = [True]
+            def finish(identity, invocation):
+                if slow and slow.pop():
+                    # A slow disk: hold SQLite's write lock past the journal's
+                    # 0.25 s budget while another call reserves.
+                    with journal._connect(write=True):
+                        finishing.set()
+                        time.sleep(0.6)
+                original_finish(identity, invocation)
+            with mock.patch.object(journal, "finish", finish):
+                first = pool.submit(copy_context().run, self.invoke, middleware,
+                                    lambda args: "first", tool_call_id="first")
+                self.assertTrue(finishing.wait(timeout=3))
+                second = pool.submit(copy_context().run, self.invoke, middleware,
+                                     lambda args: "second", tool_call_id="second")
+                self.assertEqual(["first", "second"], [first.result(timeout=5), second.result(timeout=5)])
+            records = runtime.native_invocations.records()
+            self.assertEqual(["returned", "returned"], [record["invocation"] for record in records])
 
     def test_cancellation_interrupts_only_registered_native_threads_without_clearing(self):
         with self.active_turn() as (_, runtime, trace, middleware):

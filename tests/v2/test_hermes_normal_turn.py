@@ -311,6 +311,11 @@ class StockHermesNormalTurnBaseline(_Base):
                     break
                 await asyncio.sleep(0.05)
             prompt_seen = any("Approval Required" in d or "needs your OK" in d or "/approve" in d for d in self.deliveries())
+            for _ in range(200):  # Hermes may deliver the prompt just after queuing the approval
+                if prompt_seen or session_key is None:
+                    break
+                await asyncio.sleep(0.05)
+                prompt_seen = any("Approval Required" in d or "needs your OK" in d or "/approve" in d for d in self.deliveries())
             if session_key is None:
                 return {"pending": False, "prompt_seen": prompt_seen}
             self.assertTrue((target / "marker").is_file(), "executed before approval")
