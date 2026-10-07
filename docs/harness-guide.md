@@ -484,11 +484,12 @@ The Claude Code integration, in order (`nunchi.integrations.claude_code_v2`,
 7. The session's end of turn comes back on its stream, and the gate calls
    `turn_ended`.
 
-The room connection is the runtime's own: it registers with the shared
-Discord transport, validates each event (`validate_canonical_event`), marks
-a continuity gap after each (re)connect, and hands events to `room.deliver`.
-That code lives inside the Claude Code runtime today; a shared runner every
-library-hosted integration can use is a known gap.
+The room connection is shared: `nunchi.integrations.discord_room.DiscordRoomConnection`
+registers the participant with the shared Discord transport and checks its
+attestation, validates each event, marks a continuity gap after each
+(re)connect, hands events to `room.deliver`, and reconnects. Build the `Room`
+with `connection.transport`, `attach` the room, and call `serve`. The Claude
+Code runtime and the Codex runner (`codex_app_server.runner`) both do.
 
 `nunchi.integrations.codex_app_server` is the protocol-harness example: its
 driver starts each run with `turn/start` and binds it from the answer, the
@@ -620,10 +621,6 @@ the group: npm's `codex` is a launcher with a child.
 
 ## Known library gaps
 
-- **No shared runner for library-hosted harnesses.** The room connection
-  (the Discord consumer, event validation, reconnects) lives inside the
-  Claude Code runtime. The Codex integration has no live runner until it is
-  shared.
 - **Steering marks messages as shown before delivery.** A `turn/steer` that
   fails because the run just ended loses that update.
 - **Tool posting has no silence reason.** A run that ends without a room

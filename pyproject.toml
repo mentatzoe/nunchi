@@ -62,6 +62,7 @@ nunchi-codex-room-runner = "nunchi.integrations.codex_v2:main"
 nunchi-hermes-dashboard = "nunchi.integrations.hermes_dashboard_install:main"
 nunchi-hermes-lifecycle = "nunchi.integrations.hermes_lifecycle:main"
 nunchi-claude-code-room-runner = "nunchi.integrations.claude_code_v2:main"
+nunchi-codex-app-server-runner = "nunchi.integrations.codex_app_server.runner:main"
 nunchi-service-worker = "nunchi.service_worker:main"
 
 [project.entry-points."hermes_agent.plugins"]

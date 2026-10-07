@@ -784,17 +784,21 @@ def build_integration(
     config: Mapping[str, Any],
     *,
     environ: Mapping[str, str] | None = None,
+    sections: Iterable[str] = (),
+    withhold: Iterable[str] = (),
 ) -> tuple[Any, CodexRoomIntegration]:
     """The room settings and the integration for one Nunchi config (`docs/harness-guide.md`, step 1).
 
     The caller builds the `Room` around ``integration.participant`` with its
-    platform transport, and adds its transport's own secrets to the guard.
+    platform transport. ``sections`` are the caller's own config sections, such
+    as its transport's, and ``withhold`` names more variables the agent must
+    never see or post, such as the transport's key.
     """
 
     from nunchi.room import RoomSettings
 
     environ = os.environ if environ is None else environ
-    settings = RoomSettings.from_config(config, label="Codex app-server", sections=(SECTION,))
+    settings = RoomSettings.from_config(config, label="Codex app-server", sections=(SECTION, *sections))
     try:
         codex = CodexSettings.from_section(settings.sections[SECTION])
     except ValueError as exc:
@@ -806,7 +810,7 @@ def build_integration(
     roles = ["send", "react", "context"]
     if settings.authorization is not None:
         roles += ["propose", "withdraw"]
-    withheld = withheld_names(codex, settings.attention_model)
+    withheld = list(dict.fromkeys([*withheld_names(codex, settings.attention_model), *withhold]))
     guard = SecretGuard(withheld_values(environ, withheld), patterns=TOKEN_PATTERNS)
     integration = CodexRoomIntegration(
         profile=settings.profile,

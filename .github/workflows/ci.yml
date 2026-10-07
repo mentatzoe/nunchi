@@ -140,6 +140,7 @@ jobs:
           /tmp/venv/bin/nunchi-matrix --probe
           /tmp/venv/bin/nunchi-telegram --probe
           /tmp/venv/bin/nunchi-codex-room-runner --probe
+          /tmp/venv/bin/nunchi-codex-app-server-runner --probe
           /tmp/venv/bin/nunchi-claude-code-room-runner --probe | /tmp/venv/bin/python -c "import json, sys; assert json.load(sys.stdin)['mod_version'], 'the Claude Code mod is missing from the wheel'"
           /tmp/venv/bin/nunchi-hermes-dashboard --help
           echo "packaging smoke OK"

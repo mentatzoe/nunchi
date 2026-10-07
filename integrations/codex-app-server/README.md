@@ -1,14 +1,14 @@
 # Nunchi for Codex: through `codex app-server`
 
 **Status: implemented, verified offline against Codex CLI 0.160.1 (#94 step
-9e); no live runner and no live room yet.** The turn conformance kit and
+9e); a live runner, `nunchi-codex-app-server-runner`, but no live room yet.** The turn conformance kit and
 `tests/v2/test_codex_app_server.py` run the integration against a real
 `codex app-server` from a clean, pinned npm install, with a throwaway `HOME`,
 `CODEX_HOME` and `TMPDIR`, and only the model scripted (a local Responses API
 endpoint configured as the throwaway user's model provider). It is meant to
 replace the older Codex integration under `integrations/codex/`, which runs
-Codex with its tools turned off; that one stays until this one has a live
-runner and has passed live checks.
+Codex with its tools turned off; that one stays until this one has passed
+live checks.
 
 The integration uses the app-server's public JSON-RPC protocol only. Nothing
 in Codex is patched, and the user's Codex configuration is never written.
@@ -77,8 +77,35 @@ plus a `codex` section:
 - `resume_thread` keeps the thread id in `state_directory/codex-thread.json`
   and resumes it after Codex or Nunchi restarts.
 
+## Run it
+
+`nunchi-codex-app-server-runner` runs one participant in one Discord room. The
+room comes from the shared Discord transport (`nunchi.integrations.discord_room`,
+the same connection the Claude Code runtime uses), the library decides each
+turn, and Codex takes the turns. Its config adds a `transport` section to the
+one above:
+
+```json
+"transport": {
+  "url": "http://127.0.0.1:3993/mcp",
+  "timeout_seconds": 30,
+  "output_key_env": "NUNCHI_DISCORD_OUTPUT_KEY"
+}
+```
+
+The binding's platform must be `discord`, and its `actor_id` the bot's
+`discord:actor:<id>`. The output key authorizes this participant's posts on
+the transport; it never reaches Codex, and the room refuses any post that
+carries it.
+
+```sh
+nunchi-codex-app-server-runner --config /srv/nunchi/codex.json --config-sha256 <sha256> --probe
+nunchi-codex-app-server-runner --config /srv/nunchi/codex.json --config-sha256 <sha256>
+```
+
+`--probe` reports what is configured without connecting. In your own code,
 `nunchi.integrations.codex_app_server.build_integration(config)` returns the
-room settings and the integration; the caller builds the `Room` around
+room settings and the integration, and the caller builds the `Room` around
 `integration.participant` with its platform transport.
 
 ## Codex setup the room needs
@@ -100,10 +127,9 @@ declined in a room.
 
 ## Known gaps
 
-- **No live runner.** There is no command that connects this integration to
-  the shared Discord transport. The Claude Code runtime
-  (`nunchi.integrations.claude_code_v2`) holds that code itself; a Codex
-  runner would copy it (library gap).
+- **Not run in a live room yet.** The runner is tested against a stub of the
+  shared transport, and the integration against a real `codex app-server`;
+  the two have not met a real Discord room.
 - **Steering after Codex's own tools can come late.** `turn/steer` adds the
   room's news to the run's next model call; if the run ends first, the update
   is lost for that run, though the library already counts it as shown. The
