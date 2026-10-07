@@ -21,6 +21,12 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   this one, and the mod's route names remain aliases. `TurnParticipant`
   gains `attach`, `tool_specs` and `end_turn`. `I-040A` is at `@4` for the
   host's `settle`.
+- Final-answer posting gives the agent a private place to think (#94 step 9c
+  follow-up): text inside `<thinking></thinking>` is never posted and becomes
+  the move's reason in memory, as `why` does in the envelope. In run 58, with
+  nowhere else to reason, the agent put its deliberation in its post 70 times
+  in 111. A silence marker on a line of its own is silence, and the behavior
+  eval keeps each plain reply and counts posts that name Nunchi's machinery.
 - Final-answer posting in the core `Turn` (#94 step 9c), for harnesses whose
   agent's final answer is its post, such as Hermes. `Turn.decide` and
   `Turn.finish` say whether an answer is delivered, looked at again, or

@@ -279,6 +279,19 @@ class FinalAnswerTurnTests(unittest.TestCase):
                 self.assertEqual("silent", turn.decide(answer).kind)
                 self.assertIsNone(turn.action)
 
+    def test_thinking_is_never_posted_and_becomes_the_reason(self):
+        turn = self.turn()
+        decision = turn.decide("<thinking>Zoe asked me directly; I have not checked yet.</thinking>\nNot yet, checking now.")
+        self.assertEqual(("deliver", "Not yet, checking now."), (decision.kind, decision.text))
+        self.assertEqual("Zoe asked me directly; I have not checked yet.", turn.action["why"])
+        self.assertEqual("Not yet, checking now.", turn.action["text"])
+        quiet = self.turn()
+        self.assertEqual("silent", quiet.decide("<thinking>Castor was asked; let him answer.</thinking>\n[SILENT]").kind)
+        self.assertEqual("Castor was asked; let him answer.", quiet.note)
+        unclosed = self.turn()
+        self.assertEqual("silent", unclosed.decide("<thinking>I could say that the build").kind)
+        self.assertIsNone(unclosed.action)
+
     def test_an_answer_is_the_turns_one_message(self):
         turn = self.turn()
         decision = turn.decide("  On it, checking the logs now.  ")
@@ -359,7 +372,8 @@ class FinalAnswerTurnTests(unittest.TestCase):
         text = self.turn().text
         self.assertIn("Your final reply in this turn is posted to the room", text)
         self.assertIn("no reasoning, analysis, headings, or notes to yourself", text)
-        self.assertIn("reply with exactly [SILENT]", text)
+        self.assertIn("put exactly [SILENT] outside it", text)
+        self.assertIn("inside <thinking></thinking>: it is never posted", text)
         self.assertIn("call emoji once", text)
         self.assertNotIn("never posted to the room", text)
 
@@ -463,8 +477,12 @@ class PlainReplyParticipantTests(unittest.TestCase):
         messages, json_reply = speaker.sent[0]
         self.assertFalse(json_reply)
         self.assertEqual(["user"], [message["role"] for message in messages])
-        self.assertIn("reply with exactly [SILENT]", messages[0]["content"])
+        self.assertIn("put exactly [SILENT] outside it", messages[0]["content"])
         self.assertIsNone(self.play(self.participant(["[SILENT] (nothing to add)"])))
+        self.assertEqual(
+            {"kind": "silence", "why": "Castor was asked."},
+            self.play(self.participant(["<thinking>Castor was asked.</thinking>[SILENT]"])),
+        )
 
     def test_it_replies_again_after_looking_again(self):
         room = Room()

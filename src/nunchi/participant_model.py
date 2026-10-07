@@ -1053,9 +1053,12 @@ def participant_tool_turn_prompt(
     if final_answer:
         parts.append(
             "Your final reply in this turn is posted to the room as your "
-            "message, exactly as you write it, so write only the words the room "
-            "should see: no reasoning, analysis, headings, or notes to yourself. "
-            f"To stay silent, reply with exactly {silence_marker} and nothing else."
+            "message, exactly as you write it. To think before you answer, put "
+            "your thinking first, inside <thinking></thinking>: it is never "
+            "posted, and your later turns see it as your reason. Everything "
+            "outside it is posted, so write only the words the room should see "
+            "there: no reasoning, analysis, headings, or notes to yourself. To "
+            f"stay silent, put exactly {silence_marker} outside it and nothing else."
         )
         if "react" in names:
             parts.append(
@@ -1431,7 +1434,8 @@ class OpenAICompatibleParticipant:
             if decision.kind == "deliver":
                 return deepcopy(turn.action)
             if decision.kind == "silent":
-                return None
+                # The model's own thinking, if any, is the silence's reason.
+                return {"kind": "silence", "why": turn.note} if turn.note else None
             messages += [
                 {"role": "assistant", "content": answer},
                 {"role": "user", "content": decision.text},

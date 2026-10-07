@@ -823,6 +823,14 @@ class RunTests(unittest.TestCase):
         self.assertFalse(record["provider_error"])
         self.assertEqual("speak", record["result"])
         self.assertEqual("Here is what I found.", record["agent"]["action"]["text"])
+        self.assertEqual(["Here is what I found."], record["agent"]["replies"])
+        self.assertNotIn("mentions_internals", record["agent"])
+
+    def test_a_post_that_names_nunchis_machinery_is_counted(self):
+        self.assertTrue(run.mentions_internals({"kind": "message", "text": "The attention model suggests I speak."}))
+        self.assertTrue(run.mentions_internals({"kind": "reply", "text": "Done.\n\n[SILENT]"}))
+        self.assertFalse(run.mentions_internals({"kind": "message", "text": "The build is green."}))
+        self.assertFalse(run.mentions_internals({"kind": "reaction", "reaction": "nunchi"}))
 
     def test_a_live_run_needs_the_key(self):
         with mock.patch.dict(os.environ, {}, clear=True), mock.patch("sys.stderr"):
