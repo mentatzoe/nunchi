@@ -59,10 +59,11 @@ class NativeInvocationJournal:
     @contextmanager
     def _connect(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
         self._check_file()
-        # Native batches reserve under the runtime lock but finish outside it.
-        # Allow their short durable writes to settle instead of spuriously
-        # refusing another invocation. This never retries a native effect;
-        # callers still recheck cancellation/deadline after reservation.
+        # The runtime serializes this process's reserve and finish under its
+        # lock. Other processes and readers may still hold SQLite's lock, so
+        # allow short durable writes to settle instead of spuriously refusing
+        # an invocation. This never retries a native effect; callers still
+        # recheck cancellation/deadline after reservation.
         # SQLite's busy timeout sums requested sleeps, not elapsed time.
         # Scheduler delays can therefore multiply it. Share one monotonic
         # budget across setup, writer-lock acquisition and commit contention.
