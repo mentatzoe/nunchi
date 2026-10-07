@@ -13,6 +13,16 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- One room connection for every library-hosted integration (#94 step 9e):
+  `nunchi.integrations.discord_room` registers the participant with the
+  shared Discord transport and checks its attestation, validates each
+  notification, hands events to the `Room`, marks a continuity gap when the
+  stream is uncertain, and reconnects. The Claude Code runtime uses it
+  instead of its own copy.
+- A live runner for the Codex app-server integration (#94 step 9e):
+  `nunchi-codex-app-server-runner` runs one participant in one Discord room on
+  that shared connection, with Codex taking the turns. The transport's key is
+  withheld from Codex and refused in the room. Not yet run in a live room.
 - The harness guide after its second test (#94 step 9e): binding from a
   protocol's own answer without a marker, only once the room tools reached
   the run, and the two start races; room tools from an MCP server through the

@@ -34,7 +34,6 @@ import sys
 import tempfile
 import time
 from typing import Any
-import urllib.error
 
 from .. import __version__
 from ..adapters.model_apis import ATTENTION_KINDS
@@ -43,8 +42,6 @@ from ..errors import NunchiError, ValidationError
 from ..participant import TransportResult
 from ..pipeline import DeliveryOutcome
 from ..room import Room, RoomSettings
-from ..v2_contracts import validate_canonical_event
-from ..mcp_discord.authorization import make_tool_authorization
 from .claude_code_gate import (
     SESSION_ENV,
     SOCKET_ENV,
@@ -54,10 +51,9 @@ from .claude_code_gate import (
     SecretGuard,
     full_tool_name,
 )
-from .discord_participant_transport import MCPDiscordTransport
+from .discord_room import DiscordRoomConnection, output_secret, transport_client
 from .mcp_client import StreamableMCPClient
 
-NOTIFICATION_METHOD = "notifications/nunchi/v2/discord-event"
 SURFACE = "claude-code"
 MINIMUM_CLAUDE_CODE = (2, 1, 287)
 MOD_DIRECTORY = Path(__file__).with_name("claude_code_mod")
@@ -381,14 +377,16 @@ class ClaudeCodeRoomRuntime:
         state.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.state_directory = state
         self.settings = self._claude_code_settings(config["claude_code"], state)
-        self.output_secret = self._output_secret(config["transport"])
-        transport = MCPDiscordTransport(
-            client,
-            self.binding.room_id,
-            self.binding.participant_id,
-            self.binding.actor_id,
-            self.output_secret,
+        self.output_secret = output_secret(config["transport"], label="Claude Code")
+        # The room on the shared Discord transport (`discord_room`).
+        self.connection = DiscordRoomConnection(
+            client=client,
+            binding=self.binding,
+            secret=self.output_secret,
+            label="Claude Code",
+            surface=SURFACE,
         )
+        transport = self.connection.transport
 
         # Nunchi's own secrets never enter the session's environment, and the
         # gate refuses room text that carries one.
@@ -459,6 +457,7 @@ class ClaudeCodeRoomRuntime:
             ),
             participant_timeout_seconds=self.settings["timeout_seconds"],
         )
+        self.connection.attach(self.room)
         self.privileged = self.room.privileged
         self.pipeline = self.room.pipeline
         self.lane = self.room.lane
@@ -596,23 +595,6 @@ class ClaudeCodeRoomRuntime:
             pass
 
     @staticmethod
-    def _output_secret(transport: Mapping[str, Any]) -> bytes:
-        if not isinstance(transport, Mapping):
-            raise ValidationError("Claude Code transport config must be an object")
-        env_name = transport.get("output_key_env")
-        if not isinstance(env_name, str) or not env_name:
-            raise ValidationError(
-                "Claude Code transport output_key_env must be non-empty"
-            )
-        value = os.environ.get(env_name)
-        if value is None or len(value.encode()) < 32:
-            raise ValidationError(
-                "Claude Code transport output authorization key is absent or "
-                f"short in {env_name}"
-            )
-        return value.encode()
-
-    @staticmethod
     def _executors(workspace_root: Any) -> dict[str, Any]:
         """Exactly the native privileged effects this surface can perform.
 
@@ -714,111 +696,17 @@ class ClaudeCodeRoomRuntime:
 
         return {"workspace.file.write": workspace_file_write}
 
-    # -- shared Discord consumer obligations --------------------------------
+    # -- the room on the shared Discord transport (`discord_room`) ----------------
 
     def handle(self, params: Mapping[str, Any]) -> DeliveryOutcome:
-        required = {
-            "schema_version",
-            "delivery_id",
-            "room_id",
-            "event",
-            "actors",
-            "continuity_gap",
-            "target_participant_id",
-            "transport_self_actor_id",
-        }
-        if not isinstance(params, Mapping) or set(params) != required:
-            raise ValidationError(
-                "shared Discord notification has an invalid V2 shape"
-            )
-        if params["schema_version"] != 2:
-            raise ValidationError("shared Discord notification is not V2")
-        if not isinstance(params["continuity_gap"], bool):
-            raise ValidationError("shared Discord continuity_gap must be a boolean")
-        if params["target_participant_id"] != self.binding.participant_id:
-            raise ValidationError(
-                "shared Discord notification targets another participant"
-            )
-        if params["transport_self_actor_id"] != self.binding.actor_id:
-            raise ValidationError(
-                "authenticated Discord self differs from exact binding"
-            )
-        if str(params["room_id"]) != self.binding.room_id:
-            raise ValidationError("shared Discord notification targets another room")
-        if params["continuity_gap"]:
-            if params["event"] is not None or params["actors"] != {}:
-                raise ValidationError(
-                    "Discord gap notification cannot fabricate event facts"
-                )
-            self.lane.cancel()
-            observed = self.pipeline.observation.mark_continuity_gap(
-                delivery_id=str(params["delivery_id"]),
-                detail="shared Discord transport declared a bounded queue gap",
-            )
-            return DeliveryOutcome(observed, (), False)
-        event = (
-            validate_canonical_event(params["event"])
-            if params["event"] is not None
-            else None
-        )
-        return self.lane.submit(
-            delivery_id=params["delivery_id"],
-            event=event,
-            actors=params["actors"],
-            authorized_route=True,
-        )
+        return self.connection.handle(params)
 
     def register_transport(self) -> None:
-        arguments = {
-            "participant_id": self.binding.participant_id,
-            "channel_id": self.binding.room_id,
-        }
-        supplied = {
-            **arguments,
-            "_nunchi_authorization": make_tool_authorization(
-                secret=self.output_secret,
-                request_id=f"transport-registration-{time.time_ns()}",
-                participant_id=self.binding.participant_id,
-                room_id=self.binding.room_id,
-                tool="register_participant",
-                arguments=arguments,
-            ),
-        }
-        result = self.client.call_tool("register_participant", supplied)
-        if not isinstance(result, Mapping) or result.get("isError") is True:
-            raise RuntimeError("shared Discord participant registration failed")
-        content = result.get("content")
-        if not isinstance(content, list) or len(content) != 1:
-            raise RuntimeError(
-                "shared Discord registration returned an invalid result"
-            )
-        item = content[0]
-        text = item.get("text") if isinstance(item, Mapping) else None
-        if not isinstance(text, str):
-            raise RuntimeError("shared Discord registration omitted its attestation")
-        try:
-            attestation = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(
-                "shared Discord registration attestation is malformed"
-            ) from exc
-        if attestation != {
-            "registered": True,
-            "participant_id": self.binding.participant_id,
-            "room_id": self.binding.room_id,
-            "transport_self_actor_id": self.binding.actor_id,
-        }:
-            raise RuntimeError(
-                "shared Discord registration attestation binding differs"
-            )
+        self.connection.register()
 
     def transport_interrupted(self) -> None:
         """Invalidate active work and record uncertainty before reconnect."""
-        self.lane.cancel()
-        self.pipeline.observation.mark_continuity_gap(
-            delivery_id=f"discord:claude-code-stream-gap:{time.time_ns()}",
-            detail="shared Discord notification stream continuity is uncertain",
-        )
+        self.connection.interrupted()
 
     def probe(self) -> dict[str, Any]:
         try:
@@ -890,17 +778,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not args.config_sha256:
             raise ValidationError("--config-sha256 is required")
         config = load_pinned_config(args.config, args.config_sha256)
-        transport = config.get("transport")
-        if not isinstance(transport, Mapping) or set(transport) != {
-            "url",
-            "timeout_seconds",
-            "output_key_env",
-        }:
-            raise ValidationError("Claude Code shared transport config is invalid")
-        client = StreamableMCPClient(
-            str(transport["url"]),
-            timeout_seconds=float(transport["timeout_seconds"]),
-        )
+        client = transport_client(config.get("transport"), label="Claude Code")
         runtime = ClaudeCodeRoomRuntime(config, client)
         if args.probe:
             probe = runtime.probe()
@@ -910,25 +788,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         runtime.require_supported_claude_code()
         runtime.start()
         try:
-            delay = 1.0
-            while True:
-                try:
-                    client.connect()
-                    runtime.register_transport()
-                    for method, params in client.notifications():
-                        if method != NOTIFICATION_METHOD:
-                            continue
-                        runtime.handle(params)
-                    runtime.transport_interrupted()
-                    delay = 1.0
-                except (urllib.error.URLError, RuntimeError, OSError):
-                    runtime.transport_interrupted()
-                    print(
-                        "Claude Code shared transport reconnect after operational error",
-                        file=sys.stderr,
-                    )
-                    time.sleep(delay)
-                    delay = min(delay * 2, 30)
+            runtime.connection.serve()
         finally:
             runtime.close()
     except (NunchiError, ValueError) as exc:
