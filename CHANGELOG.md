@@ -13,6 +13,17 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- The turn conformance kit (#94 step 9d): `nunchi-turn-conformance` plays a
+  scripted agent's turn through an integration's real path and checks the
+  turn's rules: one post and its result, silence only when bound, an unbound
+  turn failing, looking again, steering, one action per turn, the secret
+  guard, and final-answer delivery, silence, looking again, thinking and the
+  secret guard. Its output is the parity table. The reference turn and the
+  Claude Code gate, driven over its socket as the mod drives it, pass every
+  scenario for their posting style; CI runs the kit on a clean install. A
+  harness can end its agent's turn without naming it (`end_turn`, and
+  `/v1/turn/end` without `turn_id`), so a turn that was never bound ends at
+  once as a failure instead of waiting for the deadline.
 - The local turn protocol (#94 step 9c; `I-040D LocalTurnProtocolV2@1`):
   the core `Turn` as versioned JSON over a private Unix socket, for
   harnesses outside Python. `nunchi.turn_server` serves attach, bind, call,

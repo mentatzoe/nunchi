@@ -57,6 +57,7 @@ jobs:
           /tmp/venv/bin/python -c "import nunchi; print(nunchi.__file__)"
           /tmp/venv/bin/nunchi probe
           /tmp/venv/bin/nunchi-conformance
+          /tmp/venv/bin/nunchi-turn-conformance --integration reference --integration nunchi.integrations.claude_code_conformance
           /tmp/venv/bin/nunchi-install probe
           /tmp/venv/bin/nunchi-channel --probe
           /tmp/venv/bin/nunchi-discord --probe

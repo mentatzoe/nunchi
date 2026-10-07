@@ -13,7 +13,7 @@ interface ``I-040D LocalTurnProtocolV2@1``:
 | `/v1/turn/call` | `turn_id`, `tool`, `input` | `ok` with `text`, or `error` |
 | `/v1/turn/after-tool` | `turn_id` | `text` or null (steering) |
 | `/v1/turn/finish` | `turn_id`, `answer` | `finish` (`deliver`, `continue`, `silent`) and `text` |
-| `/v1/turn/end` | `turn_id`, `ok`, `detail` | `ended` |
+| `/v1/turn/end` | `turn_id` (optional), `ok`, `detail` | `ended` |
 
 `/v1/turn-start`, `/v1/tool` and `/v1/news` are the first integration's names
 for bind, call and after-tool, and stay as aliases.

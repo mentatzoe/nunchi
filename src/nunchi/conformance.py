@@ -84,17 +84,20 @@ class _Transport:
         return TransportResult("sent", "offline-conformance")
 
 
-def run_scenario(scenario: str) -> dict:
-    if scenario not in SCENARIOS:
-        raise ValueError(f"unknown V2 conformance scenario {scenario!r}")
-    binding = ParticipantBinding(
+def fixture_binding() -> ParticipantBinding:
+    """The conformance room: one participant in one reference-adapter room."""
+
+    return ParticipantBinding(
         participant_id="conformance-participant",
         actor_id="discord:actor:9",
         platform="discord",
         room_id="42",
         continuity_scope_id="discord:channel:42",
     )
-    profile = ParticipantProfile(
+
+
+def fixture_profile(binding: ParticipantBinding) -> ParticipantProfile:
+    return ParticipantProfile(
         profile_id="conformance-profile",
         participant_id=binding.participant_id,
         actor_id=binding.actor_id,
@@ -102,6 +105,20 @@ def run_scenario(scenario: str) -> dict:
         provenance="conformance:offline",
         sha256="0" * 64,
     )
+
+
+def fixture_attention_model(disposition: str = "WAKE") -> _Model:
+    """An offline attention model that always leans to ``disposition``."""
+
+    scenario = {"WAKE": "wake-contribution", "DEFER": "classifier-defer"}[disposition]
+    return _Model(scenario)
+
+
+def run_scenario(scenario: str) -> dict:
+    if scenario not in SCENARIOS:
+        raise ValueError(f"unknown V2 conformance scenario {scenario!r}")
+    binding = fixture_binding()
+    profile = fixture_profile(binding)
     model = _Model(scenario)
     policy = AttentionPolicy(
         preattention_enabled=scenario != "bypass",
