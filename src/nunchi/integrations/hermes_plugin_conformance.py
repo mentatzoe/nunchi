@@ -91,6 +91,8 @@ def register_for_kit(ctx: Any) -> None:
         route=_PENDING["route"],
         result_wait_seconds=_PENDING.get("result_wait_seconds", 5.0),
         start_timeout_seconds=_PENDING.get("start_timeout_seconds", 30.0),
+        # The kit builds its own Room; an end-to-end test lets the plugin build one.
+        room_factory=_PENDING.get("room_factory"),
     )
     plugin.register(ctx)
     _PENDING["plugin"] = plugin
@@ -233,7 +235,14 @@ class ScriptedModel:
 class HermesGateway:
     """A `GatewayRunner` with a recording platform adapter, on its own event loop."""
 
-    def __init__(self, *, model: ScriptedModel, tool_search: str = "off", extra_config: Mapping[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        model: ScriptedModel,
+        tool_search: str = "off",
+        allowed_users: str = f"u1,u2,{TURN_USER}",
+        extra_config: Mapping[str, Any] | None = None,
+    ) -> None:
         base = isolate()
         _ISOLATION["count"] += 1
         self.directory = base / f"scenario-{_ISOLATION['count']}"
@@ -254,11 +263,11 @@ class HermesGateway:
             config[key] = value
         # JSON is YAML: Hermes reads it as its config.yaml.
         (self.home / "config.yaml").write_text(json.dumps(config), encoding="utf-8")
-        (self.home / ".env").write_text(f"TELEGRAM_ALLOWED_USERS=u1,u2,{TURN_USER}\n", encoding="utf-8")
+        (self.home / ".env").write_text(f"TELEGRAM_ALLOWED_USERS={allowed_users}\n", encoding="utf-8")
         self._saved_env = {key: os.environ.get(key) for key in (
             "HERMES_HOME", "TELEGRAM_ALLOWED_USERS", "GATEWAY_ALLOWED_USERS", "GATEWAY_ALLOW_ALL_USERS")}
         os.environ["HERMES_HOME"] = str(self.home)
-        os.environ["TELEGRAM_ALLOWED_USERS"] = f"u1,u2,{TURN_USER}"
+        os.environ["TELEGRAM_ALLOWED_USERS"] = allowed_users
         os.environ.pop("GATEWAY_ALLOWED_USERS", None)
         os.environ.pop("GATEWAY_ALLOW_ALL_USERS", None)
         import gateway.run as gateway_run  # only once HERMES_HOME is the throwaway home
@@ -445,6 +454,92 @@ class HermesSurface:
             time.sleep(0.02)
 
 
+# -- the plugin in a real gateway -----------------------------------------------------------------
+
+
+class HermesHarness:
+    """The plugin, loaded by a real Hermes gateway from a throwaway home, with a scripted model.
+
+    ``room_factory`` lets the plugin build its own `Room` (end-to-end, through
+    Hermes's ingress); without it the caller builds the room, as the kit does.
+    """
+
+    def __init__(
+        self,
+        *,
+        profile: ParticipantProfile,
+        guard: SecretGuard,
+        room_factory: Any = None,
+        tool_search: str = "off",
+        allowed_users: str = f"u1,u2,{TURN_USER}",
+        start_timeout_seconds: float = 30.0,
+        result_wait_seconds: float = 5.0,
+    ) -> None:
+        if not hermes_available():
+            raise RuntimeError("Hermes is not installed in this Python environment")
+        self.route = HermesRoute(platform="telegram", chat_id=ROOM, turn_user_id=TURN_USER)
+        self.model = ScriptedModel()
+        _PENDING.clear()
+        _PENDING.update(
+            profile=profile,
+            guard=guard,
+            route=self.route,
+            room_factory=room_factory,
+            start_timeout_seconds=start_timeout_seconds,
+            result_wait_seconds=result_wait_seconds,
+        )
+        try:
+            self.gateway = HermesGateway(model=self.model, tool_search=tool_search, allowed_users=allowed_users)
+        except BaseException:
+            self.model.close()
+            raise
+        plugin = _PENDING.get("plugin")
+        if plugin is None:
+            self.close()
+            raise RuntimeError("Hermes did not load the plugin")
+        self.plugin: HermesRoomPlugin = plugin
+
+    def person_says(self, text: str, *, message_id: str, user_id: str = "u1", user_name: str = "Sam") -> None:
+        self.gateway.run(self.gateway.person_says(text, user_id=user_id, user_name=user_name, message_id=message_id))
+
+    def wait_observed(self, event_id: str, timeout: float = _STEP_SECONDS) -> bool:
+        """Hermes hands a message to its admission hook asynchronously; wait for the room."""
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            room = self.plugin.room
+            if room is not None and room.observation.resolve_event(event_id) is not None:
+                return True
+            time.sleep(0.02)
+        return False
+
+    def wait_for_requests(self, count: int, timeout: float = _STEP_SECONDS) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self.model.count() >= count:
+                return True
+            time.sleep(0.02)
+        return False
+
+    def settle(self, timeout: float = _STEP_SECONDS) -> bool:
+        """Hermes is idle, the turn has ended, and the room has recorded it."""
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self.gateway.idle() and self.plugin.participant.active is None:
+                room = self.plugin.room
+                return room is None or room.drain(max(0.0, deadline - time.monotonic()))
+            time.sleep(0.02)
+        return False
+
+    def close(self) -> None:
+        self.model.close()
+        gateway = getattr(self, "gateway", None)
+        if gateway is not None:
+            gateway.close()
+        _PENDING.clear()
+
+
 # -- the kit's integration -----------------------------------------------------------------------
 
 
@@ -454,44 +549,25 @@ class HermesKitIntegration:
 
     def __init__(self, *, tool_search: str = "off") -> None:
         self.tool_search = tool_search
-        self.gateway: HermesGateway | None = None
-        self.model: ScriptedModel | None = None
-        self.plugin: HermesRoomPlugin | None = None
+        self.harness: HermesHarness | None = None
 
     def participant(self, *, profile: ParticipantProfile, guard: SecretGuard, agent: ScriptedAgent) -> Any:
-        if not hermes_available():
-            raise RuntimeError("Hermes is not installed in this Python environment")
-        self.model = ScriptedModel()
-        _PENDING.clear()
-        _PENDING.update(
-            profile=profile,
-            guard=guard,
-            route=HermesRoute(platform="telegram", chat_id=ROOM, turn_user_id=TURN_USER),
-        )
-        self.gateway = HermesGateway(model=self.model, tool_search=self.tool_search)
-        plugin = _PENDING.get("plugin")
-        if plugin is None:
-            raise RuntimeError("Hermes did not load the plugin")
-        self.plugin = plugin
+        self.harness = harness = HermesHarness(profile=profile, guard=guard, tool_search=self.tool_search)
+        plugin = harness.plugin
         playing = threading.Lock()
-        model, gateway = self.model, self.gateway
 
         def first_request() -> None:
             # Hermes asked the model for the first time in this turn: the script starts.
             if playing.acquire(blocking=False):
-                agent.play(HermesSurface(gateway, model, plugin, plugin.participant.active))
+                agent.play(HermesSurface(harness.gateway, harness.model, plugin, plugin.participant.active))
 
-        self.model.on_request = first_request
+        harness.model.on_request = first_request
         return plugin.participant
 
     def close(self) -> None:
-        if self.model is not None:
-            self.model.close()
-            self.model = None
-        if self.gateway is not None:
-            self.gateway.close()
-            self.gateway = None
-        _PENDING.clear()
+        if self.harness is not None:
+            self.harness.close()
+            self.harness = None
 
 
 def conformance_integrations() -> list[HermesKitIntegration]:
@@ -500,11 +576,13 @@ def conformance_integrations() -> list[HermesKitIntegration]:
 
 __all__ = [
     "HermesGateway",
+    "HermesHarness",
     "HermesKitIntegration",
     "HermesSurface",
     "ScriptedModel",
     "WAKE_MARKER",
     "conformance_integrations",
     "hermes_available",
+    "isolate",
     "register_for_kit",
 ]

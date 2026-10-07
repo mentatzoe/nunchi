@@ -77,6 +77,7 @@ where = ["src"]
   "claude_code_mod/hooks/register.ts",
   "claude_code_mod/hooks/register.test.ts",
 ]
+"nunchi.integrations.hermes_plugin" = ["plugin.yaml"]
 "nunchi.integrations.hermes_dashboard_assets" = [
   "index.js",
   "manifest.json",
