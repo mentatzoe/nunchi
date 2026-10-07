@@ -377,7 +377,7 @@ per-thread MCP server.
 |---|---|
 | Turn rules inside the Claude Code gate | The library's `Turn`; the gate keeps only the session and the mod (done in step 9c) |
 | `ParticipantTurnProtocol` as a separate turn | The one-reply driver of the same `Turn` (done in step 9c) |
-| The Hermes integration's shims over Hermes internals | A plugin on Hermes's public hooks |
+| The Hermes integration's shims over Hermes internals | A plugin on Hermes's public hooks (built from the harness guide: `nunchi.integrations.hermes_plugin`, verified offline; not yet live) |
 | Codex with its tools turned off | The app-server with the user's own configuration and room tools |
 
 Each current integration stays until its replacement passes the conformance

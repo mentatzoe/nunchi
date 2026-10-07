@@ -6,7 +6,9 @@ documentation covers its side.
 
 **Status:** written in step 9d of [#94](https://github.com/mentatzoe/nunchi/issues/94),
 before the Hermes and Codex adapters (9e). Each adapter is built from this
-guide alone. Where the guide falls short, the guide is fixed.
+guide alone. Where the guide falls short, the guide is fixed. The first test:
+a separate agent built the Hermes plugin from it, and this version carries
+what it found.
 
 Read first:
 
@@ -74,6 +76,14 @@ own runs loses silence and looking again (see the contract's "Topologies").
 
 Reactions, the room view, and privileged actions are tools in both styles.
 
+**Whatever else the harness posts.** In final-answer posting the library sees
+only what reaches your output hook. List everything the harness can post by
+itself besides the final answer: streamed drafts, text the model writes beside
+a tool call, tool progress lines, status notices. Turn each off for the room
+in the harness's configuration, document it as operator setup, and test both
+the harness's default and the room's setting. Hermes needs four such settings
+([`integrations/hermes-plugin/README.md`](../integrations/hermes-plugin/README.md)).
+
 ## The pieces
 
 All are in the core package, `nunchi`, standard library only.
@@ -84,10 +94,11 @@ All are in the core package, `nunchi`, standard library only.
 | `Room` | `nunchi.room` | Everything the library owns for one participant in one room. |
 | `TurnParticipant` | `nunchi.turn` | The participant the library invokes. It builds a `Turn` per opportunity and hands it to your driver. |
 | `TurnDriver` | `nunchi.turn` | What you write: `start(turn)` and `interrupt(turn)`. |
-| `Turn` | `nunchi.turn` | One opportunity: `text`, `wake_id`, `cancelled`. |
+| `Turn` | `nunchi.turn` | One opportunity: `text`, `wake_id`, `cancelled`, and `tool_names`, the room tools this turn offers. |
 | `SecretGuard` | `nunchi.turn` | Refuses a room action that carries a withheld value, or text matching a credential pattern the integration names. |
 | `HarnessDelivery` | `nunchi.turn` | The transport for final-answer posting: the harness posts the message itself. |
 | `Finish` | `nunchi.turn` | What becomes of a final answer: `deliver`, `continue`, or `silent`, with `text`. |
+| `HostTextAttentionModel`, `HostStructuredAttentionModel` | `nunchi.attention` | Attention on the harness's own model. |
 | `TurnServer` | `nunchi.turn_server` | The same turn calls as JSON over a private socket, for code outside Python. |
 | `KitIntegration` | `nunchi.turn_conformance` | How your adapter joins the conformance kit. |
 
@@ -166,11 +177,22 @@ participant = TurnParticipant(
   ignored. Add the shape of your platform's tokens as compiled patterns:
   `SecretGuard(values, patterns=[re.compile(...)])`.
 - A driver may add `ready(cancel) -> bool`. The library calls it before
-  starting a turn; return False if the harness cannot take one, for example
-  while it is still busy.
+  starting a turn; return False if the harness cannot take one.
+- Set `bind_timeout_seconds` if the harness may accept a turn and then never
+  run it. Hermes, for one, drops an injected turn whose identity is not
+  allowed, and tells no plugin. A run that has not bound in time fails the
+  turn.
 
-The library starts one turn at a time per participant, and never starts a
-second while one is open. The adapter never queues turns.
+The library runs one turn at a time per participant. The adapter never
+queues turns:
+
+- After its room action, the agent's run may still be finishing. The next
+  turn waits until you report that run's end (step 6). If the end never
+  comes, the library closes the previous turn as a failure after
+  `previous_turn_grace_seconds` (30 s by default).
+- When the library cancels a turn, it calls `interrupt` and closes the turn.
+  Whatever the run does later finds it closed: `finish` answers `silent`, a
+  room tool call is refused, and `end_turn` for it returns False.
 
 ### 3. Binding the agent's run to its wake
 
@@ -183,11 +205,19 @@ participant.bind_turn(turn_id=harness_run_id, wake_id=turn.wake_id)
 ```
 
 - `turn_id` is any id your harness gives that run. Every later call for the
-  run passes the same id.
-- `wake_id` must reach the binding from the turn itself. In-process, keep it
-  from `start`. Out of process, put it where your hook reads it and the agent
-  cannot change it, as the Claude Code mod reads `<nunchi_wake id="…"/>` at
-  the start of the turn's text.
+  run passes the same id. If some hooks or tool calls carry a different key,
+  such as a session or task id, keep a map from that key to the run's id,
+  filled when you bind. A harness that runs one turn at a time per session
+  makes the map unambiguous.
+- `wake_id` must reach the binding from the turn itself, where the agent
+  cannot change it. Put `<nunchi_wake id="…"/>` at the start of the turn's
+  text and read it in the hook that sees the run start, as the Claude Code mod
+  and the Hermes plugin do.
+- **Harness-hosted: your hooks see runs that are not yours:** other chats,
+  direct messages, the harness's own command line. Bind only a run whose
+  input carries the open turn's wake id. A run that carries a Nunchi marker
+  but did not bind belongs to a closed turn: answer it with the silence
+  marker.
 - A later run in the same open turn binds with `wake_id=None`. It continues
   the turn, for example after a `continue` in final-answer posting.
 
@@ -215,6 +245,11 @@ The library applies the turn's rules inside `call_tool`:
 The text says what happened in words the agent can act on. Pass it through
 unchanged.
 
+You register the tools once, but each turn offers only some: `turn.tool_names`
+lists this turn's. A call to a tool the turn does not offer returns an error
+the agent can read. A harness may also hide plugin tools behind a search step
+(Hermes's `tool_search`); they still work.
+
 **Final-answer posting.** Hand the agent's final answer to the library
 before the harness posts it:
 
@@ -228,10 +263,20 @@ decision = participant.finish(turn_id=harness_run_id, answer=final_answer)
 | `silent` | Replace the answer with the harness's silence marker, so nothing is posted. |
 | `continue` | Keep the agent going with `decision.text` as its next input. It looks again at new messages, or answers again after a refusal. |
 
-If the harness cannot continue a run, replace the answer with the silence
-marker and start a fresh run in the same turn, with `decision.text` as its
-input, bound with `wake_id=None`. The text carries the draft, so the fresh run
-does not need the old one's history. Do not report the turn's end in between.
+- **Hand `finish` the answer as the model wrote it, thinking included.** The
+  library keeps `<thinking>` as the move's reason and never posts it. If your
+  harness strips thinking before your output hook, recover the raw text from
+  an earlier hook, or the reason is lost. The Hermes plugin reads it in
+  `post_api_request`.
+- `finish` waits up to `result_wait_seconds` for the host's commit. Keep that
+  below your harness's own hook timeout. Hermes abandons an output hook after
+  30 s and posts the raw draft, so the plugin waits 20 s.
+- **If the harness cannot continue a run,** answer with the silence marker.
+  When the current run ends, start a fresh run in the same turn, with
+  `decision.text` as its input and the same wake marker. It binds with
+  `wake_id=None`, so keep a note that it is a continuation. The text carries
+  the draft, so the fresh run does not need the old one's history. Do not
+  report the turn's end in between.
 
 ### 5. Steering
 
@@ -257,8 +302,9 @@ participant.end_turn(turn_id=harness_run_id, ok=True, detail="")
 participant.end_turn(turn_id=None, ok=False, detail="the harness refused the run")
 ```
 
-- Use `turn_id=None` when the run never got an id, or never bound. The open
-  turn ends anyway, as a failure.
+- Use `turn_id=None` only when the run never got an id or never bound, and
+  only if the harness cannot have started a newer run since: without an id,
+  whatever turn is open ends.
 - `ok=False` for errors, crashes, timeouts and interruptions.
 - In final-answer posting with a pending fresh run (step 4), report the end
   only after that run ends.
@@ -293,18 +339,28 @@ room.deliver(
 - Actor `kind`: `human`, `bot`, `system`, or `unknown`. Never invent a kind
   you do not know.
 - Ids must be the platform's own and stable. The agent's replies and
-  reactions target them.
+  reactions target them. If the harness gives a message no id, use a unique
+  one of your own; nothing can target that message.
 - **The agent's own messages are events too.** Deliver them with
   `author_id` set to `binding.actor_id`. The library never wakes on them,
   but memory finds the agent's own moves this way. If the harness hides its
   agent's own messages from plugins, the library remembers each message
   `HarnessDelivery` committed by its text and time instead, until the room
   shows it (`I-010C@14`).
-- Harness-hosted: consume every room message, so the harness never runs its
-  agent on one by itself. The harness then sees only the turns your driver
-  starts.
-- A message from a room or channel outside the binding goes in with
-  `authorized_route=False`. It is recorded, never woken on.
+- **Harness-hosted: consume every message in the participant's room,** so
+  the harness never runs its agent on one by itself. The harness then sees
+  only the turns your driver starts. Consume the message even when handing it
+  to the library fails: a harness that answers a person directly bypasses the
+  room, and its silence marker may turn into a visible warning on a person's
+  turn.
+- Other chats and direct messages are not this participant's room. A
+  harness-hosted plugin leaves them to the harness. A library-hosted
+  transport that sees another channel delivers it with
+  `authorized_route=False`: recorded, never woken on.
+- When the harness's payload is thin, send what you know and nothing more:
+  empty `mentioned_actor_ids`, no `reply_to_event_id`, actor kind `unknown`.
+- `deliver` returns a `DeliveryOutcome`. Its `observation` says whether the
+  event was recorded and whether it may wake the agent.
 
 ### 8. The room
 
@@ -322,22 +378,50 @@ room = Room(
 )
 ```
 
-- `transport`: library-hosted, your platform transport; its
+- `transport`, library-hosted: your platform transport. Its
   `dispatch(action=..., wake=...)` posts a `message`, `reply` or `reaction`
-  and returns a `TransportResult`. Harness-hosted, `HarnessDelivery(native)`.
-  The harness posts messages; `native` handles reactions, if the harness lets
-  a plugin react.
+  and returns a `TransportResult` (`nunchi.participant`): `sent`, `failed`,
+  `unknown` or `unavailable`, with a detail.
+- `transport`, harness-hosted: `HarnessDelivery(native)`. The harness posts
+  messages. In final-answer posting the answer is a message, never a reply
+  to a chosen message. `native` is optional; give it if the harness lets a
+  plugin react. It has three methods:
+  - `dispatch(action=..., wake=...) -> TransportResult` for a reaction:
+    `{"kind": "reaction", "origin_event_id": …, "target_event_id": …,
+    "reaction": …, "operation": "add"}` (or `"remove"`);
+  - `ordinary_action_capabilities() -> list[str]`, such as `["reaction"]`;
+  - `reaction_capability() -> ReactionCapability` (`nunchi.reactions`): the
+    operations and reactions the platform allows. The library offers the
+    react tool on a turn only when this allows it.
 - `event_visibility` says honestly what the harness shows for each event
   type: `history-and-live`, `live-only`, or `unavailable`.
-- `attention_kinds` are the attention routes your integration installs.
-  To let attention use the harness's own model, pass
-  `attention_model=` instead.
+- `attention_kinds` are the attention routes your integration installs. To
+  let attention use the harness's own model, pass `attention_model=` instead,
+  from `nunchi.attention`:
+  - `HostTextAttentionModel(complete)` for a plain-text completion, called as
+    `complete(system=..., prompt=..., timeout_seconds=...)`;
+  - `HostStructuredAttentionModel(client, AttentionModelSelection(provider=..., model=...))`
+    for a client with `complete_structured`.
 - `privileged_executors` are the native privileged actions your harness can
   perform, used only with `authorization`.
 - `participant_timeout_seconds` bounds one turn.
 - `room.cancel()` cancels the running turn; `room.restart()` starts over
   after the room connection restarts; `room.drain(timeout)` waits until no
   turn runs.
+- **Harness-hosted: build the `Room` in the process that owns the room
+  connection, on first use.** Harnesses often load plugins in every process
+  (Hermes loads them in its command line too), and only the gateway should
+  open the room's state.
+- Install the library into the harness's own Python environment.
+
+### 9. Turns to expect
+
+- **Catching up.** A message the agent already saw mid-turn, through
+  steering or looking again, may still get a turn of its own afterwards, when
+  it was the newest message waiting. Attention judges it with the agent's
+  memory, which holds what the agent said. Tests should expect that turn.
+- **Looking again after a pause, and outcome turns.** The library starts
+  these itself, through the same `start`.
 
 ## Walkthrough: library-hosted, tool posting
 
@@ -365,28 +449,32 @@ The Claude Code integration, in order (`nunchi.integrations.claude_code_v2`,
 The consume-and-start shape, with hook names generic. The contract's parity
 table names the Hermes hooks for each step.
 
-1. **Load.** The plugin reads its config into `RoomSettings`, builds a
-   `TurnParticipant` with the harness's silence marker, and builds a `Room`
-   with `HarnessDelivery`. It registers the reaction and room-view tools from
-   `participant.attach()` and forwards their calls to `call_tool`.
-2. **Ingress.** Every room message reaches the plugin's ingress hook. The
-   plugin hands it to `room.deliver` and tells the harness it is handled,
-   with no reply.
+`nunchi.integrations.hermes_plugin` is the worked example.
+
+1. **Load.** The plugin reads its config into `RoomSettings` and builds a
+   `TurnParticipant` with the harness's silence marker. It registers the
+   reaction and room-view tools from `participant.attach()`, and forwards
+   their calls to `call_tool`. It builds the `Room`, with `HarnessDelivery`,
+   on the first message the gateway admits.
+2. **Ingress.** Every message in the room reaches the plugin's ingress hook.
+   The plugin hands it to `room.deliver` and tells the harness it is handled,
+   with no reply, even when the hand-over failed.
 3. **Start.** The library calls `driver.start(turn)`. The driver asks the
-   harness to start a run with `turn.text`, as the plugin's own message, and
-   keeps `turn.wake_id`.
-4. **Bind.** The first hook that sees the run (before the model call) binds
-   it: `bind_turn(turn_id=<the run's id>, wake_id=<kept wake id>)`.
+   harness to start a run with `<nunchi_wake id="…"/>` and `turn.text`, as
+   the plugin's own message.
+4. **Bind.** The first hook that sees the run, before the model call, reads
+   the marker and binds the run if the id is the open turn's. It maps the
+   session and task keys that tool handlers get to the run's id.
 5. **Steering.** The tool-result hook adds `news(turn_id=…)` to each result.
-6. **Finish.** The output hook calls `finish` with the final answer, and
-   returns `decision.text` for `deliver`, or the silence marker otherwise.
-   For `continue`, the driver starts a fresh run with `decision.text`, and
-   step 4 binds it with `wake_id=None`.
-7. **End.** When the run ends with no fresh run pending, report it with
+6. **Finish.** The output hook calls `finish` with the raw answer, thinking
+   included, and returns `decision.text` for `deliver`, or the silence marker
+   otherwise. For `continue`, it notes the fresh run to start.
+7. **End.** The run-end hook starts the noted fresh run, which step 4 binds
+   with `wake_id=None`. With none pending, it reports the end with
    `end_turn`.
-8. **Cancel.** If the harness cannot interrupt a plugin's run, `interrupt`
-   does nothing more: once the turn is cancelled, `finish` answers `silent`,
-   so step 6 returns the silence marker. Tools already run stay run. The
+8. **Cancel.** Hermes cannot interrupt a plugin's run, so `interrupt` does
+   nothing: the library closes the cancelled turn, `finish` answers `silent`,
+   and step 6 returns the silence marker. Tools already run stay run. The
    parity table records the gap.
 
 ## Outside Python
@@ -420,8 +508,17 @@ Every integration joins the turn conformance kit before it replaces anything.
    `final-answer`), `participant(profile=, guard=, agent=)` and `close()`.
    `participant` returns your participant, wired so that starting its agent
    plays the scripted agent's steps through your integration's own surface:
-   your hooks, your socket, your tool registration. Script only the model and
-   the harness process. See `nunchi.integrations.claude_code_conformance`.
+   your hooks, your socket, your tool registration.
+   - Library-hosted: script only the model and the harness process. See
+     `nunchi.integrations.claude_code_conformance`.
+   - Harness-hosted: the harness is real, and the scripted agent is its
+     model. Stub the model at its API, for example a local OpenAI-compatible
+     endpoint configured as the harness's provider. Do not replace the
+     harness's run loop: that skips the hooks under test. Tell your agent's
+     model calls apart from the harness's own, such as session titles. See
+     `nunchi.integrations.hermes_plugin_conformance`.
+   - The kit builds its own `Room` around the participant you return, so your
+     integration must work with a room it did not build.
 2. Expose `conformance_integrations()` in that module.
 3. Run it:
 
@@ -436,21 +533,46 @@ Every integration joins the turn conformance kit before it replaces anything.
    skip the scenario.
 
 The kit owns the room, attention, the host and the checks, and builds them
-with the same `Room` your integration uses.
+with the same `Room` your integration uses. What it does not cover, test
+through your harness in your own tests, as `tests/v2/test_hermes_plugin.py`
+does:
+
+- its `arrive` step records a message in the room log directly, not through
+  your ingress;
+- its final-answer scenarios use no tools, so steering, the room view and
+  reactions go untested there.
+
+Before importing the harness in a test, point its home and temporary
+directories at a throwaway directory. Otherwise the harness may write into
+the user's own home: Hermes writes into `~/.hermes` on import.
 
 ## Known library gaps
 
+- **The agent's own message, when the harness never shows it.** Memory
+  keeps it by its text and time, but the room log does not have it. So the
+  question it answered still shows no response, and the room's pace misses
+  it (Hermes).
+- **Unknown mentions.** A canonical event cannot say that its mentions or
+  reply target are unknown, only that there are none.
+- **One text per turn.** The turn's guide and its context come as one text
+  (`turn.text`), so a harness's stable system-prompt slot cannot hold the
+  guide alone.
 - **Conformance scenes still to add:** the behavior scenes through each
   integration, and pause and outcome turns (step 9d).
+
+Each is tracked in [#135](https://github.com/mentatzoe/nunchi/issues/135).
 
 ## Checklist
 
 - [ ] Public extension points only; nothing patched.
+- [ ] Everything the harness posts besides the final answer is off for the
+  room, documented and tested.
 - [ ] No decision about whether or what the agent says.
 - [ ] Every room event delivered, the agent's own included.
 - [ ] Every run bound when it starts, and its end reported once.
 - [ ] Steering after every tool call, where the harness has a hook for it.
 - [ ] The secret guard holds every value the integration withholds.
-- [ ] The conformance kit passes on a clean, pinned install, in CI.
+- [ ] The conformance kit passes on a clean, pinned install, in CI, with the
+  harness's home isolated.
 - [ ] The parity table updated, and gaps filed in #135.
 - [ ] The integration documents itself under `integrations/`.

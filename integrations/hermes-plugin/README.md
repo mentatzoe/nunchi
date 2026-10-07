@@ -119,8 +119,8 @@ display:
   tests).
 - `turn_user_id` must be one of the platform's allowed users (for example
   `TELEGRAM_ALLOWED_USERS`). Otherwise Hermes accepts the injection and then
-  drops it; the plugin ends that turn as a failure after
-  `start_timeout_seconds`.
+  drops it; Nunchi ends that turn as a failure when its run has not started
+  within `start_timeout_seconds`.
 - Keep Hermes's default per-user group sessions (`group_sessions_per_user`).
   With shared group sessions, a message that arrives during a turn skips the
   admission hook ([harness contract](../../docs/harness-contract.md), Runtime
@@ -144,8 +144,8 @@ display:
 - **Thin ingress.** Hermes's admission payload carries no mentions, reply
   target, timestamp, or bot flag. The plugin delivers empty mentions and actor
   kind `unknown`.
-- **No interrupt.** Hermes gives plugins no way to stop a run. A cancelled
-  turn's answer is silenced; tools it already ran stay run.
+- **No interrupt.** Hermes gives plugins no way to stop a run. Nunchi closes
+  a cancelled turn, so its answer is silenced; tools it already ran stay run.
 - **Reactions** are add-only (Hermes's `platform_actions`) and were checked up
   to Hermes's Telegram verb with a recording adapter, not against Telegram.
 - **No room history after a restart** beyond Nunchi's own log.
