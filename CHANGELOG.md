@@ -13,6 +13,16 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- The Hermes plugin tells the room who a message mentions, which message it
+  replies to, when it was sent, and whether its author is a bot (#135 gaps 9
+  and C). Hermes's admission payload carries none of these, and on Discord
+  Hermes takes the bot's own mention out of the text, so a message naming the
+  agent read as addressed to nobody. The plugin now notes them in
+  `pre_gateway_dispatch`, from Hermes's `MessageEvent` and the platform's
+  message (Discord mentions and `@everyone`, Telegram text mentions, the
+  author's bot flag), and a message the platform says was meant for the bot
+  mentions the agent. Under `plugins.isolation: host` the platform's message
+  does not cross, so mentions, the bot flag and the time stay unknown there.
 - The agent's own "mhm" in the turn conformance kit (#94 step 9d): the kit's
   room offers one reaction, and the `mhm` and `final-mhm` scenarios check it
   through each integration's react tool. The pause scenarios now also check

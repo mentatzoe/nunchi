@@ -6,8 +6,11 @@ Built from `docs/harness-guide.md`, on Hermes's public plugin surface only
 
 How a turn goes:
 
-1. **Ingress.** `post_gateway_admission` hands every message in the bound
-   chat to the `Room` and answers ``handled`` with no reply, so Hermes never
+1. **Ingress.** `pre_gateway_dispatch` notes what Hermes knows about each
+   message in the bound chat that its admission payload leaves out: the
+   message it replies to, when it was sent, who it mentions, and whether its
+   author is a bot. `post_gateway_admission` hands the message to the `Room`
+   with those facts and answers ``handled`` with no reply, so Hermes never
    runs its agent on a person's message.
 2. **Start.** When the library decides, `start` injects the turn's text into
    the chat as the plugin's own message (`ctx.inject_message(origin=...)`),
@@ -30,7 +33,9 @@ stale turn) is silenced, since only the library may commit a post.
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import hmac
 import json
 import logging
@@ -90,6 +95,8 @@ HOST_MODEL_REFUSED = (
     "Hermes. No other attention model was used."
 )
 _THINKING = re.compile(r"<thinking>.*?(?:</thinking>|\Z)", re.S | re.I)
+# Messages noted at dispatch whose admission has not come yet.
+_NOTED_MESSAGES = 256
 
 
 class HermesPluginError(RuntimeError):
@@ -175,6 +182,63 @@ class HermesRoute:
 
     def actor_id(self, user_id: str) -> str:
         return f"{self.platform}:user:{user_id}"
+
+
+@dataclass(frozen=True)
+class _MessageFacts:
+    """What Hermes's dispatch hook knew about one message.
+
+    ``mentioned`` and ``author_is_bot`` come from the platform's own message
+    object, which exists only in-process: under `plugins.isolation: host` they
+    are unknown (None).
+    """
+
+    reply_to_message_id: str | None = None
+    timestamp: str | None = None
+    addressed: bool = False
+    mentioned: tuple[str, ...] | None = None
+    mentions_room: bool | None = None
+    author_is_bot: bool | None = None
+
+
+def _timestamp(value: Any) -> str | None:
+    if not isinstance(value, datetime):
+        return None
+    # Hermes's default is a naive local time; platforms give aware ones.
+    moment = value.astimezone(timezone.utc)
+    return moment.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _message_facts(event: Any, route: HermesRoute) -> _MessageFacts:
+    """Read a Hermes `MessageEvent`, and its platform message when there is one."""
+
+    reply_to = getattr(event, "reply_to_message_id", None)
+    raw = getattr(event, "raw_message", None)
+    mentioned: list[str] | None = None
+    users = getattr(raw, "mentions", None)  # Discord
+    if isinstance(users, (list, tuple)):
+        mentioned = [route.actor_id(str(user.id)) for user in users if getattr(user, "id", None) is not None]
+    entities = getattr(raw, "entities", None)  # Telegram: only a text mention names a user id
+    if isinstance(entities, (list, tuple)):
+        mentioned = [
+            route.actor_id(str(entity.user.id))
+            for entity in entities
+            if getattr(entity, "type", None) == "text_mention" and getattr(entity, "user", None) is not None
+        ]
+    everyone = getattr(raw, "mention_everyone", None)
+    author = getattr(raw, "author", None) or getattr(raw, "from_user", None)
+    is_bot = getattr(author, "bot", None)
+    if not isinstance(is_bot, bool):
+        is_bot = getattr(author, "is_bot", None)
+    return _MessageFacts(
+        reply_to_message_id=str(reply_to) if reply_to else None,
+        timestamp=_timestamp(getattr(event, "timestamp", None)),
+        # The platform adapter says the message was meant for this bot.
+        addressed=getattr(event, "reply_expected", None) is True,
+        mentioned=tuple(dict.fromkeys(mentioned)) if mentioned is not None else None,
+        mentions_room=everyone if isinstance(everyone, bool) else None,
+        author_is_bot=is_bot if isinstance(is_bot, bool) else None,
+    )
 
 
 @dataclass
@@ -310,6 +374,8 @@ class HermesRoomPlugin:
         # Tool handlers get task_id and session_id, not the run's turn_id.
         self._run_keys: dict[str, str] = {}
         self._room_lock = threading.Lock()
+        # Facts noted at dispatch, by Hermes message id, until admission.
+        self._noted: OrderedDict[str, _MessageFacts] = OrderedDict()
 
     # -- registration --------------------------------------------------------------
 
@@ -329,6 +395,7 @@ class HermesRoomPlugin:
                 },
                 handler=self._tool_handler(name),
             )
+        ctx.register_hook("pre_gateway_dispatch", self.on_dispatch)
         ctx.register_hook("post_gateway_admission", self.on_admission)
         ctx.register_hook("pre_llm_call", self.on_pre_llm_call)
         ctx.register_hook("transform_tool_result", self.on_tool_result)
@@ -353,6 +420,31 @@ class HermesRoomPlugin:
         return HarnessDelivery(HermesReactions(self), room_shows_own_messages=False)
 
     # -- ingress -----------------------------------------------------------------------
+
+    def on_dispatch(self, event: Any = None, **_: Any) -> None:
+        """Note what Hermes knows about a message in the bound chat; dispatch goes on.
+
+        Hermes's admission payload has no reply target, time, mentions or bot
+        flag, and on Discord Hermes takes the bot's own mention out of the
+        text. Without these, the room cannot tell who a message was for.
+        """
+
+        try:
+            source = getattr(event, "source", None)
+            platform = getattr(getattr(source, "platform", None), "value", getattr(source, "platform", ""))
+            where = {"chat_id": getattr(source, "chat_id", None), "thread_id": getattr(source, "thread_id", None)}
+            message_id = getattr(event, "message_id", None)
+            if not message_id or not self.route.holds(str(platform or ""), where):
+                return None
+            facts = _message_facts(event, self.route)
+            with self._lock:
+                self._noted[str(message_id)] = facts
+                while len(self._noted) > _NOTED_MESSAGES:
+                    self._noted.popitem(last=False)
+        except Exception:
+            # The message still reaches the room, with fewer facts.
+            logger.exception("nunchi-room: could not read a message at dispatch")
+        return None
 
     async def on_admission(
         self,
@@ -388,19 +480,32 @@ class HermesRoomPlugin:
         else:
             # Hermes gave no id: the message is still observed, but nothing can target it.
             event_id = self.route.event_id(f"unidentified-{time.time_ns()}")
+        with self._lock:
+            facts = self._noted.pop(str(message_id), None) if message_id else None
+        facts = facts or _MessageFacts()
+        mentioned = list(facts.mentioned or ())
+        own = self.participant.profile.actor_id
+        if facts.addressed and own not in mentioned:
+            # Meant for this bot without naming it, such as a reply to it.
+            mentioned.append(own)
+        event: dict[str, Any] = {
+            "id": event_id,
+            "type": "message",
+            "author_id": author,
+            "text": text or "",
+            # Unknown mentions read as none: the host-isolated plugin cannot see them.
+            "mentioned_actor_ids": mentioned,
+            "mentions_room": bool(facts.mentions_room),
+        }
+        if facts.timestamp is not None:
+            event["timestamp"] = facts.timestamp
+        if facts.reply_to_message_id is not None:
+            event["reply_to_event_id"] = self.route.event_id(facts.reply_to_message_id)
+        kind = {True: "bot", False: "human", None: "unknown"}[facts.author_is_bot]
         room.deliver(
             delivery_id=f"hermes:{event_id}",
-            event={
-                "id": event_id,
-                "type": "message",
-                "author_id": author,
-                "text": text or "",
-                # The admission payload carries no mentions, reply target or time.
-                "mentioned_actor_ids": [],
-                "mentions_room": False,
-            },
-            # Hermes's payload does not say whether the author is a bot.
-            actors={author: {"kind": "unknown", "display_name": str(source.get("user_name") or user_id)}},
+            event=event,
+            actors={author: {"kind": kind, "display_name": str(source.get("user_name") or user_id)}},
         )
 
     # -- the driver (the library calls these) ------------------------------------------
