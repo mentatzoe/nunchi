@@ -713,6 +713,46 @@ class ParticipantTurnHost:
         error_wake: bool = True,
         deadline: float | None = None,
     ) -> TransportResult | None:
+        """Run one turn, and tell a participant that waits on it what became of its action.
+
+        A participant whose agent keeps working after its room action (a tool
+        call that waits for the room's answer) has a ``settle`` method.
+        """
+
+        settle = getattr(self.participant, "settle", None)
+        request_id = request.get("request_id") if isinstance(request, Mapping) else None
+        if not isinstance(request_id, str):
+            settle = None
+        try:
+            result = self._run(
+                request=request,
+                decision=decision,
+                token=token,
+                error_wake=error_wake,
+                deadline=deadline,
+            )
+        except BaseException:
+            # The host may fail after the native call (a receipt write, say),
+            # so the participant must not be told that nothing was posted.
+            if callable(settle):
+                settle(
+                    request_id,
+                    TransportResult("unknown", "the host failed while handling it"),
+                )
+            raise
+        if callable(settle):
+            settle(request_id, result)
+        return result
+
+    def _run(
+        self,
+        *,
+        request: Mapping[str, Any],
+        decision: Mapping[str, Any],
+        token: OpportunityToken,
+        error_wake: bool,
+        deadline: float | None,
+    ) -> TransportResult | None:
         effective_deadline = (
             time.monotonic() + self.host_timeout_seconds
             if deadline is None

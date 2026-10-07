@@ -295,6 +295,30 @@ closing fence is the model's own note, usually explaining a silence; it is
 dropped and never posted. Any other text beside the envelope is a malformed
 reply.
 
+## The turn for agents that act through tools
+
+An agent that runs its own model loop acts through room tools instead of one
+envelope. The rules of that turn live in the core, in `nunchi.turn` (#94 step
+9c; [`harness-contract.md`](harness-contract.md)), so every integration gets
+them the same way:
+
+- `TurnParticipant` is the participant `ParticipantTurnHost` invokes. For each
+  wake it builds one `Turn` and hands it to the integration's `TurnDriver`,
+  which starts the agent with the turn's text and interrupts it when the turn
+  is cancelled. The integration chooses the tool names.
+- The agent's model turn must be bound to its wake (`Turn.bind`) before any
+  room tool works. A bound turn that ends without a room action is silence;
+  any other ending is a failure.
+- `Turn.call` takes one room tool call: one room action per turn, the
+  look-again before the first post or reaction, the `SecretGuard` check, and
+  then the action goes to the host, which tells the turn what became of it
+  (`settle`). The tool call returns that result to the agent.
+- `Turn.after_tool_call` is steering: what others posted since the agent last
+  looked, shown once.
+
+The Claude Code gate is the first integration on it. The one-reply
+envelope above becomes one more way to drive a `Turn` later in step 9c.
+
 ## The participant's view of the room
 
 The gate's context and the participant's view are separate (Zoe, 2026-10-05,
@@ -309,15 +333,16 @@ host-written `note`. Pages show messages only, never verdicts, and carry no
 handles or cursors. Before the first message, reply, or reaction goes out,
 the shared protocol and the Claude Code gate ask for `new` once; if others
 posted meanwhile, the action is held, the participant is shown their
-messages, and it sends, changes, or drops its action. Hermes does not offer
-the view yet.
+messages, and it sends, changes, or drops its action. For agents that act
+through tools the core `Turn` does this. Hermes does not offer the view yet.
 
 Steering (#94 step 6; Zoe, 2026-10-06): a host that can reach a running turn
 also tells the participant what others posted while it works, not only when it
 is about to post. The view's host-only `news` direction reads like `new` but
 never counts against the participant's own checks, and no action schema offers
-it to a model. The Claude Code mod asks the gate after each tool call the main
-session makes in a room turn, and a new message rides that tool's result as
+it to a model. The core `Turn` answers it (`after_tool_call`). The Claude
+Code mod asks after each tool call the main session makes in a room turn, and
+a new message rides that tool's result as
 context the model reads, never shown to the user. Each message is shown once,
 becomes a valid origin or target, and no longer holds the first post. Codex
 and the generic runtime do not steer yet.
