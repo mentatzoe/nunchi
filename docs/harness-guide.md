@@ -626,8 +626,9 @@ does:
 
 - its `arrive` step records a message in the room log directly, not through
   your ingress;
-- its final-answer scenarios use no tools, so steering, the room view and
-  reactions go untested there.
+- its room takes reactions itself, so your harness's own reaction path goes
+  untested there;
+- its final-answer scenarios use no room view and no steering.
 
 Before importing or starting the harness in a test, point its home and
 temporary directories at a throwaway directory. Otherwise the harness may
@@ -644,8 +645,6 @@ the group: npm's `codex` is a launcher with a child.
 - **One text per turn.** The turn's guide and its context come as one text
   (`turn.text`), so a harness's stable system-prompt slot cannot hold the
   guide alone.
-- **Conformance scenes still to add:** the behavior scenes through each
-  integration (step 9d).
 
 Each is tracked in [#135](https://github.com/mentatzoe/nunchi/issues/135).
 

@@ -257,21 +257,23 @@ both):
 | post: one post goes to the room, and the tool call says so | pass | n/a | pass | n/a | pass |
 | bound-silence: a bound turn that ends without an action is silence, remembered | pass | n/a | pass | n/a | pass |
 | silence-reason: a silent turn's last words are its reason, remembered and never posted | pass | n/a | pass | n/a | pass |
+| mhm: the agent's own mhm is one reaction on the message, through its react tool | pass | n/a | pass | n/a | pass |
 | unbound-failure: a turn never bound to its wake is a failure, not silence | pass | n/a | pass | n/a | pass |
 | look-again: the first post is held once when someone posted meanwhile | pass | n/a | pass | n/a | pass |
 | steering: a message that arrives mid-turn is shown once after a tool call, and can be answered | pass | n/a | pass | n/a | pass |
 | one-action: one room action per turn | pass | n/a | pass | n/a | pass |
 | secret: a withheld secret never reaches the room | pass | n/a | pass | n/a | pass |
 | cancel: a cancelled turn posts nothing | pass | n/a | pass | n/a | pass |
-| pause: after a pause the library starts a turn with no new message, and the agent can post | pass | n/a | pass | n/a | pass |
+| pause: after a pause the library starts a turn with no new message, which remembers why the agent waited | pass | n/a | pass | n/a | pass |
 | outcome: an approved action's outcome starts a turn, and the agent reports it | pass | n/a | pass | n/a | pass |
 | final-deliver: the final answer is the post, committed for the harness to deliver, and remembered | n/a | pass | n/a | pass | n/a |
 | final-silence: the silence marker is silence, and the agent's thinking is its reason | n/a | pass | n/a | pass | n/a |
+| final-mhm: the agent's own mhm is one reaction through its react tool, and the answer after it posts nothing | n/a | pass | n/a | pass | n/a |
 | final-look-again: the final answer is held once when someone posted meanwhile | n/a | pass | n/a | pass | n/a |
 | final-thinking: thinking is never posted | n/a | pass | n/a | pass | n/a |
 | final-secret: a withheld secret is refused once, and the agent answers again | n/a | pass | n/a | pass | n/a |
 | final-cancel: a cancelled turn's final answer is silent | n/a | pass | n/a | pass | n/a |
-| final-pause: after a pause the library starts a turn with no new message, and its answer is the post | n/a | pass | n/a | pass | n/a |
+| final-pause: after a pause the library starts a turn with no new message, which remembers why the agent waited | n/a | pass | n/a | pass | n/a |
 | final-outcome: an approved action's outcome starts a turn, and the agent's answer reports it | n/a | pass | n/a | pass | n/a |
 
 Through Codex the integration binds a run itself, from `turn/start`'s answer,
@@ -288,12 +290,21 @@ authorizes one privileged action, so each integration offers `propose`, as it
 would with an `authorization` section. An operator approves the proposal, the
 action runs, and the delivery lane starts the outcome turn on its own worker.
 
-The final-answer scenarios exercise no room tools, so steering, the room
-view and reactions through Hermes are checked by
-`tests/v2/test_hermes_plugin.py` instead. Steering after Codex's own tools
-(`turn/steer`), declined approvals, trust and resuming are checked by
-`tests/v2/test_codex_app_server.py`. Still to add: the behavior scenes through
-each integration, and the leak count.
+The kit's room offers one reaction, the agent's own "mhm", so the `mhm`
+scenarios check it through each integration's react tool. Through Hermes,
+the kit's room takes the reaction itself; the plugin's own path, Hermes's
+`platform_actions`, is checked by `tests/v2/test_hermes_plugin.py`, as are
+steering and the room view, which the final-answer scenarios do not use.
+Steering after Codex's own tools (`turn/steer`), declined approvals, trust and
+resuming are checked by `tests/v2/test_codex_app_server.py`.
+
+The behavior scenes ask an agent for four moves: speak, stay quiet, wait,
+and mhm. Each now has a scenario through every integration, and so do a
+scene's pause and outcome moments. Replaying every scene moment through each
+harness would run the same paths again, at about four minutes per harness in
+CI, so the kit does not (Claude's recommendation, 2026-10-07). The behavior
+suite still measures how a model makes those moves. Still to add: the leak
+count.
 
 The plan for the kit, as accepted:
 

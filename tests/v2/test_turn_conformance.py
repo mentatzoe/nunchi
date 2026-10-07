@@ -33,7 +33,10 @@ class TurnConformanceTests(unittest.TestCase):
             results = _run([kit.ReferenceIntegration("tools"), kit.ReferenceIntegration("final-answer")])
         failed = {r["scenario"] for r in results if r["status"] == "fail"}
         self.assertEqual(
-            {"look-again", "steering", "secret", "silence-reason", "final-look-again", "final-secret", "final-silence"},
+            {
+                "look-again", "steering", "secret", "silence-reason", "pause",
+                "final-look-again", "final-secret", "final-silence", "final-pause",
+            },
             failed,
         )
 
@@ -62,6 +65,22 @@ class TurnConformanceTests(unittest.TestCase):
         ):
             results = run_later()
         self.assertEqual(later, {name for name, r in results.items() if r["status"] == "fail"})
+
+    def test_a_room_without_reactions_fails_the_mhm_scenarios(self):
+        from nunchi.reactions import UNAVAILABLE_REACTION_CAPABILITY
+
+        with mock.patch(
+            "nunchi.participant.ParticipantTurnHost.reaction_capability",
+            lambda self: UNAVAILABLE_REACTION_CAPABILITY,
+        ):
+            results = [
+                kit.run_scenario(name, kit.ReferenceIntegration(kit.SCENARIOS[name].posting))
+                for name in ("mhm", "final-mhm", "post", "final-deliver")
+            ]
+        self.assertEqual(
+            {"mhm": "fail", "final-mhm": "fail", "post": "pass", "final-deliver": "pass"},
+            {r["scenario"]: r["status"] for r in results},
+        )
 
     def test_an_integration_that_cannot_offer_privileged_actions_fails_the_outcome_scenario(self):
         class NoPrivileged(kit.ReferenceIntegration):

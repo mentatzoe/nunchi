@@ -33,6 +33,7 @@ from .attention import AttentionPolicy, ParticipantProfile
 from .conformance import fixture_attention_model, fixture_binding, fixture_profile
 from .observation import ObservationLimits
 from .participant import TransportResult
+from .reactions import ReactionCapability
 from .room import Room, RoomSettings
 from .turn import HARNESS_DELIVERS, HarnessDelivery, SecretGuard, Turn, TurnDriver, TurnParticipant
 
@@ -40,7 +41,10 @@ PERSON = "conformance:person"
 TRIGGER = "conformance:message:1"
 SECRET = "conformance-withheld-secret-value"
 SILENCE = "[SILENT]"
-# What the agent posts after a pause, and when it reports an outcome.
+# The agent's own "mhm" (docs/behavior.md): one reaction the kit's room offers.
+MHM = "👂"
+# Why the agent waits, what it posts after the pause, and its outcome report.
+WAITED = "Castor was asked, not me."
 LOOKED_AGAIN = "Still stuck? I can take a look."
 REPORTED = "Done: the runbook is in the README."
 OPERATOR = "operator:conformance"
@@ -335,7 +339,7 @@ def _check_silence_reason(played: Played) -> list[str]:
     failures: list[str] = []
     _expect(not played.dispatched, f"a silent turn posted {_texts(played)}", failures)
     reasons = [move.get("why") for move in played.own_moves if move.get("kind") == "silence"]
-    _expect(reasons == ["Castor was asked, not me."], f"the last words are not the silence's reason: {reasons}", failures)
+    _expect(reasons == [WAITED], f"the last words are not the silence's reason: {reasons}", failures)
     return failures
 
 
@@ -420,10 +424,19 @@ def _later_turn(played: Played, failures: list[str], *, occasion: str, bound: in
     )
 
 
+def _remembers_why_it_waited(played: Played, failures: list[str], *, shown: int) -> None:
+    _expect(
+        f'"why":{json.dumps(WAITED)}' in str(played.answer(shown)),
+        "the turn after the pause does not remember why the agent waited",
+        failures,
+    )
+
+
 def _check_pause(played: Played) -> list[str]:
     failures: list[str] = []
     _expect(played.answer(0) is True, "the first turn did not bind", failures)
     _later_turn(played, failures, occasion="pause", bound=2, shown=3)
+    _remembers_why_it_waited(played, failures, shown=3)
     _expect(played.answer(4)[0] is True, f"the post after the pause failed: {played.answer(4)}", failures)
     _expect(_texts(played) == [LOOKED_AGAIN], f"expected only the post after the pause, saw {_texts(played)}", failures)
     return failures
@@ -445,6 +458,7 @@ def _check_final_pause(played: Played) -> list[str]:
     failures: list[str] = []
     _expect(played.answer(1)[0] == "silent", f"the first turn was not silent: {played.answer(1)}", failures)
     _later_turn(played, failures, occasion="pause", bound=3, shown=4)
+    _remembers_why_it_waited(played, failures, shown=4)
     _expect(played.answer(5) == ("deliver", LOOKED_AGAIN), f"the answer after the pause: {played.answer(5)}", failures)
     _expect(_texts(played) == [LOOKED_AGAIN], f"expected only the answer after the pause, saw {_texts(played)}", failures)
     return failures
@@ -460,6 +474,24 @@ def _check_final_outcome(played: Played) -> list[str]:
     _expect('"status":"done"' in str(played.answer(5)), "the agent was not told the action ran", failures)
     _expect(played.answer(6) == ("deliver", REPORTED), f"the report: {played.answer(6)}", failures)
     _expect(_texts(played) == [REPORTED], f"expected only the agent's report, saw {_texts(played)}", failures)
+    return failures
+
+
+def _check_mhm(played: Played, *, reacted: int) -> list[str]:
+    failures: list[str] = []
+    _expect(played.answer(reacted)[0] is True, f"the reaction was refused: {played.answer(reacted)}", failures)
+    expected = [{"kind": "reaction", "target_event_id": TRIGGER, "reaction": MHM}]
+    seen = [
+        {key: action.get(key) for key in ("kind", "target_event_id", "reaction")}
+        for action in played.dispatched
+    ]
+    _expect(seen == expected, f"expected one {MHM} on the message, saw {seen}", failures)
+    return failures
+
+
+def _check_final_mhm(played: Played) -> list[str]:
+    failures = _check_mhm(played, reacted=1)
+    _expect(played.answer(2)[0] == "silent", f"the reaction was the turn's action, yet saw {played.answer(2)}", failures)
     return failures
 
 
@@ -485,7 +517,7 @@ def _check_final_silence(played: Played) -> list[str]:
     _expect(played.answer(1)[0] == "silent", f"expected silence, saw {played.answer(1)}", failures)
     _expect(not played.dispatched, "a silent final answer was committed", failures)
     reasons = [move.get("why") for move in played.own_moves if move.get("kind") == "silence"]
-    _expect(reasons == ["Castor was asked, not me."], f"the thinking is not the silence's reason: {reasons}", failures)
+    _expect(reasons == [WAITED], f"the thinking is not the silence's reason: {reasons}", failures)
     return failures
 
 
@@ -532,8 +564,14 @@ SCENARIOS: dict[str, Scenario] = {
     "silence-reason": Scenario(
         "tools",
         "a silent turn's last words are its reason, remembered and never posted",
-        (("bind",), ("end", True, "Castor was asked, not me.")),
+        (("bind",), ("end", True, WAITED)),
         _check_silence_reason,
+    ),
+    "mhm": Scenario(
+        "tools",
+        "the agent's own mhm is one reaction on the message, through its react tool",
+        (("bind",), ("call", "react", {"target_event_id": TRIGGER, "reaction": MHM}), ("end", True)),
+        lambda played: _check_mhm(played, reacted=1),
     ),
     "unbound-failure": Scenario(
         "tools",
@@ -592,8 +630,8 @@ SCENARIOS: dict[str, Scenario] = {
     ),
     "pause": Scenario(
         "tools",
-        "after a pause the library starts a turn with no new message, and the agent can post",
-        (("bind",), ("end", True)),
+        "after a pause the library starts a turn with no new message, which remembers why the agent waited",
+        (("bind",), ("end", True, WAITED)),
         _check_pause,
         next_occasion="pause",
         next_steps=(("bind",), ("read",), ("call", "send", {"text": LOOKED_AGAIN}), ("end", True)),
@@ -615,8 +653,19 @@ SCENARIOS: dict[str, Scenario] = {
     "final-silence": Scenario(
         "final-answer",
         "the silence marker is silence, and the agent's thinking is its reason",
-        (("bind",), ("finish", f"<thinking>Castor was asked, not me.</thinking>\n{SILENCE}"), ("end", True)),
+        (("bind",), ("finish", f"<thinking>{WAITED}</thinking>\n{SILENCE}"), ("end", True)),
         _check_final_silence,
+    ),
+    "final-mhm": Scenario(
+        "final-answer",
+        "the agent's own mhm is one reaction through its react tool, and the answer after it posts nothing",
+        (
+            ("bind",),
+            ("call", "react", {"target_event_id": TRIGGER, "reaction": MHM}),
+            ("finish", SILENCE),
+            ("end", True),
+        ),
+        _check_final_mhm,
     ),
     "final-look-again": Scenario(
         "final-answer",
@@ -655,8 +704,8 @@ SCENARIOS: dict[str, Scenario] = {
     ),
     "final-pause": Scenario(
         "final-answer",
-        "after a pause the library starts a turn with no new message, and its answer is the post",
-        (("bind",), ("finish", SILENCE), ("end", True)),
+        "after a pause the library starts a turn with no new message, which remembers why the agent waited",
+        (("bind",), ("finish", f"<thinking>{WAITED}</thinking>\n{SILENCE}"), ("end", True)),
         _check_final_pause,
         next_occasion="pause",
         next_steps=(("bind",), ("read",), ("finish", LOOKED_AGAIN), ("end", True)),
@@ -679,17 +728,38 @@ class _RecordingTransport:
     def __init__(self) -> None:
         self.actions: list[dict[str, Any]] = []
 
+    def reaction_capability(self) -> ReactionCapability:
+        # The room lets the agent add its own mhm, and nothing else.
+        return ReactionCapability(
+            supported=True,
+            authenticated=True,
+            operations=("add",),
+            reactions=(MHM,),
+            permissions_revision="conformance:reactions:v1",
+        )
+
     def dispatch(self, *, action, **_):
         self.actions.append(dict(action))
         return TransportResult("sent", "conformance room")
 
 
+class _NativeReactions(_RecordingTransport):
+    """A harness's own reaction path: the harness posts messages, not this."""
+
+    def ordinary_action_capabilities(self) -> list[str]:
+        return ["reaction"]
+
+
 class _CommittedForHarness(HarnessDelivery):
-    """Records what the host committed for the harness to post."""
+    """Records what the host committed for the harness to post.
+
+    Reactions go to the room directly, as a harness's native transport would
+    send them.
+    """
 
     def __init__(self) -> None:
         # The kit's room never shows the agent's messages back.
-        super().__init__(room_shows_own_messages=False)
+        super().__init__(_NativeReactions(), room_shows_own_messages=False)
         self.actions: list[dict[str, Any]] = []
 
     def dispatch(self, *, action, wake):

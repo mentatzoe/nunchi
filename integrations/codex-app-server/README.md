@@ -138,7 +138,6 @@ declined in a room.
   directory under a workspace sandbox, but Codex's sandbox lets it read
   everywhere; the Claude Code integration denies those reads with its
   permission rules.
-- **Reactions** depend on the room's transport; the kit's room offers none.
 - **The guide in the turn text.** Codex's stable instruction slot
   (`developerInstructions`) would replace the user's own, so the guide goes
   with every turn's text (library gap: one text per turn).
