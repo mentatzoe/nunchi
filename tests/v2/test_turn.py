@@ -204,3 +204,45 @@ class TurnTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OneReplyTurnTests(unittest.TestCase):
+    """The one-reply style drives the same Turn and gets the same rules."""
+
+    def protocol(self, guard=None):
+        from nunchi.participant_model import ParticipantTurnProtocol
+
+        return ParticipantTurnProtocol(
+            profile=PROFILE, wake=test_wake(), opportunity=deepcopy(OPPORTUNITY), guard=guard
+        )
+
+    @staticmethod
+    def reply(protocol, action):
+        return {
+            "protocol": protocol.request["protocol"],
+            "binding": {"request_id": protocol.request_id},
+            "action": action,
+        }
+
+    def test_the_look_again_is_the_turns_own(self):
+        protocol = self.protocol()
+        room = Room()
+        room.arrivals = [message("e2", "actually, never mind")]
+        say = {"kind": "message", "origin_event_id": "e1", "text": "on it"}
+        self.assertEqual((False, None), protocol.consume(self.reply(protocol, say), expand=room.expand))
+        self.assertTrue(protocol.turn.looked_again)
+        self.assertIn("e2", protocol.turn.visible_event_ids)
+        self.assertTrue(protocol.pages[-1]["note"].startswith("Not posted yet: 1 new message(s)"))
+        done, action = protocol.consume(self.reply(protocol, say), expand=room.expand)
+        self.assertTrue(done)
+        self.assertEqual(action, protocol.turn.action)
+
+    def test_a_guarded_secret_is_refused_once_then_fails_the_turn(self):
+        from nunchi.participant_model import ParticipantModelError
+
+        protocol = self.protocol(guard=SecretGuard(["a-withheld-secret-value"]))
+        leak = {"kind": "message", "origin_event_id": "e1", "text": "a-withheld-secret-value"}
+        self.assertEqual((False, None), protocol.consume(self.reply(protocol, leak), expand=None))
+        self.assertIn("credential or secret", protocol.pages[-1]["note"])
+        with self.assertRaises(ParticipantModelError):
+            protocol.consume(self.reply(protocol, leak), expand=None)

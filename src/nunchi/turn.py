@@ -47,6 +47,8 @@ from .participant_model import (
 from .v2_contracts import shown_event_ids
 
 TURN_ROLES = ("send", "react", "propose", "withdraw", "context")
+# Actions the room sees; the agent looks again before the first one.
+VISIBLE_KINDS = ("message", "reply", "reaction")
 DEFAULT_RESULT_WAIT_SECONDS = 25.0
 _PAGE_EVENTS = 12
 _PAGE_BYTES = 16_384
@@ -122,11 +124,23 @@ def _shown(page: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     ]
 
 
+def new_messages(page: Mapping[str, Any]) -> int:
+    """How many of the page's events are messages, which is what holds a post."""
+
+    return sum(
+        1
+        for event in page.get("events", ())
+        if isinstance(event, Mapping) and event.get("type") == "message"
+    )
+
+
 class Turn:
     """One wake, from the text the agent receives to the end of its turn.
 
     ``tool_names`` maps each room role this turn offers to the name the agent
-    sees it under; the integration chooses the names.
+    sees it under; the integration chooses the names. A turn driven by one
+    reply at a time (`ParticipantTurnProtocol`) offers no tools: it hands its
+    actions to `take` after `look_again`.
     """
 
     def __init__(
@@ -134,21 +148,21 @@ class Turn:
         *,
         profile: ParticipantProfile,
         request: Mapping[str, Any],
-        tool_names: Mapping[str, str],
-        expand: Any,
-        cancel: threading.Event,
-        guard: SecretGuard,
+        tool_names: Mapping[str, str] | None = None,
+        expand: Any = None,
+        cancel: threading.Event | None = None,
+        guard: SecretGuard | None = None,
         result_wait_seconds: float = DEFAULT_RESULT_WAIT_SECONDS,
     ) -> None:
         self.profile = profile
         self.request = request
         self.request_id: str = request["binding"]["request_id"]
         self.wake_id = secrets.token_urlsafe(18)
-        self.tool_names = dict(tool_names)
+        self.tool_names = dict(tool_names or {})
         self.roles = frozenset(self.tool_names)
         self.expand = expand
-        self.cancelled = cancel
-        self.guard = guard
+        self.cancelled = cancel if cancel is not None else threading.Event()
+        self.guard = guard if guard is not None else SecretGuard(())
         self.result_wait_seconds = result_wait_seconds
         self.visible_event_ids = shown_event_ids(request["wake"])
         self.looked_again = False
@@ -234,11 +248,15 @@ class Turn:
             refusal = self.guard.refusal(action)
             if refusal is not None:
                 return False, refusal
-            held = self._look_again(action)
-            if held is not None:
-                return True, held
-            self.action = action
-            self.action_ready.set()
+            page = self.look_again(action)
+            if page is not None:
+                return True, (
+                    f"Not posted yet: {new_messages(page)} new message(s) arrived while "
+                    "you were composing. Call the tool again to send it as it is or "
+                    "changed, or end your turn to stay silent.\n"
+                    + json.dumps(page, sort_keys=True, ensure_ascii=False)
+                )
+            self.take(action)
         if not self.outcome_ready.wait(self.result_wait_seconds):
             return True, "The room has not confirmed this action yet. Do not repeat it."
         return describe_result(self.outcome)
@@ -277,36 +295,38 @@ class Turn:
             + json.dumps(page, sort_keys=True, ensure_ascii=False)
         )
 
-    def _look_again(self, action: Mapping[str, Any]) -> str | None:
-        """Before the first post or reaction, show what others said meanwhile.
+    def look_again(self, action: Mapping[str, Any]) -> dict[str, Any] | None:
+        """Before the first post or reaction, what others said meanwhile.
 
-        The action is held once when others posted while the agent was
-        composing; the agent then decides again. A failed check never blocks
-        the action.
+        Returns the page that holds the action, once, when others posted while
+        the agent was composing; the agent then decides again. Returns None
+        when the action may go. A failed check never blocks the action.
         """
 
-        if self.looked_again or action["kind"] not in ("message", "reply", "reaction"):
+        if (
+            self.looked_again
+            or action["kind"] not in VISIBLE_KINDS
+            or not callable(self.expand)
+        ):
             return None
         self.looked_again = True
         try:
-            page = dict(
-                self.expand(direction="new", max_events=_PAGE_EVENTS, max_bytes=_PAGE_BYTES)
-            )
+            page = self.expand(direction="new", max_events=_PAGE_EVENTS, max_bytes=_PAGE_BYTES)
         except NunchiError:
             return None
-        events = _shown(page)
-        self.visible_event_ids.update(event["id"] for event in events)
+        if not isinstance(page, Mapping):
+            return None
+        page = deepcopy(dict(page))
+        self.visible_event_ids.update(event["id"] for event in _shown(page))
         # Only another person's message holds the post; a new reaction alone
         # does not change what the room needs.
-        messages = [event for event in events if event.get("type") == "message"]
-        if not messages:
-            return None
-        return (
-            f"Not posted yet: {len(messages)} new message(s) arrived while you were "
-            "composing. Call the tool again to send it as it is or changed, or "
-            "end your turn to stay silent.\n"
-            + json.dumps(page, sort_keys=True, ensure_ascii=False)
-        )
+        return page if new_messages(page) else None
+
+    def take(self, action: Mapping[str, Any]) -> None:
+        """The turn's one room action, for the host to commit."""
+
+        self.action = deepcopy(dict(action))
+        self.action_ready.set()
 
     def _context(self, arguments: Any) -> tuple[bool, str]:
         if self.action is not None:

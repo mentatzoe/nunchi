@@ -17,7 +17,7 @@ import urllib.request
 
 from .attention import ParticipantProfile
 from .errors import NunchiError, ValidationError
-from .v2_contracts import shown_event_ids, validate_participant_wake
+from .v2_contracts import validate_participant_wake
 
 
 class ParticipantModelError(NunchiError):
@@ -718,12 +718,15 @@ def _bind_action(
     return deepcopy(action)
 
 
-# Actions the room sees; the participant looks again before the first one.
-_VISIBLE_KINDS = ("message", "reply", "reaction")
-
-
 class ParticipantTurnProtocol:
-    """State machine for one bounded participant turn."""
+    """One bounded participant turn, driven by one model reply at a time.
+
+    This is the one-reply way to drive the core's `Turn` (`nunchi.turn`): each
+    reply is one action, and the turn's rules (looking again before the first
+    post, the secret guard, one room action) are the same ones an agent that
+    acts through tools gets. What stays here is the reply's shape and the pages
+    of room the model has asked to see.
+    """
 
     def __init__(
         self,
@@ -732,6 +735,7 @@ class ParticipantTurnProtocol:
         wake: Mapping[str, Any],
         opportunity: Mapping[str, Any],
         max_expansions: int = DEFAULT_MAX_EXPANSIONS,
+        guard: Any = None,
     ) -> None:
         if (
             isinstance(max_expansions, bool)
@@ -739,14 +743,22 @@ class ParticipantTurnProtocol:
             or not 0 <= max_expansions <= 8
         ):
             raise ValidationError("participant max_expansions must be an integer from 0 through 8")
+        # The turn's rules build on this module, so they are imported here.
+        from .turn import Turn
+
         self.profile = profile
         self.request = build_participant_turn_request(wake, opportunity)
+        self.turn = Turn(profile=profile, request=self.request, guard=guard)
         self.max_expansions = max_expansions
         self.pages: list[dict[str, Any]] = []
         self.expansions = 0
         self.limit_noted = False
-        self.looked_again = False
-        self.visible_event_ids = shown_event_ids(self.request["wake"])
+        self.refused = False
+        self.visible_event_ids = self.turn.visible_event_ids
+
+    @property
+    def looked_again(self) -> bool:
+        return self.turn.looked_again
 
     @property
     def instructions(self) -> str:
@@ -778,26 +790,30 @@ class ParticipantTurnProtocol:
             # A silence with a reason goes to the host, which remembers it.
             return True, action if "why" in action else None
         if action["kind"] != "expand":
-            if action["kind"] in _VISIBLE_KINDS and not self.looked_again and callable(expand):
-                # Look again before speaking: if others posted while the
-                # participant was composing, show it those messages, once,
-                # and let it send, change, or drop its action.
-                self.looked_again = True
-                page = self._page(expand(direction="new", max_events=12, max_bytes=16_384))
-                messages = [
-                    event
-                    for event in page.get("events", ())
-                    if isinstance(event, Mapping) and event.get("type") == "message"
-                ]
-                if messages:
-                    page["note"] = (
-                        f"Not posted yet: {len(messages)} new message(s) arrived "
-                        "while you were composing. Your pending action was "
-                        + json.dumps(action, sort_keys=True, ensure_ascii=False)
-                        + ". Send it again as it is, change it, or stay silent."
-                    )
-                    self.pages.append(page)
-                    return False, None
+            refusal = self.turn.guard.refusal(action)
+            if refusal is not None:
+                if self.refused:
+                    raise ParticipantModelError("participant action carried a secret again")
+                self.refused = True
+                self.pages.append({"events": [], "note": refusal})
+                return False, None
+            # Look again before speaking: if others posted while the
+            # participant was composing, show it those messages, once, and
+            # let it send, change, or drop its action.
+            from .turn import new_messages
+
+            self.turn.expand = expand if callable(expand) else None
+            page = self.turn.look_again(action)
+            if page is not None:
+                page["note"] = (
+                    f"Not posted yet: {new_messages(page)} new message(s) arrived "
+                    "while you were composing. Your pending action was "
+                    + json.dumps(action, sort_keys=True, ensure_ascii=False)
+                    + ". Send it again as it is, change it, or stay silent."
+                )
+                self.pages.append(page)
+                return False, None
+            self.turn.take(action)
             return True, action
         if self.expansions >= self.max_expansions:
             if self.limit_noted:

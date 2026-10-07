@@ -316,8 +316,12 @@ them the same way:
 - `Turn.after_tool_call` is steering: what others posted since the agent last
   looked, shown once.
 
-The Claude Code gate is the first integration on it. The one-reply
-envelope above becomes one more way to drive a `Turn` later in step 9c.
+The Claude Code gate is the first integration on it. The one-reply envelope
+above drives the same `Turn`: `ParticipantTurnProtocol` keeps the reply's
+shape and the pages the model asked for, and hands each action to the turn's
+`look_again` and `take`. A one-reply participant may pass a `SecretGuard`
+too; a refused action is shown to the model once, and a second refusal fails
+the turn.
 
 ## The participant's view of the room
 
