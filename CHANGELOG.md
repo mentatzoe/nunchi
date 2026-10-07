@@ -13,6 +13,29 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- The harness guide after its second test (#94 step 9e): binding from a
+  protocol's own answer without a marker, only once the room tools reached
+  the run, and the two start races; room tools from an MCP server through the
+  local protocol, never behind the harness's approval; steering as input;
+  what to withhold; the profile file; Unix socket path limits and route
+  restriction; the library-hosted room connection; and proving a protocol
+  harness for real. A driver's `ready()` returning False without a cancel now
+  fails the turn instead of reading as the agent's silence.
+- The Codex integration through `codex app-server` (#94 step 9e,
+  [`integrations/codex-app-server/`](integrations/codex-app-server/README.md)),
+  built by a separate agent from the harness guide: library-hosted, tool
+  posting, on the app-server's public JSON-RPC protocol only. One thread per
+  participant with the user's own Codex configuration; the room tools come
+  from a per-thread MCP server in the thread's own `config`, which forwards
+  each call over the library's local turn protocol with Codex's turn id;
+  `turn/start` starts and binds each run, `turn/steer` carries steering after
+  Codex's own tools, `turn/interrupt` cancels, approval requests are
+  declined, and the project's trust level rides in the thread's config, so
+  Codex never writes into the user's `config.toml`. It passes every
+  tool-posting scenario of the conformance kit against a real
+  `codex app-server` (Codex CLI 0.160.1) with only the model scripted, and CI
+  runs the kit and its tests on a clean, pinned install. No live runner yet;
+  the older Codex integration stays until there is one.
 - Attention on Hermes's own model in the Hermes plugin (#94 step 9e): an
   attention model of kind `hermes-host` asks Hermes (`ctx.llm`) for the
   configured provider and model, through the core's

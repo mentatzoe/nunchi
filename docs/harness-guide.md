@@ -6,9 +6,9 @@ documentation covers its side.
 
 **Status:** written in step 9d of [#94](https://github.com/mentatzoe/nunchi/issues/94),
 before the Hermes and Codex adapters (9e). Each adapter is built from this
-guide alone. Where the guide falls short, the guide is fixed. The first test:
-a separate agent built the Hermes plugin from it, and this version carries
-what it found.
+guide alone. Where the guide falls short, the guide is fixed. Two tests so
+far: separate agents built the Hermes plugin and the Codex app-server
+integration from it, and this version carries what they found.
 
 Read first:
 
@@ -130,7 +130,9 @@ An integration's config has the shared sections and one section of its own:
 - `binding.actor_id` is the agent's own identity on the platform, exactly as
   room events name it. The library never guesses who the agent is from names.
 - `profile` is pinned by its hash, and must name the same participant and
-  actor.
+  actor. The file is JSON with exactly five fields: `profile_id`,
+  `participant_id`, `actor_id`, `instructions` (who the agent is in this
+  room) and `provenance`.
 - `authorization` is optional: privileged actions, behind the shared
   authorization coordinator.
 
@@ -172,12 +174,20 @@ participant = TurnParticipant(
 - `tool_names` needs a name for every role in `roles`. The default roles are
   all five.
 - `withheld_values` are the secret values your integration holds and the agent
-  must never post: transport keys, model API keys, anything in the
-  environment the agent should not see. Values shorter than 12 characters are
-  ignored. Add the shape of your platform's tokens as compiled patterns:
-  `SecretGuard(values, patterns=[re.compile(...)])`.
+  must never post. Withhold, at least:
+  - the variables the attention model's config names in its `*_env` keys;
+  - the transport's own key;
+  - every `NUNCHI_*` variable.
+
+  Keep them out of the harness's environment too, and keep the agent's
+  working directory outside `state_directory`. Values shorter than 12
+  characters are ignored. Add the shape of your platform's tokens as compiled
+  patterns: `SecretGuard(values, patterns=[re.compile(...)])`.
 - A driver may add `ready(cancel) -> bool`. The library calls it before
-  starting a turn; return False if the harness cannot take one.
+  starting a turn, to start the harness or wait until it is idle. Return
+  False only when `cancel` is set. If the harness cannot take the turn,
+  raise with the reason: the turn fails, and is never the agent's silence (a
+  False without a cancel fails it too).
 - Set `bind_timeout_seconds` if the harness may accept a turn and then never
   run it. Hermes, for one, drops an injected turn whose identity is not
   allowed, and tells no plugin. A run that has not bound in time fails the
@@ -210,9 +220,23 @@ participant.bind_turn(turn_id=harness_run_id, wake_id=turn.wake_id)
   filled when you bind. A harness that runs one turn at a time per session
   makes the map unambiguous.
 - `wake_id` must reach the binding from the turn itself, where the agent
-  cannot change it. Put `<nunchi_wake id="…"/>` at the start of the turn's
-  text and read it in the hook that sees the run start, as the Claude Code mod
-  and the Hermes plugin do.
+  cannot change it. Two ways:
+  - **Your driver starts the run and the harness answers with its id** (a
+    protocol, such as Codex's `turn/start`): bind in `start` with that id,
+    and leave the marker out, so the agent never sees the wake id.
+  - **A hook sees the run start:** put `<nunchi_wake id="…"/>` at the start
+    of the turn's text and read it there, as the Claude Code mod and the
+    Hermes plugin do.
+- Check that the start really started a new run. Codex's `turn/start`, for
+  one, folds the text into a run already in progress.
+- Bind only when the harness also shows the room tools reached the run, for
+  example its MCP server reported ready. Otherwise fail the turn: a run
+  without the room actions cannot be silent.
+- Two races to handle:
+  - A room tool call can arrive before you have bound: let it wait until the
+    start in progress finishes.
+  - A quick run can end before you bind: after binding, report an end you
+    already saw.
 - **Harness-hosted: your hooks see runs that are not yours:** other chats,
   direct messages, the harness's own command line. Bind only a run whose
   input carries the open turn's wake id. A run that carries a Nunchi marker
@@ -227,7 +251,15 @@ failure, never silence.
 ### 4. Room actions
 
 **Tool posting.** Register the tools from `participant.attach()` (name,
-description, JSON input schema) with the harness. Forward each call:
+description, JSON input schema) with the harness. If the tools come from an
+MCP server the harness starts, that server forwards each call to the
+library's local protocol (`TurnServer`, see "Outside Python") with the run's
+id from the call's request metadata. Give it the socket and secret through
+the harness's server configuration, never the agent's view.
+`nunchi.integrations.codex_app_server.mcp_bridge` is an example. Make sure
+the room tools never need the harness's own approval (Codex:
+`default_tools_approval_mode = "approve"`), or your rule of declining
+whatever would ask a person refuses them. Forward each call:
 
 ```python
 ok, text = participant.call_tool(turn_id=harness_run_id, tool=name, arguments=arguments)
@@ -292,6 +324,11 @@ if update:
 The agent then folds a message that arrived mid-turn into what it is doing.
 Each message is shown once. Without a hook after tool calls, steering rides on
 the next room tool call's result, and the parity table shows the gap.
+
+A harness may take steering as new input to the running turn instead of
+through a tool result (Codex's `turn/steer`). Send the update after each of
+the agent's tool calls. If the run ends first, the update is lost, though it
+counts as shown; the next moment catches up.
 
 ### 6. The end of the run
 
@@ -447,6 +484,17 @@ The Claude Code integration, in order (`nunchi.integrations.claude_code_v2`,
 7. The session's end of turn comes back on its stream, and the gate calls
    `turn_ended`.
 
+The room connection is the runtime's own: it registers with the shared
+Discord transport, validates each event (`validate_canonical_event`), marks
+a continuity gap after each (re)connect, and hands events to `room.deliver`.
+That code lives inside the Claude Code runtime today; a shared runner every
+library-hosted integration can use is a known gap.
+
+`nunchi.integrations.codex_app_server` is the protocol-harness example: its
+driver starts each run with `turn/start` and binds it from the answer, the
+room tools come from a per-thread MCP server that forwards to `TurnServer`,
+steering goes in with `turn/steer`, and `turn/completed` ends the run.
+
 ## Walkthrough: harness-hosted, final-answer posting
 
 The consume-and-start shape, with hook names generic. The contract's parity
@@ -499,6 +547,13 @@ LocalTurnProtocolV2@1`):
   refused.
 - The socket's directory is private to the integration's user.
 - Requests are at most 256 KiB.
+- A Unix socket's path is at most about 107 bytes (103 on macOS). Put the
+  socket in a short private directory, such as one under `XDG_RUNTIME_DIR`
+  or `/tmp`, never deep in a state directory.
+- Offer each caller only the routes it needs. When your driver binds and
+  ends turns itself, a tool bridge needs only attach, call and after-tool:
+  subclass `TurnServer` and refuse the rest in `route`, as the Codex
+  integration's `RoomToolServer` does.
 
 Give the secret only to the harness process you start, through its
 environment. Never put it in the agent's view.
@@ -512,8 +567,12 @@ Every integration joins the turn conformance kit before it replaces anything.
    `participant` returns your participant, wired so that starting its agent
    plays the scripted agent's steps through your integration's own surface:
    your hooks, your socket, your tool registration.
-   - Library-hosted: script only the model and the harness process. See
-     `nunchi.integrations.claude_code_conformance`.
+   - Library-hosted: run the harness for real when it speaks a protocol, and
+     stub only its model, as `nunchi.integrations.codex_app_server_conformance`
+     does; scripting the harness process would skip the protocol under test.
+     Where the harness is a session your runtime drives through its own mod,
+     script the model and the session process, as
+     `nunchi.integrations.claude_code_conformance` does.
    - Harness-hosted: the harness is real, and the scripted agent is its
      model. Stub the model at its API, for example a local OpenAI-compatible
      endpoint configured as the harness's provider. Do not replace the
@@ -522,6 +581,14 @@ Every integration joins the turn conformance kit before it replaces anything.
      `nunchi.integrations.hermes_plugin_conformance`.
    - The kit builds its own `Room` around the participant you return, so your
      integration must work with a room it did not build.
+   - The kit calls `participant()` once per scenario on the same
+     `KitIntegration`, and `close()` after each.
+   - If your integration binds runs itself, the scripted agent cannot leave a
+     run unbound. Play a script with no `bind` step as a real way a run goes
+     unbound for your harness: the Codex kit disables the room's MCP server,
+     so the room tools never arrive.
+   - A model stub answers only the newest call: the harness abandons calls
+     on interrupt or when its process dies.
 2. Expose `conformance_integrations()` in that module.
 3. Run it:
 
@@ -545,12 +612,23 @@ does:
 - its final-answer scenarios use no tools, so steering, the room view and
   reactions go untested there.
 
-Before importing the harness in a test, point its home and temporary
-directories at a throwaway directory. Otherwise the harness may write into
-the user's own home: Hermes writes into `~/.hermes` on import.
+Before importing or starting the harness in a test, point its home and
+temporary directories at a throwaway directory. Otherwise the harness may
+write into the user's own home: Hermes writes into `~/.hermes` on import. For
+a harness you run as a process, start it in its own process group and kill
+the group: npm's `codex` is a launcher with a child.
 
 ## Known library gaps
 
+- **No shared runner for library-hosted harnesses.** The room connection
+  (the Discord consumer, event validation, reconnects) lives inside the
+  Claude Code runtime. The Codex integration has no live runner until it is
+  shared.
+- **Steering marks messages as shown before delivery.** A `turn/steer` that
+  fails because the run just ended loses that update.
+- **Tool posting has no silence reason.** A run that ends without a room
+  action cannot hand its last words over as the reason, as `<thinking>` does
+  in final-answer posting.
 - **Unknown mentions.** A canonical event cannot say that its mentions or
   reply target are unknown, only that there are none.
 - **One text per turn.** The turn's guide and its context come as one text

@@ -652,7 +652,8 @@ def main(argv: list[str] | None = None) -> int:
     results = []
     for integration_spec in integrations:
         for name in SCENARIOS:
-            # Each scenario gets a fresh integration, so no turn leaks into the next.
+            # Each scenario gets a fresh participant from the integration, which
+            # closes after it, so no turn leaks into the next.
             results.append(run_scenario(name, integration_spec))
     if args.format == "jsonl":
         for result in results:
