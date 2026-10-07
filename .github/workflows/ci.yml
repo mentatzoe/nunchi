@@ -73,6 +73,41 @@ jobs:
         run: |
           "$RUNNER_TEMP/hermes-env/bin/python" -m unittest tests.v2.test_hermes_plugin -v
 
+  codex-app-server:
+    # The turn conformance kit and the integration's tests through a real
+    # `codex app-server` from a clean install of a pinned Codex, with a
+    # throwaway HOME and CODEX_HOME per run; only the model is scripted
+    # (docs/harness-guide.md, "Prove it").
+    name: Codex app-server (Codex CLI 0.160.1)
+    runs-on: ubuntu-latest
+    env:
+      CODEX_VERSION: "0.160.1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install Nunchi's wheel and the pinned Codex in clean locations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip wheel --no-deps . --wheel-dir "$RUNNER_TEMP/nunchi-wheels"
+          python -m venv "$RUNNER_TEMP/codex-env"
+          "$RUNNER_TEMP/codex-env/bin/python" -m pip install --no-deps "$RUNNER_TEMP"/nunchi-wheels/*.whl
+          mkdir -p "$RUNNER_TEMP/codex"
+          npm install --prefix "$RUNNER_TEMP/codex" --no-audit --no-fund "@openai/codex@${CODEX_VERSION}"
+          echo "NUNCHI_CODEX_BIN=$RUNNER_TEMP/codex/node_modules/.bin/codex" >> "$GITHUB_ENV"
+      - name: Turn conformance kit through codex app-server
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          codex-env/bin/nunchi-turn-conformance --integration reference --integration nunchi.integrations.codex_app_server_conformance
+      - name: Integration tests through codex app-server
+        run: |
+          "$RUNNER_TEMP/codex-env/bin/python" -m unittest tests.v2.test_codex_app_server -v
+
   package:
     name: clean-install packaging
     runs-on: ubuntu-latest
