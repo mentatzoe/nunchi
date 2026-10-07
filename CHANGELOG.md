@@ -13,6 +13,14 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- The harness guide after its second test (#94 step 9e): binding from a
+  protocol's own answer without a marker, only once the room tools reached
+  the run, and the two start races; room tools from an MCP server through the
+  local protocol, never behind the harness's approval; steering as input;
+  what to withhold; the profile file; Unix socket path limits and route
+  restriction; the library-hosted room connection; and proving a protocol
+  harness for real. A driver's `ready()` returning False without a cancel now
+  fails the turn instead of reading as the agent's silence.
 - The Codex integration through `codex app-server` (#94 step 9e,
   [`integrations/codex-app-server/`](integrations/codex-app-server/README.md)),
   built by a separate agent from the harness guide: library-hosted, tool

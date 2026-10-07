@@ -284,6 +284,23 @@ class TurnLifecycleTests(unittest.TestCase):
         self.assertEqual("silent", participant.finish(turn_id="t1", answer="late").kind)
         self.assertFalse(participant.end_turn(turn_id="t1", ok=True))
 
+    def test_a_harness_that_cannot_take_the_turn_fails_it(self):
+        class NotReady(RecordingDriver):
+            def ready(self, cancel):
+                return False
+
+        driver = NotReady()
+        cancel = threading.Event()
+        thread, box = self.run_turn(self.participant(driver), cancel)
+        thread.join(5)
+        self.assertIsInstance(box.get("error"), TurnError)
+        self.assertEqual([], driver.started)
+        # Not ready because the turn was cancelled is no failure.
+        cancel.set()
+        thread, box = self.run_turn(self.participant(NotReady()), cancel)
+        thread.join(5)
+        self.assertEqual({"action": None}, box)
+
     def test_a_run_that_never_binds_fails_after_the_bind_timeout(self):
         driver = RecordingDriver()
         participant = self.participant(driver, bind_timeout_seconds=0.2)

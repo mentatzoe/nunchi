@@ -618,7 +618,11 @@ class TurnParticipant:
         )
         ready = getattr(self.driver, "ready", None)
         if callable(ready) and not ready(cancel):
-            return None
+            if cancel.is_set():
+                return None
+            # A harness that cannot take the turn is a failure, never the
+            # agent's silence.
+            raise TurnError("the harness could not take the turn")
         if not self._wait_for_previous(cancel):
             return None
         with self._lock:
