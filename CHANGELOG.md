@@ -13,6 +13,29 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- The Hermes plugin (#94 step 9e, [`integrations/hermes-plugin/`](integrations/hermes-plugin/README.md)):
+  `nunchi-room`, a Hermes directory plugin on Hermes's public hooks only,
+  built by a separate agent from the harness guide alone. It consumes every
+  message in the bound chat (`post_gateway_admission`), starts the agent's
+  turns with `ctx.inject_message`, binds each run by its wake marker, adds
+  steering to tool results, hands the final answer (thinking included) to the
+  library, and reacts through `ctx.platform_actions`. It passes every
+  final-answer scenario of the conformance kit inside a real Hermes gateway
+  (main `a50406d9`) with only the model scripted, and its own tests cover
+  ingress, steering, the room view, reactions, looking again with a fresh
+  run, and `plugins.isolation: host`. CI runs both on a clean, pinned
+  install. Not yet run live; the older Hermes integration stays until it is.
+- One turn at a time, whatever the harness reports (#94 step 9e): a
+  cancelled turn now closes, so the run's late calls find it closed; the
+  next turn waits for the previous run's end instead of failing, and closes
+  it as a failure after `previous_turn_grace_seconds` (30 s) if the end never
+  comes; `bind_timeout_seconds` fails a run the harness accepted but never
+  started.
+- The harness guide, after its first test: what a harness may post besides
+  the final answer, binding only your own runs, mapping run ids, handing
+  over the raw answer, hook timeouts, the `HarnessDelivery` native
+  interface, harness-model attention, where to build the `Room`, catch-up
+  turns, and how to prove a harness-hosted integration.
 - Cancellation in the turn conformance kit (#94 step 9d): a cancelled turn
   posts nothing, in both posting styles (`cancel`, `final-cancel`). The
   reference turn and the Claude Code gate pass.

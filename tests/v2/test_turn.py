@@ -56,6 +56,15 @@ class Room:
         return {"events": []}
 
 
+def wait_until(condition, timeout=5.0):
+    pause = threading.Event()
+    for _ in range(int(timeout / 0.05)):
+        if condition():
+            return True
+        pause.wait(0.05)
+    return condition()
+
+
 def message(event_id, text="meanwhile"):
     return {
         "id": event_id,
@@ -200,6 +209,92 @@ class TurnTests(unittest.TestCase):
         self.assertEqual([self.turn], self.driver.interrupted)
         ok, text = self.participant.call_tool(turn_id="t1", tool="say", arguments={"text": "late"})
         self.assertFalse(ok)
+        # The library is done with a cancelled turn: it is closed, so the next
+        # one need not wait for the harness to report the end.
+        self.assertIsNone(self.participant.active)
+        self.assertFalse(self.participant.end_turn(turn_id="t1", ok=True))
+
+
+class TurnLifecycleTests(unittest.TestCase):
+    """One turn at a time, whatever the harness reports (#94 step 9e)."""
+
+    def participant(self, driver, **kwargs):
+        return TurnParticipant(
+            profile=PROFILE, driver=driver, guard=SecretGuard(()), tool_names=NAMES, result_wait_seconds=5, **kwargs
+        )
+
+    def run_turn(self, participant, cancel):
+        box = {}
+
+        def run():
+            try:
+                box["action"] = participant.run_protocol(
+                    wake=test_wake(), opportunity=deepcopy(OPPORTUNITY), expand=Room().expand, cancel=cancel
+                )
+            except BaseException as exc:  # noqa: BLE001 - recorded for assertions
+                box["error"] = exc
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        return thread, box
+
+    def test_the_next_turn_waits_for_the_previous_runs_end(self):
+        driver = RecordingDriver()
+        participant = self.participant(driver)
+        first_cancel, second_cancel = threading.Event(), threading.Event()
+        self.addCleanup(first_cancel.set)
+        self.addCleanup(second_cancel.set)
+        first, first_box = self.run_turn(participant, first_cancel)
+        self.assertTrue(driver.started_event.wait(5))
+        turn = driver.started[0]
+        participant.bind_turn(turn_id="t1", wake_id=turn.wake_id)
+        threading.Thread(
+            target=participant.call_tool,
+            kwargs={"turn_id": "t1", "tool": "say", "arguments": {"text": "On it."}},
+            daemon=True,
+        ).start()
+        first.join(5)
+        self.assertEqual("message", first_box["action"]["kind"])
+        # The agent's run is still finishing after its post: the next turn waits.
+        second, second_box = self.run_turn(participant, second_cancel)
+        second.join(0.3)
+        self.assertEqual(1, len(driver.started))
+        participant.end_turn(turn_id="t1", ok=True)
+        self.assertTrue(wait_until(lambda: len(driver.started) == 2))
+        self.assertNotIn("error", second_box)
+
+    def test_a_previous_turn_the_harness_never_ends_closes_after_a_grace(self):
+        driver = RecordingDriver()
+        participant = self.participant(driver, previous_turn_grace_seconds=0.2)
+        first_cancel, second_cancel = threading.Event(), threading.Event()
+        self.addCleanup(first_cancel.set)
+        self.addCleanup(second_cancel.set)
+        first, _ = self.run_turn(participant, first_cancel)
+        self.assertTrue(driver.started_event.wait(5))
+        old = driver.started[0]
+        participant.bind_turn(turn_id="t1", wake_id=old.wake_id)
+        old.take({"kind": "silence"})  # the run returned, and its end never comes
+        first.join(5)
+        second, second_box = self.run_turn(participant, second_cancel)
+        self.assertTrue(wait_until(lambda: len(driver.started) == 2))
+        self.assertTrue(old.ended.is_set())
+        self.assertFalse(old.end_ok)
+        self.assertIn("never reported the end", old.end_detail)
+        # The old run's late calls find its turn closed.
+        self.assertEqual("silent", participant.finish(turn_id="t1", answer="late").kind)
+        self.assertFalse(participant.end_turn(turn_id="t1", ok=True))
+
+    def test_a_run_that_never_binds_fails_after_the_bind_timeout(self):
+        driver = RecordingDriver()
+        participant = self.participant(driver, bind_timeout_seconds=0.2)
+        cancel = threading.Event()
+        self.addCleanup(cancel.set)
+        thread, box = self.run_turn(participant, cancel)
+        thread.join(5)
+        self.assertIsInstance(box.get("error"), TurnError)
+        self.assertIn("did not start within 0.2 seconds", str(box["error"]))
+        self.assertEqual(driver.started, driver.interrupted)
+        self.assertIsNone(participant.active)
 
 
 if __name__ == "__main__":

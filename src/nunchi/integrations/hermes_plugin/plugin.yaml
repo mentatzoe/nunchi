@@ -1,0 +1,30 @@
+name: nunchi-room
+version: 2.0.0
+manifest_version: 2
+description: >-
+  Nunchi reads the room for this agent in one group chat: it takes in every
+  message there, and starts the agent's turn only when the agent has something
+  to read, with the room's context. Requires the nunchi package in Hermes's
+  Python environment.
+license: MIT OR Apache-2.0
+homepage: https://github.com/mentatzoe/nunchi
+tags: [gateway, group-chat, attention]
+provides_tools:
+  - room_react
+  - room_context
+provides_hooks:
+  - post_gateway_admission
+  - pre_llm_call
+  - transform_tool_result
+  - post_api_request
+  - transform_llm_output
+  - on_session_end
+capabilities:
+  - gateway.platform_actions
+config_schema:
+  config_path:
+    type: str
+    default: ""
+    label: Nunchi config
+    description: Path to this participant's Nunchi config (JSON), with a hermes section.
+    required: true
