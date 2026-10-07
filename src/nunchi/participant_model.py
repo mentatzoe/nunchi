@@ -1053,8 +1053,9 @@ def participant_tool_turn_prompt(
     if final_answer:
         parts.append(
             "Your final reply in this turn is posted to the room as your "
-            "message, exactly as you write it. To stay silent, reply with "
-            f"exactly {silence_marker} and nothing else."
+            "message, exactly as you write it, so write only the words the room "
+            "should see: no reasoning, analysis, headings, or notes to yourself. "
+            f"To stay silent, reply with exactly {silence_marker} and nothing else."
         )
         if "react" in names:
             parts.append(

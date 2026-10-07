@@ -399,8 +399,9 @@ class Turn:
 
         ``deliver`` makes the answer this turn's one room action. ``continue``
         comes at most once for a refused answer and once for looking again.
-        An answer that starts with the silence marker is silence; any note
-        after the marker is the agent's own and is never posted. A turn that
+        An answer that starts with the silence marker, or holds it on a line
+        of its own, is silence: whatever else it says is the agent's own note
+        and is never posted. A turn that
         already took a room action, such as a reaction, or that has ended,
         posts nothing more.
         """
@@ -412,8 +413,14 @@ class Turn:
         with self.lock:
             if not self.open() or self.action is not None:
                 return Finish("silent")
-            # Models vary the marker's case; a post never starts with it.
-            if not text or text.casefold().startswith(marker.strip().casefold()):
+            # Models vary the marker's case, and some reason in text before
+            # deciding on silence; the marker wins, and the reasoning stays.
+            folded = marker.strip().casefold()
+            if (
+                not text
+                or text.casefold().startswith(folded)
+                or any(line.strip().casefold() == folded for line in text.splitlines())
+            ):
                 return Finish("silent")
             try:
                 action = participant_tool_action(

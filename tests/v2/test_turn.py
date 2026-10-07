@@ -266,7 +266,14 @@ class FinalAnswerTurnTests(unittest.TestCase):
         )
 
     def test_the_marker_or_nothing_is_silence_and_a_note_after_it_is_never_posted(self):
-        for answer in ("[SILENT]", "  [SILENT]\n\nNothing to add here.", "[silent]", "", None):
+        for answer in (
+            "[SILENT]",
+            "  [SILENT]\n\nNothing to add here.",
+            "[silent]",
+            "Zoe asked Castor, who has not answered.\nCastor should take it.\n\n[SILENT]",
+            "",
+            None,
+        ):
             with self.subTest(answer=answer):
                 turn = self.turn()
                 self.assertEqual("silent", turn.decide(answer).kind)
@@ -351,6 +358,7 @@ class FinalAnswerTurnTests(unittest.TestCase):
     def test_the_text_says_the_reply_is_the_post_and_names_the_marker(self):
         text = self.turn().text
         self.assertIn("Your final reply in this turn is posted to the room", text)
+        self.assertIn("no reasoning, analysis, headings, or notes to yourself", text)
         self.assertIn("reply with exactly [SILENT]", text)
         self.assertIn("call emoji once", text)
         self.assertNotIn("never posted to the room", text)
