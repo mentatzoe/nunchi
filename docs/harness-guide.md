@@ -343,10 +343,11 @@ room.deliver(
   one of your own; nothing can target that message.
 - **The agent's own messages are events too.** Deliver them with
   `author_id` set to `binding.actor_id`. The library never wakes on them,
-  but memory finds the agent's own moves this way. If the harness hides its
-  agent's own messages from plugins, the library remembers each message
-  `HarnessDelivery` committed by its text and time instead, until the room
-  shows it (`I-010C@14`).
+  but memory, threads and the room's pace find the agent's own moves this
+  way. If the harness hides its agent's own messages from you, say so with
+  `HarnessDelivery(room_shows_own_messages=False)`: the library then records
+  each message it committed for the harness in the room log itself, with an
+  id of its own, as a reply to the message the turn was about.
 - **Harness-hosted: consume every message in the participant's room,** so
   the harness never runs its agent on one by itself. The harness then sees
   only the turns your driver starts. Consume the message even when handing it
@@ -382,10 +383,12 @@ room = Room(
   `dispatch(action=..., wake=...)` posts a `message`, `reply` or `reaction`
   and returns a `TransportResult` (`nunchi.participant`): `sent`, `failed`,
   `unknown` or `unavailable`, with a detail.
-- `transport`, harness-hosted: `HarnessDelivery(native)`. The harness posts
-  messages. In final-answer posting the answer is a message, never a reply
-  to a chosen message. `native` is optional; give it if the harness lets a
-  plugin react. It has three methods:
+- `transport`, harness-hosted: `HarnessDelivery(native, room_shows_own_messages=...)`.
+  The harness posts messages. In final-answer posting the answer is a
+  message, never a reply to a chosen message. `room_shows_own_messages` says
+  whether the room events you deliver include the agent's own messages (step
+  7). `native` is optional; give it if the harness lets a plugin react. It
+  has three methods:
   - `dispatch(action=..., wake=...) -> TransportResult` for a reaction:
     `{"kind": "reaction", "origin_event_id": …, "target_event_id": …,
     "reaction": …, "operation": "add"}` (or `"remove"`);
@@ -548,10 +551,6 @@ the user's own home: Hermes writes into `~/.hermes` on import.
 
 ## Known library gaps
 
-- **The agent's own message, when the harness never shows it.** Memory
-  keeps it by its text and time, but the room log does not have it. So the
-  question it answered still shows no response, and the room's pace misses
-  it (Hermes).
 - **Unknown mentions.** A canonical event cannot say that its mentions or
   reply target are unknown, only that there are none.
 - **One text per turn.** The turn's guide and its context come as one text

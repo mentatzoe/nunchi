@@ -339,7 +339,9 @@ class HermesRoomPlugin:
     def transport(self) -> HarnessDelivery:
         """Hermes posts the agent's messages; reactions go through platform actions."""
 
-        return HarnessDelivery(HermesReactions(self))
+        # Hermes drops the bot's own messages before any plugin hook, so the
+        # library puts each delivered message into the room log itself.
+        return HarnessDelivery(HermesReactions(self), room_shows_own_messages=False)
 
     # -- ingress -----------------------------------------------------------------------
 

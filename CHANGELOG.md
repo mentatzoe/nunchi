@@ -13,6 +13,14 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- The agent's own message in the room log, when its harness never shows it
+  (#94 step 9e): `HarnessDelivery` now takes `room_shows_own_messages`. When
+  it is false, as for Hermes, the host records each message it committed for
+  the harness as the participant's own event, with an id of the library's own
+  (`nunchi:delivered:<request_id>`), in reply to the message the turn was
+  about. Threads, the room's pace, attention and memory then count it, so a
+  question the agent answered no longer looks open on the next turn. The
+  Hermes plugin's expected failure for this gap now passes.
 - The Hermes plugin (#94 step 9e, [`integrations/hermes-plugin/`](integrations/hermes-plugin/README.md)):
   `nunchi-room`, a Hermes directory plugin on Hermes's public hooks only,
   built by a separate agent from the harness guide alone. It consumes every

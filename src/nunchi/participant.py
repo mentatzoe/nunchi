@@ -11,6 +11,7 @@ import math
 import queue
 import threading
 import time
+from datetime import timezone
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
@@ -230,6 +231,9 @@ class ConversationOpportunityScheduler:
 # What a message's commit says when the harness, not Nunchi, posts it
 # (`nunchi.turn.HarnessDelivery`).
 HARNESS_DELIVERS = "the harness delivers it"
+# The room log's id for a message the harness posted but never shows back:
+# the library's own, never the platform's (#94 step 9e).
+DELIVERED_EVENT_PREFIX = "nunchi:delivered:"
 
 
 @dataclass(frozen=True)
@@ -1058,9 +1062,52 @@ class ParticipantTurnHost:
         self._append_transport_receipt(wake["request_id"], result)
         self.memory.record_reason(action, why)
         if (result.delivery, result.detail) == ("unknown", HARNESS_DELIVERS):
-            # The harness posts it and may never show it back (#94 step 9d).
-            self.memory.record_delivered(action, why=why)
+            # The harness posts it. If the room never shows it back, it goes
+            # into the room log now; otherwise memory keeps it by its words
+            # until the room shows it (#94 steps 9d and 9e).
+            shows = getattr(self.transport, "room_shows_own_messages", True)
+            if shows or not self._record_delivered_message(wake, action, why):
+                self.memory.record_delivered(action, why=why)
         return result
+
+    def _record_delivered_message(
+        self, wake: Mapping[str, Any], action: Mapping[str, Any], why: Any
+    ) -> bool:
+        """Put a message the harness posted, and never shows back, into the room log.
+
+        It is the participant's own message, with an id of the library's own,
+        in reply to the message the turn was about. Threads, the room's pace,
+        attention and memory then see it as the room saw it.
+        """
+
+        text = action.get("text")
+        origin = action.get("origin_event_id")
+        if action.get("kind") != "message" or not isinstance(text, str) or not isinstance(origin, str):
+            return False
+        event_id = DELIVERED_EVENT_PREFIX + str(wake["request_id"])
+        moment = self.observation.clock().astimezone(timezone.utc)
+        try:
+            observed = self.observation.observe(
+                delivery_id=event_id,
+                event={
+                    "id": event_id,
+                    "type": "message",
+                    "author_id": self.observation.binding.actor_id,
+                    "text": text,
+                    "mentioned_actor_ids": [],
+                    "mentions_room": False,
+                    "reply_to_event_id": origin,
+                    "timestamp": moment.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                },
+                actors={},
+            )
+        except NunchiError:
+            return False
+        if observed.audit.outcome not in ("recorded", "exact-self-context"):
+            return False
+        # The reason joins the move as the room log now shows it.
+        self.memory.record_reason({"kind": "reply", "target_event_id": origin, "text": text}, why)
+        return True
 
     def _append_transport_receipt(
         self,

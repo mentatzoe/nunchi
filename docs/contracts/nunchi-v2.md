@@ -136,6 +136,12 @@ A truthful attention request represents:
   (`add`/`remove`); `membership` events add `scope`
   (`{kind: room/thread/space/unknown, id}`), `subject_actor_id`, optional
   `caused_by_actor_id`, and `change` (`join`/`leave`) (FR-003, FR-014).
+  One `message` is host-attested rather than transport-attested (#94 step
+  9e): when the participant's harness posts its message and the room never
+  shows the participant's own messages (`HarnessDelivery(room_shows_own_messages=False)`),
+  the reference host records that message itself. It carries an `id` of the
+  library's own, `nunchi:delivered:<request_id>`, which no platform message
+  has, and `reply_to_event_id` naming the message its turn was about.
 - **One included trigger** — `trigger_event_id` must name an event in
   `events` (runtime-adapter-only rule; see the partition below).
 - **Honest coverage** — `has_more_before`/`has_more_after` (boolean or
@@ -409,12 +415,15 @@ reply may target any of them.
 
 Since @14 (#94 step 9d) a `message` own move may lack `event_id`. The harness
 posted that message itself (`HarnessDelivery`), and the room has not shown it
-back: some harnesses hide their agent's own messages from plugins. The
-reference host remembers it by its text and time, just after the message the
-turn was about, until the room shows a message by the participant with the
-same words after that one; then the room's copy stands. Like a silence, it
-goes once the message it followed is no longer retained, and a restart
-forgets it. Attention's request (I-010A@7) carries the same memory.
+back yet. The reference host remembers it by its text and time, just after
+the message the turn was about, until the room shows a message by the
+participant with the same words after that one; then the room's copy stands.
+Like a silence, it goes once the message it followed is no longer retained,
+and a restart forgets it. Attention's request (I-010A@7) carries the same
+memory. A room that never shows the participant's own messages (Hermes hides
+them from plugins) gets the host-attested message in the event union
+instead, so the move is a `reply` with that message's id, and threads and
+the room's pace count it too (#94 step 9e).
 
 ## I-010D ContextContinuationV2@1
 

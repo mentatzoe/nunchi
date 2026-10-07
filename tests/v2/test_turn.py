@@ -513,7 +513,7 @@ class HarnessHostedFinalAnswerTests(unittest.TestCase):
         thread.join(5)
         self.assertEqual("message", box["action"]["kind"])
         # The host commits the message for the harness to post.
-        result = HarnessDelivery().dispatch(action=box["action"], wake=test_wake())
+        result = HarnessDelivery(room_shows_own_messages=False).dispatch(action=box["action"], wake=test_wake())
         self.assertEqual(TransportResult("unknown", HARNESS_DELIVERS), result)
         participant.settle(turn.request_id, result)
         finishing.join(5)
@@ -524,7 +524,7 @@ class HarnessHostedFinalAnswerTests(unittest.TestCase):
         from nunchi.reactions import UNAVAILABLE_REACTION_CAPABILITY
         from nunchi.turn import HarnessDelivery
 
-        delivery = HarnessDelivery()
+        delivery = HarnessDelivery(room_shows_own_messages=False)
         self.assertEqual(["message"], delivery.ordinary_action_capabilities())
         self.assertIs(UNAVAILABLE_REACTION_CAPABILITY, delivery.reaction_capability())
         self.assertEqual(

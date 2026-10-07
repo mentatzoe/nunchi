@@ -274,17 +274,19 @@ class HermesGatewayTest(unittest.TestCase):
 
     def test_the_delivered_message_is_in_the_agents_memory(self):
         # Hermes drops its agent's own messages before any plugin hook; the
-        # library remembers what HarnessDelivery committed, by text and time.
+        # library puts what HarnessDelivery committed into the room log, as a
+        # reply to the message the turn was about.
         wake = self._next_turn_after_a_delivered_reply()
         moves = wake.get("memory", {}).get("own_moves", [])
-        self.assertIn(("message", "On it."), [(move.get("kind"), move.get("text")) for move in moves])
+        self.assertIn(
+            ("reply", "telegram:message:100", "On it."),
+            [(move.get("kind"), move.get("about_event_id"), move.get("text")) for move in moves],
+        )
 
-    @unittest.expectedFailure
-    def test_known_gap_the_room_counts_the_delivered_message(self):
-        # The room itself never shows the delivered message: the question it
-        # answered keeps no response, and the agent's own share of the
-        # conversation (pace) misses it. When the library accounts for a
-        # harness-delivered move there too, this passes and the decorator comes off.
+    def test_the_room_counts_the_delivered_message(self):
+        # Hermes never shows the delivered message, so the library puts it into
+        # the room log: the question it answered has a response, and the
+        # agent's own share of the conversation (pace) counts it.
         wake = self._next_turn_after_a_delivered_reply()
         self.assertEqual(wake["pace"]["own_messages"], 1)
         thread = next(item for item in wake["memory"]["threads"] if item["event_id"] == "telegram:message:100")

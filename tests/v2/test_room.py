@@ -199,7 +199,7 @@ class RoomTests(unittest.TestCase):
 
     def test_a_harness_that_posts_its_agents_final_answer(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            transport = HarnessDelivery()
+            transport = HarnessDelivery(room_shows_own_messages=False)
             driver = _Driver(
                 lambda participant: participant.finish(turn_id="t1", answer="On it.")
             )

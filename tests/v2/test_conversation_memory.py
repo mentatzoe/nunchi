@@ -438,13 +438,37 @@ class TurnTests(unittest.TestCase):
         ])
         pipeline, _, _, _ = foundation(
             participant=lambda **turn: wakes.append(turn["wake"]) or next(replies),
-            transport=HarnessDelivery(),
+            transport=HarnessDelivery(room_shows_own_messages=True),
         )
         pipeline.handle_delivery(delivery_id="d-q1", event=message("q1", text="Deploy?"), actors=ZOE)
         pipeline.handle_delivery(delivery_id="d-q2", event=message("q2", text="Anyone?"), actors=ZOE)
         (move,) = wakes[1]["memory"]["own_moves"]
         self.assertEqual(("message", "I'll check the deploy.", "Zoe asked."), (move["kind"], move["text"], move["why"]))
         self.assertNotIn("event_id", move)
+        validate_participant_wake(wakes[1])
+
+    def test_a_harness_that_hides_the_message_gets_it_in_the_room_log(self):
+        # Hermes drops its agent's own messages before any plugin sees them
+        # (#94 step 9e): the host puts the delivered message into the room log.
+        wakes = []
+        replies = iter([
+            {"kind": "message", "origin_event_id": "q1", "text": "I'll check the deploy.", "why": "Zoe asked."},
+            None,
+        ])
+        pipeline, _, _, _ = foundation(
+            participant=lambda **turn: wakes.append(turn["wake"]) or next(replies),
+            transport=HarnessDelivery(room_shows_own_messages=False),
+        )
+        pipeline.handle_delivery(delivery_id="d-q1", event=message("q1", text="Deploy?"), actors=ZOE)
+        pipeline.handle_delivery(delivery_id="d-q2", event=message("q2", text="Anyone?"), actors=ZOE)
+        (move,) = wakes[1]["memory"]["own_moves"]
+        self.assertEqual(
+            ("reply", "q1", "I'll check the deploy.", "Zoe asked."),
+            (move["kind"], move["about_event_id"], move["text"], move["why"]),
+        )
+        self.assertTrue(move["event_id"].startswith("nunchi:delivered:"))
+        self.assertIn(move["event_id"], [event["id"] for event in wakes[1]["events"]])
+        self.assertEqual(1, wakes[1]["pace"]["own_messages"])
         validate_participant_wake(wakes[1])
 
     def test_the_runtime_contract_checks_memory(self):
