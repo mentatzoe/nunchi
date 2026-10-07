@@ -1,8 +1,10 @@
 # Harness contract
 
 **Status: draft for review ([#94](https://github.com/mentatzoe/nunchi/issues/94),
-step 9a). Nothing here is built yet.** Cells marked *to verify* are checked
-against the harnesses themselves in step 9b, before this contract is frozen.
+steps 9a and 9b). Nothing here is built yet.** The harness facts were checked
+against upstream source on 2026-10-07: Hermes main `a50406d9` and Codex
+`a513012`. Cells marked *to verify* still need a runtime check with a stand-in
+model before this contract is frozen.
 
 ## Why
 
@@ -70,14 +72,15 @@ Everything that decides behavior, once, for every harness:
 | Room actions | yes | Either expose the room tools (tool posting) or hand the agent's final answer to the library (final-answer posting). | — |
 | Turn end | yes | Tell the library when the agent's turn ends, and how: finished, failed, interrupted. | — |
 | Cancel | yes | Stop the agent when the library cancels the turn. | — |
-| Events in, turn skipped | harness-hosted only | Hand each room event to the library before the harness acts on it, and skip the agent's run when the library says so. | — |
+| Events in | harness-hosted only | Hand each room event to the library before the harness acts on it, and keep the harness from running its agent on it. | — |
 | After each tool call | no | Add the library's room update to what the agent reads next (steering). | Updates ride on the result of the agent's next room tool call. |
-| Continue before posting | no | In final-answer posting, keep the agent going when new messages arrived while it composed (looking again). | The answer is delivered; what arrived meanwhile becomes the next moment. The parity table shows the gap. |
-| Start a turn unprompted | harness-hosted only | Start a turn with no inbound message, for pauses and outcomes. | No pause or outcome turns; the parity table shows the gap. |
+| Continue before posting | no | In final-answer posting, keep the agent going when new messages arrived while it composed (looking again). | Silence the draft and start a fresh turn that carries it. Failing that, the answer is delivered and what arrived meanwhile becomes the next moment; the parity table shows the gap. |
+| Start a turn itself | harness-hosted only | Start the agent's turn with the library's text, without an inbound message. | Without it, the integration must gate the harness's own runs, which loses silence and looking again on harnesses like Hermes (see Topologies). |
 | Reactions | no | Let the agent react as itself. | The react tool is not offered. |
 | Stable guide slot | no | Keep the guide in a stable part of the prompt, such as a system section. | The guide goes with each turn's text. |
 | Host model for attention | no | Let attention use the harness's own model and credentials. | A configured attention route. |
-| Delivered message id | harness-hosted only | Report the id of the message the harness posted. | Memory records the move by text until the room shows the message. *To verify.* |
+| Delivered message id | harness-hosted only | Report the id of the message the harness posted. | Memory records the move by its text and time until the room shows the message. |
+| Native tool approvals | library-hosted | Answer the harness's own tool-approval requests in a room turn. | — (the rule is the same everywhere: the user's harness rules apply, and anything that would prompt a person is declined, since nobody is at the terminal) |
 
 ## The turn interface
 
@@ -150,8 +153,9 @@ class Room:                                        # harness-hosted entry point
 
 - The agent's final answer is the post. The library decides at `finish`.
 - Silence uses the harness's own marker.
-- Looking again needs "continue before posting". Otherwise the answer goes
-  out and the next moment catches up.
+- Looking again needs "continue before posting", or else a way to silence
+  the draft and start a fresh turn that carries it (the Hermes route).
+  Without either, the answer goes out and the next moment catches up.
 - Reactions, room views, and privileged actions are still tools.
 
 ## Topologies
@@ -160,39 +164,60 @@ class Room:                                        # harness-hosted entry point
 transport. It observes, decides, and calls the integration's `start` for each
 turn. The integration only runs the harness.
 
-**Harness-hosted.** The harness owns the room connection:
+**Harness-hosted.** The harness owns the room connection. Two shapes are
+possible:
 
-- The integration feeds each event to `Room.admit`, before the harness acts
-  on it.
-- When there is no turn, it skips the agent's run.
-- When there is one, it gives the agent the turn's guide and context through
-  the harness's hooks and wires the tools.
-- The library still decides at the commit point. The harness then performs
-  delivery, and the receipt says so: the effect is reported as the harness
-  delivered it, not confirmed by Nunchi.
+- **Gate the harness's runs.** The integration lets the harness start its
+  agent on a message unless the library says skip, and adds the turn's
+  context through hooks.
+- **Consume and start.** The integration consumes every room message before
+  the harness runs on it, hands it to the library, and starts the agent's
+  turn itself, with the library's text, when the library decides. The
+  harness still delivers the answer and keeps its own model, tools, memory,
+  and settings.
+
+Hermes needs the second shape (checked in source, `a50406d9`):
+
+- Messages that arrive while a session is busy skip both gateway hooks
+  (`gateway/run_busy.py`), so gating runs would miss them, and by default
+  each user in a channel gets a separate session, so runs overlap.
+- A bare `[SILENT]` stays silent only on a turn the gateway counts as
+  machinery, such as a plugin-injected turn. On a turn a person started, it
+  is replaced by a visible warning (`gateway/response_filters.py`).
+
+With consume and start, people's messages never start runs of their own, so
+the hooks see every message, one turn runs at a time, and silence works.
+
+In either shape the library still decides at the commit point. The harness
+then performs delivery, and the receipt says so: the effect is reported as
+the harness delivered it, not confirmed by Nunchi.
 
 ## Expected parity
 
-What each integration should use after step 9e. *To verify* cells are
-checked in 9b. A gap becomes an issue here, with the alternatives
-considered, before anyone asks a harness's maintainers.
+What each integration should use after step 9e, checked against upstream
+source. *To verify* cells still need a runtime check. A gap becomes an issue
+here, with the alternatives considered, before anyone asks a harness's
+maintainers.
 
 | Behavior | Claude Code | Codex (app-server) | Hermes (plugin) | One-reply |
 |---|---|---|---|---|
-| Topology, posting | library-hosted, tools | library-hosted, tools | harness-hosted, final answer | library-hosted, tools |
-| Gate before the agent runs | library | library | `post_gateway_admission` returns `handled` | library |
-| Guide | session prompt | developer instructions *(to verify)* | `register_system_prompt_section` | request |
-| Turn context | turn text | `turn/start` input | `pre_llm_call` | request |
-| Room view | mod tool | dynamic tool or MCP | `register_tool` | room-view action |
-| Reaction | mod tool | dynamic tool | tool calling `platform_actions`, if the user grants it | action |
-| Silence | a bound turn ends without an action | a turn ends without an action | `[SILENT]` | silence action |
-| Look again before posting | send tool holds | send tool holds | **gap**: `pre_verify` fires only after code edits | action held |
-| Steering | mod, after each tool call | *to verify*; fallback on room tool results | `transform_tool_result`, or native `busy_input_mode: steer` | between room views |
-| Pause and outcome turns | library | library | `inject_message`, if the user grants it | library |
-| Catching up | library | library | library, through `admit` | library |
-| Cancel | stream-json interrupt | `turn/interrupt` *(to verify)* | *to verify* | drop the reply |
+| Topology, posting | library-hosted, tools | library-hosted, tools | harness-hosted (consume and start), final answer | library-hosted, tools |
+| Gate before the agent runs | library | library | `post_gateway_admission` consumes every message (`handled`, no reply); the library starts turns with `inject_message` | library |
+| Guide | session prompt | in the thread's first turn input (`developerInstructions` would replace the user's own) | `register_system_prompt_section` | request |
+| Turn context | turn text | `turn/start` input | the injected turn text, plus `pre_llm_call` | request |
+| Room view | mod tool | per-thread MCP server in `thread/start` config (stable); client tools need an experimental opt-in | `register_tool` | room-view action |
+| Reaction | mod tool | the same MCP server | a tool calling `platform_actions.add_reaction`, if the user grants it | action |
+| Silence | a bound turn ends without an action | a turn ends without an action | `[SILENT]` on the injected turn | silence action |
+| Look again before posting | send tool holds | send tool holds | `transform_llm_output` silences the draft; the library injects a fresh turn with the draft and the new messages *(to verify; needs streaming off in the room)* | action held |
+| Steering | mod, after each tool call | `turn/steer` (stable) | `transform_tool_result` | between room views |
+| Pause and outcome turns | library | library | `inject_message` | library |
+| Catching up | library | library | library | library |
+| Cancel | stream-json interrupt | `turn/interrupt` | no plugin interrupt: the library silences the answer at `transform_llm_output`; tools already run stay run | drop the reply |
+| Own message in memory | transport id | transport id | by text and time (no delivery id; Hermes drops the bot's own messages before hooks) | transport id |
 | Attention routes | all | all | all, plus the host's model through `ctx.llm` | all |
-| Runs without patching the harness | yes | yes | yes, also under `plugins.isolation: host` | yes |
+| Native tool approvals | user's rules; prompts declined | user's rules; approval requests declined | Hermes's own approvals | — |
+| Runs without patching the harness | yes | yes | yes, also under `plugins.isolation: host` *(to verify)* | yes |
+| Operator grants needed | none | none | `allow_gateway_injection`; an authorized identity for injected turns; `gateway.platform_actions` for reactions | none |
 
 ## Conformance kit (step 9d)
 
@@ -211,24 +236,46 @@ considered, before anyone asks a harness's maintainers.
 
 ## Candidate gaps
 
-Each becomes an issue here in step 9b, with the alternatives considered.
+Each confirmed gap becomes an issue here, with the alternatives considered.
 None goes to a harness's maintainers without Zoe's decision.
 
-1. **Hermes, looking again before a final answer.** `pre_verify` can keep the
-   agent going but fires only after code edits. Alternatives to weigh:
-   - native `busy_input_mode: steer`, which covers turns that call tools;
-   - `transform_llm_output` to silence the answer, then `inject_message` to
-     start a fresh turn that sees the new messages;
-   - accepting the gap for answers composed without tool calls.
-2. **Hermes, the id of the message it delivered.** Hooks expose no delivery
-   handle; Hermes describes an outbound-delivery contract as future work.
-   Memory needs a pointer to the agent's own message.
-3. **Hermes, interrupting a running agent from a plugin.**
-   `agent_loop_stopped` only observes.
-4. **Hermes, room history after a restart.** Does a plugin have a public way
-   to read recent channel history?
-5. **Codex, steering a running turn.** Does the app-server accept input
-   mid-turn? The fallback is updates on room tool results.
+1. **Hermes, looking again before a final answer.** No public hook can hold
+   or retry every final answer: `pre_verify` fires only after `write_file` or
+   `patch` changed a file in that turn (`agent/turn_stop_gates.py`).
+   - Proposed: silence the draft in `transform_llm_output` and inject a fresh
+     turn that carries the draft and the new messages. The cost is a second
+     agent turn, only when someone posted meanwhile.
+   - Requirement: streaming off in Nunchi rooms, since a streamed draft is
+     already visible before the transform. *To verify.*
+   - Not adopted: middleware substituting a synthetic tool call
+     (undocumented, and it can't hide streamed text).
+2. **Hermes, the id of the message it delivered.** There is no hook, ledger
+   field or transcript field for it, and the Discord adapter drops the bot's
+   own messages before any hook. Memory records the move by text and time.
+   A raw Discord listener (`register_platform_handler`) would see it, but
+   only in-process, with no stability guarantee.
+3. **Hermes, interrupting a running agent.** `PluginContext` has no interrupt,
+   `agent_loop_stopped` only observes, and injected text cannot run `/stop`.
+   The fallback silences the answer; tools already run stay run.
+4. **Hermes, room history after a restart.** There is no `ctx` history API.
+   `ctx.dispatch_tool("discord", {"action": "fetch_messages", ...})` reads
+   history, but it relies on dispatch skipping the toolset check, which is
+   fragile. The library's own persisted log is the main source. *To verify.*
+5. **Codex, trusting the working directory.** `thread/start` with a `cwd` can
+   write `trust_level = "trusted"` into the user's own Codex config
+   (`app-server/src/request_processors/thread_processor.rs`). The integration
+   must not change the user's config. *To verify:* the safe way to start a
+   thread without that write.
+6. **Codex, profiles and environment keys.** The app-server rejects
+   `--profile` and ignores `CODEX_API_KEY`, so it runs with the user's default
+   profile and stored login. This is acceptable if documented.
+
+Resolved during 9b:
+
+- **Codex steering:** `turn/steer` is stable, and `turn/start` sent during a
+  running turn steers it.
+- **Codex room tools:** a per-thread MCP server in `thread/start`'s `config`
+  is stable and sits on top of the user's own servers.
 
 ## What this replaces (step 9e)
 
