@@ -13,6 +13,15 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- The agent's own "mhm" in the turn conformance kit (#94 step 9d): the kit's
+  room offers one reaction, and the `mhm` and `final-mhm` scenarios check it
+  through each integration's react tool. The pause scenarios now also check
+  that the turn after the pause remembers why the agent waited. The reference
+  turn, the Claude Code gate, the Hermes plugin (Hermes main `a50406d9`) and
+  the Codex app-server integration (Codex CLI 0.160.1) pass all 21
+  scenarios. The behavior scenes' four moves (speak, stay quiet, wait, mhm)
+  and their pause and outcome moments each have a scenario through every
+  integration, so the kit does not replay every scene moment.
 - A silent turn's reason in tool posting (#135 gap H): `end_turn` and
   `turn_ended` take the agent's last words as `note`, and the local turn
   protocol's `/v1/turn/end` an optional `note`. When the turn ends without a
