@@ -316,12 +316,50 @@ them the same way:
 - `Turn.after_tool_call` is steering: what others posted since the agent last
   looked, shown once.
 
+Final-answer posting is the other style, for harnesses whose agent's final
+answer is its post and whose plugins cannot send, such as Hermes. The
+integration names its harness's silence marker (`silence_marker`), and
+there is no send tool:
+
+- `Turn.decide(answer)` says what becomes of the answer: `deliver` makes it
+  the turn's one message; `continue` has the agent answer again with the
+  turn's text in view, once for looking again and once for a refused secret;
+  `silent` covers the marker (any note after it is never posted), an empty
+  answer, a turn that already took its room action such as a reaction, and an
+  ended turn.
+- `Turn.finish(answer)` then waits for the host's commit. The integration's
+  transport is `HarnessDelivery`: it commits a message by allowing it, with
+  the receipt detail "the harness delivers it", and hands any other action,
+  such as a reaction, to the harness's own transport. The harness posts only
+  a committed answer; a stale, cancelled or refused turn stays silent.
+- `TurnParticipant.finish(turn_id=..., answer=...)` does this for the open,
+  bound turn.
+
+A harness outside Python makes the same calls as versioned JSON over a
+private Unix socket (`nunchi.turn_server`, interface `I-040D
+LocalTurnProtocolV2@1`). Every request carries the per-launch session secret
+the integration was given:
+
+| Route | Body | Answer |
+|---|---|---|
+| `/v1/attach` | `{}` | `protocol` (`nunchi.turn-session`), `version`, `posting` (`tools` or `final-answer`), `silence_marker`, `tools` |
+| `/v1/turn/bind` | `turn_id`, `wake_id` | `bound` |
+| `/v1/turn/call` | `turn_id`, `tool`, `input` | `ok` with `text`, or `error` |
+| `/v1/turn/after-tool` | `turn_id` | `text` or null |
+| `/v1/turn/finish` | `turn_id`, `answer` | `finish` (`deliver`, `continue` or `silent`) and `text` |
+| `/v1/turn/end` | `turn_id`, `ok`, `detail` | `ended` |
+
+The Claude Code mod's route names, `/v1/turn-start`, `/v1/tool` and
+`/v1/news`, remain aliases for bind, call and after-tool.
+
 The Claude Code gate is the first integration on it. The one-reply envelope
 above drives the same `Turn`: `ParticipantTurnProtocol` keeps the reply's
 shape and the pages the model asked for, and hands each action to the turn's
 `look_again` and `take`. A one-reply participant may pass a `SecretGuard`
 too; a refused action is shown to the model once, and a second refusal fails
-the turn.
+the turn. `OpenAICompatibleParticipant` with a `silence_marker` drives the
+same `Turn` in final-answer posting: its plain reply is the post, through
+`Turn.decide`. The behavior eval uses it for `--agent-posting final-answer`.
 
 ## The participant's view of the room
 

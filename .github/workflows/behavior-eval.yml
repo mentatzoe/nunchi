@@ -25,9 +25,17 @@ on:
         required: true
         default: "0"
       agent_model:
-        description: Model that plays the woken agent's turn; the implementation baseline is anthropic/claude-haiku-4.5 (empty grades attention alone, for model selection)
+        description: Model that plays the woken agent's turn; the implementation baseline is anthropic/claude-haiku-4.5 ("none" grades attention alone, for model selection)
         required: false
         default: anthropic/claude-haiku-4.5
+      agent_posting:
+        description: How the agent posts, one JSON envelope per reply or its plain final answer (as in harnesses like Hermes)
+        required: true
+        default: envelope
+        type: choice
+        options:
+          - envelope
+          - final-answer
       paired:
         description: Also play each agent turn that carried a reading without it, when the reading is what changed (needs agent_model; doubles the agent's cost)
         required: true
@@ -65,6 +73,7 @@ jobs:
           SCENES: ${{ inputs.scenes }}
           TEMPERATURE: ${{ inputs.temperature }}
           AGENT_MODEL: ${{ inputs.agent_model }}
+          AGENT_POSTING: ${{ inputs.agent_posting }}
           PAIRED: ${{ inputs.paired }}
           READING_ITEMS: ${{ inputs.reading_items }}
           READING_CHARS: ${{ inputs.reading_chars }}
@@ -76,6 +85,10 @@ jobs:
           # The runner exits non-zero when any call failed; write the summary
           # first so the failures are visible.
           status=0
+          # An empty input falls back to the default, so "none" means no agent.
+          if [ "$AGENT_MODEL" = "none" ]; then
+            AGENT_MODEL=""
+          fi
           paired=()
           if [ "$PAIRED" = "true" ] && [ -n "$AGENT_MODEL" ]; then
             paired=(--paired)
@@ -86,6 +99,7 @@ jobs:
             --scenes "$SCENES" \
             --temperature "$TEMPERATURE" \
             --agent-model "$AGENT_MODEL" \
+            --agent-posting "$AGENT_POSTING" \
             --reading-items "$READING_ITEMS" \
             --reading-chars "$READING_CHARS" \
             "${paired[@]}" \

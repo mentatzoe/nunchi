@@ -13,6 +13,23 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- The local turn protocol (#94 step 9c; `I-040D LocalTurnProtocolV2@1`):
+  the core `Turn` as versioned JSON over a private Unix socket, for
+  harnesses outside Python. `nunchi.turn_server` serves attach, bind, call,
+  after-tool, finish and end for a `TurnParticipant`, with the per-launch
+  session secret on every request. The Claude Code gate's server is now
+  this one, and the mod's route names remain aliases. `TurnParticipant`
+  gains `attach`, `tool_specs` and `end_turn`. `I-040A` is at `@4` for the
+  host's `settle`.
+- Final-answer posting in the core `Turn` (#94 step 9c), for harnesses whose
+  agent's final answer is its post, such as Hermes. `Turn.decide` and
+  `Turn.finish` say whether an answer is delivered, looked at again, or
+  silent; the harness posts only what the host committed for it through the
+  new `HarnessDelivery` transport. `OpenAICompatibleParticipant` takes a
+  `silence_marker` to post its plain reply this way, and the behavior eval
+  measures the style with `--agent-posting final-answer`. The eval workflow
+  gains an `agent_posting` input and accepts `agent_model: none` for an
+  attention-only run, since an empty input fell back to the default agent.
 - Behavioral evaluation (#86): scenes in `evals/behavior/` that judge whether
   a participant reads the room, with ranges of fitting moves instead of one
   expected verdict. Eight scenes come from `docs/behavior.md`; 57 are drafts

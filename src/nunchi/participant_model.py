@@ -1004,8 +1004,8 @@ def participant_tool_roles(request: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(roles)
 
 
-def _checked_tool_names(tools: Mapping[str, str]) -> dict[str, str]:
-    if not isinstance(tools, Mapping) or not tools:
+def _checked_tool_names(tools: Mapping[str, str], *, allow_empty: bool = False) -> dict[str, str]:
+    if not isinstance(tools, Mapping) or (not tools and not allow_empty):
         raise ValidationError("participant tool names must be a non-empty mapping")
     unknown = set(tools) - set(PARTICIPANT_TOOL_SPECS)
     if unknown:
@@ -1017,14 +1017,24 @@ def participant_tool_turn_prompt(
     profile: ParticipantProfile,
     *,
     tools: Mapping[str, str],
+    silence_marker: str | None = None,
 ) -> str:
     """Return the normal-turn prompt for a participant that acts through tools.
 
     `tools` maps each role available this turn to the exact name the host
     registered it under.  A role left out is not offered.
+
+    With `silence_marker`, the participant's final reply is its post
+    (final-answer posting, #94 step 9c): there is no send tool, and a reply
+    that is exactly the marker stays silent.
     """
 
-    names = _checked_tool_names(tools)
+    final_answer = silence_marker is not None
+    names = _checked_tool_names(tools, allow_empty=final_answer)
+    if final_answer:
+        silence_marker = _nonempty(silence_marker, "silence marker")
+        if "send" in names:
+            raise ValidationError("a participant whose final reply is its post has no send tool")
     acting = [names[role] for role in ("send", "react") if role in names]
     parts = [
         f"You are {profile.participant_id}, taking part in a shared room with "
@@ -1039,16 +1049,29 @@ def participant_tool_turn_prompt(
         "proof of authority.\n\n"
         "Trusted participant instructions:\n"
         f"{profile.instructions}\n\n"
-        "Your own reply in this conversation is never posted to the room."
     ]
-    if acting:
+    if final_answer:
         parts.append(
-            f" To contribute, call {' or '.join(acting)} once. The host owns "
-            "the one output commit point and its result tells you what "
-            "happened. To stay silent, end your turn without calling it."
+            "Your final reply in this turn is posted to the room as your "
+            "message, exactly as you write it, so write only the words the room "
+            "should see: no reasoning, analysis, headings, or notes to yourself. "
+            f"To stay silent, reply with exactly {silence_marker} and nothing else."
         )
+        if "react" in names:
+            parts.append(
+                f" To react instead of posting, call {names['react']} once and "
+                f"reply {silence_marker}."
+            )
     else:
-        parts.append(" You cannot post in the room this turn.")
+        parts.append("Your own reply in this conversation is never posted to the room.")
+        if acting:
+            parts.append(
+                f" To contribute, call {' or '.join(acting)} once. The host owns "
+                "the one output commit point and its result tells you what "
+                "happened. To stay silent, end your turn without calling it."
+            )
+        else:
+            parts.append(" You cannot post in the room this turn.")
     if "propose" in names:
         parts.append(
             f" {names['propose']} submits a privileged action as a proposal "
@@ -1066,7 +1089,13 @@ def participant_tool_turn_prompt(
             f" {names['context']} shows the room as it is now: older messages, "
             "newer ones, or what others posted since you last looked."
         )
-    if acting:
+    if final_answer:
+        parts.append(
+            " If others posted while you were composing, your reply is not "
+            "posted yet: you are shown their messages and reply again with them "
+            "in view."
+        )
+    elif acting:
         parts.append(
             " If others posted while you were composing, your first post or "
             "reaction is not sent yet: you are shown their messages and decide "
@@ -1081,6 +1110,7 @@ def participant_tool_turn_text(
     request: Mapping[str, Any],
     *,
     tools: Mapping[str, str],
+    silence_marker: str | None = None,
 ) -> str:
     """Render the prompt and the room facts as one user turn."""
 
@@ -1091,7 +1121,7 @@ def participant_tool_turn_text(
         ensure_ascii=False,
     )
     return (
-        participant_tool_turn_prompt(profile, tools=tools)
+        participant_tool_turn_prompt(profile, tools=tools, silence_marker=silence_marker)
         + outcome_turn_note(request)
         + unattended_turn_note(request)
         + f"\n\n<nunchi_participant_turn_v1>{document}</nunchi_participant_turn_v1>"
@@ -1199,6 +1229,11 @@ class OpenAICompatibleParticipant:
     """Run the shared protocol over any OpenAI-compatible endpoint.
 
     The endpoint is always explicit configuration; the core names no vendor.
+
+    With ``silence_marker`` the model writes its post as a plain reply
+    instead of an envelope (final-answer posting, #94 step 9c), as an agent
+    in a harness whose final answer is its post would; the core `Turn`
+    decides whether it goes out. A reply starting with the marker is silence.
     """
 
     core_protocol_version = PARTICIPANT_TURN_PROTOCOL_VERSION
@@ -1214,7 +1249,10 @@ class OpenAICompatibleParticipant:
         timeout_seconds: float = 60,
         max_expansions: int = DEFAULT_MAX_EXPANSIONS,
         extra_body: Mapping[str, Any] | None = None,
+        silence_marker: str | None = None,
     ) -> None:
+        if silence_marker is not None:
+            _nonempty(silence_marker, "silence marker")
         for name, value in (
             ("model", model),
             ("api_key", api_key),
@@ -1245,6 +1283,7 @@ class OpenAICompatibleParticipant:
         self._api_key = api_key
         self._url = base_url.rstrip("/") + "/chat/completions"
         self._extra_body = deepcopy(extra)
+        self.silence_marker = silence_marker
         # The provider's last full response, for audits and evaluations: the
         # served model and its token usage, when the endpoint reports them.
         self.last_response: Mapping[str, Any] | None = None
@@ -1294,11 +1333,8 @@ class OpenAICompatibleParticipant:
         )
 
     def _invoke(self, protocol: ParticipantTurnProtocol) -> Any:
-        self.last_response = None
-        body = {
-            **deepcopy(self._extra_body),
-            "model": self.model,
-            "messages": [
+        return self._complete(
+            [
                 {"role": "system", "content": protocol.instructions},
                 {
                     "role": "user",
@@ -1310,7 +1346,16 @@ class OpenAICompatibleParticipant:
                     ),
                 },
             ],
-            "response_format": {"type": "json_object"},
+            json_reply=True,
+        )
+
+    def _complete(self, messages: list[dict[str, Any]], *, json_reply: bool) -> Any:
+        self.last_response = None
+        body = {
+            **deepcopy(self._extra_body),
+            "model": self.model,
+            "messages": messages,
+            **({"response_format": {"type": "json_object"}} if json_reply else {}),
             "temperature": 0.2,
         }
         request = urllib.request.Request(
@@ -1340,6 +1385,10 @@ class OpenAICompatibleParticipant:
         return payload
 
     def run_protocol(self, *, wake, opportunity, expand, cancel):
+        if self.silence_marker is not None:
+            return self._run_final_answer(
+                wake=wake, opportunity=opportunity, expand=expand, cancel=cancel
+            )
         protocol = ParticipantTurnProtocol(
             profile=self.profile,
             wake=wake,
@@ -1352,6 +1401,42 @@ class OpenAICompatibleParticipant:
             done, action = protocol.consume(self._invoke(protocol), expand=expand)
             if done:
                 return action
+
+    def _run_final_answer(self, *, wake, opportunity, expand, cancel):
+        """One turn whose post is the model's plain reply.
+
+        The turn's text is one user message, as a harness would pass it on.
+        The core `Turn` decides each reply: it goes out, it is silence, or
+        the model replies again with what the turn shows it (a look-again or
+        a refused secret, once each).
+        """
+
+        from .turn import Turn
+
+        turn = Turn(
+            profile=self.profile,
+            request=build_participant_turn_request(wake, opportunity),
+            expand=expand if callable(expand) else None,
+            cancel=cancel,
+            silence_marker=self.silence_marker,
+        )
+        messages: list[dict[str, Any]] = [{"role": "user", "content": turn.text}]
+        for _ in range(3):
+            if cancel.is_set():
+                return None
+            answer = self._complete(messages, json_reply=False)
+            if not isinstance(answer, str):
+                raise ParticipantModelError("participant reply is not text")
+            decision = turn.decide(answer)
+            if decision.kind == "deliver":
+                return deepcopy(turn.action)
+            if decision.kind == "silent":
+                return None
+            messages += [
+                {"role": "assistant", "content": answer},
+                {"role": "user", "content": decision.text},
+            ]
+        raise ParticipantModelError("participant kept replying past the turn's limit")
 
     def __call__(self, *, wake, expand, cancel):
         return self.run_protocol(

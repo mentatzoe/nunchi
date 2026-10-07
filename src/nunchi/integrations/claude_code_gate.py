@@ -26,14 +26,11 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from copy import deepcopy
-import hmac
-from http.server import BaseHTTPRequestHandler
 import json
 import os
 from pathlib import Path
 import re
 import secrets
-import socketserver
 import subprocess
 import threading
 from typing import Any
@@ -42,6 +39,7 @@ import uuid
 from ..attention import ParticipantProfile
 from ..participant_model import PARTICIPANT_TOOL_SPECS
 from ..turn import TURN_ROLES, SecretGuard as CoreSecretGuard, Turn, TurnError, TurnParticipant
+from ..turn_server import TurnServer
 
 SOCKET_ENV = "NUNCHI_CLAUDE_CODE_GATE_SOCKET"
 SESSION_ENV = "NUNCHI_CLAUDE_CODE_GATE_SESSION"
@@ -55,7 +53,6 @@ TOOL_NAMES = {
 }
 WAKE_MARKER = '<nunchi_wake id="{}"/>'
 
-_MAX_BODY_BYTES = 256 * 1024
 _RESULT_WAIT_SECONDS = 25.0
 _INTERRUPT_GRACE_SECONDS = 10.0
 _DIAGNOSTIC_LINES = 40
@@ -147,7 +144,6 @@ class GatedParticipant(TurnParticipant):
             result_wait_seconds=result_wait_seconds,
         )
         self.session = session
-        self.attached = False
 
     # -- what the mod registers ------------------------------------------------
 
@@ -160,10 +156,6 @@ class GatedParticipant(TurnParticipant):
             }
             for role in self.registered_roles
         ]
-
-    def attach(self) -> list[dict[str, Any]]:
-        self.attached = True
-        return self.tool_specs()
 
     def unbound_detail(self) -> str:
         return "" if self.attached else "; the mod never attached"
@@ -487,129 +479,9 @@ class ClaudeCodeSession:
         process.stderr.close()
 
 
-class _UnixHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
-    daemon_threads = True
-    allow_reuse_address = False
-
-    def handle_error(self, request: Any, client_address: Any) -> None:
-        # A caller that hangs up is not the gate's failure; stay quiet.
-        pass
-
-
-class GateServer:
-    """The mod's only way in: HTTP over a private Unix socket.
+class GateServer(TurnServer):
+    """The mod's only way in: the core's local turn protocol over a private Unix socket.
 
     Every request carries the per-launch session secret the gate gave the
     session it started.  Any other caller is refused.
     """
-
-    def __init__(
-        self,
-        participant: GatedParticipant,
-        *,
-        socket_path: Path,
-        session_secret: str,
-    ) -> None:
-        self.participant = participant
-        self.socket_path = socket_path
-        self._secret = session_secret.encode()
-        self._server: _UnixHTTPServer | None = None
-
-    def start(self) -> None:
-        directory = self.socket_path.parent
-        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(directory, 0o700)
-        gate = self
-
-        class Handler(BaseHTTPRequestHandler):
-            protocol_version = "HTTP/1.1"
-
-            def log_message(self, *_args: Any) -> None:
-                pass
-
-            def address_string(self) -> str:
-                return "local"
-
-            def _answer(self, status: int, body: Mapping[str, Any]) -> None:
-                payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
-                self.send_response(status)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(payload)))
-                if status != 200:
-                    # The request body may be unread; never parse it as a request.
-                    self.send_header("Connection", "close")
-                    self.close_connection = True
-                self.end_headers()
-                self.wfile.write(payload)
-
-            def do_POST(self) -> None:  # noqa: N802
-                try:
-                    length = int(self.headers.get("Content-Length", "0"))
-                except ValueError:
-                    length = -1
-                if not 0 <= length <= _MAX_BODY_BYTES:
-                    self._answer(413, {"error": "request body is too large"})
-                    return
-                # Read the bounded body before refusing anyone, so a refused
-                # caller gets its answer instead of a reset connection.
-                raw = self.rfile.read(length)
-                supplied = self.headers.get("X-Nunchi-Session", "").encode()
-                if not hmac.compare_digest(supplied, gate._secret):
-                    self._answer(401, {"error": "unknown session"})
-                    return
-                try:
-                    body = json.loads(raw or b"{}")
-                except json.JSONDecodeError:
-                    self._answer(400, {"error": "request body is not JSON"})
-                    return
-                if not isinstance(body, dict):
-                    self._answer(400, {"error": "request body must be an object"})
-                    return
-                self._answer(200, gate.route(self.path, body))
-
-        self._server = _UnixHTTPServer(str(self.socket_path), Handler)
-        os.chmod(self.socket_path, 0o600)
-        threading.Thread(
-            target=self._server.serve_forever, name="nunchi-claude-gate", daemon=True
-        ).start()
-
-    def route(self, path: str, body: Mapping[str, Any]) -> dict[str, Any]:
-        participant = self.participant
-        if path == "/v1/attach":
-            return {"tools": participant.attach()}
-        if path == "/v1/turn-start":
-            turn_id = body.get("turn_id")
-            wake_id = body.get("wake_id")
-            if not isinstance(turn_id, str) or not turn_id:
-                return {"bound": False}
-            return {
-                "bound": participant.bind_turn(
-                    turn_id=turn_id,
-                    wake_id=wake_id if isinstance(wake_id, str) else None,
-                )
-            }
-        if path == "/v1/tool":
-            turn_id = body.get("turn_id")
-            tool = body.get("tool")
-            if not isinstance(tool, str):
-                return {"ok": False, "error": "The tool name is missing."}
-            ok, text = participant.call_tool(
-                turn_id=turn_id if isinstance(turn_id, str) else None,
-                tool=tool,
-                arguments=body.get("input", {}),
-            )
-            return {"ok": True, "text": text} if ok else {"ok": False, "error": text}
-        if path == "/v1/news":
-            turn_id = body.get("turn_id")
-            return {"text": participant.news(turn_id=turn_id if isinstance(turn_id, str) else None)}
-        return {"error": f"unknown gate path {path}"}
-
-    def close(self) -> None:
-        if self._server is not None:
-            self._server.shutdown()
-            self._server.server_close()
-            self._server = None
-        try:
-            self.socket_path.unlink()
-        except FileNotFoundError:
-            pass

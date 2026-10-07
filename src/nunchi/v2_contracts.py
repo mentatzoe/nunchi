@@ -31,9 +31,10 @@ INTERFACE_VERSIONS = {
     "I-010F": 1,
     "I-020A": 1,
     "I-030A": 3,
-    "I-040A": 3,
+    "I-040A": 4,
     "I-040B": 1,
     "I-040C": 1,
+    "I-040D": 1,
 }
 # Nunchi's own nod is gone (#94 step 7): a mhm is the participant's own move.
 # Receipts it wrote before I-010E@5 still read, so older journals load.

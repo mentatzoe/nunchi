@@ -585,10 +585,10 @@ class RecordingParticipant(OpenAICompatibleParticipant):
         # One entry per model call, in order; the agent splits it by play.
         self.usage_log: list[dict[str, Any]] = []
 
-    def _invoke(self, protocol: Any) -> Any:
+    def _complete(self, messages: Any, *, json_reply: bool) -> Any:
         self.last_reply = None
         try:
-            self.last_reply = super()._invoke(protocol)
+            self.last_reply = super()._complete(messages, json_reply=json_reply)
             return self.last_reply
         finally:
             if self.last_response is not None:
@@ -605,8 +605,13 @@ def _raw_reply(agent: Any) -> Any:
     return reply
 
 
+# The silence marker the agent uses when its final answer is its post. A real
+# integration names its harness's own marker.
+FINAL_ANSWER_SILENCE = "[SILENT]"
+
+
 def openai_compatible_agent_factory(
-    *, api_key: str, base_url: str, model: str
+    *, api_key: str, base_url: str, model: str, posting: str = "envelope"
 ) -> AgentFactory:
     def build(profile: ParticipantProfile) -> Any:
         openrouter = "openrouter.ai" in base_url
@@ -618,6 +623,7 @@ def openai_compatible_agent_factory(
             provider="openrouter" if openrouter else "openai-compatible",
             timeout_seconds=AGENT_TIMEOUT_SECONDS / 2,
             extra_body={"max_tokens": AGENT_MAX_TOKENS, **({"usage": {"include": True}} if openrouter else {})},
+            silence_marker=FINAL_ANSWER_SILENCE if posting == "final-answer" else None,
         )
 
     return build
@@ -1378,11 +1384,16 @@ def summarize(
             + ("; each turn with a reading is also played without it" if meta.get("paired") else ""),
         ]
     if meta.get("agent_model"):
+        posting = (
+            "and its plain final answer is its post"
+            if meta.get("agent_posting") == "final-answer"
+            else "one JSON envelope per reply"
+        )
         lines += [
             f"Each moment runs through Nunchi's pipeline. When attention wakes the agent,",
             f"`{meta['agent_model']}` plays its turn through the shared participant",
-            "protocol, and the move the room sees is graded. Step 1 is graded on",
-            "attention alone. See `evals/behavior/score.py`.",
+            f"turn ({posting}), and the move the room sees is graded. Step 1 is",
+            "graded on attention alone. See `evals/behavior/score.py`.",
             "",
         ]
     else:
@@ -1544,6 +1555,15 @@ def main(argv: list[str] | None = None) -> int:
         help="model that plays the woken agent's turn; empty grades attention alone",
     )
     parser.add_argument(
+        "--agent-posting",
+        choices=("envelope", "final-answer"),
+        default="envelope",
+        help=(
+            "how the agent posts: one JSON envelope per reply, or its plain final "
+            "answer is the post (as in harnesses like Hermes)"
+        ),
+    )
+    parser.add_argument(
         "--paired",
         action="store_true",
         help="also play each agent turn that carried a reading without it, on the same wake",
@@ -1609,7 +1629,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.agent_model:
             agent_factory = openai_compatible_agent_factory(
-                api_key=api_key, base_url=args.base_url, model=args.agent_model
+                api_key=api_key,
+                base_url=args.base_url,
+                model=args.agent_model,
+                posting=args.agent_posting,
             )
 
     jobs = plan(scenes, models, args.runs)
@@ -1650,6 +1673,7 @@ def main(argv: list[str] | None = None) -> int:
         "models": models,
         "reasoning_efforts": {model: model_spec(model)[1] for model in models if model_spec(model)[1]},
         "agent_model": (DRY_RUN_AGENT if args.dry_run else args.agent_model) if args.agent_model else None,
+        "agent_posting": args.agent_posting if args.agent_model else None,
         "paired": args.paired,
         "reading_items": args.reading_items,
         "reading_chars": args.reading_chars,
