@@ -84,6 +84,13 @@ plus a `hermes` section:
 }
 ```
 
+- `attention.model` is any configured attention route, or Hermes's own
+  model: `{"kind": "hermes-host", "provider": "…", "model": "…"}`. Hermes
+  must allow the plugin that provider and model under
+  `plugins.entries.nunchi-room.llm` (`allow_provider_override`,
+  `allow_model_override`, `allowed_providers`, `allowed_models`); if it
+  refuses, the judgment fails with that instruction and no other model is
+  used.
 - Room events use the ids `<platform>:message:<message id>` and
   `<platform>:user:<user id>`.
 - `turn_user_id` is the identity Hermes runs the injected turns as.
