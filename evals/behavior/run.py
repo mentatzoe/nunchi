@@ -29,6 +29,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import statistics
 import subprocess
 import sys
@@ -187,6 +188,7 @@ class RecordingAgent:
         self.memory_moves: list[str] = []
         self.memory_reasons: list[str] = []
         self.memory_threads: list[dict[str, Any]] = []
+        self.replies: list[Any] = []
 
     def reset(self) -> None:
         """Forget a played earlier turn, so the record shows only the judged one."""
@@ -198,6 +200,7 @@ class RecordingAgent:
         self.memory_moves = []
         self.memory_reasons = []
         self.memory_threads = []
+        self.replies = []
 
     def _usage_since(self, start: int) -> dict[str, Any] | None:
         log = getattr(self.inner, "usage_log", None)
@@ -221,6 +224,8 @@ class RecordingAgent:
             arrive()
         started = time.monotonic()
         first_call = self._calls_so_far()
+        replies = getattr(self.inner, "reply_log", None)
+        first_reply = len(replies) if isinstance(replies, list) else 0
         try:
             self.action = self.inner.run_protocol(
                 wake=wake, expand=self._recorded(expand, "with reading"), **kwargs
@@ -232,6 +237,8 @@ class RecordingAgent:
         finally:
             self.latency_ms = int((time.monotonic() - started) * 1000)
             self.usage = self._usage_since(first_call)
+            if isinstance(replies, list):
+                self.replies = list(replies[first_reply:])
         if self.paired and self.attention.get("advice"):
             self.without_reading = self._play_without_reading(wake, expand, kwargs)
         return self.action
@@ -584,11 +591,15 @@ class RecordingParticipant(OpenAICompatibleParticipant):
         super().__init__(**kwargs)
         # One entry per model call, in order; the agent splits it by play.
         self.usage_log: list[dict[str, Any]] = []
+        # Every plain reply, in order, so a silence's reply can be read too.
+        self.reply_log: list[Any] = []
 
     def _complete(self, messages: Any, *, json_reply: bool) -> Any:
         self.last_reply = None
         try:
             self.last_reply = super()._complete(messages, json_reply=json_reply)
+            if not json_reply:
+                self.reply_log.append(self.last_reply)
             return self.last_reply
         finally:
             if self.last_response is not None:
@@ -596,6 +607,24 @@ class RecordingParticipant(OpenAICompatibleParticipant):
 
 
 RAW_REPLY_MAX_CHARS = 4000
+
+# Words that belong to Nunchi's machinery, never to a post: the agent leaked
+# its own deliberation or the turn's facts into the room.
+INTERNALS = re.compile(
+    r"\battention model|\bnunchi\b|\[silent\]|</?thinking>|own_moves|judged_through|"
+    r"trigger_event_id|attention\.advice|memory\.threads",
+    re.IGNORECASE,
+)
+
+
+def mentions_internals(action: Any) -> bool:
+    """Whether a posted message or reply names Nunchi's machinery."""
+
+    return (
+        isinstance(action, Mapping)
+        and action.get("kind") in ("message", "reply")
+        and bool(INTERNALS.search(str(action.get("text", ""))))
+    )
 
 
 def _raw_reply(agent: Any) -> Any:
@@ -1036,6 +1065,15 @@ def judge_moment(
         }
         if agent.usage is not None:
             record["agent"]["usage"] = agent.usage
+        if agent.replies:
+            record["agent"]["replies"] = [
+                reply[:RAW_REPLY_MAX_CHARS] + "…"
+                if isinstance(reply, str) and len(reply) > RAW_REPLY_MAX_CHARS
+                else reply
+                for reply in agent.replies
+            ]
+        if mentions_internals(agent.action):
+            record["agent"]["mentions_internals"] = True
         if agent.memory_moves:
             record["agent"]["memory_moves"] = agent.memory_moves
         if agent.memory_reasons:
@@ -1199,6 +1237,20 @@ def _agent_turn_sections(records: list[dict[str, Any]], *, paired: bool) -> list
             f"{moves['speak']} | {moves['stay_quiet']} | {moves['mhm']} | {grades['fits']} | {grades['miss']} | "
             f"{sum(1 for record in mine if 'error' in record['agent'])} |"
         )
+    posts = [
+        record
+        for record in turns
+        if isinstance(record["agent"].get("action"), Mapping)
+        and record["agent"]["action"].get("kind") in ("message", "reply")
+    ]
+    if posts:
+        leaked = sum(1 for record in posts if record["agent"].get("mentions_internals"))
+        lines += [
+            "",
+            f"{leaked} of {len(posts)} posts mention Nunchi's machinery (the attention model, "
+            "the silence marker, thinking tags, or the turn's field names). A post should hold "
+            "only words for the room.",
+        ]
     looked = [record for record in turns if record["agent"].get("looked_again")]
     if looked:
         moves = Counter(record["result"] for record in looked)

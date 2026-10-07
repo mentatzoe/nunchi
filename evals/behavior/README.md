@@ -140,7 +140,13 @@ agent's side of the room:
   looking again. This style has no tools, so the agent cannot react or ask
   for more of the room; compare it with the envelope arm on the same
   attention route. In the workflow, the `agent_posting` input sets it, and
-  `agent_model: none` grades attention alone.
+  `agent_model: none` grades attention alone. Each record keeps the agent's
+  plain replies (`agent.replies`), so a silence can be read too.
+
+The grade covers the move, not its words. The summary also counts posts that
+name Nunchi's machinery (the attention model, the silence marker, thinking
+tags, the turn's field names), and each such record has
+`agent.mentions_internals`. A post should hold only words for the room.
 
 A pause moment, such as "five minutes later, nobody has answered", plays
 the scene through the message before the pause as it happened live: that

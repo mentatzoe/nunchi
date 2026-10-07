@@ -324,9 +324,13 @@ there is no send tool:
 - `Turn.decide(answer)` says what becomes of the answer: `deliver` makes it
   the turn's one message; `continue` has the agent answer again with the
   turn's text in view, once for looking again and once for a refused secret;
-  `silent` covers the marker (any note after it is never posted), an empty
-  answer, a turn that already took its room action such as a reaction, and an
-  ended turn.
+  `silent` covers the marker (at the start or on a line of its own; anything
+  else in that answer is never posted), an empty answer, a turn that already
+  took its room action such as a reaction, and an ended turn.
+- The agent may think first inside `<thinking></thinking>`. That text is never
+  posted; it becomes the move's reason in the agent's memory, as `why` does in
+  the envelope, so a later turn knows why it spoke or held back. An unclosed
+  block runs to the end of the answer.
 - `Turn.finish(answer)` then waits for the host's commit. The integration's
   transport is `HarnessDelivery`: it commits a message by allowing it, with
   the receipt detail "the harness delivers it", and hands any other action,
