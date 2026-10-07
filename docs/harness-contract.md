@@ -6,8 +6,10 @@ core (`nunchi.turn`), with both posting styles, and its local protocol is
 `nunchi.turn_server` (`I-040D`). The Claude Code gate and the one-reply style
 (the behavior eval, Codex) drive it, and the eval measures final-answer
 posting with `--agent-posting final-answer`. Step 9d has started: the turn
-conformance kit runs in CI (see "Conformance kit"). The adapters (9e) come
-next. The harness
+conformance kit runs in CI (see "Conformance kit"), every library-hosted
+integration builds its side through one `Room` (`nunchi.room`), and the
+[harness guide](harness-guide.md) is written. The adapters (9e) come next,
+built from the guide alone. The harness
 facts were checked against upstream source on 2026-10-07: Hermes main
 `a50406d9` and Codex `a513012`. The key Hermes and Codex behaviors were then
 run (see "Runtime checks"). The conformance kit (step 9d) checks the cells
@@ -235,6 +237,7 @@ agent plays one turn per scenario through an integration's real path, and the
 kit owns the room, attention, the host, and the checks. An integration takes
 part with a `KitIntegration`: the participant the host invokes, wired so that
 starting its agent plays the script through the integration's own surface.
+The kit builds the room with the same `Room` the integrations use.
 `nunchi.integrations.claude_code_conformance` is the first: the script binds,
 calls the room tools and asks for steering over the gate's socket, as the mod
 does. CI runs the kit on a clean install.

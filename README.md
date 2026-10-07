@@ -78,7 +78,7 @@ behavior suite, conformance scenarios and unit tests check it.
 
 ### Where the work stands
 
-As of 2026-10-06. The live plan is
+As of 2026-10-07. The live plan is
 [#94](https://github.com/mentatzoe/nunchi/issues/94); measurements are on
 [#86](https://github.com/mentatzoe/nunchi/issues/86).
 
@@ -96,7 +96,8 @@ flowchart TB
         p6["6. Rhythm:<br/>time, pauses"]:::next
         p7["7. Remove<br/>Nunchi's nod"]:::done
         p8["8. More<br/>model APIs"]:::done
-        p2 --> p3 --> p4 --> p5 --> p6 --> p7 --> p8
+        p9["9. One library,<br/>every harness"]:::next
+        p2 --> p3 --> p4 --> p5 --> p6 --> p7 --> p8 --> p9
     end
     subgraph measure["Evaluation"]
         direction LR
@@ -281,6 +282,8 @@ tests to their V2 coverage.
 - [Shared foundation and operator handoff](docs/v2-shared-foundation.md)
 - [Install and operate](docs/INSTALL.md)
 - [Platform interface and conformance](docs/platform-v2.md)
+- [Harness contract](docs/harness-contract.md) and
+  [harness guide](docs/harness-guide.md): how every harness uses the library
 - [Reference adapters](docs/adapters.md)
 - [Verification and evidence](docs/v2-verification.md)
 
