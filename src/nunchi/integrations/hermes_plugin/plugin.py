@@ -30,7 +30,7 @@ stale turn) is silenced, since only the library may commit a post.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import hmac
 import json
 import logging
@@ -184,13 +184,11 @@ class _Wake:
     """The open turn as the driver started it."""
 
     turn: Turn
-    started_at: float = field(default_factory=time.monotonic)
     # The text of a fresh run to start when the current run ends (final-answer
     # posting's `continue` on a harness that cannot continue a run).
     fresh_run: str | None = None
     # A fresh run was injected; it binds with no wake id.
     continuing: bool = False
-    ran: bool = False
 
 
 class HermesReactions:
@@ -281,7 +279,6 @@ class HermesRoomPlugin:
         room_factory: Any = None,
     ) -> None:
         self.route = route
-        self.start_timeout_seconds = float(start_timeout_seconds)
         self.room_factory = room_factory
         self.room: Any = None
         self.ctx: Any = None
@@ -294,6 +291,9 @@ class HermesRoomPlugin:
             roles=tuple(roles),
             result_wait_seconds=result_wait_seconds,
             silence_marker=SILENCE_MARKER,
+            # Hermes may accept an injected turn and drop it later at dispatch,
+            # telling no plugin: the library fails a run that never binds.
+            bind_timeout_seconds=float(start_timeout_seconds),
         )
         self._lock = threading.RLock()
         self._wake: _Wake | None = None
@@ -394,14 +394,6 @@ class HermesRoomPlugin:
 
     # -- the driver (the library calls these) ------------------------------------------
 
-    def ready(self, cancel: threading.Event) -> bool:
-        """Wait until the previous turn's run has ended; Hermes runs one at a time."""
-
-        while self.participant.active is not None:
-            if cancel.wait(0.05):
-                return False
-        return not cancel.is_set()
-
     def start(self, turn: Turn) -> None:
         with self._lock:
             self._wake = _Wake(turn)
@@ -412,20 +404,14 @@ class HermesRoomPlugin:
                 "Hermes did not accept the turn: check allow_gateway_injection and that the "
                 "gateway is running"
             )
-        self._watch(turn)
 
     def interrupt(self, turn: Turn) -> None:
-        """Hermes has no plugin interrupt; a cancelled turn's answer is silenced.
+        """Hermes has no plugin interrupt.
 
-        If the run never started, the turn ends now: a run that starts later is
-        stale and its answer is silenced too.
+        The library closes a cancelled turn, so its run's answer is silenced at
+        the output hook, and a run that starts later is stale and silenced too.
+        Tools the run already ran stay run.
         """
-
-        with self._lock:
-            wake = self._wake
-            unstarted = wake is not None and wake.turn is turn and turn.turn_id is None
-        if unstarted:
-            self._close(turn, ok=False, detail="cancelled before Hermes started the run")
 
     def _inject(self, wake_id: str, text: str) -> bool:
         if self.ctx is None:
@@ -435,27 +421,6 @@ class HermesRoomPlugin:
         except Exception:
             logger.exception("nunchi-room: inject_message failed")
             return False
-
-    def _watch(self, turn: Turn) -> None:
-        """End the turn if Hermes accepted it but never ran it (a dispatch it refused later)."""
-
-        def check() -> None:
-            with self._lock:
-                wake = self._wake
-                stuck = wake is not None and wake.turn is turn and not wake.ran
-            if stuck:
-                self._close(turn, ok=False, detail="Hermes accepted the turn but never ran it")
-
-        timer = threading.Timer(self.start_timeout_seconds, check)
-        timer.daemon = True
-        timer.start()
-
-    def _close(self, turn: Turn, *, ok: bool, detail: str) -> None:
-        with self._lock:
-            if self._wake is not None and self._wake.turn is turn:
-                self._wake = None
-        if self.participant.active is turn:
-            self.participant.end_turn(turn_id=None, ok=ok, detail=detail)
 
     # -- hooks inside the agent's run ---------------------------------------------------
 
@@ -478,7 +443,6 @@ class HermesRoomPlugin:
             wake = self._wake
             if wake is None or not hmac.compare_digest(match.group(1).encode(), wake.turn.wake_id.encode()):
                 return None  # a stale turn's run: it is silenced at the end
-            wake.ran = True
             run.bound = self.participant.bind_turn(
                 turn_id=turn_id, wake_id=None if wake.continuing else wake.turn.wake_id
             )
@@ -585,9 +549,7 @@ class HermesRoomPlugin:
         if fresh is not None and ok and wake is not None and not wake.turn.cancelled.is_set():
             with self._lock:
                 wake.continuing = True
-                wake.ran = False
             if self._inject(wake.turn.wake_id, fresh):
-                self._watch(wake.turn)
                 return None
             ok, detail = False, "Hermes did not accept the fresh run"
         if wake is not None:

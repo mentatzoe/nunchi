@@ -31,6 +31,7 @@ import json
 import re
 import secrets
 import threading
+import time
 from typing import Any, Protocol
 
 from .attention import ParticipantProfile
@@ -53,6 +54,9 @@ TURN_ROLES = ("send", "react", "propose", "withdraw", "context")
 # Actions the room sees; the agent looks again before the first one.
 VISIBLE_KINDS = ("message", "reply", "reaction")
 DEFAULT_RESULT_WAIT_SECONDS = 25.0
+# How long a new turn waits for the harness to report the previous turn's end
+# before closing it as a failure.
+DEFAULT_PREVIOUS_TURN_GRACE_SECONDS = 30.0
 _PAGE_EVENTS = 12
 _PAGE_BYTES = 16_384
 
@@ -543,6 +547,8 @@ class TurnParticipant:
         roles: Sequence[str] = TURN_ROLES,
         result_wait_seconds: float = DEFAULT_RESULT_WAIT_SECONDS,
         silence_marker: str | None = None,
+        bind_timeout_seconds: float | None = None,
+        previous_turn_grace_seconds: float = DEFAULT_PREVIOUS_TURN_GRACE_SECONDS,
     ) -> None:
         unknown = set(roles) - set(TURN_ROLES)
         if unknown:
@@ -558,6 +564,10 @@ class TurnParticipant:
         self.tool_names = {role: tool_names[role] for role in self.registered_roles}
         self._roles_by_tool = {name: role for role, name in self.tool_names.items()}
         self.result_wait_seconds = result_wait_seconds
+        # A harness that may accept a turn and then never run it sets how long
+        # the agent's run has to bind before the turn fails.
+        self.bind_timeout_seconds = bind_timeout_seconds
+        self.previous_turn_grace_seconds = previous_turn_grace_seconds
         self._lock = threading.Lock()
         self._active: Turn | None = None
         self._recent: deque[Turn] = deque(maxlen=4)
@@ -603,6 +613,8 @@ class TurnParticipant:
         ready = getattr(self.driver, "ready", None)
         if callable(ready) and not ready(cancel):
             return None
+        if not self._wait_for_previous(cancel):
+            return None
         with self._lock:
             if self._active is not None:
                 raise TurnError("another turn of this agent is still open")
@@ -613,12 +625,28 @@ class TurnParticipant:
         except BaseException:
             self._close(turn, ok=False, detail="the turn could not be started")
             raise
+        started = time.monotonic()
         while True:
             if turn.action_ready.wait(0.05):
                 return deepcopy(turn.action)
             if cancel.is_set():
                 self.driver.interrupt(turn)
+                # The library is done with this turn: whatever the agent does
+                # next finds it closed, and posts nothing.
+                self._close(turn, ok=False, detail="the turn was cancelled")
                 return None
+            if (
+                self.bind_timeout_seconds is not None
+                and turn.turn_id is None
+                and not turn.ended.is_set()
+                and time.monotonic() - started >= self.bind_timeout_seconds
+            ):
+                self.driver.interrupt(turn)
+                self._close(
+                    turn,
+                    ok=False,
+                    detail=f"the agent's run did not start within {self.bind_timeout_seconds:g} seconds",
+                )
             if turn.ended.is_set():
                 if turn.action_ready.is_set():
                     return deepcopy(turn.action)
@@ -632,6 +660,30 @@ class TurnParticipant:
                         + (f" ({turn.end_detail})" if turn.end_detail else "")
                     )
                 raise TurnError(f"the agent's turn ended without an answer: {turn.end_detail}")
+
+    def _wait_for_previous(self, cancel: threading.Event) -> bool:
+        """One turn at a time: wait until the harness reports the previous turn's end.
+
+        After its room action, the agent's run may still be finishing. A
+        harness that never reports the end would hold every later turn, so
+        after ``previous_turn_grace_seconds`` the previous turn closes as a
+        failure, and anything its run does later finds it closed.
+        """
+
+        deadline = time.monotonic() + self.previous_turn_grace_seconds
+        while True:
+            with self._lock:
+                previous = self._active
+            if previous is None:
+                return True
+            if cancel.is_set():
+                return False
+            if time.monotonic() >= deadline:
+                self._close(
+                    previous, ok=False, detail="the harness never reported the end of this turn"
+                )
+                continue
+            cancel.wait(0.05)
 
     def unbound_detail(self) -> str:
         """Why the integration may have missed the binding, for the error."""
