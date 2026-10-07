@@ -132,6 +132,15 @@ agent's side of the room:
   is asked for: at most 4 notes of at most 400 characters by default, and
   `--reading-items 0` asks for none. Shorter readings answer faster; the
   paired arm shows what each length changes.
+- `--agent-posting final-answer` has the agent write its post as a plain
+  reply, as an agent does in a harness whose final answer is its post
+  (Hermes), instead of one JSON envelope per reply (`envelope`, the
+  default). The core `Turn` decides each reply: it is posted, it is silence
+  (a reply starting with `[SILENT]`), or the agent replies again after
+  looking again. This style has no tools, so the agent cannot react or ask
+  for more of the room; compare it with the envelope arm on the same
+  attention route. In the workflow, the `agent_posting` input sets it, and
+  `agent_model: none` grades attention alone.
 
 A pause moment, such as "five minutes later, nobody has answered", plays
 the scene through the message before the pause as it happened live: that
@@ -163,7 +172,7 @@ play).
 
 | Question | Settings | About |
 |---|---|---|
-| Which model should answer steps 1 and 2? | `--agent-model` empty: attention alone, graded on step 1 and on each route's own top move | $2 |
+| Which model should answer steps 1 and 2? | `--agent-model` empty (`none` in the workflow): attention alone, graded on step 1 and on each route's own top move | $2 |
 | Did a change to the agent's turn help? | `--agent-model anthropic/claude-haiku-4.5` | $9 |
 | Did a change to the reading help? | the same agent, with `--paired` | $16 |
 

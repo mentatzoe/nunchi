@@ -801,6 +801,29 @@ class RunTests(unittest.TestCase):
         self.assertEqual(run.DRY_RUN_AGENT, meta["agent_model"])
         self.assertIn("pile-on: two-agents-one-question", summary)
 
+    def test_an_agent_whose_final_answer_is_its_post_speaks_through_the_turn(self):
+        payload = json.dumps({"choices": [{"message": {"content": "Here is what I found."}}]}).encode()
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        scene = scene_by_id("story-across-messages")
+        job = run.Job(scene, 2, scene.participants[0], "fixture/model", 0)
+        agents = run.openai_compatible_agent_factory(
+            api_key="k", base_url=run.DEFAULT_BASE_URL, model="fixture/agent", posting="final-answer"
+        )
+        with mock.patch("urllib.request.urlopen", lambda request, timeout: Response(payload)):
+            record = run.judge_moment(
+                job, lambda _: FixedModel("WAKE"), timeout_seconds=5, agent_factory=agents
+            )
+        self.assertFalse(record["provider_error"])
+        self.assertEqual("speak", record["result"])
+        self.assertEqual("Here is what I found.", record["agent"]["action"]["text"])
+
     def test_a_live_run_needs_the_key(self):
         with mock.patch.dict(os.environ, {}, clear=True), mock.patch("sys.stderr"):
             with self.assertRaises(SystemExit):

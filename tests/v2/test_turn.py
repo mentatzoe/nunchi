@@ -246,3 +246,223 @@ class OneReplyTurnTests(unittest.TestCase):
         self.assertIn("credential or secret", protocol.pages[-1]["note"])
         with self.assertRaises(ParticipantModelError):
             protocol.consume(self.reply(protocol, leak), expand=None)
+
+
+class FinalAnswerTurnTests(unittest.TestCase):
+    """Final-answer posting: the agent's answer is its post (#94 step 9c)."""
+
+    def turn(self, room=None, guard=None, tool_names=None):
+        from nunchi.participant_model import build_participant_turn_request
+        from nunchi.turn import Turn
+
+        return Turn(
+            profile=PROFILE,
+            request=build_participant_turn_request(test_wake(), deepcopy(OPPORTUNITY)),
+            tool_names=tool_names or {"react": "emoji", "context": "look"},
+            expand=(room or Room()).expand,
+            guard=guard,
+            result_wait_seconds=2,
+            silence_marker="[SILENT]",
+        )
+
+    def test_the_marker_or_nothing_is_silence_and_a_note_after_it_is_never_posted(self):
+        for answer in ("[SILENT]", "  [SILENT]\n\nNothing to add here.", "[silent]", "", None):
+            with self.subTest(answer=answer):
+                turn = self.turn()
+                self.assertEqual("silent", turn.decide(answer).kind)
+                self.assertIsNone(turn.action)
+
+    def test_an_answer_is_the_turns_one_message(self):
+        turn = self.turn()
+        decision = turn.decide("  On it, checking the logs now.  ")
+        self.assertEqual(("deliver", "On it, checking the logs now."), (decision.kind, decision.text))
+        self.assertEqual(
+            {"kind": "message", "origin_event_id": "e1", "text": "On it, checking the logs now."},
+            turn.action,
+        )
+        self.assertEqual("silent", turn.decide("and another thing").kind)
+
+    def test_it_looks_again_once_before_posting(self):
+        room = Room()
+        room.arrivals = [message("e2", "never mind, found it")]
+        turn = self.turn(room)
+        decision = turn.decide("On it.")
+        self.assertEqual("continue", decision.kind)
+        self.assertTrue(decision.text.startswith("Not posted yet: 1 new message(s)"))
+        self.assertIn('"On it."', decision.text)
+        self.assertIn("never mind", decision.text)
+        self.assertIn("e2", turn.visible_event_ids)
+        room.arrivals = [message("e3")]
+        self.assertEqual("deliver", turn.decide("Glad you found it.").kind)
+
+    def test_a_secret_is_refused_once_then_the_turn_stays_silent(self):
+        turn = self.turn(guard=SecretGuard(["a-withheld-secret-value"]))
+        first = turn.decide("the key is a-withheld-secret-value")
+        self.assertEqual("continue", first.kind)
+        self.assertIn("credential or secret", first.text)
+        self.assertIn("[SILENT]", first.text)
+        self.assertEqual("silent", turn.decide("the key is a-withheld-secret-value").kind)
+        self.assertIsNone(turn.action)
+
+    def test_a_reaction_taken_as_a_tool_is_the_turns_action(self):
+        turn = self.turn()
+        turn.bind(turn_id="t1", wake_id=turn.wake_id)
+        threading.Thread(
+            target=turn.call, args=("react", {"target_event_id": "e1", "reaction": "👍"}), daemon=True
+        ).start()
+        self.assertTrue(turn.action_ready.wait(5))
+        self.assertEqual("silent", turn.decide("Thanks!").kind)
+
+    def test_the_harness_delivers_only_what_the_host_committed_for_it(self):
+        from nunchi.turn import HARNESS_DELIVERS
+
+        for result, expected in (
+            (TransportResult("unknown", HARNESS_DELIVERS), "deliver"),
+            (None, "silent"),
+            (TransportResult("sent", "posted by the library"), "silent"),
+            (TransportResult("failed", "stale"), "silent"),
+        ):
+            with self.subTest(result=result):
+                turn = self.turn()
+                answer = {}
+                thread = threading.Thread(
+                    target=lambda: answer.setdefault("finish", turn.finish("On it.")), daemon=True
+                )
+                thread.start()
+                self.assertTrue(turn.action_ready.wait(5))
+                turn.settle(result)
+                thread.join(5)
+                self.assertEqual(expected, answer["finish"].kind)
+
+    def test_a_turn_needs_a_marker_and_has_no_send_tool(self):
+        with self.assertRaises(ValueError):
+            self.turn(tool_names={"send": "say", "context": "look"})
+        from nunchi.turn import Turn, TurnError
+        from nunchi.participant_model import build_participant_turn_request
+
+        tools_turn = Turn(
+            profile=PROFILE,
+            request=build_participant_turn_request(test_wake(), deepcopy(OPPORTUNITY)),
+            tool_names={"send": "say"},
+        )
+        with self.assertRaises(TurnError):
+            tools_turn.decide("hi")
+
+    def test_the_text_says_the_reply_is_the_post_and_names_the_marker(self):
+        text = self.turn().text
+        self.assertIn("Your final reply in this turn is posted to the room", text)
+        self.assertIn("reply with exactly [SILENT]", text)
+        self.assertIn("call emoji once", text)
+        self.assertNotIn("never posted to the room", text)
+
+
+class HarnessHostedFinalAnswerTests(unittest.TestCase):
+    """A harness that posts its agent's answer itself, through the library's turn."""
+
+    def test_the_answer_goes_out_after_the_hosts_commit(self):
+        from nunchi.turn import HARNESS_DELIVERS, HarnessDelivery
+
+        driver = RecordingDriver()
+        participant = TurnParticipant(
+            profile=PROFILE,
+            driver=driver,
+            guard=SecretGuard(()),
+            tool_names=NAMES,
+            result_wait_seconds=5,
+            silence_marker="[SILENT]",
+        )
+        box = {}
+        cancel = threading.Event()
+        thread = threading.Thread(
+            target=lambda: box.setdefault(
+                "action",
+                participant.run_protocol(
+                    wake=test_wake(), opportunity=deepcopy(OPPORTUNITY), expand=Room().expand, cancel=cancel
+                ),
+            ),
+            daemon=True,
+        )
+        thread.start()
+        self.assertTrue(driver.started_event.wait(5))
+        turn = driver.started[0]
+        self.assertNotIn("send", turn.tool_names)
+        self.assertTrue(participant.bind_turn(turn_id="t1", wake_id=turn.wake_id))
+        answer = {}
+        finishing = threading.Thread(
+            target=lambda: answer.setdefault("finish", participant.finish(turn_id="t1", answer="On it.")),
+            daemon=True,
+        )
+        finishing.start()
+        thread.join(5)
+        self.assertEqual("message", box["action"]["kind"])
+        # The host commits the message for the harness to post.
+        result = HarnessDelivery().dispatch(action=box["action"], wake=test_wake())
+        self.assertEqual(TransportResult("unknown", HARNESS_DELIVERS), result)
+        participant.settle(turn.request_id, result)
+        finishing.join(5)
+        self.assertEqual(("deliver", "On it."), (answer["finish"].kind, answer["finish"].text))
+        self.assertEqual("silent", participant.finish(turn_id="other", answer="hi").kind)
+
+    def test_without_a_native_transport_only_messages_are_offered(self):
+        from nunchi.reactions import UNAVAILABLE_REACTION_CAPABILITY
+        from nunchi.turn import HarnessDelivery
+
+        delivery = HarnessDelivery()
+        self.assertEqual(["message"], delivery.ordinary_action_capabilities())
+        self.assertIs(UNAVAILABLE_REACTION_CAPABILITY, delivery.reaction_capability())
+        self.assertEqual(
+            "unavailable",
+            delivery.dispatch(action={"kind": "reaction"}, wake=test_wake()).delivery,
+        )
+
+
+class PlainReplyParticipantTests(unittest.TestCase):
+    """The model participant whose plain reply is its post drives the same Turn."""
+
+    def participant(self, replies):
+        from nunchi.participant_model import OpenAICompatibleParticipant
+
+        class Scripted(OpenAICompatibleParticipant):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self.sent = []
+
+            def _complete(self, messages, *, json_reply):
+                self.sent.append((deepcopy(messages), json_reply))
+                return replies.pop(0)
+
+        return Scripted(
+            profile=PROFILE,
+            model="m",
+            api_key="k",
+            base_url="http://localhost",
+            silence_marker="[SILENT]",
+        )
+
+    def play(self, participant, room=None):
+        return participant.run_protocol(
+            wake=test_wake(),
+            opportunity=deepcopy(OPPORTUNITY),
+            expand=(room or Room()).expand,
+            cancel=threading.Event(),
+        )
+
+    def test_a_reply_is_the_post_and_the_marker_is_silence(self):
+        speaker = self.participant(["On it."])
+        self.assertEqual(
+            {"kind": "message", "origin_event_id": "e1", "text": "On it."}, self.play(speaker)
+        )
+        messages, json_reply = speaker.sent[0]
+        self.assertFalse(json_reply)
+        self.assertEqual(["user"], [message["role"] for message in messages])
+        self.assertIn("reply with exactly [SILENT]", messages[0]["content"])
+        self.assertIsNone(self.play(self.participant(["[SILENT] (nothing to add)"])))
+
+    def test_it_replies_again_after_looking_again(self):
+        room = Room()
+        room.arrivals = [message("e2", "never mind")]
+        speaker = self.participant(["On it.", "[SILENT]"])
+        self.assertIsNone(self.play(speaker, room))
+        messages, _ = speaker.sent[1]
+        self.assertEqual(["user", "assistant", "user"], [message["role"] for message in messages])
+        self.assertIn("never mind", messages[2]["content"])
