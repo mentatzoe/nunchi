@@ -424,9 +424,7 @@ class Turn:
         if marker is None:
             raise TurnError("this turn posts through tools, not a final answer")
         raw = answer or ""
-        note = " ".join(part.strip() for part in _NOTE.findall(raw) if part.strip())
-        if note:
-            self.note = note
+        self.keep_note(" ".join(part.strip() for part in _NOTE.findall(raw) if part.strip()))
         text = _NOTE.sub("", raw).strip()
         with self.lock:
             if not self.open() or self.action is not None:
@@ -513,6 +511,18 @@ class Turn:
                 return
             self.outcome = result
             self.outcome_ready.set()
+
+    def keep_note(self, text: str | None) -> None:
+        """Keep the agent's own words as its reason, if the turn ends in silence.
+
+        They are never posted. Words that hold a withheld secret are not kept:
+        a reason reaches the agent's later turns and attention.
+        """
+
+        words = " ".join((text or "").split())
+        if not words or self.guard.refusal({"kind": "message", "text": words}) is not None:
+            return
+        self.note = words
 
     def end(self, *, ok: bool, detail: str = "") -> None:
         """The agent's turn ended: finished (ok) or failed or interrupted (not ok)."""
@@ -732,25 +742,36 @@ class TurnParticipant:
         with self._lock:
             return self._active
 
-    def turn_ended(self, *, ok: bool, detail: str) -> None:
+    def turn_ended(self, *, ok: bool, detail: str, note: str | None = None) -> None:
         turn = self.active
         if turn is not None:
-            self._close(turn, ok=ok, detail=detail)
+            self._end(turn, ok=ok, detail=detail, note=note)
 
-    def end_turn(self, *, turn_id: str | None, ok: bool, detail: str = "") -> bool:
+    def end_turn(
+        self, *, turn_id: str | None, ok: bool, detail: str = "", note: str | None = None
+    ) -> bool:
         """The harness says its agent's turn ended.
 
         With ``turn_id``, only the open turn bound as that id ends. Without one,
         the open turn ends whether or not it was bound: a harness knows its
         agent stopped even when the binding never happened, and an unbound
         turn that ends is a failure, never silence.
+
+        ``note`` is the agent's last words, such as its final message. When
+        the turn ends in silence they are its reason, as thinking is in
+        final-answer posting; they are never posted.
         """
 
         turn = self.active
         if turn is None or (turn_id is not None and not turn.bound(turn_id)):
             return False
-        self._close(turn, ok=ok, detail=detail)
+        self._end(turn, ok=ok, detail=detail, note=note)
         return True
+
+    def _end(self, turn: Turn, *, ok: bool, detail: str, note: str | None) -> None:
+        if ok and turn.action is None and turn.note is None:
+            turn.keep_note(note)
+        self._close(turn, ok=ok, detail=detail)
 
     def _close(self, turn: Turn, *, ok: bool, detail: str) -> None:
         with self._lock:

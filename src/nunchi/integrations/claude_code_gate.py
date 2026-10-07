@@ -421,7 +421,7 @@ class ClaudeCodeSession:
         return f": {tail[-500:]}" if tail else ""
 
     def _turn_ended(
-        self, process: subprocess.Popen[str], *, ok: bool, detail: str
+        self, process: subprocess.Popen[str], *, ok: bool, detail: str, note: str | None = None
     ) -> None:
         with self._lock:
             if process is not self._process:
@@ -429,7 +429,7 @@ class ClaudeCodeSession:
         # The participant closes its turn before the session reads as idle,
         # so the next wake never finds the previous turn still open.
         if self.on_turn_end is not None:
-            self.on_turn_end(ok=ok, detail=detail)
+            self.on_turn_end(ok=ok, detail=detail, note=note)
         self._busy = False
         self._idle.set()
 
@@ -451,8 +451,14 @@ class ClaudeCodeSession:
             if message.get("type") == "result":
                 self._answered = True
                 ok = message.get("subtype") == "success" and message.get("is_error") is False
+                # The session's final message: the agent's last words, kept as
+                # its reason if the turn ends in silence.
+                result = message.get("result")
                 self._turn_ended(
-                    process, ok=ok, detail=str(message.get("subtype", "unknown"))
+                    process,
+                    ok=ok,
+                    detail=str(message.get("subtype", "unknown")),
+                    note=result if isinstance(result, str) else None,
                 )
         process.wait()
         for stream in (process.stdin, process.stdout):

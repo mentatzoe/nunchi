@@ -56,7 +56,7 @@ How a turn is recorded:
 | The turn | Recorded as |
 |---|---|
 | ends with a room action | the transport's result (`sent`, `failed`, `unknown`) |
-| ends normally without one, and the mod bound it | silence |
+| ends normally without one, and the mod bound it | silence, with the session's final message as its reason (never posted) |
 | was never bound by the mod (mod missing or disabled) | failure, never silence |
 | ends in an error or refusal, or the session exits | failure, never silence |
 | is cancelled (gap, restart, deadline) | interrupted; closed work |

@@ -336,6 +336,8 @@ class CodexRoomIntegration:
         # What Codex reported, for diagnostics and the conformance kit.
         self.completed_turns: dict[str, Mapping[str, Any]] = {}
         self.tool_items: dict[str, Mapping[str, Any]] = {}
+        # The agent's newest message in each run: its last words.
+        self._last_words: dict[str, str] = {}
         self.steered: list[tuple[str, str]] = []
         self.declined: list[str] = []
         self.warnings: list[str] = []
@@ -684,8 +686,11 @@ class CodexRoomIntegration:
             if self._bound is not None and self._bound[1] == codex_turn:
                 self._bound = None
         ok, detail = _ending(turn)
+        with self._lock:
+            note = self._last_words.pop(codex_turn, None)
         # Only the run bound to the open turn ends it; others are not Nunchi's.
-        self.participant.end_turn(turn_id=codex_turn, ok=ok, detail=detail)
+        # The agent's last words are its reason if the turn ends in silence.
+        self.participant.end_turn(turn_id=codex_turn, ok=ok, detail=detail, note=note)
 
     def _item_completed(self, params: Mapping[str, Any]) -> None:
         item = params.get("item")
@@ -693,6 +698,9 @@ class CodexRoomIntegration:
         if not isinstance(item, Mapping) or not isinstance(codex_turn, str):
             return
         kind = item.get("type")
+        if kind == "agentMessage" and isinstance(item.get("text"), str):
+            with self._lock:
+                _remember(self._last_words, codex_turn, item["text"])
         if kind in _NOT_TOOL_ITEMS:
             return
         if isinstance(item.get("id"), str):

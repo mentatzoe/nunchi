@@ -143,6 +143,39 @@ class TurnTests(unittest.TestCase):
         self.thread.join(5)
         self.assertEqual({"action": None}, self.box)
 
+    def test_a_silent_turns_last_words_are_its_reason(self):
+        self.assertTrue(self.participant.bind_turn(turn_id="t1", wake_id=self.turn.wake_id))
+        self.assertTrue(
+            self.participant.end_turn(
+                turn_id="t1", ok=True, detail="done", note="  Castor was asked,\n not me. "
+            )
+        )
+        self.thread.join(5)
+        self.assertEqual({"action": {"kind": "silence", "why": "Castor was asked, not me."}}, self.box)
+
+    def test_last_words_holding_a_secret_are_not_kept(self):
+        self.assertTrue(self.participant.bind_turn(turn_id="t1", wake_id=self.turn.wake_id))
+        self.participant.turn_ended(ok=True, detail="done", note="The key is tok_abcdefgh.")
+        self.thread.join(5)
+        self.assertEqual({"action": None}, self.box)
+
+    def test_last_words_after_an_action_are_no_reason(self):
+        self.participant.bind_turn(turn_id="t1", wake_id=self.turn.wake_id)
+        thread, answer = self.act("say", {"text": "on it"})
+        self.thread.join(5)
+        self.assertNotIn("why", self.box["action"])
+        self.participant.settle(self.turn.request_id, TransportResult("sent", "ok"))
+        thread.join(5)
+        self.participant.end_turn(turn_id="t1", ok=True, note="Posted it.")
+        self.assertIsNone(self.turn.note)
+
+    def test_a_failed_runs_last_words_are_no_reason(self):
+        self.participant.bind_turn(turn_id="t1", wake_id=self.turn.wake_id)
+        self.participant.end_turn(turn_id="t1", ok=False, detail="crashed", note="I stopped.")
+        self.thread.join(5)
+        self.assertIsInstance(self.box.get("error"), TurnError)
+        self.assertIsNone(self.turn.note)
+
     def test_an_unbound_turn_is_a_failure_never_silence(self):
         self.assertFalse(self.participant.bind_turn(turn_id="t1", wake_id="wrong"))
         self.participant.turn_ended(ok=True, detail="done")
@@ -678,12 +711,16 @@ class LocalTurnProtocolTests(unittest.TestCase):
         status, update = self.post("/v1/turn/after-tool", {"turn_id": "t1"})
         self.assertIn("use staging", update["text"])
         self.assertEqual({"ended": False}, self.post("/v1/turn/end", {"turn_id": "nope", "ok": True})[1])
-        self.assertEqual({"ended": True}, self.post("/v1/turn/end", {"turn_id": "t1", "ok": True, "detail": "done"})[1])
+        self.assertEqual(
+            {"ended": True},
+            self.post("/v1/turn/end", {"turn_id": "t1", "ok": True, "detail": "done", "note": "Nothing to add."})[1],
+        )
         for _ in range(100):
             if "action" in self.box:
                 break
             threading.Event().wait(0.05)
-        self.assertEqual({"action": None}, self.box)
+        # The agent's last words are the silence's reason.
+        self.assertEqual({"action": {"kind": "silence", "why": "Nothing to add."}}, self.box)
 
     def test_the_first_integrations_route_names_still_work(self):
         self.serve()

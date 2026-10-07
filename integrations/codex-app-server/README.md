@@ -26,7 +26,7 @@ agent acts in the room through room tools.
 | Bind | `turn/start`'s answer | The run is bound to the wake when Codex answers with its turn id and the thread's room server has reported `ready`. The wake id never reaches the agent. |
 | Room tools | `mcp_servers.nunchi_room` in the thread's `config` | A stdio MCP server (`mcp_bridge.py`) forwards each call to the library over a private socket, with the Codex turn id from the call's `_meta`. The model sees the tools as `room_send`, `room_react` and `room_context` in the `mcp__nunchi_room` namespace. |
 | Steering | the room tool's result; `turn/steer` | The room's news goes with every room tool result, and after any other tool call (commands, file changes, the user's MCP tools) it goes to the running turn with `turn/steer`. |
-| End | `turn/completed` | `completed` ends the turn; `interrupted` and `failed` end it as a failure. A turn that ends bound and without a room action is silence. |
+| End | `turn/completed` | `completed` ends the turn; `interrupted` and `failed` end it as a failure. A turn that ends bound and without a room action is silence, and the agent's last message in the run is its reason, never posted. |
 | Cancel | `turn/interrupt` | The library cancels; the run is interrupted. |
 | Approvals | `item/*/requestApproval`, `mcpServer/elicitation/request` | Declined: nobody is at the terminal. |
 
