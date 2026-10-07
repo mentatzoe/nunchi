@@ -90,10 +90,16 @@ class HarnessDelivery:
     delivers it, which Nunchi does not confirm. Any other action goes to
     ``native`` when the integration has one, such as a reaction through the
     harness's platform actions.
+
+    ``room_shows_own_messages`` says whether the room events the integration
+    delivers include the agent's own messages. When they do not (some
+    harnesses hide them from plugins), the host puts each delivered message
+    into the room log itself.
     """
 
-    def __init__(self, native: Any = None) -> None:
+    def __init__(self, native: Any = None, *, room_shows_own_messages: bool) -> None:
         self.native = native
+        self.room_shows_own_messages = bool(room_shows_own_messages)
 
     def dispatch(self, *, action: Mapping[str, Any], wake: Mapping[str, Any]) -> TransportResult:
         if action.get("kind") == "message":

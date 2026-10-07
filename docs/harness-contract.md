@@ -224,7 +224,7 @@ maintainers.
 | Pause and outcome turns | library | library | `inject_message` | library |
 | Catching up | library | library | library | library |
 | Cancel | stream-json interrupt | `turn/interrupt` | no plugin interrupt: the library silences the answer at `transform_llm_output`; tools already run stay run | drop the reply |
-| Own message in memory | transport id | transport id | by text and time (no delivery id; Hermes drops the bot's own messages before hooks) | transport id |
+| Own message in memory | transport id | transport id | the library records it in the room log with an id of its own (no delivery id; Hermes drops the bot's own messages before hooks) | transport id |
 | Attention routes | all | all | all, plus the host's model through `ctx.llm` | all |
 | Native tool approvals | user's rules; prompts declined | user's rules; approval requests declined | Hermes's own approvals | — |
 | Runs without patching the harness | yes | yes | yes, also under `plugins.isolation: host` (a turn verified offline, `a50406d9`) | yes |

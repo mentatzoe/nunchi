@@ -325,7 +325,7 @@ def _check_final_deliver(played: Played) -> list[str]:
     )
     _expect(_texts(played) == ["On it."], f"expected one committed post, saw {_texts(played)}", failures)
     _expect(
-        any(move.get("kind") == "message" and move.get("text") == "On it." for move in played.own_moves),
+        any(move.get("kind") in ("message", "reply") and move.get("text") == "On it." for move in played.own_moves),
         "the post is not in the agent's memory",
         failures,
     )
@@ -502,7 +502,8 @@ class _CommittedForHarness(HarnessDelivery):
     """Records what the host committed for the harness to post."""
 
     def __init__(self) -> None:
-        super().__init__()
+        # The kit's room never shows the agent's messages back.
+        super().__init__(room_shows_own_messages=False)
         self.actions: list[dict[str, Any]] = []
 
     def dispatch(self, *, action, wake):
