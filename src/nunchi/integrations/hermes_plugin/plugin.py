@@ -550,7 +550,7 @@ class HermesRoomPlugin:
             return decision.text
         if decision.kind == "continue":
             with self._lock:
-                if self._wake is not None:
+                if self._wake is not None and self._wake.turn.bound(run.turn_id):
                     self._wake.fresh_run = decision.text
         return SILENCE_MARKER
 
@@ -575,6 +575,8 @@ class HermesRoomPlugin:
             if not run.bound:
                 return None
             wake = self._wake
+            if wake is not None and not wake.turn.bound(turn_id):
+                wake = None  # this run's turn already ended; the wake is a newer turn's
             fresh = wake.fresh_run if wake is not None else None
             if wake is not None:
                 wake.fresh_run = None
