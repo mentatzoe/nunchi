@@ -23,12 +23,11 @@ import tempfile
 import threading
 from typing import Any, Protocol
 
-from .attention import AttentionEngine, AttentionPolicy, ParticipantProfile
+from .attention import AttentionPolicy, ParticipantProfile
 from .conformance import fixture_attention_model, fixture_binding, fixture_profile
-from .observation import ObservationProvider
-from .participant import ConversationOpportunityScheduler, ParticipantTurnHost, TransportResult
-from .pipeline import NunchiV2Pipeline
-from .receipts import ReceiptJournal
+from .observation import ObservationLimits
+from .participant import TransportResult
+from .room import Room, RoomSettings
 from .turn import HARNESS_DELIVERS, HarnessDelivery, SecretGuard, Turn, TurnDriver, TurnParticipant
 
 PERSON = "conformance:person"
@@ -37,7 +36,8 @@ SECRET = "conformance-withheld-secret-value"
 SILENCE = "[SILENT]"
 
 # Each step is what the agent does next: ("bind",), ("call", role, arguments),
-# ("after_tool",), ("finish", answer), ("arrive", text), ("end", ok).
+# ("after_tool",), ("finish", answer), ("end", ok); or what happens around it:
+# ("arrive", text), someone posts; ("cancel",), the library cancels the turn.
 Step = tuple
 
 
@@ -93,9 +93,15 @@ class ScriptedAgent:
     arrived during the turn, once it has arrived.
     """
 
-    def __init__(self, steps: Sequence[Step], arrive: Callable[[str], str]) -> None:
+    def __init__(
+        self,
+        steps: Sequence[Step],
+        arrive: Callable[[str], str],
+        cancel: Callable[[], None] | None = None,
+    ) -> None:
         self.steps = tuple(steps)
         self.arrive = arrive
+        self.cancel = cancel
         self.arrivals: list[str] = []
         self.answers: list[tuple[Step, Any]] = []
         self.done = threading.Event()
@@ -125,6 +131,10 @@ class ScriptedAgent:
                     elif kind == "arrive":
                         answer = self.arrive(step[1])
                         self.arrivals.append(answer)
+                    elif kind == "cancel":
+                        if self.cancel is None:
+                            raise ValueError("this agent cannot cancel its turn")
+                        answer = self.cancel()
                     elif kind == "end":
                         answer = surface.end(turn_id, step[1])
                     else:
@@ -290,6 +300,21 @@ def _check_secret(played: Played) -> list[str]:
     return failures
 
 
+def _check_cancel(played: Played) -> list[str]:
+    failures: list[str] = []
+    _expect(not played.dispatched, f"a cancelled turn posted {_texts(played)}", failures)
+    _expect(played.answer(2)[0] is False, "the post was accepted after the cancel", failures)
+    _expect(played.host_result is None, f"expected nothing committed, host said {played.host_result}", failures)
+    return failures
+
+
+def _check_final_cancel(played: Played) -> list[str]:
+    failures: list[str] = []
+    _expect(played.answer(2) == ("silent", ""), f"expected silence after the cancel, saw {played.answer(2)}", failures)
+    _expect(not played.dispatched, f"a cancelled turn committed {_texts(played)}", failures)
+    return failures
+
+
 def _check_final_deliver(played: Played) -> list[str]:
     failures: list[str] = []
     _expect(played.answer(1) == ("deliver", "On it."), f"expected delivery, saw {played.answer(1)}", failures)
@@ -299,6 +324,11 @@ def _check_final_deliver(played: Played) -> list[str]:
         failures,
     )
     _expect(_texts(played) == ["On it."], f"expected one committed post, saw {_texts(played)}", failures)
+    _expect(
+        any(move.get("kind") == "message" and move.get("text") == "On it." for move in played.own_moves),
+        "the post is not in the agent's memory",
+        failures,
+    )
     return failures
 
 
@@ -400,9 +430,15 @@ SCENARIOS: dict[str, Scenario] = {
         (("bind",), ("call", "send", {"text": f"The key is {SECRET}"}), ("end", True)),
         _check_secret,
     ),
+    "cancel": Scenario(
+        "tools",
+        "a cancelled turn posts nothing",
+        (("bind",), ("cancel",), ("call", "send", {"text": "On it."}), ("end", False)),
+        _check_cancel,
+    ),
     "final-deliver": Scenario(
         "final-answer",
-        "the final answer is the post, committed for the harness to deliver",
+        "the final answer is the post, committed for the harness to deliver, and remembered",
         (("bind",), ("finish", "On it."), ("end", True)),
         _check_final_deliver,
     ),
@@ -441,6 +477,12 @@ SCENARIOS: dict[str, Scenario] = {
         ),
         _check_final_secret,
     ),
+    "final-cancel": Scenario(
+        "final-answer",
+        "a cancelled turn's final answer is silent",
+        (("bind",), ("cancel",), ("finish", "On it."), ("end", False)),
+        _check_final_cancel,
+    ),
 }
 
 
@@ -476,14 +518,21 @@ def run_scenario(name: str, integration: KitIntegration, *, timeout: float = 15.
     profile = fixture_profile(binding)
     played = Played()
     with tempfile.TemporaryDirectory(prefix="nunchi-turn-conformance-") as directory:
-        receipts = ReceiptJournal(Path(directory) / "receipts.jsonl")
-        observation = ObservationProvider(binding, receipts=receipts)
-        scheduler = ConversationOpportunityScheduler("conformance:turns")
+        settings = RoomSettings(
+            binding=binding,
+            profile=profile,
+            attention=AttentionPolicy(),
+            attention_model=None,
+            limits=ObservationLimits(),
+            state_directory=Path(directory) / "state",
+        )
         transport = _CommittedForHarness() if scenario.posting == "final-answer" else _RecordingTransport()
+        room: Room | None = None
 
         def arrive(text: str) -> str:
+            assert room is not None
             event_id = f"conformance:message:{len(played.arrivals) + 2}"
-            observation.observe(
+            room.observation.observe(
                 delivery_id=f"conformance:delivery:{event_id}",
                 event={
                     "id": event_id,
@@ -498,27 +547,28 @@ def run_scenario(name: str, integration: KitIntegration, *, timeout: float = 15.
             played.arrivals.append(event_id)
             return event_id
 
-        agent = ScriptedAgent(scenario.steps, arrive)
+        def cancel() -> None:
+            assert room is not None
+            room.cancel()
+
+        agent = ScriptedAgent(scenario.steps, arrive, cancel)
         participant = integration.participant(profile=profile, guard=SecretGuard([SECRET]), agent=agent)
-        host = ParticipantTurnHost(
-            observation=observation,
+        # The same assembly every integration uses (`nunchi.room`).
+        room = Room(
+            settings,
             participant=participant,
             transport=transport,
-            scheduler=scheduler,
-            receipts=receipts,
+            event_visibility={
+                "message": "history-and-live",
+                "reaction": "history-and-live",
+                "membership": "live-only",
+            },
+            state_prefix="conformance-",
+            attention_model=fixture_attention_model("WAKE"),
             participant_timeout_seconds=timeout,
         )
-        pipeline = NunchiV2Pipeline(
-            observation=observation,
-            attention=AttentionEngine(
-                profile=profile,
-                model=fixture_attention_model("WAKE"),
-                policy=AttentionPolicy(),
-                receipts=receipts,
-            ),
-            host=host,
-            scheduler=scheduler,
-        )
+        host = room.host
+        pipeline = room.pipeline
         try:
             outcome = pipeline.handle_delivery(
                 delivery_id="conformance:delivery:1",

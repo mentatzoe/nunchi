@@ -8,7 +8,10 @@ Its own moves: its recent messages, replies and reactions, each pointing at
 the message it was about, and where it stayed quiet. The visible moves come
 from the room's retained history, which the host observes like anyone
 else's. A silence leaves no trace in the room, so the participant host
-records it here when a turn ends without an action. Its privileged proposals
+records it here when a turn ends without an action. A message the harness
+posted itself may never come back as a room event (some harnesses hide their
+agent's own messages); the host records it here by its text and time until
+the room shows it (#94 step 9d). Its privileged proposals
 come from the host that authorizes them, with what became of each: awaiting
 approval, done, denied, expired, withdrawn (#90). A move may carry the
 participant's own reason at the time, in its own words (``why``): a person
@@ -144,6 +147,7 @@ class ConversationMemory:
         self.judgments_limit = judgments
         self.max_age = timedelta(seconds=max_age_seconds)
         self._silences: deque[dict[str, Any]] = deque(maxlen=silences)
+        self._delivered: deque[dict[str, Any]] = deque(maxlen=own_moves)
         self._reasons: deque[tuple[tuple[Any, ...], str]] = deque(maxlen=own_moves * 2)
         self._judgments: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._lock = threading.Lock()
@@ -190,6 +194,35 @@ class ConversationMemory:
         with self._lock:
             self._reasons.append((_move_key(move), reason))
 
+    def record_delivered(
+        self,
+        action: Mapping[str, Any],
+        *,
+        why: Any = None,
+        at: datetime | None = None,
+    ) -> None:
+        """The harness posted this message itself, and the room may never show it.
+
+        It is remembered by its text and time, after the message the turn was
+        about, until the room shows the same message by the participant.
+        """
+
+        if action.get("kind") != "message" or not isinstance(action.get("text"), str):
+            return
+        origin = action.get("origin_event_id")
+        if not isinstance(origin, str) or not origin:
+            return
+        move: dict[str, Any] = {
+            "kind": "message",
+            "text": _excerpt(action["text"]),
+            "at": _timestamp(at or datetime.now(timezone.utc)),
+        }
+        reason = move_reason(why)
+        if reason:
+            move["why"] = reason
+        with self._lock:
+            self._delivered.append({"origin": origin, "move": move})
+
     def record_judgment(
         self,
         *,
@@ -230,6 +263,7 @@ class ConversationMemory:
 
         with self._lock:
             self._silences.clear()
+            self._delivered.clear()
             self._reasons.clear()
             self._judgments.clear()
 
@@ -246,7 +280,9 @@ class ConversationMemory:
         ``events`` is the room's retained history in arrival order. The
         newest visible moves are kept, and the latest silences beside them;
         a silence is placed just after the message it was about, and is
-        dropped once that message is no longer retained.
+        dropped once that message is no longer retained. A message the
+        harness posted counts as visible: it has no ``event_id`` until the
+        room shows it.
         """
 
         now = now or datetime.now(timezone.utc)
@@ -265,7 +301,19 @@ class ConversationMemory:
                     visible.append((float(index), move))
         with self._lock:
             silences = [dict(item) for item in self._silences]
+            delivered = [(item["origin"], dict(item["move"])) for item in self._delivered]
             reasons = list(self._reasons)
+        # A message the harness posted joins the moves after the message it
+        # was about, until the room shows it; then the room's copy stands.
+        shown = [(index, _move_key(move)) for index, move in visible]
+        for order, (origin, move) in enumerate(delivered):
+            if origin not in position or not fresh(move):
+                continue
+            key = _move_key(move)
+            if any(index > position[origin] and seen == key for index, seen in shown):
+                continue
+            visible.append((position[origin] + 0.5 + order / 1000, move))
+        visible.sort(key=lambda item: item[0])
         # Each reason joins the newest move it matches, once.
         for _, move in reversed(visible):
             key = _move_key(move)

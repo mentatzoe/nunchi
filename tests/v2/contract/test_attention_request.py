@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010A AttentionRequestV2@6`` (slice 010, T002; #94 step 6: @2 adds the pace, @3 the pause occasion, @4 the outcome one, @5 the memory, @6 the unattended messages).
+"""Contract tests for ``I-010A AttentionRequestV2@7`` (slice 010, T002; #94 step 6: @2 adds the pace, @3 the pause occasion, @4 the outcome one, @5 the memory, @6 the unattended messages; #94 step 9d: @7 a message the harness posted).
 
 Red cases cover exact identity (S01), actor mentions versus
 ``mentions_room`` (S02), the runtime-adapter-only relational classes

@@ -21,24 +21,15 @@ import urllib.error
 from .. import __version__
 from ..adapters.model_apis import ATTENTION_KINDS
 from ..adapters.runtime import load_pinned_config
-from ..attention import (
-    AttentionEngine,
-    AttentionPolicy,
-    attention_model_from_config,
-    ParticipantProfile,
-)
+from ..attention import ParticipantProfile
 from ..errors import NunchiError, ValidationError
-from ..observation import ObservationLimits, ObservationProvider, ParticipantBinding
-from ..participant import (
-    ConversationOpportunityScheduler,
-    ParticipantTurnHost,
-)
+from ..observation import ParticipantBinding
 from ..participant_model import (
     PARTICIPANT_TURN_PROTOCOL_VERSION,
     ParticipantTurnProtocol,
 )
-from ..pipeline import AsyncDeliveryLane, DeliveryOutcome, NunchiV2Pipeline
-from ..receipts import ReceiptJournal
+from ..pipeline import DeliveryOutcome
+from ..room import Room, RoomSettings
 from ..v2_contracts import validate_canonical_event
 from ..mcp_discord.authorization import make_tool_authorization
 from .discord_participant_transport import MCPDiscordTransport
@@ -413,76 +404,18 @@ class CodexParticipant:
 
 class CodexRoomRuntime:
     def __init__(self, config: Mapping[str, Any], client: StreamableMCPClient) -> None:
-        required = {
-            "schema_version",
-            "binding",
-            "profile",
-            "attention",
-            "limits",
-            "state_directory",
-            "transport",
-            "codex",
-        }
-        # "ack" configured Nunchi's own nod, removed in #94 step 7; an older
-        # config that still has it loads, and the setting is ignored.
-        if (
-            required - set(config)
-            or set(config) - (required | {"ack"})
-            or config["schema_version"] != 2
-        ):
-            raise ValidationError("Codex V2 config has a missing or unexpected field")
-        binding_raw = config["binding"]
-        if not isinstance(binding_raw, Mapping):
-            raise ValidationError("Codex binding must be an object")
-        self.binding = ParticipantBinding(
-            **{
-                **binding_raw,
-                "names": tuple(binding_raw.get("names", ())),
-            }
+        settings = RoomSettings.from_config(
+            config, label="Codex V2", sections=("transport", "codex")
         )
+        if settings.authorization is not None:
+            raise ValidationError("Codex V2 config has a missing or unexpected field")
+        self.binding = settings.binding
         if self.binding.platform != "discord":
             raise ValidationError("Codex V2 currently requires the shared Discord transport")
-        profile_raw = config["profile"]
-        if not isinstance(profile_raw, Mapping) or set(profile_raw) != {"path", "sha256"}:
-            raise ValidationError("Codex profile config is invalid")
-        profile = ParticipantProfile.load(
-            profile_raw["path"],
-            expected_sha256=profile_raw["sha256"],
-        )
-        if (
-            profile.participant_id != self.binding.participant_id
-            or profile.actor_id != self.binding.actor_id
-        ):
-            raise ValidationError("Codex profile and exact transport self differ")
-        attention_raw = config["attention"]
-        if not isinstance(attention_raw, Mapping) or set(attention_raw) != {"policy", "model"}:
-            raise ValidationError("Codex attention config is invalid")
-        policy = AttentionPolicy(**attention_raw["policy"])
-        model = (
-            attention_model_from_config(attention_raw["model"], host_kinds=ATTENTION_KINDS)
-            if policy.preattention_enabled
-            else None
-        )
-        limits = ObservationLimits(**config["limits"])
-        state = Path(config["state_directory"])
-        state.mkdir(parents=True, exist_ok=True)
-        receipts = ReceiptJournal(state / "codex-v2-receipts.jsonl")
-        observation = ObservationProvider(
-            self.binding,
-            limits=limits,
-            receipts=receipts,
-            persistence_path=state / "codex-v2-observations.jsonl",
-            event_visibility={
-                "message": "history-and-live",
-                "reaction": "history-and-live",
-                "membership": "live-only",
-            },
-        )
-        scheduler = ConversationOpportunityScheduler(
-            f"{self.binding.participant_id}:{self.binding.continuity_scope_id}"
-        )
+        state = settings.state_directory
+        state.mkdir(parents=True, exist_ok=True, mode=0o700)
         participant = CodexParticipant(
-            profile=profile,
+            profile=settings.profile,
             config=config["codex"],
             binding=self.binding,
             state_directory=state,
@@ -494,27 +427,21 @@ class CodexRoomRuntime:
             self.binding.actor_id,
             self._output_secret(config["transport"]),
         )
-        host = ParticipantTurnHost(
-            observation=observation,
+        self.room = Room(
+            settings,
             participant=participant,
             transport=transport,
-            scheduler=scheduler,
-            receipts=receipts,
+            event_visibility={
+                "message": "history-and-live",
+                "reaction": "history-and-live",
+                "membership": "live-only",
+            },
+            state_prefix="codex-v2-",
+            attention_kinds=ATTENTION_KINDS,
             participant_timeout_seconds=participant.timeout_seconds + 5,
         )
-        attention = AttentionEngine(
-            profile=profile,
-            model=model,
-            policy=policy,
-            receipts=receipts,
-        )
-        self.pipeline = NunchiV2Pipeline(
-            observation=observation,
-            attention=attention,
-            host=host,
-            scheduler=scheduler,
-        )
-        self.lane = AsyncDeliveryLane(self.pipeline)
+        self.pipeline = self.room.pipeline
+        self.lane = self.room.lane
         self.client = client
         self.output_secret = self._output_secret(config["transport"])
 

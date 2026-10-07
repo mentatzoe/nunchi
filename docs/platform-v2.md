@@ -37,6 +37,14 @@ is the participant's own reaction in its own turn (#94 step 7).
 
 Room payloads are never trusted configuration.
 
+`nunchi.room` assembles the owners from these inputs. `RoomSettings` checks
+the shared config sections (binding, profile, attention, limits, state
+directory, optional authorization). `Room` builds observation, attention,
+the scheduler, the participant host, authorization, the pipeline and the
+non-blocking delivery lane from them, the integration's participant, its
+transport, and what its harness shows of each event type. The
+[harness guide](harness-guide.md) walks through it.
+
 The shared runtime always owns the attention prompt, attention model selection,
 judgment schema, policy, scheduling, and wake facts. For Nunchi-owned
 participants it also owns the normal-turn prompt and action schema. A platform

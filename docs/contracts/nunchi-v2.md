@@ -111,7 +111,7 @@ python3 -m unittest tests.v2.contract.test_privileged_action_authorization
 uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
 ```
 
-## I-010A AttentionRequestV2@6
+## I-010A AttentionRequestV2@7
 
 A truthful attention request represents:
 
@@ -189,7 +189,8 @@ A truthful attention request represents:
   after that has left the window. The reference host builds it for every
   judgment, including recalled ones; it is absent while the memory is
   empty. The attention prompt explains it only to a judgment that carries
-  it. The reference typed route does not pass it to its model yet.
+  it. The reference typed route does not pass it to its model yet. Since @7
+  it shares I-010C@14's memory: a `message` own move may lack `event_id`.
 - **Messages that arrived while the participant was busy (@6, #94 step 6;
   Zoe, 2026-10-06)** — optional `unattended_event_ids`: 1 to 3 messages by
   others, in `events` and newest first, that arrived while the participant
@@ -311,7 +312,7 @@ A tagged host-facing union on `status`:
   occur before a request ID is assignable); an optional `classifier` audit is
   present only when the error occurred after classifier invocation.
 
-## I-010C ParticipantWakeV2@13
+## I-010C ParticipantWakeV2@14
 
 The normal-turn input materializes `self`, `room`, `actors`, `events`,
 `trigger_event_id`, `coverage`, and optional `continuation` directly —
@@ -405,6 +406,15 @@ those still in the fresh view: messages by others that arrived while the
 participant was busy with its previous turn and got no turn of their own,
 newest first. The turn reads them with its trigger as one moment, and a
 reply may target any of them.
+
+Since @14 (#94 step 9d) a `message` own move may lack `event_id`. The harness
+posted that message itself (`HarnessDelivery`), and the room has not shown it
+back: some harnesses hide their agent's own messages from plugins. The
+reference host remembers it by its text and time, just after the message the
+turn was about, until the room shows a message by the participant with the
+same words after that one; then the room's copy stands. Like a silence, it
+goes once the message it followed is no longer retained, and a restart
+forgets it. Attention's request (I-010A@7) carries the same memory.
 
 ## I-010D ContextContinuationV2@1
 

@@ -23,9 +23,9 @@ DISPOSITIONS = ("SUPPRESS", "WAKE", "DEFER")
 WAKE_SOURCES = ("WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS")
 # The portable interfaces and their versions, as `nunchi probe` reports them.
 INTERFACE_VERSIONS = {
-    "I-010A": 6,
+    "I-010A": 7,
     "I-010B": 9,
-    "I-010C": 13,
+    "I-010C": 14,
     "I-010D": 1,
     "I-010E": 5,
     "I-010F": 1,
@@ -759,8 +759,10 @@ MOVE_REASON_MAX_CHARS = 200
 # Since @11 a move about a message may carry that message's author and text
 # (``about_author_id``, ``about_text``), together (#94 step 6).
 _ABOUT = ("about_author_id", "about_text")
+# Since @14 (I-010A@7) a message may lack ``event_id``: the harness posted it
+# and the room has not shown it back (#94 step 9d).
 _OWN_MOVE_FIELDS = {
-    "message": (("kind", "event_id", "text"), ("at", "why")),
+    "message": (("kind", "text"), ("event_id", "at", "why")),
     "reply": (("kind", "event_id", "about_event_id", "text"), ("at", "why") + _ABOUT),
     "reaction": (("kind", "event_id", "about_event_id", "reaction"), ("at", "why") + _ABOUT),
     "silence": (("kind", "about_event_id", "at"), ("why",) + _ABOUT),

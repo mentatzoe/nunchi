@@ -13,6 +13,27 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- Cancellation in the turn conformance kit (#94 step 9d): a cancelled turn
+  posts nothing, in both posting styles (`cancel`, `final-cancel`). The
+  reference turn and the Claude Code gate pass.
+- Memory of a message the harness posted (#94 step 9d; `I-010A@7`,
+  `I-010C@14`): when a harness posts the agent's final answer itself and
+  never shows that message back (Hermes hides its agent's own messages from
+  plugins), the host remembers it by its text and time, after the message
+  the turn was about, until the room shows it. A `message` own move may now
+  lack `event_id`. The conformance kit's final-answer delivery checks it.
+- The harness guide (#94 step 9d, [`docs/harness-guide.md`](docs/harness-guide.md)):
+  how to make a harness use Nunchi, for either topology and either posting
+  style, with the rules, each library piece, two walkthroughs, the local
+  protocol, and how to prove an integration with the conformance kit.
+- `nunchi.room` (#94 step 9d): `RoomSettings` checks the shared config
+  sections once, and `Room` builds everything the library owns for one
+  participant in one room (observation, attention, the scheduler, the turn
+  host, authorization, the pipeline and the delivery lane) from the
+  integration's participant, transport and event visibility. The reference
+  adapters, the Claude Code and Codex runtimes and the turn conformance kit
+  use it, instead of four hand-wired copies that had drifted. State files
+  keep their names; a new state directory is created private (0700).
 - The turn conformance kit (#94 step 9d): `nunchi-turn-conformance` plays a
   scripted agent's turn through an integration's real path and checks the
   turn's rules: one post and its result, silence only when bound, an unbound

@@ -8,11 +8,13 @@ step 9, accepted 2026-10-07) replaces the paths below, so every harness gets
 the same behavior. Until each replacement passes the conformance kit, the
 paths below are what runs.
 
-Every integration constructs one exact `ParticipantBinding`, retains native
-observations through `ObservationProvider`, runs `AttentionEngine` with that
-participant's pinned profile and delegated model, and schedules with
-`ConversationOpportunityScheduler`. It then takes one of two paths for the
-participant turn.
+To build a new integration, follow the [harness guide](harness-guide.md).
+
+Every integration builds the library's side through one `Room`
+(`nunchi.room`): the exact `ParticipantBinding`, observation, attention with
+the participant's pinned profile and delegated model, the scheduler, and the
+turn host. Hermes still wires these itself until its plugin replaces it (step
+9e). It then takes one of two paths for the participant turn.
 
 ## Nunchi-owned participant
 

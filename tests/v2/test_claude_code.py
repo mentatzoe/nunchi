@@ -647,7 +647,7 @@ class RuntimeHarness:
         if model is not None:
             patches.append(
                 mock.patch(
-                    "nunchi.integrations.claude_code_v2.attention_model_from_config",
+                    "nunchi.room.attention_model_from_config",
                     return_value=model,
                 )
             )
