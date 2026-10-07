@@ -13,6 +13,12 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- Memory of a message the harness posted (#94 step 9d; `I-010A@7`,
+  `I-010C@14`): when a harness posts the agent's final answer itself and
+  never shows that message back (Hermes hides its agent's own messages from
+  plugins), the host remembers it by its text and time, after the message
+  the turn was about, until the room shows it. A `message` own move may now
+  lack `event_id`. The conformance kit's final-answer delivery checks it.
 - The harness guide (#94 step 9d, [`docs/harness-guide.md`](docs/harness-guide.md)):
   how to make a harness use Nunchi, for either topology and either posting
   style, with the rules, each library piece, two walkthroughs, the local

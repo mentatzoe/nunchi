@@ -35,7 +35,7 @@ from typing import Any, Protocol
 
 from .attention import ParticipantProfile
 from .errors import NunchiError
-from .participant import TransportResult
+from .participant import HARNESS_DELIVERS, TransportResult
 from .reactions import UNAVAILABLE_REACTION_CAPABILITY
 from .participant_model import (
     PARTICIPANT_TOOL_SPECS,
@@ -61,8 +61,6 @@ class TurnError(NunchiError):
     """The agent's turn ended in a way that is neither an action nor silence."""
 
 
-# What a message's commit says when the harness, not Nunchi, posts it.
-HARNESS_DELIVERS = "the harness delivers it"
 # In final-answer posting, the agent's own thinking: never posted, and kept as
 # its reason. An unclosed block runs to the end of the answer.
 _NOTE = re.compile(r"<thinking>(.*?)(?:</thinking>|\Z)", re.S | re.I)

@@ -298,6 +298,11 @@ def _check_final_deliver(played: Played) -> list[str]:
         failures,
     )
     _expect(_texts(played) == ["On it."], f"expected one committed post, saw {_texts(played)}", failures)
+    _expect(
+        any(move.get("kind") == "message" and move.get("text") == "On it." for move in played.own_moves),
+        "the post is not in the agent's memory",
+        failures,
+    )
     return failures
 
 
@@ -401,7 +406,7 @@ SCENARIOS: dict[str, Scenario] = {
     ),
     "final-deliver": Scenario(
         "final-answer",
-        "the final answer is the post, committed for the harness to deliver",
+        "the final answer is the post, committed for the harness to deliver, and remembered",
         (("bind",), ("finish", "On it."), ("end", True)),
         _check_final_deliver,
     ),

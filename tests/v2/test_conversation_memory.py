@@ -16,6 +16,7 @@ from nunchi.attention_questions import answers_leaning
 from nunchi.errors import ValidationError
 from nunchi.memory import ConversationMemory
 from nunchi.participant_model import ParticipantTurnProtocol
+from nunchi.turn import HarnessDelivery
 from nunchi.v2_contracts import validate_participant_wake
 from tests.v2.test_operator_protocol import PROFILE, opportunity
 from tests.v2.test_shared_foundation import foundation, message
@@ -123,6 +124,52 @@ def judged(memory, event_id, **changes):
     answers = answers_leaning("WAKE")
     answers.update(changes)
     memory.record_judgment(event_id=event_id, answers=answers)
+
+
+class DeliveredByTheHarnessTests(unittest.TestCase):
+    """A message the harness posted, when the room never shows it back (#94 step 9d)."""
+
+    POSTED = {"kind": "message", "origin_event_id": "q1", "text": "On it."}
+
+    def moves(self, events, memory):
+        return memory.own_moves(events, actor_id=SELF, now=NOW)
+
+    def test_it_is_remembered_by_its_text_and_time_after_the_message_it_answered(self):
+        memory = ConversationMemory()
+        memory.record_silence(about_event_id="q0", at=NOW - timedelta(minutes=9))
+        memory.record_delivered(self.POSTED, why="Zoe asked me.", at=NOW - timedelta(minutes=2))
+        events = [message("q0"), message("q1"), message("c1", author_id="human:castor")]
+        self.assertEqual(
+            [
+                {"kind": "silence", "about_event_id": "q0", "at": at(9),
+                 "about_author_id": "human:zoe", "about_text": "Could you look at this?"},
+                {"kind": "message", "text": "On it.", "at": at(2), "why": "Zoe asked me."},
+            ],
+            self.moves(events, memory),
+        )
+
+    def test_once_the_room_shows_it_the_rooms_copy_stands(self):
+        memory = ConversationMemory()
+        memory.record_delivered(self.POSTED, at=NOW - timedelta(minutes=2))
+        events = [message("q1"), message("v1", author_id=SELF, text="On it.")]
+        self.assertEqual([{"kind": "message", "event_id": "v1", "text": "On it."}], self.moves(events, memory))
+        # The same words said earlier do not stand in for it.
+        earlier = [message("v0", author_id=SELF, text="On it."), message("q1")]
+        self.assertEqual(["v0", None], [move.get("event_id") for move in self.moves(earlier, memory)])
+
+    def test_it_goes_with_the_message_it_followed_and_on_restart(self):
+        memory = ConversationMemory()
+        memory.record_delivered(self.POSTED, at=NOW - timedelta(minutes=2))
+        self.assertEqual([], self.moves([message("c1")], memory))
+        self.assertEqual(1, len(self.moves([message("q1")], memory)))
+        memory.restart()
+        self.assertEqual([], self.moves([message("q1")], memory))
+
+    def test_only_a_message_with_its_origin_is_kept(self):
+        memory = ConversationMemory()
+        memory.record_delivered({"kind": "reaction", "origin_event_id": "q1", "target_event_id": "q1", "reaction": "x"})
+        memory.record_delivered({"kind": "message", "text": "No origin."})
+        self.assertEqual([], self.moves([message("q1")], memory))
 
 
 class ReasonTests(unittest.TestCase):
@@ -381,6 +428,24 @@ class TurnTests(unittest.TestCase):
         (reply,) = [move for move in wakes[2]["memory"]["own_moves"] if move["kind"] == "reply"]
         self.assertEqual("Castor never answered.", reply["why"])
         validate_participant_wake(wakes[2])
+
+    def test_a_message_the_harness_posted_reaches_its_next_turn(self):
+        # A harness that hides its agent's own messages (#94 step 9d).
+        wakes = []
+        replies = iter([
+            {"kind": "message", "origin_event_id": "q1", "text": "I'll check the deploy.", "why": "Zoe asked."},
+            None,
+        ])
+        pipeline, _, _, _ = foundation(
+            participant=lambda **turn: wakes.append(turn["wake"]) or next(replies),
+            transport=HarnessDelivery(),
+        )
+        pipeline.handle_delivery(delivery_id="d-q1", event=message("q1", text="Deploy?"), actors=ZOE)
+        pipeline.handle_delivery(delivery_id="d-q2", event=message("q2", text="Anyone?"), actors=ZOE)
+        (move,) = wakes[1]["memory"]["own_moves"]
+        self.assertEqual(("message", "I'll check the deploy.", "Zoe asked."), (move["kind"], move["text"], move["why"]))
+        self.assertNotIn("event_id", move)
+        validate_participant_wake(wakes[1])
 
     def test_the_runtime_contract_checks_memory(self):
         wakes = []

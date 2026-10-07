@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010C ParticipantWakeV2@13`` (slice 010, T004; @12 the unattended messages; @13 no ACK source).
+"""Contract tests for ``I-010C ParticipantWakeV2@14`` (slice 010, T004; @12 the unattended messages; @13 no ACK source; @14 a message the harness posted).
 
 Red cases cover the wake sources, advice-free ``PREATTENTION_BYPASS``
 (010-Preattention-bypass), the FR-013 advice-source violations (advice on
@@ -71,6 +71,16 @@ class MemoryCases(unittest.TestCase):
         ):
             with self.subTest(bad=bad):
                 assert_schema_verdict(self, "participant-wake", self.wake([bad]), "invalid")
+
+    def test_a_message_the_harness_posted_needs_no_event_id(self):
+        # @14 (#94 step 9d): remembered by its text and time until the room shows it.
+        posted = {k: v for k, v in self.MOVES[0].items() if k != "event_id"}
+        assert_schema_verdict(self, "participant-wake", self.wake([posted]), "valid")
+        reply_without_id = {k: v for k, v in self.MOVES[1].items() if k != "event_id"}
+        reaction_without_id = {k: v for k, v in self.MOVES[2].items() if k != "event_id"}
+        for bad in ([reply_without_id], [reaction_without_id], [dict(posted, event_id="")]):
+            with self.subTest(bad=bad):
+                assert_schema_verdict(self, "participant-wake", self.wake(bad), "invalid")
 
     def test_malformed_memory_rejects(self):
         too_long = dict(self.MOVES[0], text="x" * 281)

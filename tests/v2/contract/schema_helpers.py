@@ -97,9 +97,9 @@ SCHEMA_FILES = {
 }
 
 INTERFACE_VERSIONS = {
-    "attention-request": ("I-010A", "AttentionRequestV2", 6),
+    "attention-request": ("I-010A", "AttentionRequestV2", 7),
     "attention-decision": ("I-010B", "AttentionDecisionV2", 9),
-    "participant-wake": ("I-010C", "ParticipantWakeV2", 13),
+    "participant-wake": ("I-010C", "ParticipantWakeV2", 14),
     "context-continuation": ("I-010D", "ContextContinuationV2", 1),
     "attention-receipt": ("I-010E", "AttentionReceiptV2", 5),
     "privileged-action-authorization": (
@@ -1297,7 +1297,7 @@ def _validate_decision_error(doc: dict[str, Any]) -> list[str]:
 
 _ABOUT = ("about_author_id", "about_text")  # @11: who wrote the message and what it said
 _OWN_MOVE_FIELDS = {
-    "message": (("kind", "event_id", "text"), ("at", "why")),
+    "message": (("kind", "text"), ("event_id", "at", "why")),
     "reply": (("kind", "event_id", "about_event_id", "text"), ("at", "why") + _ABOUT),
     "reaction": (("kind", "event_id", "about_event_id", "reaction"), ("at", "why") + _ABOUT),
     "silence": (("kind", "about_event_id", "at"), ("why",) + _ABOUT),

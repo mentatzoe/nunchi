@@ -227,6 +227,11 @@ class ConversationOpportunityScheduler:
             return self._lifecycle_id
 
 
+# What a message's commit says when the harness, not Nunchi, posts it
+# (`nunchi.turn.HarnessDelivery`).
+HARNESS_DELIVERS = "the harness delivers it"
+
+
 @dataclass(frozen=True)
 class TransportResult:
     delivery: Literal["sent", "failed", "unknown", "unavailable"]
@@ -1052,6 +1057,9 @@ class ParticipantTurnHost:
             result = TransportResult("unknown", "transport returned no attested result")
         self._append_transport_receipt(wake["request_id"], result)
         self.memory.record_reason(action, why)
+        if (result.delivery, result.detail) == ("unknown", HARNESS_DELIVERS):
+            # The harness posts it and may never show it back (#94 step 9d).
+            self.memory.record_delivered(action, why=why)
         return result
 
     def _append_transport_receipt(

@@ -296,9 +296,10 @@ room.deliver(
   reactions target them.
 - **The agent's own messages are events too.** Deliver them with
   `author_id` set to `binding.actor_id`. The library never wakes on them,
-  but memory finds the agent's own moves this way. A harness that hides its
-  agent's own messages from plugins loses that memory today; see "Known
-  library gaps".
+  but memory finds the agent's own moves this way. If the harness hides its
+  agent's own messages from plugins, the library remembers each message
+  `HarnessDelivery` committed by its text and time instead, until the room
+  shows it (`I-010C@14`).
 - Harness-hosted: consume every room message, so the harness never runs its
   agent on one by itself. The harness then sees only the turns your driver
   starts.
@@ -439,11 +440,6 @@ with the same `Room` your integration uses.
 
 ## Known library gaps
 
-- **The agent's own message, when the harness hides it.** Memory finds the
-  agent's own posts among room events. Where the harness drops its agent's
-  own messages before any plugin sees them (Hermes), the library must record
-  the delivered move by its text and time. That is not built yet; it comes
-  before the Hermes plugin (step 9e).
 - **Conformance scenes still to add:** the behavior scenes through each
   integration, cancellation, and pause and outcome turns (step 9d).
 
