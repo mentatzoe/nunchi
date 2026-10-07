@@ -452,9 +452,12 @@ If the room stays quiet for `look_again_seconds` (300 by default; 0 turns it
 off), the delivery lane's timer judges the same message again with
 `occasion: "pause"`, and the participant may get a turn that carries it. It
 runs only when the lane is idle, so it never displaces a newer message, and
-it happens once per quiet stretch: a look again never arms another. Hosts
-that run through the async delivery lane (Claude Code, Codex, and the
-generic runtime) look again; Hermes does not yet.
+it happens once per quiet stretch: a look again never arms another. Every
+integration built on `nunchi.room` looks again, since a `Room` delivers
+through the lane: Claude Code, the Codex app-server integration, the Hermes
+plugin, and the generic runtime. The older Hermes integration does not. The
+turn conformance kit checks that the pause turn and the outcome turn reach
+the agent through each integration.
 
 Outcome turns (#94 step 6; Zoe, #90 decision 2 on #94): when an operator's
 approval settles a privileged action after the participant's turn about it

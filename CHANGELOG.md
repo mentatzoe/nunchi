@@ -13,6 +13,18 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- Pause and outcome turns in the turn conformance kit (#94 step 9d): four
+  scenarios, two per posting style, in which the library starts a second
+  turn with no new message, after a pause and after an operator approves an
+  action the agent proposed. The agent must get the turn through the
+  integration, read in its text that it is a pause or an outcome turn, and
+  be able to post. The scripted agent plays one script per turn the library
+  starts, surfaces report the turn's text (`read`), and `participant()`
+  takes `privileged=True` for a room that authorizes privileged actions.
+  The reference turn, the Claude Code gate, the Hermes plugin (Hermes main
+  `a50406d9`) and the Codex app-server integration (Codex CLI 0.160.1) all
+  pass. The Hermes plugin looks again after a pause, which the older Hermes
+  integration never did.
 - One room connection for every library-hosted integration (#94 step 9e):
   `nunchi.integrations.discord_room` registers the participant with the
   shared Discord transport and checks its attestation, validates each

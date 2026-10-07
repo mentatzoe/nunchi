@@ -1,9 +1,14 @@
 """Conformance for the agent's turn, through any integration (#94 step 9d).
 
 Every harness must give its agent the same turn (`docs/harness-contract.md`).
-This kit checks that: a scripted agent plays one turn per scenario through an
+This kit checks that: a scripted agent plays a scenario's turns through an
 integration's real path, and the kit compares what the room and the agent saw
 with what the turn's rules say. The results make the parity table.
+
+Most scenarios are one turn, started by a message. Two have a second turn that
+the library starts itself, with no new message: after a pause, when it looks
+again at a moment it waited on, and after an operator approves an action the
+agent proposed, when it gives the agent a turn about the outcome.
 
 An integration takes part by providing a `KitIntegration`: the participant the
 shared turn host invokes, wired so that when its agent is started the scripted
@@ -16,6 +21,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+import hashlib
 import importlib
 import json
 from pathlib import Path
@@ -34,19 +40,42 @@ PERSON = "conformance:person"
 TRIGGER = "conformance:message:1"
 SECRET = "conformance-withheld-secret-value"
 SILENCE = "[SILENT]"
+# What the agent posts after a pause, and when it reports an outcome.
+LOOKED_AGAIN = "Still stuck? I can take a look."
+REPORTED = "Done: the runbook is in the README."
+OPERATOR = "operator:conformance"
+# The privileged action the outcome scenarios propose, and the policy that
+# lets the person ask for it with an operator's approval.
+CAPABILITY = "workspace.file.write"
+PROPOSAL = {
+    "capability": CAPABILITY,
+    "resource": {"kind": "workspace-file", "id": "repo:README.md"},
+    "operation": {"path": "README.md", "content": "The deploy runbook."},
+}
 
-# Each step is what the agent does next: ("bind",), ("call", role, arguments),
-# ("after_tool",), ("finish", answer), ("end", ok); or what happens around it:
-# ("arrive", text), someone posts; ("cancel",), the library cancels the turn.
+# Each step is what the agent does next: ("bind",), ("read",), the turn's text
+# as the agent received it, ("call", role, arguments), ("after_tool",),
+# ("finish", answer), ("end", ok); or what happens around it: ("arrive",
+# text), someone posts; ("cancel",), the library cancels the turn.
 Step = tuple
 
 
 @dataclass(frozen=True)
 class Scenario:
+    """One scenario: the first turn's steps, and a second turn the library may start.
+
+    ``next_occasion`` names what starts the second turn: ``"pause"``, the room
+    stays quiet after a moment the agent waited on, and the library looks
+    again; ``"outcome"``, an operator approves the action the agent proposed
+    in its first turn. The agent plays ``next_steps`` in that turn.
+    """
+
     posting: str
     description: str
     steps: tuple[Step, ...]
     check: Callable[["Played"], list[str]]
+    next_occasion: str | None = None
+    next_steps: tuple[Step, ...] = ()
 
 
 @dataclass
@@ -58,6 +87,8 @@ class Played:
     host_result: TransportResult | None = None
     own_moves: list[dict[str, Any]] = field(default_factory=list)
     arrivals: list[str] = field(default_factory=list)
+    # The privileged operations the room's executor ran.
+    executed: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
 
     def answer(self, index: int) -> Any:
@@ -68,6 +99,7 @@ class TurnSurface(Protocol):
     """How a scripted agent reaches its turn through one integration."""
 
     def bind(self, turn_id: str) -> bool: ...
+    def read(self, turn_id: str) -> str: ...
     def call(self, turn_id: str, role: str, arguments: Mapping[str, Any]) -> tuple[bool, str]: ...
     def after_tool(self, turn_id: str) -> str | None: ...
     def finish(self, turn_id: str, answer: str) -> tuple[str, str]: ...
@@ -81,16 +113,26 @@ class KitIntegration(Protocol):
     posting: str
 
     def participant(self, *, profile: ParticipantProfile, guard: SecretGuard, agent: "ScriptedAgent") -> Any:
-        """The participant the host invokes; starting its agent plays ``agent``."""
+        """The participant the host invokes; starting its agent plays ``agent``.
+
+        Every turn the library starts plays the agent's next turn. For the
+        outcome scenarios the kit also passes ``privileged=True``: the room
+        authorizes privileged actions, so the integration offers ``propose``
+        and ``withdraw`` as it would with an ``authorization`` section.
+        """
 
     def close(self) -> None: ...
 
 
 class ScriptedAgent:
-    """Plays a scenario's steps through an integration's surface, in its own thread.
+    """Plays a scenario's turns through an integration's surface, each in its own thread.
+
+    ``steps`` is the first turn; ``later`` holds the turns the library starts
+    after it. Each `play` plays the next turn. A turn the script does not
+    have is counted in ``unexpected`` and not played.
 
     A call's argument written ``"@arrival:N"`` names the N-th message that
-    arrived during the turn, once it has arrived.
+    arrived during the scenario, once it has arrived.
     """
 
     def __init__(
@@ -98,14 +140,36 @@ class ScriptedAgent:
         steps: Sequence[Step],
         arrive: Callable[[str], str],
         cancel: Callable[[], None] | None = None,
+        *,
+        later: Sequence[Sequence[Step]] = (),
     ) -> None:
-        self.steps = tuple(steps)
+        self.turns = (tuple(steps), *(tuple(turn) for turn in later))
+        self.steps = self.turns[0]
         self.arrive = arrive
         self.cancel = cancel
         self.arrivals: list[str] = []
         self.answers: list[tuple[Step, Any]] = []
+        # Set when every turn's steps have played; `turn_done` per turn.
         self.done = threading.Event()
+        self.turn_done = tuple(threading.Event() for _ in self.turns)
+        self.unexpected = 0
         self.error: BaseException | None = None
+        self._lock = threading.Lock()
+        self._started = 0
+        self._seen: list[Any] = []
+
+    def play_once(self, key: Any, surface: Callable[[], "TurnSurface"]) -> None:
+        """Play the next turn the first time ``key``, the harness's turn, is seen.
+
+        For integrations that learn of a turn from something that repeats
+        within it, such as each model request.
+        """
+
+        with self._lock:
+            if any(seen is key for seen in self._seen):
+                return
+            self._seen.append(key)
+        self.play(surface())
 
     def _arguments(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         return {
@@ -115,13 +179,24 @@ class ScriptedAgent:
             for key, value in arguments.items()
         }
 
-    def play(self, surface: TurnSurface, turn_id: str = "turn-1") -> None:
+    def play(self, surface: TurnSurface, turn_id: str | None = None) -> None:
+        with self._lock:
+            index = self._started
+            if index >= len(self.turns):
+                self.unexpected += 1
+                return
+            self._started += 1
+        steps = self.turns[index]
+        turn_id = turn_id or f"turn-{index + 1}"
+
         def run() -> None:
             try:
-                for step in self.steps:
+                for step in steps:
                     kind = step[0]
                     if kind == "bind":
                         answer: Any = surface.bind(turn_id)
+                    elif kind == "read":
+                        answer = surface.read(turn_id)
                     elif kind == "call":
                         answer = surface.call(turn_id, step[1], self._arguments(step[2]))
                     elif kind == "after_tool":
@@ -143,7 +218,9 @@ class ScriptedAgent:
             except BaseException as exc:  # recorded for the result
                 self.error = exc
             finally:
-                self.done.set()
+                self.turn_done[index].set()
+                if all(event.is_set() for event in self.turn_done):
+                    self.done.set()
 
         threading.Thread(target=run, name="nunchi-scripted-agent", daemon=True).start()
 
@@ -158,6 +235,9 @@ class _DirectSurface:
 
     def bind(self, turn_id: str) -> bool:
         return self.participant.bind_turn(turn_id=turn_id, wake_id=self.turn.wake_id)
+
+    def read(self, turn_id: str) -> str:
+        return self.turn.text
 
     def call(self, turn_id: str, role: str, arguments: Mapping[str, Any]) -> tuple[bool, str]:
         return self.participant.call_tool(
@@ -196,7 +276,10 @@ class ReferenceIntegration:
         self.posting = posting
         self.name = f"reference ({posting})"
 
-    def participant(self, *, profile: ParticipantProfile, guard: SecretGuard, agent: ScriptedAgent) -> Any:
+    def participant(
+        self, *, profile: ParticipantProfile, guard: SecretGuard, agent: ScriptedAgent, privileged: bool = False
+    ) -> Any:
+        # The turn offers propose and withdraw only when the room authorizes them.
         driver = _DirectDriver(agent)
         participant = TurnParticipant(
             profile=profile,
@@ -312,6 +395,61 @@ def _check_final_cancel(played: Played) -> list[str]:
     failures: list[str] = []
     _expect(played.answer(2) == ("silent", ""), f"expected silence after the cancel, saw {played.answer(2)}", failures)
     _expect(not played.dispatched, f"a cancelled turn committed {_texts(played)}", failures)
+    return failures
+
+
+def _later_turn(played: Played, failures: list[str], *, occasion: str, bound: int, shown: int) -> None:
+    """The second turn reached the agent, bound, and told it why it came."""
+
+    _expect(played.answer(bound) is True, f"the {occasion} turn did not bind", failures)
+    text = played.answer(shown)
+    _expect(
+        isinstance(text, str) and f'"occasion":"{occasion}"' in text,
+        f"the turn's text does not give its occasion, {occasion}",
+        failures,
+    )
+
+
+def _check_pause(played: Played) -> list[str]:
+    failures: list[str] = []
+    _expect(played.answer(0) is True, "the first turn did not bind", failures)
+    _later_turn(played, failures, occasion="pause", bound=2, shown=3)
+    _expect(played.answer(4)[0] is True, f"the post after the pause failed: {played.answer(4)}", failures)
+    _expect(_texts(played) == [LOOKED_AGAIN], f"expected only the post after the pause, saw {_texts(played)}", failures)
+    return failures
+
+
+def _check_outcome(played: Played) -> list[str]:
+    failures: list[str] = []
+    proposed = played.answer(1)
+    _expect(proposed[0] is True, f"the proposal was refused: {proposed}", failures)
+    _expect(played.executed == [PROPOSAL["operation"]], f"the approved action did not run: {played.executed}", failures)
+    _later_turn(played, failures, occasion="outcome", bound=3, shown=4)
+    _expect('"status":"done"' in str(played.answer(4)), "the agent was not told the action ran", failures)
+    _expect(played.answer(5)[0] is True, f"the report failed: {played.answer(5)}", failures)
+    _expect(_texts(played) == [REPORTED], f"expected only the agent's report, saw {_texts(played)}", failures)
+    return failures
+
+
+def _check_final_pause(played: Played) -> list[str]:
+    failures: list[str] = []
+    _expect(played.answer(1)[0] == "silent", f"the first turn was not silent: {played.answer(1)}", failures)
+    _later_turn(played, failures, occasion="pause", bound=3, shown=4)
+    _expect(played.answer(5) == ("deliver", LOOKED_AGAIN), f"the answer after the pause: {played.answer(5)}", failures)
+    _expect(_texts(played) == [LOOKED_AGAIN], f"expected only the answer after the pause, saw {_texts(played)}", failures)
+    return failures
+
+
+def _check_final_outcome(played: Played) -> list[str]:
+    failures: list[str] = []
+    proposed = played.answer(1)
+    _expect(proposed[0] is True, f"the proposal was refused: {proposed}", failures)
+    _expect(played.answer(2)[0] == "silent", f"the proposal was the turn's action, yet saw {played.answer(2)}", failures)
+    _expect(played.executed == [PROPOSAL["operation"]], f"the approved action did not run: {played.executed}", failures)
+    _later_turn(played, failures, occasion="outcome", bound=4, shown=5)
+    _expect('"status":"done"' in str(played.answer(5)), "the agent was not told the action ran", failures)
+    _expect(played.answer(6) == ("deliver", REPORTED), f"the report: {played.answer(6)}", failures)
+    _expect(_texts(played) == [REPORTED], f"expected only the agent's report, saw {_texts(played)}", failures)
     return failures
 
 
@@ -436,6 +574,22 @@ SCENARIOS: dict[str, Scenario] = {
         (("bind",), ("cancel",), ("call", "send", {"text": "On it."}), ("end", False)),
         _check_cancel,
     ),
+    "pause": Scenario(
+        "tools",
+        "after a pause the library starts a turn with no new message, and the agent can post",
+        (("bind",), ("end", True)),
+        _check_pause,
+        next_occasion="pause",
+        next_steps=(("bind",), ("read",), ("call", "send", {"text": LOOKED_AGAIN}), ("end", True)),
+    ),
+    "outcome": Scenario(
+        "tools",
+        "an approved action's outcome starts a turn, and the agent reports it",
+        (("bind",), ("call", "propose", PROPOSAL), ("end", True)),
+        _check_outcome,
+        next_occasion="outcome",
+        next_steps=(("bind",), ("read",), ("call", "send", {"text": REPORTED}), ("end", True)),
+    ),
     "final-deliver": Scenario(
         "final-answer",
         "the final answer is the post, committed for the harness to deliver, and remembered",
@@ -483,6 +637,22 @@ SCENARIOS: dict[str, Scenario] = {
         (("bind",), ("cancel",), ("finish", "On it."), ("end", False)),
         _check_final_cancel,
     ),
+    "final-pause": Scenario(
+        "final-answer",
+        "after a pause the library starts a turn with no new message, and its answer is the post",
+        (("bind",), ("finish", SILENCE), ("end", True)),
+        _check_final_pause,
+        next_occasion="pause",
+        next_steps=(("bind",), ("read",), ("finish", LOOKED_AGAIN), ("end", True)),
+    ),
+    "final-outcome": Scenario(
+        "final-answer",
+        "an approved action's outcome starts a turn, and the agent's answer reports it",
+        (("bind",), ("call", "propose", PROPOSAL), ("finish", "I asked for approval."), ("end", True)),
+        _check_final_outcome,
+        next_occasion="outcome",
+        next_steps=(("bind",), ("read",), ("finish", REPORTED), ("end", True)),
+    ),
 }
 
 
@@ -511,6 +681,56 @@ class _CommittedForHarness(HarnessDelivery):
         return super().dispatch(action=action, wake=wake)
 
 
+def _policy(directory: Path, binding: Any) -> dict[str, str]:
+    """A pinned policy: the person may ask for the kit's action, with an operator's approval."""
+
+    raw = json.dumps(
+        {
+            "policy_id": "conformance-policy",
+            "revision": "1",
+            "approver_ids": [OPERATOR],
+            "rules": [
+                {
+                    "requester_actor_id": PERSON,
+                    "capability": CAPABILITY,
+                    "platform": binding.platform,
+                    "room_id": binding.room_id,
+                    "participant_id": binding.participant_id,
+                    "resource_kind": PROPOSAL["resource"]["kind"],
+                    "resource_id": PROPOSAL["resource"]["id"],
+                    "impact": "high",
+                }
+            ],
+        }
+    ).encode()
+    path = directory / "policy.json"
+    path.write_bytes(raw)
+    return {"policy_path": str(path), "policy_sha256": hashlib.sha256(raw).hexdigest()}
+
+
+def _start_next_turn(room: Room, occasion: str) -> str | None:
+    """Start the scenario's second turn the way the library does; an error, or None."""
+
+    if occasion == "pause":
+        # The room stayed quiet: what the delivery lane's timer does when due.
+        if room.pipeline.look_again(now=True) is None:
+            return "the library had nothing to look again at after the pause"
+        return None
+    if occasion == "outcome":
+        assert room.privileged is not None
+        waiting = room.privileged.pending_for_operator()
+        if not waiting:
+            return "no proposal was waiting for an operator"
+        # The operator approves; the action runs, and the delivery lane gives
+        # the agent its outcome turn on its own worker.
+        room.privileged.complete_authenticated_approval(
+            approval_challenge_id=waiting[0]["challenge"]["approval_challenge_id"],
+            authenticated_approver_id=OPERATOR,
+        )
+        return None
+    raise ValueError(f"unknown occasion {occasion!r}")
+
+
 def run_scenario(name: str, integration: KitIntegration, *, timeout: float = 15.0) -> dict[str, Any]:
     scenario = SCENARIOS[name]
     if scenario.posting != integration.posting:
@@ -518,6 +738,7 @@ def run_scenario(name: str, integration: KitIntegration, *, timeout: float = 15.
     binding = fixture_binding()
     profile = fixture_profile(binding)
     played = Played()
+    privileged = scenario.next_occasion == "outcome"
     with tempfile.TemporaryDirectory(prefix="nunchi-turn-conformance-") as directory:
         settings = RoomSettings(
             binding=binding,
@@ -526,6 +747,7 @@ def run_scenario(name: str, integration: KitIntegration, *, timeout: float = 15.
             attention_model=None,
             limits=ObservationLimits(),
             state_directory=Path(directory) / "state",
+            authorization=_policy(Path(directory), binding) if privileged else None,
         )
         transport = _CommittedForHarness() if scenario.posting == "final-answer" else _RecordingTransport()
         room: Room | None = None
@@ -552,8 +774,33 @@ def run_scenario(name: str, integration: KitIntegration, *, timeout: float = 15.
             assert room is not None
             room.cancel()
 
-        agent = ScriptedAgent(scenario.steps, arrive, cancel)
-        participant = integration.participant(profile=profile, guard=SecretGuard([SECRET]), agent=agent)
+        def execute(operation: Mapping[str, Any], idempotency_key: str) -> TransportResult:
+            played.executed.append(dict(operation))
+            return TransportResult("sent", "conformance workspace")
+
+        agent = ScriptedAgent(
+            scenario.steps,
+            arrive,
+            cancel,
+            later=(scenario.next_steps,) if scenario.next_occasion else (),
+        )
+        try:
+            participant = integration.participant(
+                profile=profile,
+                guard=SecretGuard([SECRET]),
+                agent=agent,
+                **({"privileged": True} if privileged else {}),
+            )
+        except TypeError as exc:
+            if not privileged:
+                raise
+            integration.close()
+            return {
+                "scenario": name,
+                "integration": integration.name,
+                "status": "fail",
+                "failures": [f"the integration cannot offer privileged actions: {exc}"],
+            }
         # The same assembly every integration uses (`nunchi.room`).
         room = Room(
             settings,
@@ -565,7 +812,9 @@ def run_scenario(name: str, integration: KitIntegration, *, timeout: float = 15.
                 "membership": "live-only",
             },
             state_prefix="conformance-",
-            attention_model=fixture_attention_model("WAKE"),
+            # A pause follows a moment whose most likely move was to wait.
+            attention_model=fixture_attention_model("DEFER" if scenario.next_occasion == "pause" else "WAKE"),
+            privileged_executors={CAPABILITY: execute} if privileged else None,
             participant_timeout_seconds=timeout,
         )
         host = room.host
@@ -583,9 +832,16 @@ def run_scenario(name: str, integration: KitIntegration, *, timeout: float = 15.
                 },
                 actors={PERSON: {"kind": "human", "display_name": "Sam"}},
             )
-            agent.done.wait(timeout)
+            agent.turn_done[0].wait(timeout)
             if outcome.opportunities:
                 played.host_result = outcome.opportunities[0].transport
+            if scenario.next_occasion is not None:
+                played.error = _start_next_turn(room, scenario.next_occasion)
+                if played.error is None and not agent.done.wait(timeout):
+                    played.error = f"the {scenario.next_occasion} turn never reached the agent"
+                room.drain(timeout)
+            if agent.unexpected:
+                played.error = played.error or f"{agent.unexpected} turn(s) started that the scenario does not expect"
         except BaseException as exc:  # recorded for the result
             played.error = f"{type(exc).__name__}: {exc}"
         finally:
