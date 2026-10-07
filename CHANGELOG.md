@@ -13,6 +13,9 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- Cancellation in the turn conformance kit (#94 step 9d): a cancelled turn
+  posts nothing, in both posting styles (`cancel`, `final-cancel`). The
+  reference turn and the Claude Code gate pass.
 - Memory of a message the harness posted (#94 step 9d; `I-010A@7`,
   `I-010C@14`): when a harness posts the agent's final answer itself and
   never shows that message back (Hermes hides its agent's own messages from

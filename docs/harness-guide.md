@@ -441,7 +441,7 @@ with the same `Room` your integration uses.
 ## Known library gaps
 
 - **Conformance scenes still to add:** the behavior scenes through each
-  integration, cancellation, and pause and outcome turns (step 9d).
+  integration, and pause and outcome turns (step 9d).
 
 ## Checklist
 
