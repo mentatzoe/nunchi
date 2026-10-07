@@ -3,6 +3,11 @@
 Use [the platform interface](platform-v2.md). Integrations do not implement a
 second gate.
 
+The harness contract in [`harness-contract.md`](harness-contract.md) (#94
+step 9, accepted 2026-10-07) replaces the paths below, so every harness gets
+the same behavior. Until each replacement passes the conformance kit, the
+paths below are what runs.
+
 Every integration constructs one exact `ParticipantBinding`, retains native
 observations through `ObservationProvider`, runs `AttentionEngine` with that
 participant's pinned profile and delegated model, and schedules with
