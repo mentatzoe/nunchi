@@ -1,11 +1,13 @@
 # Harness contract
 
-**Status: draft for review ([#94](https://github.com/mentatzoe/nunchi/issues/94),
-steps 9a and 9b). Nothing here is built yet.** The harness facts were checked
-against upstream source on 2026-10-07: Hermes main `a50406d9` and Codex
-`a513012`. The key Hermes and Codex behaviors were then run (see "Runtime
-checks"). Cells marked *to verify* still need a runtime check before this
-contract is frozen.
+**Status: accepted by Zoe, 2026-10-07 ([#94](https://github.com/mentatzoe/nunchi/issues/94),
+steps 9a and 9b). Step 9c builds it; nothing here is built yet.** The harness
+facts were checked against upstream source on 2026-10-07: Hermes main
+`a50406d9` and Codex `a513012`. The key Hermes and Codex behaviors were then
+run (see "Runtime checks"). The conformance kit (step 9d) checks the cells
+marked *to verify*. A cell that fails becomes a gap in
+[#135](https://github.com/mentatzoe/nunchi/issues/135), and this contract
+changes with it.
 
 ## Why
 
@@ -196,7 +198,7 @@ the harness delivered it, not confirmed by Nunchi.
 ## Expected parity
 
 What each integration should use after step 9e, checked against upstream
-source. *To verify* cells still need a runtime check. A gap becomes an issue
+source. The conformance kit checks the *to verify* cells. A gap becomes an issue
 here, with the alternatives considered, before anyone asks a harness's
 maintainers.
 
@@ -315,8 +317,9 @@ home and a git working directory, no model call:
 | `cwd`, workspace-write, trust level `trusted` in the thread's `config` | no |
 | `cwd`, workspace-write, trust level `untrusted` in the thread's `config` | no |
 
-Still to run: the Hermes plugin under `plugins.isolation: host`, reading
-history through `ctx.dispatch_tool`, and a Codex turn with room tools from a
+Still to run, in the conformance kit (step 9d), since they need real
+adapters: the Hermes plugin under `plugins.isolation: host`, reading history
+through `ctx.dispatch_tool`, and a Codex turn with room tools from a
 per-thread MCP server.
 
 ## What this replaces (step 9e)
@@ -331,11 +334,11 @@ per-thread MCP server.
 Each current integration stays until its replacement passes the conformance
 kit. It is then removed, with migration notes.
 
-## Open question
+## Where integrations live
 
-**Where integrations live.** I recommend this repository for now, with one
-package and one optional install per harness, and the Hermes plugin also
-installable as a subdirectory with `hermes plugins install`. That keeps one
-source of truth for the contract and the conformance kit. An integration
-can move out later if its harness's ecosystem calls for it, for example
-Hermes's reviewed plugin catalog.
+Decided (Zoe, 2026-10-07): in this repository for now. Each harness gets one
+package and one optional install. The Hermes plugin can also be installed
+from its subdirectory with `hermes plugins install`. That keeps one source of
+truth for the contract and the conformance kit. An integration can move out
+later if its harness's ecosystem calls for it, for example Hermes's reviewed
+plugin catalog.

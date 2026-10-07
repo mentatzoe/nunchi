@@ -3,9 +3,10 @@
 Use [the platform interface](platform-v2.md). Integrations do not implement a
 second gate.
 
-A draft contract that replaces the paths below, so every harness gets the
-same behavior, is in [`harness-contract.md`](harness-contract.md) (#94 step
-9a, for review).
+The harness contract in [`harness-contract.md`](harness-contract.md) (#94
+step 9, accepted 2026-10-07) replaces the paths below, so every harness gets
+the same behavior. Until each replacement passes the conformance kit, the
+paths below are what runs.
 
 Every integration constructs one exact `ParticipantBinding`, retains native
 observations through `ObservationProvider`, runs `AttentionEngine` with that
