@@ -351,7 +351,7 @@ the integration was given:
 | `/v1/turn/call` | `turn_id`, `tool`, `input` | `ok` with `text`, or `error` |
 | `/v1/turn/after-tool` | `turn_id` | `text` or null |
 | `/v1/turn/finish` | `turn_id`, `answer` | `finish` (`deliver`, `continue` or `silent`) and `text` |
-| `/v1/turn/end` | `turn_id`, `ok`, `detail` | `ended` |
+| `/v1/turn/end` | `turn_id` (optional: without it, the open turn ends even if it was never bound, which is a failure), `ok`, `detail` | `ended` |
 
 The Claude Code mod's route names, `/v1/turn-start`, `/v1/tool` and
 `/v1/news`, remain aliases for bind, call and after-tool.

@@ -678,10 +678,16 @@ class TurnParticipant:
             self._close(turn, ok=ok, detail=detail)
 
     def end_turn(self, *, turn_id: str | None, ok: bool, detail: str = "") -> bool:
-        """End the open turn the integration bound as ``turn_id``."""
+        """The harness says its agent's turn ended.
+
+        With ``turn_id``, only the open turn bound as that id ends. Without one,
+        the open turn ends whether or not it was bound: a harness knows its
+        agent stopped even when the binding never happened, and an unbound
+        turn that ends is a failure, never silence.
+        """
 
         turn = self.active
-        if turn is None or not turn.bound(turn_id):
+        if turn is None or (turn_id is not None and not turn.bound(turn_id)):
             return False
         self._close(turn, ok=ok, detail=detail)
         return True

@@ -1,0 +1,618 @@
+"""Conformance for the agent's turn, through any integration (#94 step 9d).
+
+Every harness must give its agent the same turn (`docs/harness-contract.md`).
+This kit checks that: a scripted agent plays one turn per scenario through an
+integration's real path, and the kit compares what the room and the agent saw
+with what the turn's rules say. The results make the parity table.
+
+An integration takes part by providing a `KitIntegration`: the participant the
+shared turn host invokes, wired so that when its agent is started the scripted
+agent's steps go through the integration's own surface (its tool calls, its
+socket, its hooks). The kit owns the room, attention, the host, and the checks.
+"""
+
+from __future__ import annotations
+
+import argparse
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
+import importlib
+import json
+from pathlib import Path
+import tempfile
+import threading
+from typing import Any, Protocol
+
+from .attention import AttentionEngine, AttentionPolicy, ParticipantProfile
+from .conformance import fixture_attention_model, fixture_binding, fixture_profile
+from .observation import ObservationProvider
+from .participant import ConversationOpportunityScheduler, ParticipantTurnHost, TransportResult
+from .pipeline import NunchiV2Pipeline
+from .receipts import ReceiptJournal
+from .turn import HARNESS_DELIVERS, HarnessDelivery, SecretGuard, Turn, TurnDriver, TurnParticipant
+
+PERSON = "conformance:person"
+TRIGGER = "conformance:message:1"
+SECRET = "conformance-withheld-secret-value"
+SILENCE = "[SILENT]"
+
+# Each step is what the agent does next: ("bind",), ("call", role, arguments),
+# ("after_tool",), ("finish", answer), ("arrive", text), ("end", ok).
+Step = tuple
+
+
+@dataclass(frozen=True)
+class Scenario:
+    posting: str
+    description: str
+    steps: tuple[Step, ...]
+    check: Callable[["Played"], list[str]]
+
+
+@dataclass
+class Played:
+    """What happened in one scenario's turn."""
+
+    answers: list[tuple[Step, Any]] = field(default_factory=list)
+    dispatched: list[dict[str, Any]] = field(default_factory=list)
+    host_result: TransportResult | None = None
+    own_moves: list[dict[str, Any]] = field(default_factory=list)
+    arrivals: list[str] = field(default_factory=list)
+    error: str | None = None
+
+    def answer(self, index: int) -> Any:
+        return self.answers[index][1]
+
+
+class TurnSurface(Protocol):
+    """How a scripted agent reaches its turn through one integration."""
+
+    def bind(self, turn_id: str) -> bool: ...
+    def call(self, turn_id: str, role: str, arguments: Mapping[str, Any]) -> tuple[bool, str]: ...
+    def after_tool(self, turn_id: str) -> str | None: ...
+    def finish(self, turn_id: str, answer: str) -> tuple[str, str]: ...
+    def end(self, turn_id: str, ok: bool) -> None: ...
+
+
+class KitIntegration(Protocol):
+    """An integration under test."""
+
+    name: str
+    posting: str
+
+    def participant(self, *, profile: ParticipantProfile, guard: SecretGuard, agent: "ScriptedAgent") -> Any:
+        """The participant the host invokes; starting its agent plays ``agent``."""
+
+    def close(self) -> None: ...
+
+
+class ScriptedAgent:
+    """Plays a scenario's steps through an integration's surface, in its own thread.
+
+    A call's argument written ``"@arrival:N"`` names the N-th message that
+    arrived during the turn, once it has arrived.
+    """
+
+    def __init__(self, steps: Sequence[Step], arrive: Callable[[str], str]) -> None:
+        self.steps = tuple(steps)
+        self.arrive = arrive
+        self.arrivals: list[str] = []
+        self.answers: list[tuple[Step, Any]] = []
+        self.done = threading.Event()
+        self.error: BaseException | None = None
+
+    def _arguments(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            key: self.arrivals[int(value.split(":")[1])]
+            if isinstance(value, str) and value.startswith("@arrival:")
+            else value
+            for key, value in arguments.items()
+        }
+
+    def play(self, surface: TurnSurface, turn_id: str = "turn-1") -> None:
+        def run() -> None:
+            try:
+                for step in self.steps:
+                    kind = step[0]
+                    if kind == "bind":
+                        answer: Any = surface.bind(turn_id)
+                    elif kind == "call":
+                        answer = surface.call(turn_id, step[1], self._arguments(step[2]))
+                    elif kind == "after_tool":
+                        answer = surface.after_tool(turn_id)
+                    elif kind == "finish":
+                        answer = surface.finish(turn_id, step[1])
+                    elif kind == "arrive":
+                        answer = self.arrive(step[1])
+                        self.arrivals.append(answer)
+                    elif kind == "end":
+                        answer = surface.end(turn_id, step[1])
+                    else:
+                        raise ValueError(f"unknown step {kind!r}")
+                    self.answers.append((step, answer))
+            except BaseException as exc:  # recorded for the result
+                self.error = exc
+            finally:
+                self.done.set()
+
+        threading.Thread(target=run, name="nunchi-scripted-agent", daemon=True).start()
+
+
+# -- the reference integration: the core turn, called directly ---------------------
+
+
+class _DirectSurface:
+    def __init__(self, participant: TurnParticipant, turn: Turn) -> None:
+        self.participant = participant
+        self.turn = turn
+
+    def bind(self, turn_id: str) -> bool:
+        return self.participant.bind_turn(turn_id=turn_id, wake_id=self.turn.wake_id)
+
+    def call(self, turn_id: str, role: str, arguments: Mapping[str, Any]) -> tuple[bool, str]:
+        return self.participant.call_tool(
+            turn_id=turn_id, tool=self.participant.tool_names.get(role, role), arguments=dict(arguments)
+        )
+
+    def after_tool(self, turn_id: str) -> str | None:
+        return self.participant.news(turn_id=turn_id)
+
+    def finish(self, turn_id: str, answer: str) -> tuple[str, str]:
+        decision = self.participant.finish(turn_id=turn_id, answer=answer)
+        return decision.kind, decision.text
+
+    def end(self, turn_id: str, ok: bool) -> None:
+        # The harness reports its agent's end of turn, bound or not.
+        self.participant.end_turn(turn_id=None, ok=ok, detail="scripted end")
+
+
+class _DirectDriver(TurnDriver):
+    def __init__(self, agent: ScriptedAgent) -> None:
+        self.agent = agent
+        self.participant: TurnParticipant | None = None
+
+    def start(self, turn: Turn) -> None:
+        assert self.participant is not None
+        self.agent.play(_DirectSurface(self.participant, turn))
+
+    def interrupt(self, turn: Turn) -> None:
+        pass
+
+
+class ReferenceIntegration:
+    """The core turn with no harness around it: what every integration must match."""
+
+    def __init__(self, posting: str = "tools") -> None:
+        self.posting = posting
+        self.name = f"reference ({posting})"
+
+    def participant(self, *, profile: ParticipantProfile, guard: SecretGuard, agent: ScriptedAgent) -> Any:
+        driver = _DirectDriver(agent)
+        participant = TurnParticipant(
+            profile=profile,
+            driver=driver,
+            guard=guard,
+            tool_names={role: role for role in ("send", "react", "propose", "withdraw", "context")},
+            result_wait_seconds=5,
+            silence_marker=SILENCE if self.posting == "final-answer" else None,
+        )
+        driver.participant = participant
+        return participant
+
+    def close(self) -> None:
+        pass
+
+
+# -- the scenarios -------------------------------------------------------------------
+
+
+def _expect(condition: bool, message: str, failures: list[str]) -> None:
+    if not condition:
+        failures.append(message)
+
+
+def _texts(played: Played) -> list[str]:
+    return [action.get("text", "") for action in played.dispatched]
+
+
+def _check_post(played: Played) -> list[str]:
+    failures: list[str] = []
+    _expect(played.answer(0) is True, "the turn did not bind", failures)
+    _expect(_texts(played) == ["On it."], f"expected one post, saw {_texts(played)}", failures)
+    _expect(played.answer(1)[0] is True, "the tool call failed", failures)
+    _expect("Done" in played.answer(1)[1], "the agent was not told the room accepted it", failures)
+    return failures
+
+
+def _check_bound_silence(played: Played) -> list[str]:
+    failures: list[str] = []
+    _expect(not played.dispatched, "a silent turn posted", failures)
+    _expect(played.host_result is None, f"expected silence, host said {played.host_result}", failures)
+    _expect(
+        any(move.get("kind") == "silence" for move in played.own_moves),
+        "the silence is not in the agent's memory",
+        failures,
+    )
+    return failures
+
+
+def _check_unbound_failure(played: Played) -> list[str]:
+    failures: list[str] = []
+    _expect(not played.dispatched, "an unbound turn posted", failures)
+    _expect(
+        played.host_result is not None and played.host_result.delivery == "failed",
+        f"an unbound turn must fail, host said {played.host_result}",
+        failures,
+    )
+    _expect(
+        not any(move.get("kind") == "silence" for move in played.own_moves),
+        "an unbound turn was remembered as silence",
+        failures,
+    )
+    return failures
+
+
+def _check_look_again(played: Played) -> list[str]:
+    failures: list[str] = []
+    held = played.answer(2)
+    _expect(held[0] is True and held[1].startswith("Not posted yet"), f"the first post was not held: {held}", failures)
+    _expect(_texts(played) == ["Never mind, then."], f"expected only the second post, saw {_texts(played)}", failures)
+    return failures
+
+
+def _check_steering(played: Played) -> list[str]:
+    failures: list[str] = []
+    update = played.answer(3)
+    _expect(isinstance(update, str) and "use the staging box" in update, f"no steering update: {update!r}", failures)
+    _expect(played.answer(4) is None, "the same update was shown twice", failures)
+    posted = played.dispatched[0] if played.dispatched else {}
+    _expect(posted.get("kind") == "reply", f"expected one reply, saw {played.dispatched}", failures)
+    _expect(
+        played.arrivals and posted.get("target_event_id") == played.arrivals[0],
+        "the reply does not answer the message shown by steering",
+        failures,
+    )
+    return failures
+
+
+def _check_one_action(played: Played) -> list[str]:
+    failures: list[str] = []
+    _expect(_texts(played) == ["First."], f"expected one post, saw {_texts(played)}", failures)
+    _expect(played.answer(2)[0] is False, "a second room action was accepted", failures)
+    return failures
+
+
+def _check_secret(played: Played) -> list[str]:
+    failures: list[str] = []
+    refused = played.answer(1)
+    _expect(refused[0] is False and "secret" in refused[1], f"the secret was not refused: {refused}", failures)
+    _expect(not played.dispatched, "a secret reached the room", failures)
+    return failures
+
+
+def _check_final_deliver(played: Played) -> list[str]:
+    failures: list[str] = []
+    _expect(played.answer(1) == ("deliver", "On it."), f"expected delivery, saw {played.answer(1)}", failures)
+    _expect(
+        played.host_result == TransportResult("unknown", HARNESS_DELIVERS),
+        f"the host did not commit the post for the harness: {played.host_result}",
+        failures,
+    )
+    _expect(_texts(played) == ["On it."], f"expected one committed post, saw {_texts(played)}", failures)
+    return failures
+
+
+def _check_final_silence(played: Played) -> list[str]:
+    failures: list[str] = []
+    _expect(played.answer(1)[0] == "silent", f"expected silence, saw {played.answer(1)}", failures)
+    _expect(not played.dispatched, "a silent final answer was committed", failures)
+    reasons = [move.get("why") for move in played.own_moves if move.get("kind") == "silence"]
+    _expect(reasons == ["Castor was asked, not me."], f"the thinking is not the silence's reason: {reasons}", failures)
+    return failures
+
+
+def _check_final_look_again(played: Played) -> list[str]:
+    failures: list[str] = []
+    _expect(played.answer(2)[0] == "continue", f"the first answer was not held: {played.answer(2)}", failures)
+    _expect(played.answer(3) == ("deliver", "Never mind, then."), f"the second answer: {played.answer(3)}", failures)
+    _expect(_texts(played) == ["Never mind, then."], f"expected only the second answer, saw {_texts(played)}", failures)
+    return failures
+
+
+def _check_final_thinking(played: Played) -> list[str]:
+    failures: list[str] = []
+    _expect(played.answer(1) == ("deliver", "Checking now."), f"saw {played.answer(1)}", failures)
+    _expect(
+        all("thinking" not in text and "plan" not in text for text in _texts(played)),
+        f"thinking reached the room: {_texts(played)}",
+        failures,
+    )
+    return failures
+
+
+def _check_final_secret(played: Played) -> list[str]:
+    failures: list[str] = []
+    _expect(played.answer(1)[0] == "continue" and "secret" in played.answer(1)[1], f"saw {played.answer(1)}", failures)
+    _expect(played.answer(2) == ("deliver", "I can't share that here."), f"saw {played.answer(2)}", failures)
+    _expect(all(SECRET not in text for text in _texts(played)), "a secret reached the room", failures)
+    return failures
+
+
+SCENARIOS: dict[str, Scenario] = {
+    "post": Scenario(
+        "tools",
+        "one post goes to the room, and the tool call says so",
+        (("bind",), ("call", "send", {"text": "On it."}), ("end", True)),
+        _check_post,
+    ),
+    "bound-silence": Scenario(
+        "tools",
+        "a bound turn that ends without an action is silence, remembered",
+        (("bind",), ("end", True)),
+        _check_bound_silence,
+    ),
+    "unbound-failure": Scenario(
+        "tools",
+        "a turn never bound to its wake is a failure, not silence",
+        (("end", True),),
+        _check_unbound_failure,
+    ),
+    "look-again": Scenario(
+        "tools",
+        "the first post is held once when someone posted meanwhile",
+        (
+            ("bind",),
+            ("arrive", "Actually, I found it myself."),
+            ("call", "send", {"text": "On it."}),
+            ("call", "send", {"text": "Never mind, then."}),
+            ("end", True),
+        ),
+        _check_look_again,
+    ),
+    "steering": Scenario(
+        "tools",
+        "a message that arrives mid-turn is shown once after a tool call, and can be answered",
+        (
+            ("bind",),
+            ("arrive", "Please use the staging box."),
+            ("call", "context", {"direction": "before"}),
+            ("after_tool",),
+            ("after_tool",),
+            ("call", "send", {"text": "Will do.", "reply_to_event_id": "@arrival:0"}),
+            ("end", True),
+        ),
+        _check_steering,
+    ),
+    "one-action": Scenario(
+        "tools",
+        "one room action per turn",
+        (
+            ("bind",),
+            ("call", "send", {"text": "First."}),
+            ("call", "send", {"text": "Second."}),
+            ("end", True),
+        ),
+        _check_one_action,
+    ),
+    "secret": Scenario(
+        "tools",
+        "a withheld secret never reaches the room",
+        (("bind",), ("call", "send", {"text": f"The key is {SECRET}"}), ("end", True)),
+        _check_secret,
+    ),
+    "final-deliver": Scenario(
+        "final-answer",
+        "the final answer is the post, committed for the harness to deliver",
+        (("bind",), ("finish", "On it."), ("end", True)),
+        _check_final_deliver,
+    ),
+    "final-silence": Scenario(
+        "final-answer",
+        "the silence marker is silence, and the agent's thinking is its reason",
+        (("bind",), ("finish", f"<thinking>Castor was asked, not me.</thinking>\n{SILENCE}"), ("end", True)),
+        _check_final_silence,
+    ),
+    "final-look-again": Scenario(
+        "final-answer",
+        "the final answer is held once when someone posted meanwhile",
+        (
+            ("bind",),
+            ("arrive", "Actually, I found it myself."),
+            ("finish", "On it."),
+            ("finish", "Never mind, then."),
+            ("end", True),
+        ),
+        _check_final_look_again,
+    ),
+    "final-thinking": Scenario(
+        "final-answer",
+        "thinking is never posted",
+        (("bind",), ("finish", "<thinking>My plan: check the logs.</thinking>Checking now."), ("end", True)),
+        _check_final_thinking,
+    ),
+    "final-secret": Scenario(
+        "final-answer",
+        "a withheld secret is refused once, and the agent answers again",
+        (
+            ("bind",),
+            ("finish", f"The key is {SECRET}"),
+            ("finish", "I can't share that here."),
+            ("end", True),
+        ),
+        _check_final_secret,
+    ),
+}
+
+
+# -- running ---------------------------------------------------------------------------
+
+
+class _RecordingTransport:
+    def __init__(self) -> None:
+        self.actions: list[dict[str, Any]] = []
+
+    def dispatch(self, *, action, **_):
+        self.actions.append(dict(action))
+        return TransportResult("sent", "conformance room")
+
+
+class _CommittedForHarness(HarnessDelivery):
+    """Records what the host committed for the harness to post."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.actions: list[dict[str, Any]] = []
+
+    def dispatch(self, *, action, wake):
+        self.actions.append(dict(action))
+        return super().dispatch(action=action, wake=wake)
+
+
+def run_scenario(name: str, integration: KitIntegration, *, timeout: float = 15.0) -> dict[str, Any]:
+    scenario = SCENARIOS[name]
+    if scenario.posting != integration.posting:
+        return {"scenario": name, "integration": integration.name, "status": "n/a"}
+    binding = fixture_binding()
+    profile = fixture_profile(binding)
+    played = Played()
+    with tempfile.TemporaryDirectory(prefix="nunchi-turn-conformance-") as directory:
+        receipts = ReceiptJournal(Path(directory) / "receipts.jsonl")
+        observation = ObservationProvider(binding, receipts=receipts)
+        scheduler = ConversationOpportunityScheduler("conformance:turns")
+        transport = _CommittedForHarness() if scenario.posting == "final-answer" else _RecordingTransport()
+
+        def arrive(text: str) -> str:
+            event_id = f"conformance:message:{len(played.arrivals) + 2}"
+            observation.observe(
+                delivery_id=f"conformance:delivery:{event_id}",
+                event={
+                    "id": event_id,
+                    "type": "message",
+                    "author_id": PERSON,
+                    "text": text,
+                    "mentioned_actor_ids": [],
+                    "mentions_room": False,
+                },
+                actors={PERSON: {"kind": "human", "display_name": "Sam"}},
+            )
+            played.arrivals.append(event_id)
+            return event_id
+
+        agent = ScriptedAgent(scenario.steps, arrive)
+        participant = integration.participant(profile=profile, guard=SecretGuard([SECRET]), agent=agent)
+        host = ParticipantTurnHost(
+            observation=observation,
+            participant=participant,
+            transport=transport,
+            scheduler=scheduler,
+            receipts=receipts,
+            participant_timeout_seconds=timeout,
+        )
+        pipeline = NunchiV2Pipeline(
+            observation=observation,
+            attention=AttentionEngine(
+                profile=profile,
+                model=fixture_attention_model("WAKE"),
+                policy=AttentionPolicy(),
+                receipts=receipts,
+            ),
+            host=host,
+            scheduler=scheduler,
+        )
+        try:
+            outcome = pipeline.handle_delivery(
+                delivery_id="conformance:delivery:1",
+                event={
+                    "id": TRIGGER,
+                    "type": "message",
+                    "author_id": PERSON,
+                    "text": "Can someone look at the failing deploy?",
+                    "mentioned_actor_ids": [],
+                    "mentions_room": False,
+                },
+                actors={PERSON: {"kind": "human", "display_name": "Sam"}},
+            )
+            agent.done.wait(timeout)
+            if outcome.opportunities:
+                played.host_result = outcome.opportunities[0].transport
+        except BaseException as exc:  # recorded for the result
+            played.error = f"{type(exc).__name__}: {exc}"
+        finally:
+            integration.close()
+        played.answers = list(agent.answers)
+        played.dispatched = list(transport.actions)
+        facts = host.memory_facts(TRIGGER) or {}
+        played.own_moves = list(facts.get("own_moves", ()))
+        if agent.error is not None and played.error is None:
+            played.error = f"{type(agent.error).__name__}: {agent.error}"
+    try:
+        failures = [] if played.error is None else [f"error: {played.error}"]
+        if not failures:
+            failures = scenario.check(played)
+    except (IndexError, TypeError, KeyError) as exc:
+        failures = [f"the turn did not play out: {type(exc).__name__}: {exc}"]
+    return {
+        "scenario": name,
+        "integration": integration.name,
+        "status": "pass" if not failures else "fail",
+        "failures": failures,
+    }
+
+
+def parity_table(results: Sequence[Mapping[str, Any]]) -> str:
+    """The parity table: one row per scenario, one column per integration."""
+
+    integrations = list(dict.fromkeys(result["integration"] for result in results))
+    cells = {(result["scenario"], result["integration"]): result["status"] for result in results}
+    lines = [
+        "| Scenario | " + " | ".join(integrations) + " |",
+        "|---|" + "---|" * len(integrations),
+    ]
+    for name, scenario in SCENARIOS.items():
+        row = [cells.get((name, integration), "n/a") for integration in integrations]
+        lines.append(f"| {name}: {scenario.description} | " + " | ".join(row) + " |")
+    return "\n".join(lines)
+
+
+def _load(spec: str) -> list[KitIntegration]:
+    if spec == "reference":
+        return [ReferenceIntegration("tools"), ReferenceIntegration("final-answer")]
+    module_name, _, factory = spec.partition(":")
+    built = getattr(importlib.import_module(module_name), factory or "conformance_integrations")()
+    return list(built)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="nunchi-turn-conformance")
+    parser.add_argument("--list", action="store_true")
+    parser.add_argument(
+        "--integration",
+        action="append",
+        default=[],
+        help="'reference', or module:factory returning integrations under test (repeatable)",
+    )
+    parser.add_argument("--format", choices=("table", "jsonl"), default="table")
+    args = parser.parse_args(argv)
+    if args.list:
+        for name, scenario in SCENARIOS.items():
+            print(f"{name:18s} {scenario.posting:13s} {scenario.description}")
+        return 0
+    integrations = [item for spec in (args.integration or ["reference"]) for item in _load(spec)]
+    results = []
+    for integration_spec in integrations:
+        for name in SCENARIOS:
+            # Each scenario gets a fresh integration, so no turn leaks into the next.
+            results.append(run_scenario(name, integration_spec))
+    if args.format == "jsonl":
+        for result in results:
+            print(json.dumps(result, sort_keys=True))
+    else:
+        print(parity_table(results))
+        for result in results:
+            for failure in result.get("failures", ()):
+                print(f"FAIL {result['integration']} {result['scenario']}: {failure}")
+    return 0 if all(result["status"] in ("pass", "n/a") for result in results) else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
