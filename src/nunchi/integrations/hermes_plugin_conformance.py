@@ -40,6 +40,14 @@ from .hermes_plugin.plugin import PLUGIN_NAME, TOOL_NAMES, WAKE_MARKER, HermesRo
 
 ROOM = "conformance-room"
 TURN_USER = "nunchi-turns"
+# Hermes's per-platform display settings a Nunchi room needs: no streamed
+# drafts, tool progress lines, interim assistant text or "still working" notes.
+ROOM_DISPLAY = {
+    "streaming": False,
+    "tool_progress": "off",
+    "interim_assistant_messages": False,
+    "long_running_notifications": False,
+}
 _STEP_SECONDS = 20.0
 _PLUGIN_YAML = Path(__file__).parent / "hermes_plugin" / "plugin.yaml"
 _KIT_PLUGIN_INIT = (
@@ -183,7 +191,8 @@ class ScriptedModel:
                 if "tool" in reply:
                     message = {
                         "role": "assistant",
-                        "content": None,
+                        # A model may write text alongside its tool call.
+                        "content": reply.get("text") or None,
                         "tool_calls": [
                             {
                                 "id": f"call_{model.count()}",
@@ -242,25 +251,42 @@ class HermesGateway:
         tool_search: str = "off",
         allowed_users: str = f"u1,u2,{TURN_USER}",
         extra_config: Mapping[str, Any] | None = None,
+        plugin_source: Path | None = None,
+        plugin_settings: Mapping[str, Any] | None = None,
+        platform_actions: bool = False,
     ) -> None:
         base = isolate()
         _ISOLATION["count"] += 1
         self.directory = base / f"scenario-{_ISOLATION['count']}"
         self.home = self.directory / "home"
         plugin_dir = self.home / "plugins" / PLUGIN_NAME
-        plugin_dir.mkdir(parents=True)
-        shutil.copyfile(_PLUGIN_YAML, plugin_dir / "plugin.yaml")
-        (plugin_dir / "__init__.py").write_text(_KIT_PLUGIN_INIT, encoding="utf-8")
+        if plugin_source is not None:
+            # The shipped plugin directory, loaded with its own register().
+            shutil.copytree(plugin_source, plugin_dir, ignore=shutil.ignore_patterns("__pycache__"))
+        else:
+            plugin_dir.mkdir(parents=True)
+            shutil.copyfile(_PLUGIN_YAML, plugin_dir / "plugin.yaml")
+            (plugin_dir / "__init__.py").write_text(_KIT_PLUGIN_INIT, encoding="utf-8")
+        entry: dict[str, Any] = {"allow_gateway_injection": True}
+        if platform_actions:
+            # The operator's grant for reactions (legacy key of gateway.platform_actions).
+            entry["allow_platform_actions"] = True
+        if plugin_settings:
+            entry["settings"] = dict(plugin_settings)
         config: dict[str, Any] = {
             "model": {"default": "conformance/model", "provider": "custom", "base_url": model.base_url,
                       "api_key": "sk-local-conformance"},
-            "plugins": {"enabled": [PLUGIN_NAME], "entries": {PLUGIN_NAME: {"allow_gateway_injection": True}}},
-            # Operator setup for a Nunchi room (integrations/hermes-plugin/README.md).
-            "display": {"platforms": {"telegram": {"streaming": False, "tool_progress": "off"}}},
+            "plugins": {"enabled": [PLUGIN_NAME], "entries": {PLUGIN_NAME: entry}},
+            # Operator setup for a Nunchi room (integrations/hermes-plugin/README.md):
+            # only the final answer the library committed may reach the room.
+            "display": {"platforms": {"telegram": dict(ROOM_DISPLAY)}},
             "tools": {"tool_search": {"enabled": tool_search}},
         }
         for key, value in (extra_config or {}).items():
-            config[key] = value
+            if isinstance(value, Mapping) and isinstance(config.get(key), dict):
+                config[key] = {**config[key], **value}
+            else:
+                config[key] = value
         # JSON is YAML: Hermes reads it as its config.yaml.
         (self.home / "config.yaml").write_text(json.dumps(config), encoding="utf-8")
         (self.home / ".env").write_text(f"TELEGRAM_ALLOWED_USERS={allowed_users}\n", encoding="utf-8")
@@ -296,6 +322,7 @@ class HermesGateway:
                     Platform.TELEGRAM,
                 )
                 self.sent: list[tuple[str, str]] = []
+                self.reactions: list[tuple[str, str, str]] = []
                 self._running = True
 
             async def connect(self, *, is_reconnect: bool = False) -> bool:
@@ -307,6 +334,11 @@ class HermesGateway:
             async def send(self, chat_id, content, reply_to=None, metadata=None):
                 self.sent.append((str(chat_id), content))
                 return SendResult(success=True, message_id=f"sent-{len(self.sent)}")
+
+            async def _set_reaction(self, chat_id, message_id, emoji) -> bool:
+                # What Hermes's Telegram add_reaction verb calls on the adapter.
+                self.reactions.append((str(chat_id), str(message_id), emoji))
+                return True
 
             async def send_typing(self, chat_id, metadata=None):
                 return None
@@ -474,6 +506,8 @@ class HermesHarness:
         allowed_users: str = f"u1,u2,{TURN_USER}",
         start_timeout_seconds: float = 30.0,
         result_wait_seconds: float = 5.0,
+        platform_actions: bool = False,
+        display: Mapping[str, Any] | None = None,
     ) -> None:
         if not hermes_available():
             raise RuntimeError("Hermes is not installed in this Python environment")
@@ -489,7 +523,13 @@ class HermesHarness:
             result_wait_seconds=result_wait_seconds,
         )
         try:
-            self.gateway = HermesGateway(model=self.model, tool_search=tool_search, allowed_users=allowed_users)
+            self.gateway = HermesGateway(
+                model=self.model, tool_search=tool_search, allowed_users=allowed_users,
+                platform_actions=platform_actions,
+                extra_config=(
+                    {"display": {"platforms": {"telegram": dict(display)}}} if display is not None else None
+                ),
+            )
         except BaseException:
             self.model.close()
             raise

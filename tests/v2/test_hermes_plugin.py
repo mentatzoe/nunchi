@@ -345,6 +345,53 @@ class HermesGatewayTest(unittest.TestCase):
         self.assertEqual(harness.gateway.adapter.sent, [])
         self.assertIsNone(harness.plugin.participant.active)
 
+    def _text_beside_a_tool_call(self, harness):
+        harness.person_says("Can someone look at the failing deploy?", message_id="100")
+        self.assertTrue(harness.wait_for_requests(1))
+        harness.model.reply({"tool": "room_context", "text": "Let me look at the room first.",
+                             "arguments": {"direction": "before"}})
+        self.assertTrue(harness.wait_for_requests(2))
+        harness.model.reply({"text": SILENCE_MARKER})
+        self.assertTrue(harness.settle())
+        return harness.gateway.adapter.sent
+
+    def test_the_room_setup_keeps_interim_text_out_of_the_room(self):
+        self.assertEqual(self._text_beside_a_tool_call(self._harness()), [])
+
+    def test_hermes_defaults_post_interim_text_without_the_library(self):
+        # Hermes's own display default posts text the model writes beside a tool
+        # call, before any final answer: it never reaches the library's commit.
+        # No plugin hook can stop it, so the room needs the operator setting
+        # (integrations/hermes-plugin/README.md).
+        from nunchi.integrations.hermes_plugin_conformance import ROOM_DISPLAY
+
+        defaults = {key: value for key, value in ROOM_DISPLAY.items() if key in ("streaming", "tool_progress")}
+        sent = self._text_beside_a_tool_call(self._harness(display=defaults))
+        self.assertEqual(sent, [(ROOM, "Let me look at the room first.")])
+
+    def test_a_reaction_is_the_agents_own_through_platform_actions(self):
+        harness = self._harness(platform_actions=True)
+        harness.person_says("Deploy is green again.", message_id="100")
+        self.assertTrue(harness.wait_for_requests(1))
+        self.assertIn("room_react", _user_text(harness.model.latest()))
+        harness.model.reply({"tool": "room_react",
+                             "arguments": {"target_event_id": "telegram:message:100", "reaction": "👍"}})
+        self.assertTrue(harness.wait_for_requests(2))
+        self.assertIn("Done", json.loads(_tool_text(harness.model.latest()))["result"])
+        # One room action per turn: a final answer after the reaction posts nothing.
+        harness.model.reply({"text": "Nice."})
+        self.assertTrue(harness.settle())
+        self.assertEqual(harness.gateway.adapter.reactions, [(ROOM, "100", "👍")])
+        self.assertEqual(harness.gateway.adapter.sent, [])
+
+    def test_without_the_grant_the_agent_is_not_offered_reactions(self):
+        harness = self._harness()
+        harness.person_says("Deploy is green again.", message_id="100")
+        self.assertTrue(harness.wait_for_requests(1))
+        self.assertNotIn("room_react", _user_text(harness.model.latest()))
+        harness.model.reply({"text": SILENCE_MARKER})
+        self.assertTrue(harness.settle())
+
     def test_room_tools_through_the_tool_search_bridge(self):
         # Hermes's default defers plugin tools behind tool_search / tool_call.
         harness = self._harness(tool_search="auto")
@@ -361,6 +408,68 @@ class HermesGatewayTest(unittest.TestCase):
         self.assertIn('"direction": "before"', answer["result"])
         harness.model.reply({"text": SILENCE_MARKER})
         self.assertTrue(harness.settle())
+
+
+@unittest.skipUnless(hermes_available(), "requires an installed Hermes (hermes-agent)")
+class HermesInstalledPluginTest(unittest.TestCase):
+    """The shipped plugin directory, loaded by Hermes with its own register() and a Nunchi config."""
+
+    def test_the_plugin_directory_runs_a_turn_from_its_config(self):
+        self._run_from_config("in_process")
+
+    def test_the_plugin_runs_out_of_process_in_hermess_plugin_host(self):
+        # harness-contract.md, parity table: "also under plugins.isolation: host (to verify)".
+        self._run_from_config("host")
+
+    def _run_from_config(self, isolation):
+        import hashlib
+        import shutil
+
+        import nunchi.integrations.hermes_plugin as package
+        from nunchi.integrations.hermes_plugin_conformance import HermesGateway, ScriptedModel
+
+        directory = Path(tempfile.mkdtemp(prefix="nunchi-hermes-config-test-"))
+        self.addCleanup(shutil.rmtree, directory, True)
+        profile = directory / "vigil.profile.json"
+        profile.write_text(json.dumps({
+            "profile_id": PROFILE.profile_id, "participant_id": PROFILE.participant_id,
+            "actor_id": PROFILE.actor_id, "instructions": PROFILE.instructions, "provenance": "test:offline",
+        }), encoding="utf-8")
+        config = directory / "nunchi.json"
+        config.write_text(json.dumps({
+            "schema_version": 2,
+            "binding": {"participant_id": BINDING.participant_id, "actor_id": BINDING.actor_id,
+                        "platform": "telegram", "room_id": ROOM, "continuity_scope_id": BINDING.continuity_scope_id,
+                        "names": ["Vigil"]},
+            "profile": {"path": str(profile), "sha256": hashlib.sha256(profile.read_bytes()).hexdigest()},
+            # No attention route, so no credentials: every message reaches the agent.
+            "attention": {"policy": {"preattention_enabled": False}, "model": None},
+            "limits": {},
+            "state_directory": str(directory / "state"),
+            "hermes": {"platform": "telegram", "chat_id": ROOM, "turn_user_id": TURN_USER},
+        }), encoding="utf-8")
+        model = ScriptedModel()
+        self.addCleanup(model.close)
+        gateway = HermesGateway(model=model, plugin_source=Path(package.__file__).parent,
+                                plugin_settings={"config_path": str(config)},
+                                extra_config={"plugins": {"isolation": isolation}})
+        self.addCleanup(gateway.close)
+        gateway.run(gateway.person_says("Can someone look at the failing deploy?", message_id="100"))
+        for _ in range(500):
+            if model.count():
+                break
+            __import__("time").sleep(0.02)
+        self.assertEqual(model.count(), 1)
+        self.assertTrue(_user_text(model.latest()).startswith('<nunchi_wake id="'))
+        offered = {tool["function"]["name"] for tool in model.latest()["tools"]}
+        self.assertTrue({"room_context"} <= offered)
+        model.reply({"text": "On it."})
+        for _ in range(500):
+            if gateway.adapter.sent and gateway.idle():
+                break
+            __import__("time").sleep(0.02)
+        self.assertEqual(gateway.adapter.sent, [(ROOM, "On it.")])
+        self.assertTrue((directory / "state" / "hermes-plugin-receipts.jsonl").exists())
 
 
 async def _person_elsewhere(gateway):

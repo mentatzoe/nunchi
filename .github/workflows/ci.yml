@@ -32,6 +32,47 @@ jobs:
       - name: Verdict-suite CLI loads the corpus (smoke)
         run: python3 -m evals.verdict_suite.runner --list
 
+  hermes-plugin:
+    # The turn conformance kit and the plugin's tests inside a real Hermes
+    # gateway, on a clean install of a pinned Hermes; only the model is
+    # scripted (docs/harness-guide.md, "Prove it").
+    name: Hermes plugin (Hermes main a50406d9)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Check out Hermes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: NousResearch/hermes-agent
+          ref: a50406d9b7474b060450d2dcaff8743c977d296a
+          path: hermes-agent
+          fetch-depth: 0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          # Current Hermes gates its core dependencies on Python 3.14.
+          python-version: "3.14"
+      - name: Install Nunchi's wheel and untouched Hermes in a clean virtualenv
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip wheel --no-deps . --wheel-dir "$RUNNER_TEMP/nunchi-wheels"
+          python -m venv "$RUNNER_TEMP/hermes-env"
+          "$RUNNER_TEMP/hermes-env/bin/python" -m pip install --upgrade pip
+          git clone --no-local --no-checkout hermes-agent "$RUNNER_TEMP/stock-hermes"
+          git -C "$RUNNER_TEMP/stock-hermes" checkout --detach "$(git -C hermes-agent rev-parse HEAD)"
+          "$RUNNER_TEMP/hermes-env/bin/python" -m pip install -e "$RUNNER_TEMP/stock-hermes[messaging]"
+          "$RUNNER_TEMP/hermes-env/bin/python" -m pip install --no-deps "$RUNNER_TEMP"/nunchi-wheels/*.whl
+      - name: Turn conformance kit through the plugin
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          hermes-env/bin/nunchi-turn-conformance --integration reference --integration nunchi.integrations.hermes_plugin_conformance
+      - name: Plugin tests inside the gateway
+        run: |
+          "$RUNNER_TEMP/hermes-env/bin/python" -m unittest tests.v2.test_hermes_plugin -v
+
   package:
     name: clean-install packaging
     runs-on: ubuntu-latest
