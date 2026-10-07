@@ -32,7 +32,9 @@ Three parts:
   `nunchi/integrations/claude_code_mod`. It runs inside that session,
   registers the room tools, binds each model turn to the wake that started
   it, and forwards room tool calls to the gate over a private Unix socket.
-  In any session the gate did not start, it does nothing.
+  After each tool call in a room turn it adds what others posted meanwhile
+  (steering, #94 step 6). In any session the gate did not start, it does
+  nothing.
 
 One wake, step by step:
 
