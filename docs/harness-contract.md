@@ -1,11 +1,12 @@
 # Harness contract
 
 **Status: accepted by Zoe, 2026-10-07 ([#94](https://github.com/mentatzoe/nunchi/issues/94),
-steps 9a and 9b). Step 9c is building it.** The `Turn` is in the core
-(`nunchi.turn`), with both posting styles. The Claude Code gate and the
-one-reply style (the behavior eval, Codex) drive it, and the eval measures
-final-answer posting with `--agent-posting final-answer`. The local
-protocol comes next. The harness
+steps 9a and 9b). Step 9c built the library's side.** The `Turn` is in the
+core (`nunchi.turn`), with both posting styles, and its local protocol is
+`nunchi.turn_server` (`I-040D`). The Claude Code gate and the one-reply style
+(the behavior eval, Codex) drive it, and the eval measures final-answer
+posting with `--agent-posting final-answer`. The conformance kit (9d) and the
+adapters (9e) come next. The harness
 facts were checked against upstream source on 2026-10-07: Hermes main
 `a50406d9` and Codex `a513012`. The key Hermes and Codex behaviors were then
 run (see "Runtime checks"). The conformance kit (step 9d) checks the cells

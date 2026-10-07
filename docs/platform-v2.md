@@ -335,6 +335,23 @@ there is no send tool:
 - `TurnParticipant.finish(turn_id=..., answer=...)` does this for the open,
   bound turn.
 
+A harness outside Python makes the same calls as versioned JSON over a
+private Unix socket (`nunchi.turn_server`, interface `I-040D
+LocalTurnProtocolV2@1`). Every request carries the per-launch session secret
+the integration was given:
+
+| Route | Body | Answer |
+|---|---|---|
+| `/v1/attach` | `{}` | `protocol` (`nunchi.turn-session`), `version`, `posting` (`tools` or `final-answer`), `silence_marker`, `tools` |
+| `/v1/turn/bind` | `turn_id`, `wake_id` | `bound` |
+| `/v1/turn/call` | `turn_id`, `tool`, `input` | `ok` with `text`, or `error` |
+| `/v1/turn/after-tool` | `turn_id` | `text` or null |
+| `/v1/turn/finish` | `turn_id`, `answer` | `finish` (`deliver`, `continue` or `silent`) and `text` |
+| `/v1/turn/end` | `turn_id`, `ok`, `detail` | `ended` |
+
+The Claude Code mod's route names, `/v1/turn-start`, `/v1/tool` and
+`/v1/news`, remain aliases for bind, call and after-tool.
+
 The Claude Code gate is the first integration on it. The one-reply envelope
 above drives the same `Turn`: `ParticipantTurnProtocol` keeps the reply's
 shape and the pages the model asked for, and hands each action to the turn's

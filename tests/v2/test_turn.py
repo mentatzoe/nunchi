@@ -466,3 +466,132 @@ class PlainReplyParticipantTests(unittest.TestCase):
         messages, _ = speaker.sent[1]
         self.assertEqual(["user", "assistant", "user"], [message["role"] for message in messages])
         self.assertIn("never mind", messages[2]["content"])
+
+
+class LocalTurnProtocolTests(unittest.TestCase):
+    """I-040D: the same turn as versioned JSON over a private socket."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+
+        from nunchi.turn_server import TurnServer
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.socket_path = Path(directory.name) / "turns" / "turn.sock"
+        self.secret = "a-launch-secret-for-this-test"
+        self.driver = RecordingDriver()
+        self.room = Room()
+
+    def serve(self, **participant):
+        from nunchi.turn_server import TurnServer
+
+        self.participant = TurnParticipant(
+            profile=PROFILE,
+            driver=self.driver,
+            guard=SecretGuard(()),
+            tool_names=NAMES,
+            result_wait_seconds=5,
+            **participant,
+        )
+        server = TurnServer(self.participant, socket_path=self.socket_path, session_secret=self.secret)
+        server.start()
+        self.addCleanup(server.close)
+
+    def post(self, path, body, secret=None):
+        from tests.v2.test_claude_code import gate_post
+
+        return gate_post(self.socket_path, path, body, self.secret if secret is None else secret)
+
+    def open_turn(self):
+        self.box = {}
+        cancel = threading.Event()
+        self.addCleanup(cancel.set)
+        threading.Thread(
+            target=lambda: self.box.setdefault(
+                "action",
+                self.participant.run_protocol(
+                    wake=test_wake(), opportunity=deepcopy(OPPORTUNITY), expand=self.room.expand, cancel=cancel
+                ),
+            ),
+            daemon=True,
+        ).start()
+        self.assertTrue(self.driver.started_event.wait(5))
+        return self.driver.started[0]
+
+    def test_attach_names_the_protocol_the_posting_style_and_the_tools(self):
+        self.serve()
+        self.assertEqual(401, self.post("/v1/attach", {}, secret="wrong")[0])
+        status, body = self.post("/v1/attach", {})
+        self.assertEqual(200, status)
+        self.assertEqual(
+            ("nunchi.turn-session", 1, "tools", None),
+            (body["protocol"], body["version"], body["posting"], body["silence_marker"]),
+        )
+        self.assertEqual(["say", "emoji", "ask_operator", "take_back", "look"], [tool["name"] for tool in body["tools"]])
+        self.assertTrue(self.participant.attached)
+
+    def test_a_tool_turn_binds_calls_steers_and_ends(self):
+        self.serve()
+        turn = self.open_turn()
+        self.assertEqual({"bound": True}, self.post("/v1/turn/bind", {"turn_id": "t1", "wake_id": turn.wake_id})[1])
+        self.room.arrivals = [message("e2", "use staging")]
+        status, update = self.post("/v1/turn/after-tool", {"turn_id": "t1"})
+        self.assertIn("use staging", update["text"])
+        self.assertEqual({"ended": False}, self.post("/v1/turn/end", {"turn_id": "nope", "ok": True})[1])
+        self.assertEqual({"ended": True}, self.post("/v1/turn/end", {"turn_id": "t1", "ok": True, "detail": "done"})[1])
+        for _ in range(100):
+            if "action" in self.box:
+                break
+            threading.Event().wait(0.05)
+        self.assertEqual({"action": None}, self.box)
+
+    def test_the_first_integrations_route_names_still_work(self):
+        self.serve()
+        turn = self.open_turn()
+        self.assertEqual({"bound": True}, self.post("/v1/turn-start", {"turn_id": "t1", "wake_id": turn.wake_id})[1])
+        self.assertEqual({"text": None}, self.post("/v1/news", {"turn_id": "t1"})[1])
+        answer = {}
+        threading.Thread(
+            target=lambda: answer.setdefault(
+                "body", self.post("/v1/tool", {"turn_id": "t1", "tool": "say", "input": {"text": "on it"}})[1]
+            ),
+            daemon=True,
+        ).start()
+        self.assertTrue(turn.action_ready.wait(5))
+        self.participant.settle(turn.request_id, TransportResult("sent", "ok"))
+        for _ in range(100):
+            if "body" in answer:
+                break
+            threading.Event().wait(0.05)
+        self.assertEqual({"ok": True, "text": "Done: the room accepted this action."}, answer["body"])
+
+    def test_a_final_answer_turn_finishes_over_the_socket(self):
+        from nunchi.turn import HARNESS_DELIVERS
+
+        self.serve(silence_marker="[SILENT]")
+        status, body = self.post("/v1/attach", {})
+        self.assertEqual(("final-answer", "[SILENT]"), (body["posting"], body["silence_marker"]))
+        self.assertNotIn("say", [tool["name"] for tool in body["tools"]])
+        turn = self.open_turn()
+        self.post("/v1/turn/bind", {"turn_id": "t1", "wake_id": turn.wake_id})
+        self.assertEqual({"finish": "silent", "text": ""}, self.post("/v1/turn/finish", {"turn_id": "t1", "answer": "[SILENT]"})[1])
+        answer = {}
+        threading.Thread(
+            target=lambda: answer.setdefault(
+                "body", self.post("/v1/turn/finish", {"turn_id": "t1", "answer": "On it."})[1]
+            ),
+            daemon=True,
+        ).start()
+        self.assertTrue(turn.action_ready.wait(5))
+        self.participant.settle(turn.request_id, TransportResult("unknown", HARNESS_DELIVERS))
+        for _ in range(100):
+            if "body" in answer:
+                break
+            threading.Event().wait(0.05)
+        self.assertEqual({"finish": "deliver", "text": "On it."}, answer["body"])
+
+    def test_finish_is_refused_for_a_participant_that_posts_through_tools(self):
+        self.serve()
+        self.assertIn("error", self.post("/v1/turn/finish", {"turn_id": "t1", "answer": "hi"})[1])

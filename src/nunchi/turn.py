@@ -38,6 +38,7 @@ from .errors import NunchiError
 from .participant import TransportResult
 from .reactions import UNAVAILABLE_REACTION_CAPABILITY
 from .participant_model import (
+    PARTICIPANT_TOOL_SPECS,
     PARTICIPANT_TURN_PROTOCOL_VERSION,
     ParticipantModelError,
     build_participant_turn_request,
@@ -542,6 +543,27 @@ class TurnParticipant:
         self._lock = threading.Lock()
         self._active: Turn | None = None
         self._recent: deque[Turn] = deque(maxlen=4)
+        self.attached = False
+
+    # -- what the integration registers ------------------------------------------
+
+    def tool_specs(self) -> list[dict[str, Any]]:
+        """The room tools, under the names the integration chose."""
+
+        return [
+            {
+                "name": self.tool_names[role],
+                "description": PARTICIPANT_TOOL_SPECS[role]["description"],
+                "inputSchema": deepcopy(PARTICIPANT_TOOL_SPECS[role]["input_schema"]),
+            }
+            for role in self.registered_roles
+        ]
+
+    def attach(self) -> list[dict[str, Any]]:
+        """The integration is ready to bind turns; returns the tools to register."""
+
+        self.attached = True
+        return self.tool_specs()
 
     # -- the shared host's side ------------------------------------------------
 
@@ -595,7 +617,7 @@ class TurnParticipant:
     def unbound_detail(self) -> str:
         """Why the integration may have missed the binding, for the error."""
 
-        return ""
+        return "" if self.attached else "; the integration never attached"
 
     def __call__(self, *, wake, expand, cancel):
         return self.run_protocol(
@@ -633,6 +655,15 @@ class TurnParticipant:
         turn = self.active
         if turn is not None:
             self._close(turn, ok=ok, detail=detail)
+
+    def end_turn(self, *, turn_id: str | None, ok: bool, detail: str = "") -> bool:
+        """End the open turn the integration bound as ``turn_id``."""
+
+        turn = self.active
+        if turn is None or not turn.bound(turn_id):
+            return False
+        self._close(turn, ok=ok, detail=detail)
+        return True
 
     def _close(self, turn: Turn, *, ok: bool, detail: str) -> None:
         with self._lock:
