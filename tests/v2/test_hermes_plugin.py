@@ -257,19 +257,38 @@ class HermesGatewayTest(unittest.TestCase):
         self.assertEqual(harness.gateway.adapter.sent, [(ROOM, "On it.")])
         self.assertEqual(harness.model.count(), 1)
 
-    @unittest.expectedFailure
-    def test_known_gap_the_delivered_message_is_in_memory(self):
-        # docs/harness-guide.md, "Known library gaps": Hermes drops its agent's
-        # own messages before any plugin hook, and the library does not yet
-        # record a harness-delivered move by its text and time. When it does,
-        # this test passes and the decorator comes off.
+    def _next_turn_after_a_delivered_reply(self):
         harness = self._harness()
         harness.person_says("Can someone look at the failing deploy?", message_id="100")
         self.assertTrue(harness.wait_for_requests(1))
         harness.model.reply({"text": "On it."})
         self.assertTrue(harness.settle())
-        facts = harness.plugin.room.host.memory_facts("telegram:message:100") or {}
-        self.assertIn("message", [move.get("kind") for move in facts.get("own_moves", ())])
+        harness.person_says("Thanks! Ping me when it's green.", message_id="102")
+        self.assertTrue(harness.wait_for_requests(2))
+        text = _user_text(harness.model.latest())
+        harness.model.reply({"text": SILENCE_MARKER})
+        self.assertTrue(harness.settle())
+        payload = text[text.index("<nunchi_participant_turn_v1>") + len("<nunchi_participant_turn_v1>"):
+                       text.index("</nunchi_participant_turn_v1>")]
+        return json.loads(payload)["participant_turn"]["wake"]
+
+    def test_the_delivered_message_is_in_the_agents_memory(self):
+        # Hermes drops its agent's own messages before any plugin hook; the
+        # library remembers what HarnessDelivery committed, by text and time.
+        wake = self._next_turn_after_a_delivered_reply()
+        moves = wake.get("memory", {}).get("own_moves", [])
+        self.assertIn(("message", "On it."), [(move.get("kind"), move.get("text")) for move in moves])
+
+    @unittest.expectedFailure
+    def test_known_gap_the_room_counts_the_delivered_message(self):
+        # The room itself never shows the delivered message: the question it
+        # answered keeps no response, and the agent's own share of the
+        # conversation (pace) misses it. When the library accounts for a
+        # harness-delivered move there too, this passes and the decorator comes off.
+        wake = self._next_turn_after_a_delivered_reply()
+        self.assertEqual(wake["pace"]["own_messages"], 1)
+        thread = next(item for item in wake["memory"]["threads"] if item["event_id"] == "telegram:message:100")
+        self.assertTrue(thread["responses"])
 
     def test_silence_sends_nothing(self):
         harness = self._harness()

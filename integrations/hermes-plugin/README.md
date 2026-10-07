@@ -134,12 +134,12 @@ display:
 
 ## Known gaps
 
-- **The agent's own message is missing from its memory.** Hermes drops the
-  bot's own messages before any plugin hook, and the library does not yet
-  record a harness-delivered move by its text and time. In the agent's next
-  turn its own reply is not in the room, `memory.own_moves` is empty, and the
-  question it answered shows no responses. Tracked by an expected-failure
-  test.
+- **The agent's own message is not in the room.** Hermes drops the bot's own
+  messages before any plugin hook. The library remembers what it committed for
+  Hermes to deliver (`memory.own_moves`, by text and time), but the room never
+  shows the message: the question it answered keeps no response, the move
+  points at no message, and `pace.own_messages` misses it. Tracked by an
+  expected-failure test.
 - **No delivered message id.** Hermes reports none to plugins.
 - **Thin ingress.** Hermes's admission payload carries no mentions, reply
   target, timestamp, or bot flag. The plugin delivers empty mentions and actor
