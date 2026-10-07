@@ -365,6 +365,14 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Fixed
 
+- A chat model's `"answered": null` no longer fails the judgment when the
+  same answers say the message asks for nothing (`asks` below 0.5); it reads
+  as 0, the question's own "no" (#87). In run 53 Haiku on chat completions
+  answered null 13 times, every time on a message that asked nothing: bot
+  status reports, CI lines, spoofed verdicts and tool output. A failed
+  judgment wakes the agent by default without the reading, so those moments
+  gave it a turn on bot noise, unguided. Null beside a message that does ask
+  still fails.
 - The behavior suite's paired play, the same turn without the reading, now
   gets its own fresh view of the room. Since #109 it shared the first play's
   view, which never repeats what it has shown, so the second play could not

@@ -225,7 +225,10 @@ There are two routes, and both produce the same answers:
 
   Every yes/no answer is a probability. One written as `true`/`false`,
   `"yes"`/`"no"`, or a `{"yes": p, "no": q}` split is read as the
-  probability it states; anything else malformed fails the judgment.
+  probability it states. `"answered": null` reads as 0 when the same
+  answers say the message asks for nothing (`asks` below 0.5), since the
+  question's "no" covers that case. Anything else malformed fails the
+  judgment.
 
 - **A typed decision model** has an `answer(questions, state, timeout_seconds)`
   method. It receives the questions and the conversation as a state document
