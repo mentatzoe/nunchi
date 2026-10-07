@@ -2443,9 +2443,9 @@ def emit(message):
     sys.stdout.write(json.dumps(message) + "\n")
     sys.stdout.flush()
 
-def result(subtype="success"):
+def result(subtype="success", text=""):
     emit({"type": "result", "subtype": subtype, "is_error": subtype != "success",
-          "session_id": "''' + STUB_SESSION_ID + r'''", "result": ""})
+          "session_id": "''' + STUB_SESSION_ID + r'''", "result": text})
 
 post("/v1/attach", {})
 turn = 0
@@ -2470,6 +2470,9 @@ for line in sys.stdin:
     if scenario == "send":
         note({"answer": post("/v1/tool", {"turn_id": turn_id, "tool": "mcp__nunchi__room_send",
                                           "input": {"text": "on it"}})})
+    if scenario == "reason":
+        result(text="Castor was asked, not me.")
+        continue
     result()
 '''
 
@@ -2564,6 +2567,18 @@ class RealSessionTests(unittest.TestCase):
                 self.assertEqual(
                     [{"ok": True, "text": "Done: the room accepted this action."}],
                     answers,
+                )
+
+    def test_a_silent_turns_final_message_is_its_reason(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self._harness(directory, scenario="reason") as harness:
+                harness.runtime.start()
+                self.assertTrue(self._deliver(harness))
+                self.assertEqual([], harness.client.outbound())
+                moves = harness.runtime.room.host.memory_facts("discord:message:1")["own_moves"]
+                self.assertEqual(
+                    [("silence", "Castor was asked, not me.")],
+                    [(move["kind"], move.get("why")) for move in moves],
                 )
 
     def test_the_session_runs_with_the_mod_and_without_nunchi_secrets(self):

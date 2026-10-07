@@ -218,7 +218,7 @@ maintainers.
 | Turn context | turn text | `turn/start` input | the injected turn text, plus `pre_llm_call` | request |
 | Room view | mod tool | per-thread MCP server in `thread/start` config (stable); client tools need an experimental opt-in | `register_tool` | room-view action |
 | Reaction | mod tool | the same MCP server | a tool calling `platform_actions.add_reaction`, if the user grants it | action |
-| Silence | a bound turn ends without an action | a bound turn ends without an action (bound from `turn/start`'s answer once the room server is ready) | `[SILENT]` on the injected turn | silence action |
+| Silence | a bound turn ends without an action; its final message is the reason | a bound turn ends without an action (bound from `turn/start`'s answer once the room server is ready); its last agent message is the reason | `[SILENT]` on the injected turn; its `<thinking>` is the reason | silence action, with its `why` |
 | Look again before posting | send tool holds | send tool holds | `transform_llm_output` silences the draft; the plugin injects a fresh run with the draft and the new messages (verified offline, `a50406d9`). Needs streaming off: Discord's default, while Telegram streams unless `display.platforms.telegram.streaming` is false | action held |
 | Steering | mod, after each tool call | with each room tool's result; `turn/steer` after every other tool call | `transform_tool_result` | between room views |
 | Pause and outcome turns | library | library | `inject_message`, like every turn | library |
@@ -256,6 +256,7 @@ both):
 |---|---|---|---|---|---|
 | post: one post goes to the room, and the tool call says so | pass | n/a | pass | n/a | pass |
 | bound-silence: a bound turn that ends without an action is silence, remembered | pass | n/a | pass | n/a | pass |
+| silence-reason: a silent turn's last words are its reason, remembered and never posted | pass | n/a | pass | n/a | pass |
 | unbound-failure: a turn never bound to its wake is a failure, not silence | pass | n/a | pass | n/a | pass |
 | look-again: the first post is held once when someone posted meanwhile | pass | n/a | pass | n/a | pass |
 | steering: a message that arrives mid-turn is shown once after a tool call, and can be answered | pass | n/a | pass | n/a | pass |

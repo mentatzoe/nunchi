@@ -13,6 +13,17 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- A silent turn's reason in tool posting (#135 gap H): `end_turn` and
+  `turn_ended` take the agent's last words as `note`, and the local turn
+  protocol's `/v1/turn/end` an optional `note`. When the turn ends without a
+  room action they are its silence's reason, which later turns and attention
+  see, as `<thinking>` is in final-answer posting; they are never posted, and
+  words that hold a withheld secret are not kept. The Claude Code gate passes
+  the session's final message, and the Codex app-server integration the
+  run's last agent message. The tool-posting guide now asks the agent to say
+  why in its last words when it stays quiet. The turn conformance kit's new
+  `silence-reason` scenario passes through the reference turn, the Claude
+  Code gate and Codex CLI 0.160.1.
 - Pause and outcome turns in the turn conformance kit (#94 step 9d): four
   scenarios, two per posting style, in which the library starts a second
   turn with no new message, after a pause and after an operator approves an

@@ -1071,7 +1071,9 @@ def participant_tool_turn_prompt(
             parts.append(
                 f" To contribute, call {' or '.join(acting)} once. The host owns "
                 "the one output commit point and its result tells you what "
-                "happened. To stay silent, end your turn without calling it."
+                "happened. To stay silent, end your turn without calling it, "
+                "and say why in your last words: your later turns see them as "
+                "your reason."
             )
         else:
             parts.append(" You cannot post in the room this turn.")

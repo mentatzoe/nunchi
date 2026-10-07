@@ -335,9 +335,15 @@ counts as shown; the next moment catches up.
 Report every run's end, exactly once, success or not:
 
 ```python
-participant.end_turn(turn_id=harness_run_id, ok=True, detail="")
+participant.end_turn(turn_id=harness_run_id, ok=True, detail="", note=final_message)
 participant.end_turn(turn_id=None, ok=False, detail="the harness refused the run")
 ```
+
+- With tool posting, pass the agent's last words as `note`: its final
+  message, if the harness reports one. When the turn ends without a room
+  action they are its silence's reason, which later turns see, as
+  `<thinking>` is in final-answer posting. They are never posted, and words
+  that hold a withheld secret are not kept.
 
 - Use `turn_id=None` only when the run never got an id or never bound, and
   only if the harness cannot have started a newer run since: without an id,
@@ -482,7 +488,7 @@ The Claude Code integration, in order (`nunchi.integrations.claude_code_v2`,
 6. The mod forwards room tool calls (`/v1/tool`). After every tool call it
    asks `/v1/news` and adds the update to the result's context.
 7. The session's end of turn comes back on its stream, and the gate calls
-   `turn_ended`.
+   `turn_ended` with the session's final message as the note.
 
 The room connection is shared: `nunchi.integrations.discord_room.DiscordRoomConnection`
 registers the participant with the shared Discord transport and checks its
@@ -542,7 +548,7 @@ LocalTurnProtocolV2@1`):
 | `/v1/turn/call` | `turn_id`, `tool`, `input` | `ok` with `text`, or `error` |
 | `/v1/turn/after-tool` | `turn_id` | `text` or null |
 | `/v1/turn/finish` | `turn_id`, `answer` | `finish` (`deliver`, `continue`, `silent`) and `text` |
-| `/v1/turn/end` | `turn_id` (optional), `ok`, `detail` | `ended` |
+| `/v1/turn/end` | `turn_id` (optional), `ok`, `detail`, `note` (optional) | `ended` |
 
 - Every request carries the launch secret in `X-Nunchi-Session`. Others are
   refused.
@@ -633,9 +639,6 @@ the group: npm's `codex` is a launcher with a child.
 
 - **Steering marks messages as shown before delivery.** A `turn/steer` that
   fails because the run just ended loses that update.
-- **Tool posting has no silence reason.** A run that ends without a room
-  action cannot hand its last words over as the reason, as `<thinking>` does
-  in final-answer posting.
 - **Unknown mentions.** A canonical event cannot say that its mentions or
   reply target are unknown, only that there are none.
 - **One text per turn.** The turn's guide and its context come as one text

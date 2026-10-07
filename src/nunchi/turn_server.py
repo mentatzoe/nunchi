@@ -13,7 +13,7 @@ interface ``I-040D LocalTurnProtocolV2@1``:
 | `/v1/turn/call` | `turn_id`, `tool`, `input` | `ok` with `text`, or `error` |
 | `/v1/turn/after-tool` | `turn_id` | `text` or null (steering) |
 | `/v1/turn/finish` | `turn_id`, `answer` | `finish` (`deliver`, `continue`, `silent`) and `text` |
-| `/v1/turn/end` | `turn_id` (optional), `ok`, `detail` | `ended` |
+| `/v1/turn/end` | `turn_id` (optional), `ok`, `detail`, `note` (optional) | `ended` |
 
 `/v1/turn-start`, `/v1/tool` and `/v1/news` are the first integration's names
 for bind, call and after-tool, and stay as aliases.
@@ -170,11 +170,13 @@ class TurnServer:
         if path == "/v1/turn/end":
             ok = body.get("ok")
             detail = body.get("detail")
+            note = body.get("note")
             return {
                 "ended": participant.end_turn(
                     turn_id=turn_id,
                     ok=ok is True,
                     detail=detail if isinstance(detail, str) else "",
+                    note=note if isinstance(note, str) else None,
                 )
             }
         return {"error": f"unknown path {path}"}

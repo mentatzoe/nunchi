@@ -81,9 +81,10 @@ class _SocketSurface:
     def finish(self, turn_id: str, answer: str) -> tuple[str, str]:
         raise NotImplementedError("Claude Code posts through room tools")
 
-    def end(self, turn_id: str, ok: bool) -> None:
-        # Claude Code reports the end of its turn on stream-json, not the socket.
-        self.session.ended(ok)
+    def end(self, turn_id: str, ok: bool, note: str | None = None) -> None:
+        # Claude Code reports the end of its turn on stream-json, not the
+        # socket, with its final message as the result.
+        self.session.ended(ok, note)
 
 
 class _ScriptedSession:
@@ -107,8 +108,8 @@ class _ScriptedSession:
     def interrupt(self) -> None:
         pass
 
-    def ended(self, ok: bool) -> None:
-        self.on_turn_end(ok=ok, detail="success" if ok else "error_during_execution")
+    def ended(self, ok: bool, note: str | None = None) -> None:
+        self.on_turn_end(ok=ok, detail="success" if ok else "error_during_execution", note=note)
 
 
 class ClaudeCodeKitIntegration:

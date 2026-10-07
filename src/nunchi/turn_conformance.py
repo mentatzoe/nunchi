@@ -55,8 +55,9 @@ PROPOSAL = {
 
 # Each step is what the agent does next: ("bind",), ("read",), the turn's text
 # as the agent received it, ("call", role, arguments), ("after_tool",),
-# ("finish", answer), ("end", ok); or what happens around it: ("arrive",
-# text), someone posts; ("cancel",), the library cancels the turn.
+# ("finish", answer), ("end", ok) or ("end", ok, last_words); or what happens
+# around it: ("arrive", text), someone posts; ("cancel",), the library
+# cancels the turn.
 Step = tuple
 
 
@@ -103,7 +104,7 @@ class TurnSurface(Protocol):
     def call(self, turn_id: str, role: str, arguments: Mapping[str, Any]) -> tuple[bool, str]: ...
     def after_tool(self, turn_id: str) -> str | None: ...
     def finish(self, turn_id: str, answer: str) -> tuple[str, str]: ...
-    def end(self, turn_id: str, ok: bool) -> None: ...
+    def end(self, turn_id: str, ok: bool, note: str | None = None) -> None: ...
 
 
 class KitIntegration(Protocol):
@@ -211,7 +212,8 @@ class ScriptedAgent:
                             raise ValueError("this agent cannot cancel its turn")
                         answer = self.cancel()
                     elif kind == "end":
-                        answer = surface.end(turn_id, step[1])
+                        # The agent's last words, if the step has them.
+                        answer = surface.end(turn_id, step[1], **({"note": step[2]} if len(step) > 2 else {}))
                     else:
                         raise ValueError(f"unknown step {kind!r}")
                     self.answers.append((step, answer))
@@ -251,9 +253,9 @@ class _DirectSurface:
         decision = self.participant.finish(turn_id=turn_id, answer=answer)
         return decision.kind, decision.text
 
-    def end(self, turn_id: str, ok: bool) -> None:
+    def end(self, turn_id: str, ok: bool, note: str | None = None) -> None:
         # The harness reports its agent's end of turn, bound or not.
-        self.participant.end_turn(turn_id=None, ok=ok, detail="scripted end")
+        self.participant.end_turn(turn_id=None, ok=ok, detail="scripted end", note=note)
 
 
 class _DirectDriver(TurnDriver):
@@ -326,6 +328,14 @@ def _check_bound_silence(played: Played) -> list[str]:
         "the silence is not in the agent's memory",
         failures,
     )
+    return failures
+
+
+def _check_silence_reason(played: Played) -> list[str]:
+    failures: list[str] = []
+    _expect(not played.dispatched, f"a silent turn posted {_texts(played)}", failures)
+    reasons = [move.get("why") for move in played.own_moves if move.get("kind") == "silence"]
+    _expect(reasons == ["Castor was asked, not me."], f"the last words are not the silence's reason: {reasons}", failures)
     return failures
 
 
@@ -518,6 +528,12 @@ SCENARIOS: dict[str, Scenario] = {
         "a bound turn that ends without an action is silence, remembered",
         (("bind",), ("end", True)),
         _check_bound_silence,
+    ),
+    "silence-reason": Scenario(
+        "tools",
+        "a silent turn's last words are its reason, remembered and never posted",
+        (("bind",), ("end", True, "Castor was asked, not me.")),
+        _check_silence_reason,
     ),
     "unbound-failure": Scenario(
         "tools",

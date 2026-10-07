@@ -27,10 +27,15 @@ class TurnConformanceTests(unittest.TestCase):
     def test_the_checks_catch_broken_rules(self):
         with mock.patch.object(turn.Turn, "look_again", lambda self, action: None), mock.patch.object(
             turn.SecretGuard, "refusal", lambda self, action: None
-        ), mock.patch.object(turn.Turn, "after_tool_call", lambda self: None):
+        ), mock.patch.object(turn.Turn, "after_tool_call", lambda self: None), mock.patch.object(
+            turn.Turn, "keep_note", lambda self, text: None
+        ):
             results = _run([kit.ReferenceIntegration("tools"), kit.ReferenceIntegration("final-answer")])
         failed = {r["scenario"] for r in results if r["status"] == "fail"}
-        self.assertEqual({"look-again", "steering", "secret", "final-look-again", "final-secret"}, failed)
+        self.assertEqual(
+            {"look-again", "steering", "secret", "silence-reason", "final-look-again", "final-secret", "final-silence"},
+            failed,
+        )
 
     def test_the_pause_and_outcome_checks_catch_a_library_that_does_not_start_them(self):
         later = {"pause", "outcome", "final-pause", "final-outcome"}

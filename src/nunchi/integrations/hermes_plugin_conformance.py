@@ -485,7 +485,7 @@ class HermesSurface:
             return "deliver", sent[-1][1]
         return "silent", ""
 
-    def end(self, turn_id: str, ok: bool) -> None:
+    def end(self, turn_id: str, ok: bool, note: str | None = None) -> None:
         # The run ends by itself after its final answer; wait for Hermes to report it.
         deadline = time.monotonic() + _STEP_SECONDS
         while time.monotonic() < deadline and not (self.turn.ended.is_set() and self.gateway.idle()):

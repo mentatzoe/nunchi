@@ -449,9 +449,10 @@ class CodexSurface:
     def finish(self, turn_id: str, answer: str) -> tuple[str, str]:
         raise NotImplementedError("Codex posts through room tools")
 
-    def end(self, turn_id: str, ok: bool) -> None:
+    def end(self, turn_id: str, ok: bool, note: str | None = None) -> None:
         if not self._ended():
-            self.harness.model.reply({"text": _FINAL})
+            # The model's final message: the agent's last words.
+            self.harness.model.reply({"text": note or _FINAL})
         deadline = time.monotonic() + _STEP_SECONDS
         while time.monotonic() < deadline:
             if self._ended() and self.harness.integration.participant.active is not self.turn:
