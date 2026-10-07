@@ -13,28 +13,11 @@ from typing import Any, TextIO
 
 from .. import __version__
 from ..reactions import ReactionCapability
-from ..attention import (
-    AttentionEngine,
-    AttentionPolicy,
-    attention_model_from_config,
-    ParticipantProfile,
-)
-from ..authorization import (
-    AuthorizationCoordinator,
-    AuthorizationJournal,
-    PinnedFilePolicySource,
-)
 from ..errors import InputError, ValidationError
-from ..observation import ObservationLimits, ObservationProvider, ParticipantBinding
-from ..participant import (
-    ConversationOpportunityScheduler,
-    ParticipantTurnHost,
-    Transport,
-    TransportResult,
-)
+from ..participant import Transport, TransportResult
 from ..participant_model import OpenAICompatibleParticipant
-from ..pipeline import AsyncDeliveryLane, DeliveryOutcome, NunchiV2Pipeline
-from ..receipts import ReceiptJournal
+from ..pipeline import DeliveryOutcome
+from ..room import DEFAULT_PARTICIPANT_TIMEOUT_SECONDS, Room, RoomSettings
 from ..v2_contracts import INTERFACE_VERSIONS
 from .model_apis import ATTENTION_KINDS
 from .v2 import NORMALIZERS
@@ -113,15 +96,6 @@ def load_pinned_config(path: str | Path, expected_sha256: str) -> dict[str, Any]
     return data
 
 
-def _policy(raw: Any) -> AttentionPolicy:
-    if not isinstance(raw, Mapping):
-        raise ValidationError("adapter attention policy must be an object")
-    try:
-        return AttentionPolicy(**raw)
-    except (TypeError, ValueError) as exc:
-        raise ValidationError(f"adapter attention policy is invalid: {exc}") from exc
-
-
 class JsonLineTransport:
     """Host-attested generic outbound seam used by ``nunchi-channel``."""
 
@@ -171,156 +145,44 @@ class ReferenceAdapterRuntime:
     ) -> None:
         if surface not in NORMALIZERS:
             raise ValidationError(f"unsupported V2 adapter surface {surface!r}")
-        required = {
-            "schema_version",
-            "binding",
-            "profile",
-            "attention",
-            "participant_model",
-            "limits",
-            "state_directory",
-        }
-        optional = {
-            "authorization",
-            "transport",
-            "participant_timeout_seconds",
-            # Nunchi's own nod, removed in #94 step 7; an older config that
-            # still has it loads, and the setting is ignored.
-            "ack",
-        }
-        if set(config) - (required | optional) or required - set(config):
-            raise ValidationError("adapter config has a missing or unexpected field")
-        if config["schema_version"] != 2:
-            raise ValidationError("adapter config schema_version must be 2")
-        binding_raw = config["binding"]
-        if not isinstance(binding_raw, Mapping):
-            raise ValidationError("adapter binding must be an object")
-        allowed_binding = {
-            "participant_id",
-            "actor_id",
-            "platform",
-            "room_id",
-            "continuity_scope_id",
-            "names",
-            "role",
-            "description",
-            "room_name",
-            "room_kind",
-            "provenance",
-        }
-        if set(binding_raw) - allowed_binding:
-            raise ValidationError("adapter binding has unexpected fields")
-        try:
-            self.binding = ParticipantBinding(
-                **{
-                    **binding_raw,
-                    "names": tuple(binding_raw.get("names", ())),
-                }
-            )
-        except (TypeError, ValueError) as exc:
-            raise ValidationError(f"adapter binding is invalid: {exc}") from exc
+        settings = RoomSettings.from_config(
+            config,
+            label="adapter",
+            sections=("participant_model",),
+            optional=("transport", "participant_timeout_seconds"),
+        )
+        self.binding = settings.binding
         if self.binding.platform != surface and not (
             surface == "channel" and self.binding.platform
         ):
             raise ValidationError("adapter surface and trusted platform binding differ")
-
-        profile_raw = config["profile"]
-        if not isinstance(profile_raw, Mapping) or set(profile_raw) != {"path", "sha256"}:
-            raise ValidationError("adapter profile must contain exactly path and sha256")
-        profile = ParticipantProfile.load(
-            profile_raw["path"],
-            expected_sha256=profile_raw["sha256"],
-        )
-        if (
-            profile.participant_id != self.binding.participant_id
-            or profile.actor_id != self.binding.actor_id
-        ):
-            raise ValidationError("adapter profile does not match exact transport self binding")
-
-        attention_raw = config["attention"]
-        if not isinstance(attention_raw, Mapping) or set(attention_raw) != {"policy", "model"}:
-            raise ValidationError("adapter attention config must contain policy and model")
-        policy = _policy(attention_raw["policy"])
-        model = (
-            attention_model_from_config(attention_raw["model"], host_kinds=ATTENTION_KINDS)
-            if policy.preattention_enabled
-            else None
-        )
-        participant_raw = config["participant_model"]
+        participant_raw = settings.sections["participant_model"]
         if not isinstance(participant_raw, Mapping):
             raise ValidationError("adapter participant_model must be an object")
         participant = OpenAICompatibleParticipant.from_trusted_config(
-            profile=profile,
+            profile=settings.profile,
             config=participant_raw,
             environment=os.environ,
         )
-        try:
-            limits = ObservationLimits(**config["limits"])
-        except (TypeError, ValueError) as exc:
-            raise ValidationError(f"adapter limits are invalid: {exc}") from exc
-        state_directory = Path(config["state_directory"])
-        state_directory.mkdir(parents=True, exist_ok=True)
         stem = hashlib.sha256(
             f"{surface}\0{self.binding.participant_id}\0{self.binding.continuity_scope_id}".encode()
         ).hexdigest()[:24]
-        receipts = ReceiptJournal(state_directory / f"{stem}.receipts.jsonl")
-        observation = ObservationProvider(
-            self.binding,
-            limits=limits,
-            receipts=receipts,
-            persistence_path=state_directory / f"{stem}.observations.jsonl",
-            event_visibility=CAPABILITIES[surface]["event_visibility"],
-        )
-        scheduler = ConversationOpportunityScheduler(
-            f"{self.binding.participant_id}:{self.binding.continuity_scope_id}"
-        )
-        privileged = None
-        authorization = config.get("authorization")
-        if authorization is not None:
-            if not isinstance(authorization, Mapping) or set(authorization) != {
-                "policy_path",
-                "policy_sha256",
-            }:
-                raise ValidationError("adapter authorization config has an invalid shape")
-            policy_source = PinnedFilePolicySource(
-                authorization["policy_path"],
-                expected_sha256=authorization["policy_sha256"],
-            )
-            privileged = AuthorizationCoordinator(
-                observation=observation,
-                policy_source=policy_source,
-                journal=AuthorizationJournal(
-                    state_directory / f"{stem}.authorization.jsonl"
-                ),
-                executors=privileged_executors or {},
-            )
-        host = ParticipantTurnHost(
-            observation=observation,
+        self.room = Room(
+            settings,
             participant=participant,
             transport=transport,
-            scheduler=scheduler,
-            receipts=receipts,
-            privileged=privileged,
-            participant_timeout_seconds=config.get(
-                "participant_timeout_seconds",
-                300.0,
+            event_visibility=CAPABILITIES[surface]["event_visibility"],
+            state_prefix=f"{stem}.",
+            attention_kinds=ATTENTION_KINDS,
+            privileged_executors=privileged_executors,
+            participant_timeout_seconds=settings.sections.get(
+                "participant_timeout_seconds", DEFAULT_PARTICIPANT_TIMEOUT_SECONDS
             ),
-        )
-        attention = AttentionEngine(
-            profile=profile,
-            model=model,
-            policy=policy,
-            receipts=receipts,
         )
         self.surface = surface
         self.transport = transport
-        self.pipeline = NunchiV2Pipeline(
-            observation=observation,
-            attention=attention,
-            host=host,
-            scheduler=scheduler,
-        )
-        self.lane = AsyncDeliveryLane(self.pipeline)
+        self.pipeline = self.room.pipeline
+        self.lane = self.room.lane
 
     def process(
         self,

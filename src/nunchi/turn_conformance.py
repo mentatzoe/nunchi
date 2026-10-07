@@ -23,12 +23,11 @@ import tempfile
 import threading
 from typing import Any, Protocol
 
-from .attention import AttentionEngine, AttentionPolicy, ParticipantProfile
+from .attention import AttentionPolicy, ParticipantProfile
 from .conformance import fixture_attention_model, fixture_binding, fixture_profile
-from .observation import ObservationProvider
-from .participant import ConversationOpportunityScheduler, ParticipantTurnHost, TransportResult
-from .pipeline import NunchiV2Pipeline
-from .receipts import ReceiptJournal
+from .observation import ObservationLimits
+from .participant import TransportResult
+from .room import Room, RoomSettings
 from .turn import HARNESS_DELIVERS, HarnessDelivery, SecretGuard, Turn, TurnDriver, TurnParticipant
 
 PERSON = "conformance:person"
@@ -476,14 +475,21 @@ def run_scenario(name: str, integration: KitIntegration, *, timeout: float = 15.
     profile = fixture_profile(binding)
     played = Played()
     with tempfile.TemporaryDirectory(prefix="nunchi-turn-conformance-") as directory:
-        receipts = ReceiptJournal(Path(directory) / "receipts.jsonl")
-        observation = ObservationProvider(binding, receipts=receipts)
-        scheduler = ConversationOpportunityScheduler("conformance:turns")
+        settings = RoomSettings(
+            binding=binding,
+            profile=profile,
+            attention=AttentionPolicy(),
+            attention_model=None,
+            limits=ObservationLimits(),
+            state_directory=Path(directory) / "state",
+        )
         transport = _CommittedForHarness() if scenario.posting == "final-answer" else _RecordingTransport()
+        room: Room | None = None
 
         def arrive(text: str) -> str:
+            assert room is not None
             event_id = f"conformance:message:{len(played.arrivals) + 2}"
-            observation.observe(
+            room.observation.observe(
                 delivery_id=f"conformance:delivery:{event_id}",
                 event={
                     "id": event_id,
@@ -500,25 +506,22 @@ def run_scenario(name: str, integration: KitIntegration, *, timeout: float = 15.
 
         agent = ScriptedAgent(scenario.steps, arrive)
         participant = integration.participant(profile=profile, guard=SecretGuard([SECRET]), agent=agent)
-        host = ParticipantTurnHost(
-            observation=observation,
+        # The same assembly every integration uses (`nunchi.room`).
+        room = Room(
+            settings,
             participant=participant,
             transport=transport,
-            scheduler=scheduler,
-            receipts=receipts,
+            event_visibility={
+                "message": "history-and-live",
+                "reaction": "history-and-live",
+                "membership": "live-only",
+            },
+            state_prefix="conformance-",
+            attention_model=fixture_attention_model("WAKE"),
             participant_timeout_seconds=timeout,
         )
-        pipeline = NunchiV2Pipeline(
-            observation=observation,
-            attention=AttentionEngine(
-                profile=profile,
-                model=fixture_attention_model("WAKE"),
-                policy=AttentionPolicy(),
-                receipts=receipts,
-            ),
-            host=host,
-            scheduler=scheduler,
-        )
+        host = room.host
+        pipeline = room.pipeline
         try:
             outcome = pipeline.handle_delivery(
                 delivery_id="conformance:delivery:1",

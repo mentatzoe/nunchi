@@ -39,22 +39,10 @@ import urllib.error
 from .. import __version__
 from ..adapters.model_apis import ATTENTION_KINDS
 from ..adapters.runtime import load_pinned_config
-from ..attention import (
-    AttentionEngine,
-    AttentionPolicy,
-    attention_model_from_config,
-    ParticipantProfile,
-)
-from ..authorization import (
-    AuthorizationCoordinator,
-    AuthorizationJournal,
-    PinnedFilePolicySource,
-)
 from ..errors import NunchiError, ValidationError
-from ..observation import ObservationLimits, ObservationProvider, ParticipantBinding
-from ..participant import ConversationOpportunityScheduler, ParticipantTurnHost, TransportResult
-from ..pipeline import AsyncDeliveryLane, DeliveryOutcome, NunchiV2Pipeline
-from ..receipts import ReceiptJournal
+from ..participant import TransportResult
+from ..pipeline import DeliveryOutcome
+from ..room import Room, RoomSettings
 from ..v2_contracts import validate_canonical_event
 from ..mcp_discord.authorization import make_tool_authorization
 from .claude_code_gate import (
@@ -377,91 +365,22 @@ class ClaudeCodeRoomRuntime:
         *,
         session: Any = None,
     ) -> None:
-        required = {
-            "schema_version",
-            "binding",
-            "profile",
-            "attention",
-            "limits",
-            "state_directory",
-            "transport",
-            "claude_code",
-        }
-        # "ack" configured Nunchi's own nod, removed in #94 step 7; an older
-        # config that still has it loads, and the setting is ignored.
-        optional = {"authorization", "ack"}
-        supplied = set(config)
-        if not required <= supplied or supplied - (required | optional):
-            raise ValidationError(
-                "Claude Code V2 config has a missing or unexpected field"
-            )
-        if config["schema_version"] != 2:
-            raise ValidationError("Claude Code V2 config is not V2")
-
-        binding_raw = config["binding"]
-        if not isinstance(binding_raw, Mapping):
-            raise ValidationError("Claude Code binding must be an object")
-        self.binding = ParticipantBinding(
-            **{**binding_raw, "names": tuple(binding_raw.get("names", ()))}
+        settings = RoomSettings.from_config(
+            config,
+            label="Claude Code V2",
+            sections=("transport", "claude_code"),
+            authorization_keys=("workspace_root",),
         )
+        self.binding = settings.binding
         if self.binding.platform != "discord":
             raise ValidationError(
                 "Claude Code V2 currently requires the shared Discord transport"
             )
-
-        profile_raw = config["profile"]
-        if not isinstance(profile_raw, Mapping) or set(profile_raw) != {
-            "path",
-            "sha256",
-        }:
-            raise ValidationError("Claude Code profile config is invalid")
-        profile = ParticipantProfile.load(
-            profile_raw["path"],
-            expected_sha256=profile_raw["sha256"],
-        )
-        if (
-            profile.participant_id != self.binding.participant_id
-            or profile.actor_id != self.binding.actor_id
-        ):
-            raise ValidationError(
-                "Claude Code profile and exact transport self differ"
-            )
-        self.profile = profile
-
-        attention_raw = config["attention"]
-        if not isinstance(attention_raw, Mapping) or set(attention_raw) != {
-            "policy",
-            "model",
-        }:
-            raise ValidationError("Claude Code attention config is invalid")
-        policy = AttentionPolicy(**attention_raw["policy"])
-        model = (
-            attention_model_from_config(attention_raw["model"], host_kinds=ATTENTION_KINDS)
-            if policy.preattention_enabled
-            else None
-        )
-
-        limits = ObservationLimits(**config["limits"])
-        state = Path(config["state_directory"])
+        self.profile = settings.profile
+        state = settings.state_directory
         state.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.state_directory = state
         self.settings = self._claude_code_settings(config["claude_code"], state)
-
-        receipts = ReceiptJournal(state / "claude-code-v2-receipts.jsonl")
-        observation = ObservationProvider(
-            self.binding,
-            limits=limits,
-            receipts=receipts,
-            persistence_path=state / "claude-code-v2-observations.jsonl",
-            event_visibility={
-                "message": "history-and-live",
-                "reaction": "history-and-live",
-                "membership": "live-only",
-            },
-        )
-        scheduler = ConversationOpportunityScheduler(
-            f"{self.binding.participant_id}:{self.binding.continuity_scope_id}"
-        )
         self.output_secret = self._output_secret(config["transport"])
         transport = MCPDiscordTransport(
             client,
@@ -470,16 +389,11 @@ class ClaudeCodeRoomRuntime:
             self.binding.actor_id,
             self.output_secret,
         )
-        privileged = self._privileged(
-            config.get("authorization"),
-            observation=observation,
-            state=state,
-        )
 
         # Nunchi's own secrets never enter the session's environment, and the
         # gate refuses room text that carries one.
         withheld = {config["transport"]["output_key_env"], *self.settings["withhold_env"]}
-        model_config = attention_raw.get("model")
+        model_config = settings.attention_model
         if isinstance(model_config, Mapping):
             withheld.update(
                 value
@@ -515,37 +429,39 @@ class ClaudeCodeRoomRuntime:
                 ),
             )
         self.session = session
+        authorization = settings.authorization
         participant = GatedParticipant(
-            profile=profile,
+            profile=settings.profile,
             session=session,
             guard=guard,
-            privileged_enabled=privileged is not None,
+            privileged_enabled=authorization is not None,
         )
         session.on_turn_end = participant.turn_ended
         self.participant = participant
-        host = ParticipantTurnHost(
-            observation=observation,
+        # Claude Code adds no authorization semantics of its own: it supplies
+        # the pinned policy and the exact native executors, and the shared
+        # coordinator makes every decision (see `_executors`).
+        self.room = Room(
+            settings,
             participant=participant,
             transport=transport,
-            scheduler=scheduler,
-            receipts=receipts,
-            privileged=privileged,
+            event_visibility={
+                "message": "history-and-live",
+                "reaction": "history-and-live",
+                "membership": "live-only",
+            },
+            state_prefix="claude-code-v2-",
+            attention_kinds=ATTENTION_KINDS,
+            privileged_executors=(
+                self._executors(authorization.get("workspace_root"))
+                if authorization is not None
+                else None
+            ),
             participant_timeout_seconds=self.settings["timeout_seconds"],
         )
-        attention = AttentionEngine(
-            profile=profile,
-            model=model,
-            policy=policy,
-            receipts=receipts,
-        )
-        self.privileged = privileged
-        self.pipeline = NunchiV2Pipeline(
-            observation=observation,
-            attention=attention,
-            host=host,
-            scheduler=scheduler,
-        )
-        self.lane = AsyncDeliveryLane(self.pipeline)
+        self.privileged = self.room.privileged
+        self.pipeline = self.room.pipeline
+        self.lane = self.room.lane
         self.client = client
         self.server = GateServer(
             participant,
@@ -695,44 +611,6 @@ class ClaudeCodeRoomRuntime:
                 f"short in {env_name}"
             )
         return value.encode()
-
-    def _privileged(
-        self,
-        authorization: Any,
-        *,
-        observation: ObservationProvider,
-        state: Path,
-    ) -> AuthorizationCoordinator | None:
-        """Wire the shared coordinator, or disable privileged actions entirely.
-
-        Claude Code adds no authorization semantics of its own.  It supplies a
-        trusted pinned policy source, private persistence, and the exact native
-        executors; every requester, scope, digest, approval, expiry, revocation
-        and replay decision stays in the shared coordinator.
-
-        Ordinary conversation is deliberately not in this inventory.  Speaking
-        in the room is the participant's normal path and is guarded by
-        attention and the host commit point, not by an operator grant.
-        """
-        if authorization is None:
-            return None
-        if not isinstance(authorization, Mapping) or set(authorization) - {
-            "policy_path",
-            "policy_sha256",
-            "workspace_root",
-        } or not {"policy_path", "policy_sha256"} <= set(authorization):
-            raise ValidationError(
-                "Claude Code authorization config has an invalid shape"
-            )
-        return AuthorizationCoordinator(
-            observation=observation,
-            policy_source=PinnedFilePolicySource(
-                authorization["policy_path"],
-                expected_sha256=authorization["policy_sha256"],
-            ),
-            journal=AuthorizationJournal(state / "claude-code-v2-authorization.jsonl"),
-            executors=self._executors(authorization.get("workspace_root")),
-        )
 
     @staticmethod
     def _executors(workspace_root: Any) -> dict[str, Any]:
