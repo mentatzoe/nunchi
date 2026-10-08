@@ -11,7 +11,9 @@ How a turn goes:
    message it replies to, when it was sent, who it mentions, and whether its
    author is a bot. `post_gateway_admission` hands the message to the `Room`
    with those facts and answers ``handled`` with no reply, so Hermes never
-   runs its agent on a person's message.
+   runs its agent on a person's message. A thread inside the bound chat (a
+   Discord thread under the channel) is part of the room: its messages are
+   handled the same way, with the thread they belong to.
 2. **Start.** When the library decides, `start` injects the turn's text into
    the chat as the plugin's own message (`ctx.inject_message(origin=...)`),
    after a wake marker that only this plugin knows.
@@ -136,6 +138,18 @@ _THINKING = re.compile(r"<thinking>.*?(?:</thinking>|\Z)", re.S | re.I)
 # plugin closed itself that Hermes may still finish.
 _NOTED_MESSAGES = 256
 _CLOSED_RUNS = 256
+# Messages in a place inside the room (a thread), by id, with the chat Hermes
+# reacts in: more than the room log keeps by default (512 events).
+_INSIDE_MESSAGES = 1024
+# What the room needs when Hermes opened a thread for a room message itself.
+AUTO_THREAD_SETUP = (
+    "nunchi-room: Hermes opened a Discord thread for room message %s before the plugin saw it. "
+    "The room's channel is not set up for Nunchi, and Hermes may also be dropping messages that "
+    "do not mention the bot. In the profile's config.yaml set "
+    "discord.free_response_channels: [\"%s\"] and discord.free_response_auto_thread: false, "
+    "and leave DISCORD_FREE_RESPONSE_AUTO_THREAD unset in its .env "
+    "(integrations/hermes-plugin/README.md, \"Hermes setup the room needs\")."
+)
 
 
 class HermesPluginError(RuntimeError):
@@ -204,13 +218,26 @@ class HermesRoute:
         return origin
 
     def holds(self, platform: str, source: Mapping[str, Any]) -> bool:
-        """Whether an admitted message was posted in this chat."""
+        """Whether an admitted message was posted in this chat, or in a place inside it."""
 
-        if str(platform).lower() != self.platform or str(source.get("chat_id")) != self.chat_id:
+        if str(platform).lower() != self.platform:
             return False
-        if self.thread_id is None:
-            return True
-        return str(source.get("thread_id")) == self.thread_id
+        if str(source.get("chat_id")) == self.chat_id:
+            return self.thread_id is None or str(source.get("thread_id")) == self.thread_id
+        return self.inside(source)
+
+    def inside(self, source: Mapping[str, Any]) -> bool:
+        """Whether a message was posted in a place inside this chat, such as a
+        Discord thread under the bound channel.
+
+        Hermes gives such a message the thread as its chat and the channel as
+        its parent (``parent_chat_id``). A binding to the whole chat holds
+        them: they are part of the room, and Hermes would otherwise answer
+        them itself. A binding to one thread holds only that thread.
+        """
+
+        parent = source.get("parent_chat_id")
+        return self.thread_id is None and parent is not None and str(parent) == self.chat_id
 
     def event_id(self, message_id: str) -> str:
         return f"{self.platform}:message:{message_id}"
@@ -229,7 +256,8 @@ class _MessageFacts:
 
     ``mentioned`` and ``author_is_bot`` come from the platform's own message
     object, which exists only in-process: under `plugins.isolation: host` they
-    are unknown (None).
+    are unknown (None). ``mentioned_actors`` describes each user mentioned, as
+    the room needs every actor an event names.
     """
 
     reply_to_message_id: str | None = None
@@ -238,6 +266,7 @@ class _MessageFacts:
     mentioned: tuple[str, ...] | None = None
     mentions_room: bool | None = None
     author_is_bot: bool | None = None
+    mentioned_actors: tuple[tuple[str, dict[str, str]], ...] = ()
 
 
 def _timestamp(value: Any) -> str | None:
@@ -248,27 +277,49 @@ def _timestamp(value: Any) -> str | None:
     return moment.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+def _is_bot(user: Any) -> bool | None:
+    """Whether a platform user is a bot (Discord ``bot``, Telegram ``is_bot``), if it says."""
+
+    bot = getattr(user, "bot", None)
+    if not isinstance(bot, bool):
+        bot = getattr(user, "is_bot", None)
+    return bot if isinstance(bot, bool) else None
+
+
+def _actor(user: Any) -> dict[str, str]:
+    """The room's entry for a platform user: its kind and the name the platform shows."""
+
+    names = (getattr(user, key, None) for key in ("display_name", "full_name", "name", "first_name", "username"))
+    name = next((value for value in names if isinstance(value, str) and value), str(user.id))
+    return {"kind": {True: "bot", False: "human", None: "unknown"}[_is_bot(user)], "display_name": name}
+
+
 def _message_facts(event: Any, route: HermesRoute) -> _MessageFacts:
     """Read a Hermes `MessageEvent`, and its platform message when there is one."""
 
     reply_to = getattr(event, "reply_to_message_id", None)
     raw = getattr(event, "raw_message", None)
-    mentioned: list[str] | None = None
-    users = getattr(raw, "mentions", None)  # Discord
-    if isinstance(users, (list, tuple)):
-        mentioned = [route.actor_id(str(user.id)) for user in users if getattr(user, "id", None) is not None]
+    users: Any = getattr(raw, "mentions", None)  # Discord
     entities = getattr(raw, "entities", None)  # Telegram: only a text mention names a user id
     if isinstance(entities, (list, tuple)):
-        mentioned = [
-            route.actor_id(str(entity.user.id))
+        users = [
+            entity.user
             for entity in entities
             if getattr(entity, "type", None) == "text_mention" and getattr(entity, "user", None) is not None
         ]
+    mentioned: list[str] | None = None
+    actors: dict[str, dict[str, str]] = {}
+    if isinstance(users, (list, tuple)):
+        mentioned = []
+        for user in users:
+            if getattr(user, "id", None) is None:
+                continue
+            actor_id = route.actor_id(str(user.id))
+            mentioned.append(actor_id)
+            actors[actor_id] = _actor(user)
     everyone = getattr(raw, "mention_everyone", None)
     author = getattr(raw, "author", None) or getattr(raw, "from_user", None)
-    is_bot = getattr(author, "bot", None)
-    if not isinstance(is_bot, bool):
-        is_bot = getattr(author, "is_bot", None)
+    is_bot = _is_bot(author)
     return _MessageFacts(
         reply_to_message_id=str(reply_to) if reply_to else None,
         timestamp=_timestamp(getattr(event, "timestamp", None)),
@@ -276,7 +327,8 @@ def _message_facts(event: Any, route: HermesRoute) -> _MessageFacts:
         addressed=getattr(event, "reply_expected", None) is True,
         mentioned=tuple(dict.fromkeys(mentioned)) if mentioned is not None else None,
         mentions_room=everyone if isinstance(everyone, bool) else None,
-        author_is_bot=is_bot if isinstance(is_bot, bool) else None,
+        author_is_bot=is_bot,
+        mentioned_actors=tuple(actors.items()),
     )
 
 
@@ -359,7 +411,8 @@ class HermesReactions:
         future = asyncio.run_coroutine_threadsafe(
             ctx.platform_actions.add_reaction(
                 platform=route.platform,
-                chat_id=route.chat_id,
+                # A message in a thread is reached through the thread.
+                chat_id=self.plugin.chat_of(message_id),
                 message_id=message_id,
                 emoji=str(action.get("reaction", "")),
             ),
@@ -433,6 +486,8 @@ class HermesRoomPlugin:
         self._room_lock = threading.Lock()
         # Facts noted at dispatch, by Hermes message id, until admission.
         self._noted: OrderedDict[str, _MessageFacts] = OrderedDict()
+        # The chat each message inside the room (in a thread) was posted in.
+        self._inside: OrderedDict[str, str] = OrderedDict()
 
     # -- registration --------------------------------------------------------------
 
@@ -491,7 +546,9 @@ class HermesRoomPlugin:
         try:
             source = getattr(event, "source", None)
             platform = getattr(getattr(source, "platform", None), "value", getattr(source, "platform", ""))
-            where = {"chat_id": getattr(source, "chat_id", None), "thread_id": getattr(source, "thread_id", None)}
+            where = {
+                name: getattr(source, name, None) for name in ("chat_id", "thread_id", "parent_chat_id")
+            }
             message_id = getattr(event, "message_id", None)
             if not message_id or not self.route.holds(str(platform or ""), where):
                 return None
@@ -514,12 +571,17 @@ class HermesRoomPlugin:
         text: str = "",
         **_: Any,
     ) -> dict[str, Any] | None:
-        """Every admitted message in the bound chat goes to the room; Hermes skips its run."""
+        """Every admitted message in the bound chat, or in a thread inside it, goes
+        to the room; Hermes skips its run."""
 
         self.gateway_loop = asyncio.get_running_loop()
         source = source or {}
         if not self.route.holds(platform, source):
             return None
+        if source.get("auto_thread_created"):
+            # Hermes's auto-thread ran before this hook: people already see
+            # the thread, and its mention gate may be dropping messages.
+            logger.error(AUTO_THREAD_SETUP, message_id, self.route.chat_id)
         try:
             room = self._ensure_room()
             if room is not None:
@@ -560,12 +622,33 @@ class HermesRoomPlugin:
             event["timestamp"] = facts.timestamp
         if facts.reply_to_message_id is not None:
             event["reply_to_event_id"] = self.route.event_id(facts.reply_to_message_id)
+        chat = str(source.get("chat_id"))
+        if chat != self.route.chat_id and self.route.inside(source) and not source.get("auto_thread_created"):
+            # Posted in a thread inside the room. The thread's id names the
+            # message that started it, when one did; it groups the thread
+            # either way. A message Hermes moved into a thread of its own is
+            # the start of that thread, and stays in the channel.
+            thread = self.route.event_id(str(source.get("thread_id") or chat))
+            if thread != event_id:
+                event["thread_root_event_id"] = thread
+            if message_id:
+                with self._lock:
+                    self._inside[str(message_id)] = chat
+                    while len(self._inside) > _INSIDE_MESSAGES:
+                        self._inside.popitem(last=False)
         kind = {True: "bot", False: "human", None: "unknown"}[facts.author_is_bot]
-        room.deliver(
-            delivery_id=f"hermes:{event_id}",
-            event=event,
-            actors={author: {"kind": kind, "display_name": str(source.get("user_name") or user_id)}},
-        )
+        # Everyone the message names, as the platform described them; the
+        # room knows the agent itself by its binding.
+        actors = {actor_id: actor for actor_id, actor in facts.mentioned_actors if actor_id != own}
+        actors[author] = {"kind": kind, "display_name": str(source.get("user_name") or user_id)}
+        room.deliver(delivery_id=f"hermes:{event_id}", event=event, actors=actors)
+
+    def chat_of(self, message_id: str) -> str:
+        """The chat a room message was posted in: its thread's, for a message in
+        a thread inside the room, or the bound chat."""
+
+        with self._lock:
+            return self._inside.get(message_id, self.route.chat_id)
 
     # -- the driver (the library calls these) ------------------------------------------
 

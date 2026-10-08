@@ -13,6 +13,13 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- A Discord lane in the Hermes plugin's conformance kit: Hermes's stock
+  Discord adapter in the real gateway, fed fake discord.py channels, threads
+  and messages through its own ingress, as Hermes's tests do, recording what
+  it sends, the threads it opens, typing and reactions. Every final-answer
+  scenario passes on it, as on the Telegram lane, and `ROOM_DISCORD` pins the
+  README's Discord keys. `nunchi.integrations.hermes_plugin_conformance`
+  runs both lanes.
 - The Hermes plugin tells the room who a message mentions, which message it
   replies to, when it was sent, and whether its author is a bot (#135 gaps 9
   and C). Hermes's admission payload carries none of these, and on Discord
@@ -548,6 +555,31 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Fixed
 
+- A Hermes room on Discord hears its whole channel, and nothing said there,
+  or in a thread under it, gets an answer that bypasses Nunchi
+  ([leak audit in #135](https://github.com/mentatzoe/nunchi/issues/135#issuecomment-6057394431), row 1).
+  Under Hermes's Discord defaults, a message that did not @mention the bot
+  never reached the plugin, and an @mention made Hermes open a thread the
+  plugin did not hold, so Hermes answered there itself, raw.
+  - The plugin holds the threads under its bound channel as part of the room
+    (`HermesRoute.holds` matches a source whose `parent_chat_id` is the bound
+    chat, when the binding names no thread). Their messages reach the room
+    with `thread_root_event_id` set to `discord:message:<thread id>`, and
+    the agent's reaction to one goes through its thread.
+  - When Hermes has already opened a thread for a room message, the plugin
+    still takes the message in and logs an error naming the Discord keys.
+  - The README's Discord block sets `discord.free_response_channels` to the
+    bound channel and `discord.free_response_auto_thread: false`, beside
+    `typing_indicator` and `reactions` off. That setting makes every thread
+    under the channel free-response, so it is only for this plugin or later.
+  - Not yet: the agent's answer to a thread message is posted in the
+    channel, until thread placement (decision D1). A message that @mentions
+    only another bot never reaches any plugin hook, and peer agents' bots
+    are heard only with profile-wide settings (README, Known gaps).
+- The Hermes plugin gives the room every actor a message mentions, as the
+  platform describes them. A message that mentioned someone the room had
+  not seen yet, on Discord or as a Telegram text mention, was refused by the
+  room and lost, though the plugin still kept Hermes from answering it.
 - In final-answer posting, only words the agent's own model wrote can be its
   post ([leak audit in #135](https://github.com/mentatzoe/nunchi/issues/135#issuecomment-6057394431), row 5).
   A harness that put its own text in place of a missing answer, such as

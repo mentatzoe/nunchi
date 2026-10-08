@@ -4,7 +4,9 @@
 step 9e); not yet run live on Telegram or Discord.** The turn conformance kit
 and `tests/v2/test_hermes_plugin.py` run the plugin inside a real Hermes
 gateway, loaded from a throwaway `HERMES_HOME` through Hermes's own plugin
-discovery, with only the model scripted. It replaces the older Hermes
+discovery, with only the model scripted. On Discord they use Hermes's stock
+Discord adapter with fake discord.py channels, threads and messages, as
+Hermes's own tests do. It replaces the older Hermes
 integration under `integrations/hermes/`, which stays until this plugin has
 passed live checks and Zoe decides to remove it.
 
@@ -22,7 +24,7 @@ harness-hosted, consume-and-start shape with final-answer posting
 | Step | Hermes surface | What happens |
 |---|---|---|
 | Message facts | `pre_gateway_dispatch` | For each message in the bound chat, the plugin notes what the admission payload leaves out: the message it replies to, when it was sent, who it mentions (Hermes takes the bot's own Discord mention out of the text), whether its author is a bot, and whether the platform says it was meant for the bot. Dispatch goes on unchanged. |
-| Ingress | `post_gateway_admission` | Every message in the bound chat goes to the room, with those facts; Hermes runs no turn of its own on it. Messages in other chats are left to Hermes. |
+| Ingress | `post_gateway_admission` | Every message in the bound chat goes to the room, with those facts; Hermes runs no turn of its own on it. On Discord, the threads under a bound channel are part of the room: their messages go to the room too, marked with their thread (`thread_root_event_id`). Messages in other chats are left to Hermes. |
 | Start | `ctx.inject_message(origin=...)` | When the library gives the agent a turn, the plugin injects the turn's text into the chat as its own message. |
 | Bind | `pre_llm_call` | The run whose message carries the turn's wake marker is bound to the turn. |
 | Steering | `transform_tool_result` | What others posted meanwhile is added to every tool result in a bound run. |
@@ -95,7 +97,12 @@ plus a `hermes` section:
   refuses, the judgment fails with that instruction and no other model is
   used.
 - Room events use the ids `<platform>:message:<message id>` and
-  `<platform>:user:<user id>`.
+  `<platform>:user:<user id>`. A message in a Discord thread has the thread
+  as `thread_root_event_id`: `discord:message:<thread id>`, which is the
+  message that started the thread when one did.
+- On Discord, `chat_id` is the channel's id and `thread_id` is null: the room
+  is the channel and every thread under it. To bind one thread only, set both
+  to the thread's id.
 - `turn_user_id` is the identity Hermes runs the injected turns as.
 - `withheld_env` names environment variables whose values the agent must
   never post (default: the platform bot tokens). The value of every other
@@ -149,10 +156,9 @@ agent:
   disabled_toolsets: [clarify, cronjob]
 ```
 
-For a Discord room, put the same keys under `display.platforms.discord` and
-`discord:`. Leave the `TELEGRAM_REACTIONS`, `DISCORD_REACTIONS`,
-`HERMES_TURN_COMPLETION_EXPLAINER` and `HERMES_FILE_MUTATION_VERIFIER`
-environment variables unset or false: each wins over the config.
+Leave the `TELEGRAM_REACTIONS`, `HERMES_TURN_COMPLETION_EXPLAINER` and
+`HERMES_FILE_MUTATION_VERIFIER` environment variables unset or false: each
+wins over the config. Discord has its own (On Discord).
 
 Leave `agent.max_turns` unset (Hermes's default: no limit) and the
 `HERMES_MAX_ITERATIONS` environment variable unset. At that limit Hermes asks
@@ -182,7 +188,7 @@ Hermes with these settings, and a test checks that this block matches them.
 More setup:
 
 - `turn_user_id` must be one of the platform's allowed users (for example
-  `TELEGRAM_ALLOWED_USERS`). Otherwise Hermes accepts the injection and then
+  `TELEGRAM_ALLOWED_USERS` or `DISCORD_ALLOWED_USERS`). Otherwise Hermes accepts the injection and then
   drops it; Nunchi ends that turn as a failure when its run has not started
   within `start_timeout_seconds`.
 - Keep Hermes's default per-user group sessions (`group_sessions_per_user`).
@@ -195,6 +201,55 @@ More setup:
 - Hermes's tool search (default on) hides plugin tools behind `tool_search` and
   `tool_call`. The room tools work through that bridge;
   `tools.tool_search.enabled: off` shows them to the model directly.
+
+### On Discord
+
+For a Discord room, put the same display keys under
+`display.platforms.discord`, and give the bot a `discord:` block in place of
+the `telegram:` one:
+
+```yaml
+discord:                                   # the room's bot
+  typing_indicator: false
+  reactions: false
+  free_response_channels: ["<bound channel id>"]   # the hermes section's chat_id
+  free_response_auto_thread: false
+```
+
+**Use these keys only with this plugin from the commit that added this
+section, or later.** `free_response_channels` also makes every thread under
+the channel free-response. An earlier plugin does not hold those threads as
+part of the room, so Hermes would answer every message in them itself,
+outside Nunchi. Install the plugin and the `nunchi` package from the same
+commit (Install, steps 1 and 2).
+
+| Key | Without it |
+|---|---|
+| **`free_response_channels: ["<bound channel id>"]`** (required) | Hermes's default (`require_mention: true`) drops every message in the channel that does not @mention the bot, before any plugin hook: the room hears only what is said to the agent. Hermes also drops a message that @mentions someone else and not the bot. |
+| `free_response_auto_thread: false` | Hermes's default. With `true`, Hermes moves every message into a new thread named after it before the plugin sees it. |
+
+`typing_indicator` and `reactions` are as in the table above; on Discord
+both are on by default. The kit's Discord lane runs Hermes with this block,
+and a test checks that the two match.
+
+More setup on Discord:
+
+- Do not set `require_mention: false` instead. It lets every message in, but
+  `auto_thread` (on by default) then moves each one into a new thread before
+  the plugin sees it. In a free-response channel Hermes opens no threads.
+- Keep the channel out of `discord.ignored_channels`, and in
+  `discord.allowed_channels` when that is set. Hermes drops messages in either
+  case before any plugin hook, in the channel and in its threads.
+- `DISCORD_FREE_RESPONSE_AUTO_THREAD`, `DISCORD_REACTIONS`,
+  `DISCORD_REQUIRE_MENTION` and `DISCORD_AUTO_THREAD` in the profile's `.env`
+  (or Hermes's environment) win over `config.yaml`. Leave them unset; the
+  last two do not matter for a free-response channel.
+  `DISCORD_FREE_RESPONSE_CHANNELS` does not win: `free_response_channels` in
+  `config.yaml` replaces it, so list there every channel the bot should hear
+  freely.
+- If Hermes still opens a thread for a message in the room, the plugin takes
+  the message in and logs an error naming these keys. The thread stays.
+- Peer agents' bots are not heard by default (Known gaps).
 
 ## Known gaps
 
@@ -259,7 +314,31 @@ More setup:
 - **No interrupt.** Hermes gives plugins no way to stop a run. Nunchi closes
   a cancelled turn, so its answer is silenced; tools it already ran stay run.
 - **Reactions** are add-only (Hermes's `platform_actions`) and were checked up
-  to Hermes's Telegram verb with a recording adapter, not against Telegram.
+  to Hermes's Telegram verb with a recording adapter, and through Hermes's
+  Discord verb to a fake discord.py message, not against either platform. A
+  reaction to a message in a Discord thread goes through the thread. The
+  plugin learns a message's thread when the message arrives, so after a
+  restart the agent cannot react to a thread message from before it.
+- **Answers to a Discord thread land in the channel.** The room hears a
+  thread under the bound channel and knows which thread each message is in,
+  but the agent's turns run in the channel, so its answer to a thread
+  message is posted in the channel, not in the thread. Posting in the thread
+  needs thread placement in the library (decision D1).
+- **Messages that @mention only another bot.** Hermes drops a Discord message
+  that @mentions another bot and not this one, before any plugin hook,
+  whatever the channel's settings. The room never hears a person ask a peer
+  agent by @mention. No setting changes this.
+- **Peer agents on Discord.** Hermes drops messages from other bots
+  (`discord.allow_bots: none` by default). To hear peer agents, set
+  `discord.allow_bots: all` and `discord.bots_require_inline_mention: false`.
+  Both apply to the whole profile and every channel the bot can see, which is
+  one more reason to give each room its own bot. With `allow_bots: mentions`,
+  only a bot message that @mentions this one is heard.
+- **Rapid Discord messages are merged.** Hermes joins one person's messages
+  sent less than 0.6 s apart (2 s after a long one) into one, under the first
+  message's id (`HERMES_DISCORD_TEXT_BATCH_DELAY_SECONDS`). The room reads
+  them as one message, and the later ids cannot be targeted. The kit turns
+  this batching off, as Hermes's own tests do.
 - **No room history after a restart** beyond Nunchi's own log.
 - **Hermes's process is not private.** The plugin runs inside Hermes's own
   process, and Nunchi leaves a stock harness's process alone: it does not

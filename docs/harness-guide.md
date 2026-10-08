@@ -101,6 +101,26 @@ harnesses post the raw draft when a hook raises. Whatever no setting or hook
 can stop goes into the integration's known gaps. Hermes's list is in
 [`integrations/hermes-plugin/README.md`](../integrations/hermes-plugin/README.md).
 
+**Whatever the harness drops or does before your ingress hook.** The room
+should hear the whole conversation, and a harness-hosted plugin hears only
+what reaches its hook. List what the harness does to a message before then:
+
+- what it drops: mention gates (a group message that does not name the
+  bot), user and channel allowlists, ignored channels, filters for other
+  bots. Open each for the room;
+- what it does first: opening a thread for the message, processing
+  reactions, typing. Turn each off; no hook can take it back.
+
+Places nested in the room, such as the threads under a channel or the
+topics in a group, belong to the room. Consume their messages too, with
+the thread each is in (`thread_root_event_id`, step 7); a harness left to
+answer them bypasses the room. A setting that opens the room's channel may
+open its threads too, as Hermes's Discord `free_response_channels` does: the
+plugin that holds them must ship with that setting or before it, never
+after. Test the harness's defaults and the room's setting through its real
+ingress, as the Hermes kit's Discord lane does with Hermes's stock Discord
+adapter.
+
 ## The pieces
 
 All are in the core package, `nunchi`, standard library only.
@@ -481,6 +501,7 @@ room.deliver(
         "mentions_room": False,
         "timestamp": "2026-10-07T18:00:00Z",       # optional
         "reply_to_event_id": "example:message:9000",  # optional
+        "thread_root_event_id": "example:message:8990",  # optional: the thread it is in
     },
     actors={"example:user:42": {"kind": "human", "display_name": "Sam"}},
 )
@@ -493,6 +514,10 @@ room.deliver(
   checked by `nunchi.v2_contracts.validate_canonical_event`.
 - Actor `kind`: `human`, `bot`, `system`, or `unknown`. Never invent a kind
   you do not know.
+- `actors` describes everyone the event names: its author and each actor in
+  `mentioned_actor_ids` the room has not seen yet, with what the platform
+  says about them. The room refuses an event that names an unknown actor.
+  The agent itself is known from the binding.
 - Ids must be the platform's own and stable. The agent's replies and
   reactions target them. If the harness gives a message no id, use a unique
   one of your own; nothing can target that message.
@@ -509,6 +534,14 @@ room.deliver(
   to the library fails: a harness that answers a person directly bypasses the
   room, and its silence marker may turn into a visible warning on a person's
   turn.
+- The room includes the places nested in it: a thread under the channel, a
+  topic in the group. Consume their messages and set `thread_root_event_id`
+  to the thread's root: the message that started it, or the platform's own
+  id for the thread when no message did. A message the harness itself moved
+  into a new thread is that thread's start and stays where it was posted.
+  A harness-hosted plugin starts every turn in the room's main chat, so
+  until the library places answers in threads, the agent's answer to a
+  thread message is posted there.
 - Other chats and direct messages are not this participant's room. A
   harness-hosted plugin leaves them to the harness. A library-hosted
   transport that sees another channel delivers it with
@@ -636,8 +669,10 @@ table names the Hermes hooks for each step.
    reaction and room-view tools from `participant.attach()`, and forwards
    their calls to `call_tool`. It builds the `Room`, with `HarnessDelivery`,
    on the first message the gateway admits.
-2. **Ingress.** Every message in the room reaches the plugin's ingress hook.
-   The plugin hands it to `room.deliver` and tells the harness it is handled,
+2. **Ingress.** Every message in the room, and in the threads inside it,
+   reaches the plugin's ingress hook, once the harness's own gates are open
+   for the room (on Discord, Hermes's `free_response_channels`). The plugin
+   hands it to `room.deliver` and tells the harness it is handled,
    with no reply, even when the hand-over failed. Give the room every fact the
    harness has: who a message mentions, the message it replies to, when it was
    sent, and whether its author is a bot. When the ingress hook's payload
@@ -825,6 +860,9 @@ Each is tracked in [#135](https://github.com/mentatzoe/nunchi/issues/135).
 - [ ] Everything the harness shows by itself besides the agent's own acts is
   off for the room, documented with the reason and tested; what nothing can
   stop is in the integration's known gaps.
+- [ ] Everything the harness drops or does before your ingress hook is open
+  or off for the room, tested through the harness's real ingress; threads
+  and topics inside the room are consumed as the room's.
 - [ ] No decision about whether or what the agent says.
 - [ ] Every room event delivered, the agent's own included.
 - [ ] Every run bound when it starts, and its end reported once, also when

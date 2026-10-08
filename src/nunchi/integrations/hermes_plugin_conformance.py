@@ -24,7 +24,24 @@ Hermes runs with the room settings `integrations/hermes-plugin/README.md`
 gives (`room_settings`), and the recording adapter takes its platform settings
 from the config Hermes loads, so the README's keys are what the kit tests.
 
-Hermes must be importable (a clean, pinned install; see `.github/workflows`).
+Two lanes, one per platform the plugin supports:
+
+- **Telegram**: a recording adapter in place of Telegram's, fed Hermes's
+  `MessageEvent` directly.
+- **Discord**: Hermes's stock Discord adapter (`plugins.platforms.discord`),
+  with fake discord channels, threads and messages as Hermes's own Discord
+  tests make them. A person's message enters through the adapter's own
+  ingress (`_dispatch_discord_message`, what its `on_message` runs), so
+  Hermes's mention gate, allowlists and auto-threading apply. Only the
+  calls that would reach Discord are recorded instead: `send`,
+  `send_typing`, the threads it opens (`_auto_create_thread`, which runs
+  stock against the fake message) and every reaction added to a message.
+  The kit does for the adapter what its `connect()` does without a
+  connection (gate settings, allowlists, ready), and turns text batching
+  off, as Hermes's tests do.
+
+Hermes must be importable (a clean, pinned install with its ``[messaging]``
+extra for discord.py; see `.github/workflows`).
 """
 
 from __future__ import annotations
@@ -42,6 +59,8 @@ import shutil
 import tempfile
 import threading
 import time
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 
 from ..attention import ParticipantProfile
@@ -59,6 +78,14 @@ from .hermes_plugin.plugin import (
 
 ROOM = "conformance-room"
 TURN_USER = "nunchi-turns"
+# The Discord lane's bound channel, guild, bot and people: Discord ids are numbers.
+DISCORD_ROOM = "1100"
+DISCORD_GUILD = "70"
+DISCORD_BOT = "9900"
+DISCORD_PEOPLE = {"42": "Sam", "43": "Kim"}
+ROOMS = {"telegram": ROOM, "discord": DISCORD_ROOM}
+# Who may talk to the bot, by platform: the people and the injected turns' identity.
+ALLOWED_USERS = {"telegram": f"u1,u2,{TURN_USER}", "discord": f"{','.join(DISCORD_PEOPLE)},{TURN_USER}"}
 # The Hermes settings a Nunchi room needs, so that people see only what the
 # agent chose to do (integrations/hermes-plugin/README.md, "Hermes setup the
 # room needs"). Per platform, under display.platforms.<platform>: no streamed
@@ -88,6 +115,18 @@ ROOM_PLATFORM = {
     "typing_indicator": False,
     "reactions": False,
 }
+# Discord's ingress, in the `discord:` block beside ROOM_PLATFORM: every
+# message in the bound channel, and in the threads under it, reaches the
+# plugin without an @mention, and Hermes opens no thread for it. Hermes's
+# defaults (`require_mention`, `auto_thread`) drop unmentioned messages before
+# any plugin hook and move each @mention into a new thread. The setting also
+# makes every thread under the channel free-response, which this plugin
+# version holds as part of the room.
+BOUND_CHANNEL = "<bound channel id>"
+ROOM_DISCORD = {
+    "free_response_channels": [BOUND_CHANNEL],
+    "free_response_auto_thread": False,
+}
 # Hermes toolsets that reach people outside the agent's answer: clarify
 # prompts and scheduled deliveries.
 ROOM_DISABLED_TOOLSETS = ("clarify", "cronjob")
@@ -105,12 +144,18 @@ _PENDING: dict[str, Any] = {}
 _ISOLATION: dict[str, Any] = {}
 
 
-def room_settings(platform: str = "telegram") -> dict[str, Any]:
-    """The Hermes config a Nunchi room on ``platform`` needs, beside the plugin's entry."""
+def room_settings(platform: str = "telegram", *, channel: str = BOUND_CHANNEL) -> dict[str, Any]:
+    """The Hermes config a Nunchi room on ``platform`` needs, beside the plugin's entry.
 
+    ``channel`` is the bound Discord channel's id.
+    """
+
+    block = dict(ROOM_PLATFORM)
+    if platform == "discord":
+        block.update(copy.deepcopy(ROOM_DISCORD), free_response_channels=[channel])
     return {
         "display": {**ROOM_DISPLAY_GLOBAL, "platforms": {platform: copy.deepcopy(ROOM_DISPLAY)}},
-        platform: dict(ROOM_PLATFORM),
+        platform: block,
         "agent": {"disabled_toolsets": list(ROOM_DISABLED_TOOLSETS)},
     }
 
@@ -325,23 +370,268 @@ class ScriptedModel:
         return Handler
 
 
+# -- Discord, faked the way Hermes's own Discord tests fake it ----------------------------------
+
+
+class _DiscordChannel:
+    """A guild text channel: what Hermes's Discord adapter reads of one."""
+
+    def __init__(self, world: "DiscordWorld", channel_id: int, name: str) -> None:
+        self.world = world
+        self.id = channel_id
+        self.name = name
+        self.guild = world.guild
+        self.topic = None
+        self.messages: dict[int, Any] = {}
+
+    def history(self, *, limit: Any = None, before: Any = None, after: Any = None, oldest_first: Any = None):
+        async def _none():
+            return
+            yield
+
+        return _none()
+
+    async def fetch_message(self, message_id: int) -> Any:
+        message = self.messages.get(int(message_id))
+        if message is None:
+            # Discord answers 404 Unknown Message: the message is in another channel.
+            raise LookupError(f"Unknown Message {message_id} in channel {self.id}")
+        return message
+
+    async def send(self, content: Any = None, **_: Any) -> Any:
+        # Hermes posting straight into a channel, around the adapter's `send`.
+        self.world.sent.append((str(self.id), str(content)))
+        return SimpleNamespace(id=self.world.next_id())
+
+
+class _DiscordThread(_DiscordChannel):
+    """A thread under a channel."""
+
+    def __init__(self, world: "DiscordWorld", thread_id: int, parent: _DiscordChannel, name: str) -> None:
+        super().__init__(world, thread_id, name)
+        self.parent = parent
+        self.parent_id = parent.id
+
+
+class _DiscordDM:
+    def __init__(self, channel_id: int) -> None:
+        self.id = channel_id
+
+
+class _DiscordForum:
+    def __init__(self, channel_id: int) -> None:
+        self.id = channel_id
+
+
+class _DiscordMessage:
+    """A message as discord.py hands it to Hermes's `on_message`."""
+
+    def __init__(
+        self,
+        world: "DiscordWorld",
+        *,
+        message_id: int,
+        channel: _DiscordChannel,
+        author: Any,
+        content: str,
+        mentions: list[Any],
+        reply_to: int | None,
+    ) -> None:
+        import discord
+
+        self.world = world
+        self.id = message_id
+        self.content = content
+        self.mentions = mentions
+        self.mention_everyone = False
+        self.attachments: list[Any] = []
+        self.reference = SimpleNamespace(message_id=reply_to, resolved=None) if reply_to else None
+        self.type = discord.MessageType.reply if reply_to else discord.MessageType.default
+        self.created_at = datetime.now(timezone.utc)
+        self.channel = channel
+        self.guild = channel.guild
+        self.author = author
+        channel.messages[message_id] = self
+
+    async def add_reaction(self, emoji: Any) -> None:
+        self.world.reactions.append((str(self.channel.id), str(self.id), str(emoji)))
+
+    async def remove_reaction(self, emoji: Any, member: Any) -> None:
+        self.world.reactions_removed.append((str(self.channel.id), str(self.id), str(emoji)))
+
+    async def create_thread(self, *, name: str, auto_archive_duration: Any = None, reason: Any = None) -> Any:
+        # A thread started from a message has that message's id; the message stays in its channel.
+        return self.world.thread(self.id, parent=int(self.channel.id), name=name)
+
+
+class DiscordWorld:
+    """The guild the Discord lane's bot is in: the bound channel, its threads, and who is there.
+
+    What Hermes sends, the reactions it adds (its processing reactions and
+    the plugin's), and the threads it opens are recorded here.
+    """
+
+    def __init__(self) -> None:
+        self.guild = SimpleNamespace(id=int(DISCORD_GUILD), name="Conformance")
+        self.bot = SimpleNamespace(id=int(DISCORD_BOT), bot=True, name="Vigil", display_name="Vigil")
+        self.people = {
+            user_id: SimpleNamespace(id=int(user_id), bot=False, name=name, display_name=name)
+            for user_id, name in DISCORD_PEOPLE.items()
+        }
+        self.channels: dict[int, _DiscordChannel] = {}
+        self.sent: list[tuple[str, str]] = []
+        self.reactions: list[tuple[str, str, str]] = []
+        self.reactions_removed: list[tuple[str, str, str]] = []
+        self._ids = 900000
+        self.channel(int(DISCORD_ROOM), name="room")
+
+    def next_id(self) -> int:
+        self._ids += 1
+        return self._ids
+
+    def channel(self, channel_id: int, *, name: str = "channel") -> _DiscordChannel:
+        return self.channels.setdefault(int(channel_id), _DiscordChannel(self, int(channel_id), name))
+
+    def thread(self, thread_id: int, *, parent: int = int(DISCORD_ROOM), name: str = "thread") -> _DiscordThread:
+        thread = _DiscordThread(self, int(thread_id), self.channels[int(parent)], name)
+        self.channels[thread.id] = thread
+        return thread
+
+    def peer_bot(self, user_id: str, name: str) -> Any:
+        """Another agent's bot in the guild."""
+
+        return self.people.setdefault(user_id, SimpleNamespace(id=int(user_id), bot=True, name=name, display_name=name))
+
+    def message(
+        self,
+        text: str,
+        *,
+        message_id: str,
+        user_id: str = "42",
+        channel: str = DISCORD_ROOM,
+        mentions: tuple[str, ...] = (),
+        reply_to: str | None = None,
+    ) -> _DiscordMessage:
+        """A message from ``user_id`` in ``channel``; each id in ``mentions`` is @mentioned in its text."""
+
+        mentioned = [self.bot if user == DISCORD_BOT else self.people[user] for user in mentions]
+        content = " ".join([*(f"<@{user}>" for user in mentions), text])
+        return _DiscordMessage(
+            self,
+            message_id=int(message_id),
+            channel=self.channels[int(channel)],
+            author=self.people[user_id],
+            content=content,
+            mentions=mentioned,
+            reply_to=int(reply_to) if reply_to else None,
+        )
+
+
+class _DiscordClient:
+    """The parts of discord.py's client Hermes's adapter and platform actions use."""
+
+    def __init__(self, world: DiscordWorld) -> None:
+        self.world = world
+        self.user = world.bot
+
+    def get_channel(self, channel_id: int) -> Any:
+        return self.world.channels.get(int(channel_id))
+
+    async def fetch_channel(self, channel_id: int) -> Any:
+        channel = self.get_channel(channel_id)
+        if channel is None:
+            raise LookupError(f"Unknown Channel {channel_id}")
+        return channel
+
+    def get_guild(self, guild_id: int) -> Any:
+        return self.world.guild if int(guild_id) == self.world.guild.id else None
+
+    def is_closed(self) -> bool:
+        return False
+
+
+def _discord_adapter(platform_config: Any, world: DiscordWorld) -> Any:
+    """Hermes's stock Discord adapter, recording what would reach Discord."""
+
+    from gateway.platforms.base import SendResult
+    from plugins.platforms.discord.adapter import DiscordAdapter
+
+    class RecordingDiscordAdapter(DiscordAdapter):
+        def __init__(self) -> None:
+            super().__init__(platform_config)
+            self.world = world
+            self.sent = world.sent
+            self.reactions = world.reactions
+            # Each typing action Hermes started, by channel, and each thread it opened.
+            self.typing: list[str] = []
+            self.threads: list[str] = []
+            self._client = _DiscordClient(world)
+            # What connect() sets up before it reaches Discord.
+            self._snapshot_gate_env()
+            self._allowed_user_ids = self._get_allowed_users()
+            self._allowed_role_ids = self._get_allowed_roles()
+            self._ready_event.set()
+            self._text_batch_delay_seconds = 0
+            self._running = True
+
+        async def connect(self, *, is_reconnect: bool = False) -> bool:
+            return True
+
+        async def disconnect(self) -> None:
+            self._mark_disconnected()
+
+        async def send(self, chat_id, content, reply_to=None, metadata=None):
+            # A thread in the metadata wins over the chat, as in Hermes's send.
+            target = (metadata or {}).get("thread_id") or chat_id
+            self.sent.append((str(target), content))
+            return SendResult(success=True, message_id=str(world.next_id()))
+
+        async def send_typing(self, chat_id, metadata=None):
+            self.typing.append(str(chat_id))
+
+        async def stop_typing(self, chat_id) -> None:
+            return None
+
+        async def _auto_create_thread(self, message):
+            thread = await super()._auto_create_thread(message)
+            if thread is not None:
+                self.threads.append(str(thread.id))
+            return thread
+
+    return RecordingDiscordAdapter()
+
+
 # -- a real Hermes gateway in a throwaway home ------------------------------------------------
 
 
 class HermesGateway:
-    """A `GatewayRunner` with a recording platform adapter, on its own event loop."""
+    """A `GatewayRunner` with a recording platform adapter, on its own event loop.
+
+    ``platform`` is the lane: ``telegram`` (a recording adapter) or ``discord``
+    (Hermes's stock Discord adapter on a fake guild, `DiscordWorld`).
+    ``platform_block`` replaces the platform's own block (``telegram:`` or
+    ``discord:``) of the room settings, for Hermes's defaults.
+    """
 
     def __init__(
         self,
         *,
         model: ScriptedModel,
         tool_search: str = "off",
-        allowed_users: str = f"u1,u2,{TURN_USER}",
+        allowed_users: str | None = None,
         extra_config: Mapping[str, Any] | None = None,
         plugin_source: Path | None = None,
         plugin_settings: Mapping[str, Any] | None = None,
         platform_actions: bool = False,
+        platform: str = "telegram",
+        platform_block: Mapping[str, Any] | None = None,
     ) -> None:
+        if platform not in ROOMS:
+            raise ValueError(f"the kit has no {platform} lane")
+        self.platform = platform
+        self.room = ROOMS[platform]
+        self.world = DiscordWorld() if platform == "discord" else None
+        allowed_users = ALLOWED_USERS[platform] if allowed_users is None else allowed_users
         base = isolate()
         _ISOLATION["count"] += 1
         self.directory = base / f"scenario-{_ISOLATION['count']}"
@@ -360,13 +650,16 @@ class HermesGateway:
             entry["allow_platform_actions"] = True
         if plugin_settings:
             entry["settings"] = dict(plugin_settings)
+        settings = room_settings(platform, channel=self.room)
+        if platform_block is not None:
+            settings[platform] = dict(platform_block)
         config: dict[str, Any] = {
             "model": {"default": "conformance/model", "provider": "custom", "base_url": model.base_url,
                       "api_key": "sk-local-conformance"},
             "plugins": {"enabled": [PLUGIN_NAME], "entries": {PLUGIN_NAME: entry}},
             # Operator setup for a Nunchi room (integrations/hermes-plugin/README.md):
             # only what the agent chose to do may reach the room.
-            **room_settings("telegram"),
+            **settings,
             "tools": {"tool_search": {"enabled": tool_search}},
         }
         for key, value in (extra_config or {}).items():
@@ -374,24 +667,33 @@ class HermesGateway:
                 config[key] = {**config[key], **value}
             else:
                 config[key] = value
+        allowed_env = f"{platform.upper()}_ALLOWED_USERS"
         # JSON is YAML: Hermes reads it as its config.yaml.
         (self.home / "config.yaml").write_text(json.dumps(config), encoding="utf-8")
-        (self.home / ".env").write_text(f"TELEGRAM_ALLOWED_USERS={allowed_users}\n", encoding="utf-8")
+        (self.home / ".env").write_text(f"{allowed_env}={allowed_users}\n", encoding="utf-8")
         # Hermes copies agent.max_turns into HERMES_MAX_ITERATIONS, and
         # display.busy_ack_enabled into HERMES_GATEWAY_BUSY_ACK_ENABLED, for the
         # whole process (gateway/run.py), so they are put back with the rest on
         # close. Hermes bridges busy_ack_enabled only when it first imports
         # gateway.run: each gateway sets it from its own config, as that would.
+        # Loading the config also copies the platform's block into the
+        # platform's environment variables (DISCORD_REACTIONS and kin), where
+        # the first value written wins over every later config: each gateway
+        # starts without them and puts them back on close.
+        platform_env = [key for key in os.environ if key.startswith(("TELEGRAM_", "DISCORD_"))]
         self._saved_env = {key: os.environ.get(key) for key in (
-            "HERMES_HOME", "TELEGRAM_ALLOWED_USERS", "GATEWAY_ALLOWED_USERS", "GATEWAY_ALLOW_ALL_USERS",
-            "HERMES_MAX_ITERATIONS", "HERMES_GATEWAY_BUSY_ACK_ENABLED")}
+            "HERMES_HOME", "GATEWAY_ALLOWED_USERS", "GATEWAY_ALLOW_ALL_USERS",
+            "HERMES_MAX_ITERATIONS", "HERMES_GATEWAY_BUSY_ACK_ENABLED", allowed_env, *platform_env)}
+        for key in platform_env:
+            if key.startswith(f"{platform.upper()}_"):
+                del os.environ[key]
         busy_ack = config.get("display", {}).get("busy_ack_enabled")
         if busy_ack is None:
             os.environ.pop("HERMES_GATEWAY_BUSY_ACK_ENABLED", None)
         else:
             os.environ["HERMES_GATEWAY_BUSY_ACK_ENABLED"] = str(busy_ack)
         os.environ["HERMES_HOME"] = str(self.home)
-        os.environ["TELEGRAM_ALLOWED_USERS"] = allowed_users
+        os.environ[allowed_env] = allowed_users
         os.environ.pop("GATEWAY_ALLOWED_USERS", None)
         os.environ.pop("GATEWAY_ALLOW_ALL_USERS", None)
         import gateway.run as gateway_run  # only once HERMES_HOME is the throwaway home
@@ -399,10 +701,25 @@ class HermesGateway:
         self._gateway_run = gateway_run
         self._saved_home = getattr(gateway_run, "_hermes_home", None)
         gateway_run._hermes_home = self.home
+        self._saved_discord: dict[str, Any] = {}
+        if self.world is not None:
+            # Hermes's Discord adapter tells channels, threads and DMs apart with
+            # isinstance on discord.py's classes: its tests swap in fakes.
+            import plugins.platforms.discord.adapter as discord_adapter
+
+            fakes = {"Thread": _DiscordThread, "DMChannel": _DiscordDM, "ForumChannel": _DiscordForum}
+            self._discord_module = discord_adapter.discord
+            self._saved_discord = {name: getattr(self._discord_module, name, None) for name in fakes}
+            for name, fake in fakes.items():
+                setattr(self._discord_module, name, fake)
         self.loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self.loop.run_forever, name="nunchi-kit-gateway", daemon=True)
         self._thread.start()
-        self.runner, self.adapter = self.run(self._start(), timeout=60)
+        try:
+            self.runner, self.adapter = self.run(self._start(), timeout=60)
+        except BaseException:
+            self.close()
+            raise
 
     def run(self, coroutine: Any, timeout: float = 30) -> Any:
         return asyncio.run_coroutine_threadsafe(coroutine, self.loop).result(timeout)
@@ -414,9 +731,10 @@ class HermesGateway:
         from gateway.platforms.base import BasePlatformAdapter, SendResult
 
         # The platform settings as Hermes loads them from this home's config
-        # (the README's `telegram:` block), as a real adapter gets them.
+        # (the README's `telegram:` or `discord:` block), as a real adapter gets them.
         loaded = await asyncio.to_thread(load_gateway_config)
-        settings = loaded.platforms.get(Platform.TELEGRAM) or PlatformConfig()
+        platform = Platform(self.platform)
+        settings = loaded.platforms.get(platform) or PlatformConfig()
         platform_config = dataclasses.replace(
             settings,
             enabled=True,
@@ -460,8 +778,11 @@ class HermesGateway:
         # Hermes discovers and loads the plugin from this home, as at startup.
         await asyncio.to_thread(discover_plugins)
         runner = GatewayRunner(GatewayConfig(sessions_dir=self.home / "sessions", group_sessions_per_user=True))
-        adapter = RecordingAdapter()
-        runner.adapters = {Platform.TELEGRAM: adapter}
+        if self.world is not None:
+            adapter = _discord_adapter(platform_config, self.world)
+        else:
+            adapter = RecordingAdapter()
+        runner.adapters = {platform: adapter}
         adapter.gateway_runner = runner
         adapter.set_message_handler(runner._handle_message)
         runner._gateway_loop = asyncio.get_running_loop()
@@ -471,15 +792,29 @@ class HermesGateway:
 
     async def person_says(
         self, text: str, *, user_id: str = "u1", user_name: str = "Sam", message_id: str, **fields: Any
-    ) -> None:
-        """A message as the platform adapter hands it to Hermes; ``fields`` are more `MessageEvent` fields."""
+    ) -> bool:
+        """A person's message, as the platform adapter hands it to Hermes.
 
+        On Telegram ``fields`` are more `MessageEvent` fields. On Discord the
+        message enters through the adapter's own ingress, which may drop it
+        (the answer is whether it reached the gateway); ``fields`` are
+        `DiscordWorld.message`'s (``channel``, ``mentions``, ``reply_to``) and
+        ``user_id`` is one of `DISCORD_PEOPLE` (``u1`` and ``u2`` stand for
+        the first two).
+        """
+
+        if self.world is not None:
+            people = list(DISCORD_PEOPLE)
+            user_id = {"u1": people[0], "u2": people[1]}.get(user_id, user_id)
+            message = self.world.message(text, message_id=message_id, user_id=user_id, **fields)
+            return bool(await self.adapter._dispatch_discord_message(message))
         from gateway.platforms.base import MessageEvent, MessageType
 
         source = self.adapter.build_source(chat_id=ROOM, chat_type="group", user_id=user_id, user_name=user_name)
         await self.adapter.handle_message(
             MessageEvent(text=text, message_type=MessageType.TEXT, source=source, message_id=message_id, **fields)
         )
+        return True
 
     def idle(self) -> bool:
         """Hermes's own test pattern for a settled gateway: nothing in flight."""
@@ -496,11 +831,18 @@ class HermesGateway:
             with contextlib.suppress(Exception):
                 self.runner._clear_plugin_message_injector()
 
-        with contextlib.suppress(Exception):
-            self.run(stop(), timeout=10)
-        self.loop.call_soon_threadsafe(self.loop.stop)
-        self._thread.join(timeout=10)
+        if hasattr(self, "runner"):
+            with contextlib.suppress(Exception):
+                self.run(stop(), timeout=10)
+        if hasattr(self, "loop"):
+            self.loop.call_soon_threadsafe(self.loop.stop)
+            self._thread.join(timeout=10)
         self._gateway_run._hermes_home = self._saved_home
+        for name, original in self._saved_discord.items():
+            setattr(self._discord_module, name, original)
+        for key in [key for key in os.environ if key.startswith(("TELEGRAM_", "DISCORD_"))]:
+            if key not in self._saved_env:
+                del os.environ[key]
         for key, value in self._saved_env.items():
             if value is None:
                 os.environ.pop(key, None)
@@ -639,8 +981,10 @@ class HermesHarness:
     ``room_factory`` lets the plugin build its own `Room` (end-to-end, through
     Hermes's ingress); without it the caller builds the room, as the kit does.
 
-    Hermes runs with the room settings (`room_settings`). ``display`` replaces
-    the platform's display settings, ``agent`` adds Hermes agent settings, and
+    Hermes runs with the room settings (`room_settings`) for ``platform``
+    (``telegram`` or ``discord``, see `HermesGateway`). ``display`` replaces
+    the platform's display settings, ``platform_block`` its own block
+    (``discord:``), ``agent`` adds Hermes agent settings, and
     ``extra_config`` changes any other part of the config, one level deep
     (``{"display": {"turn_completion_explainer": True}}`` keeps the rest of
     ``display``).
@@ -653,7 +997,7 @@ class HermesHarness:
         guard: SecretGuard,
         room_factory: Any = None,
         tool_search: str = "off",
-        allowed_users: str = f"u1,u2,{TURN_USER}",
+        allowed_users: str | None = None,
         start_timeout_seconds: float = 30.0,
         result_wait_seconds: float = 5.0,
         platform_actions: bool = False,
@@ -663,10 +1007,14 @@ class HermesHarness:
         extra_config: Mapping[str, Any] | None = None,
         failure_grace_seconds: float | None = None,
         recovery_grace_seconds: float | None = None,
+        platform: str = "telegram",
+        platform_block: Mapping[str, Any] | None = None,
     ) -> None:
         if not hermes_available():
             raise RuntimeError("Hermes is not installed in this Python environment")
-        self.route = HermesRoute(platform="telegram", chat_id=ROOM, turn_user_id=TURN_USER)
+        self.platform = platform
+        self.room = ROOMS[platform]
+        self.route = HermesRoute(platform=platform, chat_id=self.room, turn_user_id=TURN_USER)
         self.model = ScriptedModel()
         _PENDING.clear()
         _PENDING.update(
@@ -682,7 +1030,7 @@ class HermesHarness:
         )
         extra: dict[str, Any] = {}
         if display is not None:
-            extra["display"] = {"platforms": {"telegram": dict(display)}}
+            extra["display"] = {"platforms": {platform: dict(display)}}
         if agent is not None:
             # Hermes's own agent settings, such as its budget of model calls.
             extra["agent"] = dict(agent)
@@ -696,6 +1044,8 @@ class HermesHarness:
                 model=self.model, tool_search=tool_search, allowed_users=allowed_users,
                 platform_actions=platform_actions,
                 extra_config=extra or None,
+                platform=platform,
+                platform_block=platform_block,
             )
         except BaseException:
             self.model.close()
@@ -708,8 +1058,10 @@ class HermesHarness:
 
     def person_says(
         self, text: str, *, message_id: str, user_id: str = "u1", user_name: str = "Sam", **fields: Any
-    ) -> None:
-        self.gateway.run(
+    ) -> bool:
+        """A person's message (`HermesGateway.person_says`); on Discord, whether it reached the gateway."""
+
+        return self.gateway.run(
             self.gateway.person_says(text, user_id=user_id, user_name=user_name, message_id=message_id, **fields)
         )
 
@@ -744,6 +1096,9 @@ class HermesHarness:
         return False
 
     def close(self) -> None:
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
         self.model.close()
         gateway = getattr(self, "gateway", None)
         if gateway is not None:
@@ -755,13 +1110,16 @@ class HermesHarness:
 
 
 class HermesKitIntegration:
-    name = "Hermes plugin"
+    """The plugin in a real Hermes gateway, on one platform's lane."""
+
     posting = "final-answer"
     # Hermes ends a run with its own text when its model gives no answer.
     harness_text = True
 
-    def __init__(self, *, tool_search: str = "off") -> None:
+    def __init__(self, *, tool_search: str = "off", platform: str = "telegram") -> None:
         self.tool_search = tool_search
+        self.platform = platform
+        self.name = f"Hermes plugin ({platform.capitalize()})"
         self.harness: HermesHarness | None = None
 
     def participant(
@@ -776,6 +1134,7 @@ class HermesKitIntegration:
             tool_search=self.tool_search,
             roles=("react", "context", "propose", "withdraw") if privileged else ("react", "context"),
             agent={"max_turns": 1} if budget else None,
+            platform=self.platform,
         )
         plugin = harness.plugin
 
@@ -795,16 +1154,23 @@ class HermesKitIntegration:
 
 
 def conformance_integrations() -> list[HermesKitIntegration]:
-    return [HermesKitIntegration()]
+    """Both lanes: the plugin on Telegram and on Discord."""
+
+    return [HermesKitIntegration(platform="telegram"), HermesKitIntegration(platform="discord")]
 
 
 __all__ = [
+    "BOUND_CHANNEL",
+    "DISCORD_BOT",
+    "DISCORD_ROOM",
+    "DiscordWorld",
     "HermesGateway",
     "HermesHarness",
     "HermesKitIntegration",
     "HermesSurface",
     "ScriptedModel",
     "ROOM_DISABLED_TOOLSETS",
+    "ROOM_DISCORD",
     "ROOM_DISPLAY",
     "ROOM_DISPLAY_GLOBAL",
     "ROOM_PLATFORM",

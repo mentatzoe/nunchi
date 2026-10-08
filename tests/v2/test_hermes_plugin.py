@@ -29,7 +29,16 @@ from nunchi.integrations.hermes_plugin import (
     HermesRoute,
 )
 from nunchi.integrations.hermes_plugin.plugin import TOKEN_PATTERNS
-from nunchi.integrations.hermes_plugin_conformance import ROOM, TURN_USER, hermes_available, room_settings
+from nunchi.integrations.hermes_plugin_conformance import (
+    BOUND_CHANNEL,
+    DISCORD_BOT,
+    DISCORD_ROOM,
+    ROOM,
+    ROOM_PLATFORM,
+    TURN_USER,
+    hermes_available,
+    room_settings,
+)
 from nunchi.observation import ObservationLimits, ParticipantBinding
 from nunchi.room import Room, RoomSettings
 from nunchi.turn import SecretGuard
@@ -51,6 +60,22 @@ PROFILE = ParticipantProfile(
     sha256="0" * 64,
 )
 ROUTE = HermesRoute(platform="telegram", chat_id=ROOM, turn_user_id=TURN_USER)
+DISCORD_BINDING = ParticipantBinding(
+    participant_id="vigil",
+    actor_id=f"discord:user:{DISCORD_BOT}",
+    platform="discord",
+    room_id=DISCORD_ROOM,
+    continuity_scope_id=f"discord:{DISCORD_ROOM}",
+)
+DISCORD_PROFILE = ParticipantProfile(
+    profile_id="vigil-profile",
+    participant_id=DISCORD_BINDING.participant_id,
+    actor_id=DISCORD_BINDING.actor_id,
+    instructions="Participate directly and preserve uncertainty.",
+    provenance="test:offline",
+    sha256="0" * 64,
+)
+DISCORD_ROUTE = HermesRoute(platform="discord", chat_id=DISCORD_ROOM, turn_user_id=TURN_USER)
 REPO = Path(__file__).resolve().parents[2]
 PLUGIN_DIR = REPO / "src" / "nunchi" / "integrations" / "hermes_plugin"
 README = REPO / "integrations" / "hermes-plugin" / "README.md"
@@ -87,14 +112,19 @@ class _StubRoom:
     def deliver(self, **kwargs):
         if self.fail:
             raise RuntimeError("room unavailable")
+        # The room needs every actor an event names, except the agent itself.
+        event = kwargs["event"]
+        named = {event["author_id"], *event["mentioned_actor_ids"]} - {PROFILE.actor_id, DISCORD_PROFILE.actor_id}
+        if named - set(kwargs["actors"]):
+            raise AssertionError(f"the room cannot resolve {sorted(named - set(kwargs['actors']))}")
         self.delivered.append(kwargs)
 
 
-def _plugin(room=None) -> HermesRoomPlugin:
+def _plugin(room=None, *, route=ROUTE) -> HermesRoomPlugin:
     return HermesRoomPlugin(
-        profile=PROFILE,
+        profile=PROFILE if route.platform == "telegram" else DISCORD_PROFILE,
         guard=SecretGuard([]),
-        route=ROUTE,
+        route=route,
         room_factory=(lambda _plugin: room) if room is not None else None,
     )
 
@@ -117,6 +147,26 @@ class RouteTest(unittest.TestCase):
         self.assertFalse(route.holds("telegram", {"chat_id": "9", "thread_id": "77"}))
         self.assertEqual(route.message_id(route.event_id("555")), "555")
         self.assertIsNone(route.message_id("telegram:message:555"))
+
+    def test_a_thread_under_the_bound_channel_is_part_of_the_room(self):
+        # Hermes gives a message in a Discord thread the thread as its chat and
+        # the channel as its parent; Hermes would answer it itself if the
+        # plugin left it.
+        route = HermesRoute(platform="discord", chat_id="1100", turn_user_id="t")
+        thread = {"chat_id": "777", "thread_id": "777", "parent_chat_id": "1100"}
+        self.assertTrue(route.holds("discord", thread))
+        self.assertTrue(route.inside(thread))
+        self.assertTrue(route.holds("discord", {"chat_id": "1100", "thread_id": None}))
+        self.assertFalse(route.inside({"chat_id": "1100", "thread_id": None}))
+        self.assertFalse(route.holds("discord", {**thread, "parent_chat_id": "1200"}))
+        self.assertFalse(route.holds("discord", {"chat_id": "777", "thread_id": "777"}))
+        self.assertFalse(route.holds("telegram", thread))
+        # A binding to one thread holds that thread only, not its neighbours.
+        one = HermesRoute(platform="discord", chat_id="777", turn_user_id="t", thread_id="777")
+        self.assertTrue(one.holds("discord", thread))
+        self.assertFalse(one.holds("discord", {"chat_id": "778", "thread_id": "778", "parent_chat_id": "1100"}))
+        topic = HermesRoute(platform="telegram", chat_id="-100", turn_user_id="t", thread_id="5")
+        self.assertFalse(topic.holds("telegram", {"chat_id": "-200", "thread_id": "5", "parent_chat_id": "-100"}))
 
 
 class RegistrationTest(unittest.TestCase):
@@ -186,7 +236,7 @@ class IngressTest(unittest.TestCase):
         room = _StubRoom()
         plugin = _plugin(room)
         raw = SimpleNamespace(
-            mentions=[SimpleNamespace(id="bot-7"), SimpleNamespace(id="u2")],
+            mentions=[SimpleNamespace(id="bot-7"), SimpleNamespace(id="u2", bot=False, display_name="Kim")],
             mention_everyone=False,
             author=SimpleNamespace(bot=True),
         )
@@ -201,6 +251,9 @@ class IngressTest(unittest.TestCase):
         self.assertEqual("telegram:message:100", event["reply_to_event_id"])
         self.assertEqual("2026-10-07T21:05:03.250Z", event["timestamp"])
         self.assertEqual("bot", delivery["actors"]["telegram:user:u3"]["kind"])
+        # Each person it names is an actor the room knows; the agent keeps its own name.
+        self.assertEqual({"kind": "human", "display_name": "Kim"}, delivery["actors"]["telegram:user:u2"])
+        self.assertNotIn("telegram:user:bot-7", delivery["actors"])
 
     def test_a_message_meant_for_the_bot_mentions_it(self):
         room = _StubRoom()
@@ -231,6 +284,54 @@ class IngressTest(unittest.TestCase):
                              message_id="1", text="hi")
         self.assertIsNone(answer)
         self.assertEqual(room.delivered, [])
+
+    def test_a_message_in_a_thread_under_the_channel_is_observed_in_its_thread(self):
+        room = _StubRoom()
+        plugin = _plugin(room, route=DISCORD_ROUTE)
+        source = SimpleNamespace(platform=SimpleNamespace(value="discord"), chat_id="777", thread_id="777",
+                                 parent_chat_id=DISCORD_ROOM)
+        raw = SimpleNamespace(mentions=[], mention_everyone=False, author=SimpleNamespace(bot=False))
+        plugin.on_dispatch(event=SimpleNamespace(source=source, message_id="2002", raw_message=raw))
+        answer = self._admit(plugin, platform="discord",
+                             source={"chat_id": "777", "thread_id": "777", "parent_chat_id": DISCORD_ROOM,
+                                     "chat_type": "thread", "user_id": "42", "user_name": "Sam"},
+                             message_id="2002", text="is the rollback done?")
+        self.assertEqual(answer, {"action": "handled"})
+        (delivery,) = room.delivered
+        event = validate_canonical_event(delivery["event"])
+        self.assertEqual("discord:message:777", event["thread_root_event_id"])
+        # The facts noted at dispatch reached the room.
+        self.assertEqual("human", delivery["actors"]["discord:user:42"]["kind"])
+        # The agent's reaction to it goes through the thread.
+        self.assertEqual("777", plugin.chat_of("2002"))
+        self.assertEqual(DISCORD_ROOM, plugin.chat_of("2001"))
+
+    def test_a_message_in_the_channel_names_no_thread(self):
+        room = _StubRoom()
+        plugin = _plugin(room, route=DISCORD_ROUTE)
+        self._admit(plugin, platform="discord", source={"chat_id": DISCORD_ROOM, "thread_id": None, "user_id": "42"},
+                    message_id="2001", text="anyone around?")
+        (delivery,) = room.delivered
+        self.assertNotIn("thread_root_event_id", delivery["event"])
+
+    def test_a_thread_hermes_opened_itself_is_consumed_and_named_in_an_error(self):
+        # Under Hermes's Discord defaults an @mention gets a new thread before
+        # any plugin hook. The message still reaches the room, as the start of
+        # that thread in the channel, and the error names the settings.
+        room = _StubRoom()
+        plugin = _plugin(room, route=DISCORD_ROUTE)
+        with self.assertLogs("nunchi.hermes_plugin", level="ERROR") as logs:
+            answer = self._admit(plugin, platform="discord",
+                                 source={"chat_id": "2004", "thread_id": "2004", "parent_chat_id": DISCORD_ROOM,
+                                         "chat_type": "thread", "auto_thread_created": True, "user_id": "42"},
+                                 message_id="2004", text="can you look?")
+        self.assertEqual(answer, {"action": "handled"})
+        (line,) = logs.output
+        for key in ("discord.free_response_channels", f'["{DISCORD_ROOM}"]', "discord.free_response_auto_thread"):
+            self.assertIn(key, line)
+        (delivery,) = room.delivered
+        self.assertNotIn("thread_root_event_id", delivery["event"])
+        self.assertEqual(DISCORD_ROOM, plugin.chat_of("2004"))
 
     def test_a_room_failure_still_consumes(self):
         # Fail closed: Hermes answering the person directly would bypass the room.
@@ -349,10 +450,10 @@ class WhatTheModelWroteTest(unittest.TestCase):
 # -- inside a real Hermes gateway -----------------------------------------------------------------
 
 
-def _room_factory(state: Path):
+def _room_factory(state: Path, *, binding=BINDING, profile=PROFILE):
     settings = RoomSettings(
-        binding=BINDING,
-        profile=PROFILE,
+        binding=binding,
+        profile=profile,
         attention=AttentionPolicy(),
         attention_model=None,
         limits=ObservationLimits(),
@@ -414,8 +515,9 @@ def _own_moves(harness, event_id: str = "telegram:message:100") -> list[tuple]:
     return [(move.get("kind"), move.get("text") or move.get("why")) for move in facts.get("own_moves", ())]
 
 
-def _readme_settings() -> dict:
-    """The README's "Hermes setup the room needs" YAML block, as Hermes's own reader reads it."""
+def _readme_settings(after: str = "## Hermes setup the room needs") -> dict:
+    """The README's first YAML block after ``after`` in "Hermes setup the room needs",
+    as Hermes's own reader reads it."""
 
     try:
         if not hermes_available():
@@ -430,8 +532,8 @@ def _readme_settings() -> dict:
         except ImportError:
             raise unittest.SkipTest("needs Hermes or PyYAML to read YAML") from None
     text = README.read_text(encoding="utf-8")
-    section = text[text.index("## Hermes setup the room needs"):]
-    block = re.search(r"```yaml\n(.*?)```", section, re.S)
+    section = text[text.index("## Hermes setup the room needs"):text.index("## Known gaps")]
+    block = re.search(r"```yaml\n(.*?)```", section[section.index(after):], re.S)
     return yaml.safe_load(block.group(1))
 
 
@@ -442,6 +544,11 @@ class ReadmeTest(unittest.TestCase):
         self.assertEqual(room_settings("telegram"), settings)
         self.assertEqual(["nunchi-room"], plugins["enabled"])
         self.assertIs(True, plugins["entries"]["nunchi-room"]["allow_gateway_injection"])
+
+    def test_the_readme_discord_block_is_what_the_discord_lane_tests(self):
+        discord = _readme_settings(after="### On Discord")
+        self.assertEqual({"discord": room_settings("discord")["discord"]}, discord)
+        self.assertEqual([BOUND_CHANNEL], discord["discord"]["free_response_channels"])
 
 
 class HostModelAttentionTest(unittest.TestCase):
@@ -587,14 +694,15 @@ class HermesGatewayTest(unittest.TestCase):
 
     def test_kit_final_answer_scenarios(self):
         from nunchi import turn_conformance as kit
-        from nunchi.integrations.hermes_plugin_conformance import HermesKitIntegration
+        from nunchi.integrations.hermes_plugin_conformance import conformance_integrations
 
-        for name, scenario in kit.SCENARIOS.items():
-            if scenario.posting != "final-answer":
-                continue
-            with self.subTest(name):
-                result = kit.run_scenario(name, HermesKitIntegration())
-                self.assertEqual(result["status"], "pass", result.get("failures"))
+        for integration in conformance_integrations():  # Telegram, then Discord
+            for name, scenario in kit.SCENARIOS.items():
+                if scenario.posting != "final-answer":
+                    continue
+                with self.subTest(integration.name, scenario=name):
+                    result = kit.run_scenario(name, integration)
+                    self.assertEqual(result["status"], "pass", result.get("failures"))
 
     def test_the_room_sees_hermess_reply_target_time_and_mentions(self):
         harness = self._harness()
@@ -1295,6 +1403,166 @@ class HermesInstalledPluginTest(unittest.TestCase):
             __import__("time").sleep(0.02)
         self.assertEqual(gateway.adapter.sent, [(ROOM, expect)])
         self.assertTrue((directory / "state" / "hermes-plugin-receipts.jsonl").exists())
+
+
+def _discord_installed() -> bool:
+    import importlib.util
+
+    return hermes_available() and importlib.util.find_spec("discord") is not None
+
+
+@unittest.skipUnless(_discord_installed(), "requires an installed Hermes with discord.py (hermes-agent[messaging])")
+class HermesDiscordTest(unittest.TestCase):
+    """The plugin bound to a Discord channel, behind Hermes's stock Discord adapter (leak audit row 1).
+
+    People's messages enter through the adapter's own ingress, so Hermes's
+    mention gate, allowlists and auto-threading run as they would live.
+    """
+
+    def _harness(self, **kwargs):
+        from nunchi.integrations.hermes_plugin_conformance import HermesHarness
+
+        state = Path(tempfile.mkdtemp(prefix="nunchi-hermes-discord-test-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(state, ignore_errors=True))
+        kwargs.setdefault("room_factory", _room_factory(state, binding=DISCORD_BINDING, profile=DISCORD_PROFILE))
+        harness = HermesHarness(profile=DISCORD_PROFILE, guard=SecretGuard(["withheld-secret-value-123"]),
+                                platform="discord", **kwargs)
+        self.addCleanup(harness.close)
+        return harness
+
+    def _event(self, harness, event_id):
+        self.assertTrue(harness.wait_observed(event_id))
+        (event,) = [event for event in harness.plugin.room.observation.retained_events() if event["id"] == event_id]
+        return event
+
+    def _all_marked(self, harness):
+        # Hermes never ran its own agent on a person's message: every model
+        # request is a turn the library started.
+        texts = [_user_text(request) for request in harness.model.requests]
+        self.assertTrue(texts)
+        for text in texts:
+            self.assertTrue(text.startswith('<nunchi_wake id="'), text[:80])
+
+    def test_the_room_setup_is_what_hermes_loads(self):
+        harness = self._harness()
+        adapter = harness.gateway.adapter
+        self.assertEqual({DISCORD_ROOM}, adapter._discord_free_response_channels())
+        self.assertFalse(adapter._discord_free_response_auto_thread())
+        self.assertFalse(adapter._reactions_enabled())
+        self.assertFalse(adapter.config.typing_indicator)
+
+    def test_an_unmentioned_message_reaches_the_room_and_hermes_adds_nothing(self):
+        # With the README setup every message in the channel reaches the room,
+        # with no thread, reaction or typing from Hermes.
+        harness = self._harness()
+        self.assertTrue(harness.person_says("Anyone around? The deploy is red.", message_id="2001"))
+        event = self._event(harness, "discord:message:2001")
+        self.assertEqual(("discord:user:42", [], False),
+                         (event["author_id"], event["mentioned_actor_ids"], "thread_root_event_id" in event))
+        self.assertTrue(harness.wait_for_requests(1))
+        time.sleep(2.5)  # Hermes refreshes typing every 2 s while a run is on
+        harness.model.reply({"text": SILENCE_MARKER})
+        self.assertTrue(harness.settle())
+        self._all_marked(harness)
+        adapter = harness.gateway.adapter
+        self.assertEqual(([], [], [], [], []), (adapter.threads, adapter.reactions,
+                                                harness.gateway.world.reactions_removed, adapter.typing, adapter.sent))
+
+    def test_a_message_in_a_persons_thread_is_the_rooms_and_only_the_library_posts(self):
+        # Free-response for the channel makes every thread under it
+        # free-response too: Hermes would answer there itself, raw, if the
+        # plugin did not hold the thread as part of the room.
+        harness = self._harness()
+        harness.gateway.world.thread(777, name="rollback")
+        self.assertTrue(harness.person_says("Is the rollback done?", message_id="2002", channel="777"))
+        event = self._event(harness, "discord:message:2002")
+        self.assertEqual("discord:message:777", event["thread_root_event_id"])
+        self.assertTrue(harness.wait_for_requests(1))
+        self.assertIn("rollback done", _user_text(harness.model.latest()))
+        harness.model.reply({"text": "Yes, it finished at 02:10."})
+        self.assertTrue(harness.settle())
+        self._all_marked(harness)
+        adapter = harness.gateway.adapter
+        # The library's commit, and nothing else. It lands in the channel, not
+        # the thread, until thread placement (README, Known gaps).
+        self.assertEqual([(DISCORD_ROOM, "Yes, it finished at 02:10.")], adapter.sent)
+        self.assertEqual(([], []), (adapter.threads, adapter.reactions))
+        facts = harness.plugin.room.host.memory_facts("discord:message:2002") or {}
+        self.assertEqual([("reply", "Yes, it finished at 02:10.")],
+                         [(move.get("kind"), move.get("text")) for move in facts.get("own_moves", ())])
+
+    def test_hermes_discord_defaults_drop_the_room_and_open_threads(self):
+        # Hermes's Discord defaults, kept as a regression pin: without
+        # free_response_channels an unmentioned message never reaches any
+        # plugin hook, and an @mention is moved into a new thread before one.
+        # The plugin still consumes it, so no raw reply, and names the keys.
+        harness = self._harness(platform_block=dict(ROOM_PLATFORM))
+        adapter = harness.gateway.adapter
+        self.assertEqual(set(), adapter._discord_free_response_channels())
+        self.assertFalse(harness.person_says("Anyone around? The deploy is red.", message_id="2003"))
+        with self.assertLogs("nunchi.hermes_plugin", level="ERROR") as logs:
+            self.assertTrue(harness.person_says("can you look at it?", message_id="2004", mentions=(DISCORD_BOT,)))
+            event = self._event(harness, "discord:message:2004")
+        self.assertIn("discord.free_response_channels", "\n".join(logs.output))
+        self.assertIsNone(harness.plugin.room.observation.resolve_event("discord:message:2003"))
+        self.assertEqual(["2004"], adapter.threads)
+        self.assertEqual([f"discord:user:{DISCORD_BOT}"], event["mentioned_actor_ids"])
+        self.assertNotIn("thread_root_event_id", event)
+        self.assertTrue(harness.wait_for_requests(1))
+        harness.model.reply({"text": SILENCE_MARKER})
+        self.assertTrue(harness.settle())
+        self._all_marked(harness)
+        self.assertEqual([], adapter.sent)
+
+    def test_the_agents_reaction_to_a_thread_message_lands_in_the_thread(self):
+        harness = self._harness(platform_actions=True)
+        world = harness.gateway.world
+        world.thread(777, name="deploy")
+        self.assertTrue(harness.person_says("Deploy is green again.", message_id="2005", channel="777"))
+        self.assertTrue(harness.wait_for_requests(1))
+        self.assertIn("room_react", _user_text(harness.model.latest()))
+        harness.model.reply({"tool": "room_react",
+                             "arguments": {"target_event_id": "discord:message:2005", "reaction": "👍"}})
+        self.assertTrue(harness.wait_for_requests(2))
+        self.assertIn("Done", json.loads(_tool_text(harness.model.latest()))["result"])
+        harness.model.reply({"text": "Nice."})
+        self.assertTrue(harness.settle())
+        # Discord finds the message only through the thread it is in.
+        self.assertEqual([("777", "2005", "👍")], world.reactions)
+        self.assertEqual([], harness.gateway.adapter.sent)
+
+    def test_known_gap_a_message_that_names_only_another_bot_never_reaches_the_room(self):
+        # Hermes drops a message that @mentions another bot and not this one
+        # before any plugin hook, whatever the channel's settings (README,
+        # Known gaps).
+        harness = self._harness()
+        harness.gateway.world.peer_bot("8800", "Castor")
+        self.assertFalse(harness.person_says("can you check the logs?", message_id="2006", mentions=("8800",)))
+        self.assertTrue(harness.person_says("and Vigil, you too?", message_id="2007", mentions=("8800", DISCORD_BOT)))
+        self.assertTrue(harness.wait_observed("discord:message:2007"))
+        self.assertIsNone(harness.plugin.room.observation.resolve_event("discord:message:2006"))
+        self.assertTrue(harness.wait_for_requests(1))
+        harness.model.reply({"text": SILENCE_MARKER})
+        self.assertTrue(harness.settle())
+
+    def test_peer_agents_are_heard_only_with_the_profiles_bot_settings(self):
+        # Another agent's bot is dropped by Hermes's defaults (allow_bots:
+        # none). With allow_bots: all and bots_require_inline_mention: false,
+        # for the whole profile, its messages reach the room.
+        for block, heard in ((dict(ROOM_PLATFORM), False),
+                             ({**ROOM_PLATFORM, "allow_bots": "all", "bots_require_inline_mention": False}, True)):
+            with self.subTest(heard=heard):
+                harness = self._harness(platform_block={**block, "free_response_channels": [DISCORD_ROOM],
+                                                        "free_response_auto_thread": False})
+                harness.gateway.world.peer_bot("8800", "Castor")
+                self.assertIs(heard, harness.person_says("Deploy is green.", message_id="2008", user_id="8800"))
+                if heard:
+                    event = self._event(harness, "discord:message:2008")
+                    self.assertEqual("discord:user:8800", event["author_id"])
+                    self.assertTrue(harness.wait_for_requests(1))
+                    harness.model.reply({"text": SILENCE_MARKER})
+                self.assertTrue(harness.settle())
+                harness.close()
 
 
 async def _person_elsewhere(gateway):

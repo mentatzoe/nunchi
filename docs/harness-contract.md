@@ -234,7 +234,7 @@ maintainers.
 | Behavior | Claude Code | Codex (app-server) | Hermes (plugin) | One-reply |
 |---|---|---|---|---|
 | Topology, posting | library-hosted, tools | library-hosted, tools | harness-hosted (consume and start), final answer | library-hosted, tools |
-| Gate before the agent runs | library | library | `post_gateway_admission` consumes every message (`handled`, no reply), with the reply target, time, mentions and bot flag noted at `pre_gateway_dispatch` (mentions and bot flag in-process only); the library starts turns with `inject_message` | library |
+| Gate before the agent runs | library | library | `post_gateway_admission` consumes every message in the bound chat and, on Discord, in the threads under the bound channel (`handled`, no reply), with the reply target, time, mentions and bot flag noted at `pre_gateway_dispatch` (mentions and bot flag in-process only); the library starts turns with `inject_message`. Hermes's own Discord gates run first and need the operator setup below | library |
 | Guide | session prompt | with every turn's text (`developerInstructions` would replace the user's own; the library gives one text per turn) | `register_system_prompt_section` | request |
 | Turn context | turn text | `turn/start` input | the injected turn text, plus `pre_llm_call` | request |
 | Room view | mod tool | per-thread MCP server in `thread/start` config (stable); client tools need an experimental opt-in | `register_tool` | room-view action |
@@ -251,7 +251,7 @@ maintainers.
 | Native tool approvals | user's rules; prompts declined | user's rules; approval requests declined | Hermes's own approvals, whose prompts reach the room (gap 8) | — |
 | Secret guard (the room's, from `room_guard`; the host checks every action again) | plus the launch secret, which the session's environment holds, so the agent can read it | plus the bridge's launch secret, which the room's MCP server holds; the agent can read it when Codex runs commands without a sandbox | plus Hermes's platform tokens (Telegram, Discord, Slack) when the config names none | the room's guard (old Codex runner, reference adapters) |
 | Runs without patching the harness | yes | yes | yes, also under `plugins.isolation: host` (a turn verified offline, `a50406d9`) | yes |
-| Operator setup needed | none | the project's trust level, used when the user's config has none (see gap 5); no MCP server named `nunchi_room` | `allow_gateway_injection`; the injected turns' identity among the platform's allowed users; per-user group sessions (Hermes's default); `gateway.platform_actions` for reactions. So that people see only what the agent chose: for the room's platform, `streaming`, `tool_progress`, `interim_assistant_messages`, `long_running_notifications`, `show_reasoning` and `runtime_footer` off and `suppress_warning_notifications` on; for the whole profile, `display.file_mutation_verifier`, `display.turn_completion_explainer` and `display.busy_ack_enabled` off and the `clarify` and `cronjob` toolsets disabled; for the whole bot, `typing_indicator` and `reactions` off. `agent.max_turns` and `HERMES_MAX_ITERATIONS` unset (gap 9), and the environment variables that override these keys unset. A dedicated profile and bot per room, with `group_allow_admin_from` set (gap 11). The kit runs with exactly these settings | none |
+| Operator setup needed | none | the project's trust level, used when the user's config has none (see gap 5); no MCP server named `nunchi_room` | `allow_gateway_injection`; the injected turns' identity among the platform's allowed users; per-user group sessions (Hermes's default); `gateway.platform_actions` for reactions. So that people see only what the agent chose: for the room's platform, `streaming`, `tool_progress`, `interim_assistant_messages`, `long_running_notifications`, `show_reasoning` and `runtime_footer` off and `suppress_warning_notifications` on; for the whole profile, `display.file_mutation_verifier`, `display.turn_completion_explainer` and `display.busy_ack_enabled` off and the `clarify` and `cronjob` toolsets disabled; for the whole bot, `typing_indicator` and `reactions` off. On Discord, so that the room hears the whole channel and Hermes opens no threads: `discord.free_response_channels` set to the bound channel and `discord.free_response_auto_thread` false, with the channel outside `ignored_channels` and inside `allowed_channels` when that is set; `DISCORD_FREE_RESPONSE_AUTO_THREAD` and `DISCORD_REACTIONS` unset. That setting makes every thread under the channel free-response, so it needs a plugin that holds those threads (this one or later). The agent's answer to a thread message is still posted in the channel, until thread placement (decision D1). Peer bots are heard only with `discord.allow_bots: all` and `bots_require_inline_mention: false`, for the whole profile. `agent.max_turns` and `HERMES_MAX_ITERATIONS` unset (gap 9), and the environment variables that override these keys unset. A dedicated profile and bot per room, with `group_allow_admin_from` set (gap 11). The kit runs with exactly these settings, on Telegram and on Discord | none |
 
 ## Conformance kit (step 9d)
 
@@ -270,38 +270,40 @@ does. CI runs the kit on a clean install.
 Today's table, generated by `nunchi-turn-conformance --integration reference
 --integration nunchi.integrations.claude_code_conformance --integration
 nunchi.integrations.hermes_plugin_conformance --integration
-nunchi.integrations.codex_app_server_conformance` (the Hermes column on Hermes
-main `a50406d9`, in a real gateway; the Codex column on Codex CLI 0.160.1, a
-real `codex app-server` from a clean npm install; only the model scripted in
-both):
+nunchi.integrations.codex_app_server_conformance` (the Hermes columns on
+Hermes main `a50406d9`, in a real gateway: on Telegram with a recording
+adapter, on Discord with Hermes's stock Discord adapter and fake discord.py
+channels and messages; the Codex column on Codex CLI 0.160.1, a real
+`codex app-server` from a clean npm install; only the model scripted in
+all):
 
-| Scenario | reference (tools) | reference (final-answer) | Claude Code gate | Hermes plugin | Codex app-server |
-|---|---|---|---|---|---|
-| post: one post goes to the room, and the tool call says so | pass | n/a | pass | n/a | pass |
-| bound-silence: a bound turn that ends without an action is silence, remembered | pass | n/a | pass | n/a | pass |
-| silence-reason: a silent turn's last words are its reason, remembered and never posted | pass | n/a | pass | n/a | pass |
-| mhm: the agent's own mhm is one reaction on the message, through its react tool | pass | n/a | pass | n/a | pass |
-| unbound-failure: a turn never bound to its wake is a failure, not silence | pass | n/a | pass | n/a | pass |
-| look-again: the first post is held once when someone posted meanwhile | pass | n/a | pass | n/a | pass |
-| steering: a message that arrives mid-turn is shown once after a tool call, and can be answered | pass | n/a | pass | n/a | pass |
-| one-action: one room action per turn | pass | n/a | pass | n/a | pass |
-| secret: a withheld secret never reaches the room | pass | n/a | pass | n/a | pass |
-| launch-secret: the launch secret the harness holds never reaches the room, and the agent can post without it | n/a | n/a | pass | n/a | pass |
-| cancel: a cancelled turn posts nothing | pass | n/a | pass | n/a | pass |
-| pause: after a pause the library starts a turn with no new message, which remembers why the agent waited | pass | n/a | pass | n/a | pass |
-| outcome: an approved action's outcome starts a turn, and the agent reports it | pass | n/a | pass | n/a | pass |
-| final-deliver: the final answer is the post, committed for the harness to deliver, and remembered | n/a | pass | n/a | pass | n/a |
-| final-silence: the silence marker is silence, and the agent's thinking is its reason | n/a | pass | n/a | pass | n/a |
-| final-mhm: the agent's own mhm is one reaction through its react tool, and the answer after it posts nothing | n/a | pass | n/a | pass | n/a |
-| final-look-again: the final answer is held once when someone posted meanwhile | n/a | pass | n/a | pass | n/a |
-| final-thinking: thinking is never posted | n/a | pass | n/a | pass | n/a |
-| final-secret: a withheld secret is refused once, and the agent answers again | n/a | pass | n/a | pass | n/a |
-| final-cancel: a cancelled turn's final answer is silent | n/a | pass | n/a | pass | n/a |
-| final-pause: after a pause the library starts a turn with no new message, which remembers why the agent waited | n/a | pass | n/a | pass | n/a |
-| final-outcome: an approved action's outcome starts a turn, and the agent's answer reports it | n/a | pass | n/a | pass | n/a |
-| final-not-own-words: text the harness puts in place of the agent's answer is never posted or remembered, and the turn fails | n/a | pass | n/a | pass | n/a |
-| final-no-answer: a run whose model wrote nothing, with the harness's text as its answer, posts nothing and fails | n/a | pass | n/a | pass | n/a |
-| final-silence-forms: a wrapped marker or the harness's other silence word is silence, remembered with its reason; a post that only looks like one goes out | n/a | pass | n/a | pass | n/a |
+| Scenario | reference (tools) | reference (final-answer) | Claude Code gate | Hermes plugin (Telegram) | Hermes plugin (Discord) | Codex app-server |
+|---|---|---|---|---|---|---|
+| post: one post goes to the room, and the tool call says so | pass | n/a | pass | n/a | n/a | pass |
+| bound-silence: a bound turn that ends without an action is silence, remembered | pass | n/a | pass | n/a | n/a | pass |
+| silence-reason: a silent turn's last words are its reason, remembered and never posted | pass | n/a | pass | n/a | n/a | pass |
+| mhm: the agent's own mhm is one reaction on the message, through its react tool | pass | n/a | pass | n/a | n/a | pass |
+| unbound-failure: a turn never bound to its wake is a failure, not silence | pass | n/a | pass | n/a | n/a | pass |
+| look-again: the first post is held once when someone posted meanwhile | pass | n/a | pass | n/a | n/a | pass |
+| steering: a message that arrives mid-turn is shown once after a tool call, and can be answered | pass | n/a | pass | n/a | n/a | pass |
+| one-action: one room action per turn | pass | n/a | pass | n/a | n/a | pass |
+| secret: a withheld secret never reaches the room | pass | n/a | pass | n/a | n/a | pass |
+| launch-secret: the launch secret the harness holds never reaches the room, and the agent can post without it | n/a | n/a | pass | n/a | n/a | pass |
+| cancel: a cancelled turn posts nothing | pass | n/a | pass | n/a | n/a | pass |
+| pause: after a pause the library starts a turn with no new message, which remembers why the agent waited | pass | n/a | pass | n/a | n/a | pass |
+| outcome: an approved action's outcome starts a turn, and the agent reports it | pass | n/a | pass | n/a | n/a | pass |
+| final-deliver: the final answer is the post, committed for the harness to deliver, and remembered | n/a | pass | n/a | pass | pass | n/a |
+| final-silence: the silence marker is silence, and the agent's thinking is its reason | n/a | pass | n/a | pass | pass | n/a |
+| final-mhm: the agent's own mhm is one reaction through its react tool, and the answer after it posts nothing | n/a | pass | n/a | pass | pass | n/a |
+| final-look-again: the final answer is held once when someone posted meanwhile | n/a | pass | n/a | pass | pass | n/a |
+| final-thinking: thinking is never posted | n/a | pass | n/a | pass | pass | n/a |
+| final-secret: a withheld secret is refused once, and the agent answers again | n/a | pass | n/a | pass | pass | n/a |
+| final-cancel: a cancelled turn's final answer is silent | n/a | pass | n/a | pass | pass | n/a |
+| final-pause: after a pause the library starts a turn with no new message, which remembers why the agent waited | n/a | pass | n/a | pass | pass | n/a |
+| final-outcome: an approved action's outcome starts a turn, and the agent's answer reports it | n/a | pass | n/a | pass | pass | n/a |
+| final-not-own-words: text the harness puts in place of the agent's answer is never posted or remembered, and the turn fails | n/a | pass | n/a | pass | pass | n/a |
+| final-no-answer: a run whose model wrote nothing, with the harness's text as its answer, posts nothing and fails | n/a | pass | n/a | pass | pass | n/a |
+| final-silence-forms: a wrapped marker or the harness's other silence word is silence, remembered with its reason; a post that only looks like one goes out | n/a | pass | n/a | pass | pass | n/a |
 
 Through Codex the integration binds a run itself, from `turn/start`'s answer,
 so the scripted agent cannot leave it unbound: the Codex column's
