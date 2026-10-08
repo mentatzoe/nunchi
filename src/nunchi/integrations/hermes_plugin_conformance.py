@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 import contextlib
+import copy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -48,6 +49,7 @@ from ..turn import SecretGuard
 from ..turn_conformance import ScriptedAgent
 from .hermes_plugin.plugin import (
     DEFAULT_FAILURE_GRACE_SECONDS,
+    DEFAULT_RECOVERY_GRACE_SECONDS,
     PLUGIN_NAME,
     TOOL_NAMES,
     WAKE_MARKER,
@@ -61,7 +63,8 @@ TURN_USER = "nunchi-turns"
 # agent chose to do (integrations/hermes-plugin/README.md, "Hermes setup the
 # room needs"). Per platform, under display.platforms.<platform>: no streamed
 # drafts, tool progress lines, interim assistant text, "still working" notes,
-# retry and budget status lines, or reasoning.
+# retry and budget status lines, reasoning, or runtime footer. The per-platform
+# footer setting outranks the top-level one Hermes's /footer command writes.
 ROOM_DISPLAY = {
     "streaming": False,
     "tool_progress": "off",
@@ -69,6 +72,7 @@ ROOM_DISPLAY = {
     "long_running_notifications": False,
     "suppress_warning_notifications": True,
     "show_reasoning": False,
+    "runtime_footer": {"enabled": False},
 }
 # Display settings Hermes reads only at the top level of `display`, for the
 # whole profile: no footer after a failed file edit, no explanation added to
@@ -105,7 +109,7 @@ def room_settings(platform: str = "telegram") -> dict[str, Any]:
     """The Hermes config a Nunchi room on ``platform`` needs, beside the plugin's entry."""
 
     return {
-        "display": {**ROOM_DISPLAY_GLOBAL, "platforms": {platform: dict(ROOM_DISPLAY)}},
+        "display": {**ROOM_DISPLAY_GLOBAL, "platforms": {platform: copy.deepcopy(ROOM_DISPLAY)}},
         platform: dict(ROOM_PLATFORM),
         "agent": {"disabled_toolsets": list(ROOM_DISABLED_TOOLSETS)},
     }
@@ -151,6 +155,7 @@ def register_for_kit(ctx: Any) -> None:
         result_wait_seconds=_PENDING.get("result_wait_seconds", 5.0),
         start_timeout_seconds=_PENDING.get("start_timeout_seconds", 30.0),
         failure_grace_seconds=_PENDING.get("failure_grace_seconds", DEFAULT_FAILURE_GRACE_SECONDS),
+        recovery_grace_seconds=_PENDING.get("recovery_grace_seconds", DEFAULT_RECOVERY_GRACE_SECONDS),
         roles=_PENDING.get("roles", ("react", "context")),
         # The kit builds its own Room; an end-to-end test lets the plugin build one.
         room_factory=_PENDING.get("room_factory"),
@@ -168,7 +173,10 @@ class ScriptedModel:
     Only the agent's own model calls (those offering tools) are scripted. Hermes's
     auxiliary calls, such as naming the session, get a fixed answer. A reply
     is ``{"text": ...}``, ``{"tool": name, "arguments": {...}}`` (with optional
-    text), or ``{"status": 400, "error": message}``: the provider refuses.
+    text), or ``{"status": 400, "error": message}``: the provider refuses, or
+    with a 5xx status is out of service. A text reply may add ``reasoning``
+    (the provider's ``reasoning_content``), ``finish`` (its finish reason,
+    such as ``length``), or ``drop``: the stream breaks off after the text.
     """
 
     def __init__(self) -> None:
@@ -242,8 +250,9 @@ class ScriptedModel:
                     return
                 reply = model._answer(request)
                 if "status" in reply:
+                    kind = "server_error" if int(reply["status"]) >= 500 else "invalid_request_error"
                     payload = json.dumps({"error": {"message": str(reply.get("error", "refused")),
-                                                    "type": "invalid_request_error"}}).encode()
+                                                    "type": kind}}).encode()
                     self.send_response(int(reply["status"]))
                     self.send_header("Content-Type", "application/json")
                     self.send_header("Content-Length", str(len(payload)))
@@ -266,8 +275,11 @@ class ScriptedModel:
                         ],
                     }
                     finish = "tool_calls"
+                if reply.get("reasoning"):
+                    message["reasoning_content"] = reply["reasoning"]
+                finish = reply.get("finish", finish)
                 # An empty reply generated nothing, as a provider reports it.
-                output = 5 if message.get("content") or message.get("tool_calls") else 0
+                output = 5 if message.get("content") or message.get("tool_calls") or reply.get("reasoning") else 0
                 usage = {"prompt_tokens": 10, "completion_tokens": output, "total_tokens": 10 + output}
                 if not request.get("stream"):
                     self._json(
@@ -286,12 +298,21 @@ class ScriptedModel:
                 self.send_header("Connection", "close")
                 self.end_headers()
                 delta: dict[str, Any] = {"role": "assistant"}
+                if message.get("reasoning_content"):
+                    delta["reasoning_content"] = message["reasoning_content"]
                 if message.get("content"):
                     delta["content"] = message["content"]
                 if message.get("tool_calls"):
                     delta["tool_calls"] = [dict(call, index=i) for i, call in enumerate(message["tool_calls"])]
                 base = {"id": "conformance", "object": "chat.completion.chunk", "created": int(time.time()),
                         "model": "conformance/model"}
+                if reply.get("drop"):
+                    # The connection breaks mid-answer: no finish reason, no [DONE].
+                    chunk = dict(base, choices=[{"index": 0, "delta": delta, "finish_reason": None}])
+                    self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
+                    self.wfile.flush()
+                    self.close_connection = True
+                    return
                 for chunk in (
                     dict(base, choices=[{"index": 0, "delta": delta, "finish_reason": None}]),
                     dict(base, choices=[{"index": 0, "delta": {}, "finish_reason": finish}], usage=usage),
@@ -356,11 +377,19 @@ class HermesGateway:
         # JSON is YAML: Hermes reads it as its config.yaml.
         (self.home / "config.yaml").write_text(json.dumps(config), encoding="utf-8")
         (self.home / ".env").write_text(f"TELEGRAM_ALLOWED_USERS={allowed_users}\n", encoding="utf-8")
-        # Hermes copies agent.max_turns into HERMES_MAX_ITERATIONS for the whole
-        # process (gateway/run.py), so it is put back with the rest on close.
+        # Hermes copies agent.max_turns into HERMES_MAX_ITERATIONS, and
+        # display.busy_ack_enabled into HERMES_GATEWAY_BUSY_ACK_ENABLED, for the
+        # whole process (gateway/run.py), so they are put back with the rest on
+        # close. Hermes bridges busy_ack_enabled only when it first imports
+        # gateway.run: each gateway sets it from its own config, as that would.
         self._saved_env = {key: os.environ.get(key) for key in (
             "HERMES_HOME", "TELEGRAM_ALLOWED_USERS", "GATEWAY_ALLOWED_USERS", "GATEWAY_ALLOW_ALL_USERS",
-            "HERMES_MAX_ITERATIONS")}
+            "HERMES_MAX_ITERATIONS", "HERMES_GATEWAY_BUSY_ACK_ENABLED")}
+        busy_ack = config.get("display", {}).get("busy_ack_enabled")
+        if busy_ack is None:
+            os.environ.pop("HERMES_GATEWAY_BUSY_ACK_ENABLED", None)
+        else:
+            os.environ["HERMES_GATEWAY_BUSY_ACK_ENABLED"] = str(busy_ack)
         os.environ["HERMES_HOME"] = str(self.home)
         os.environ["TELEGRAM_ALLOWED_USERS"] = allowed_users
         os.environ.pop("GATEWAY_ALLOWED_USERS", None)
@@ -633,6 +662,7 @@ class HermesHarness:
         agent: Mapping[str, Any] | None = None,
         extra_config: Mapping[str, Any] | None = None,
         failure_grace_seconds: float | None = None,
+        recovery_grace_seconds: float | None = None,
     ) -> None:
         if not hermes_available():
             raise RuntimeError("Hermes is not installed in this Python environment")
@@ -648,6 +678,7 @@ class HermesHarness:
             result_wait_seconds=result_wait_seconds,
             roles=roles,
             **({} if failure_grace_seconds is None else {"failure_grace_seconds": failure_grace_seconds}),
+            **({} if recovery_grace_seconds is None else {"recovery_grace_seconds": recovery_grace_seconds}),
         )
         extra: dict[str, Any] = {}
         if display is not None:

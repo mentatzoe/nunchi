@@ -738,21 +738,39 @@ class ModelTextTests(unittest.TestCase):
         self.assertIsNone(turn.unattributed)
 
     def test_the_harnesss_text_is_never_posted_and_fails_the_turn_even_when_the_run_ended_ok(self):
+        held = "no reported model response holds this text"
+        empty = f"{held} (each was empty)"
         for wrote, answer, detail in (
-            (["Let me check the deploy logs first."], "I reached the iteration limit and couldn't generate a summary.", "is not what its model wrote"),
-            ([""], "(empty)", "its model wrote nothing in this turn"),
-            (["", ""], "⚠️ No reply: the model didn't produce a reply this time. Send `continue` to try again.", "its model wrote nothing"),
-            (["Looking into it now."], "Hermes hit repeated errors. Details: RuntimeError: boom", "is not what its model wrote"),
+            (["Let me check the deploy logs first."], "I reached the iteration limit and couldn't generate a summary.", held),
+            ([""], "(empty)", empty),
+            (["", ""], "⚠️ No reply: the model didn't produce a reply this time. Send `continue` to try again.", empty),
+            (["Looking into it now."], "Hermes hit repeated errors. Details: RuntimeError: boom", held),
             # Scattered words are not a contiguous run.
-            (["I reached the end of the logs; the iteration count hit its limit."], "I reached the iteration limit", "is not what its model wrote"),
+            (["I reached the end of the logs; the iteration count hit its limit."], "I reached the iteration limit", held),
             # The marker counts only when the model wrote it.
-            (["On it."], "[SILENT]", "is not what its model wrote"),
+            (["On it."], "[SILENT]", held),
+            # A harness's one-word stand-in is not the model's word inside
+            # what it wrote, its thinking or its reasoning (leak audit row 5).
+            (["The queue is not empty."], "(empty)", held),
+            (["Let me see whether the deploy queue is empty.", ""], "(empty)", held),
+            (["<think>The deploy log is empty, so the job never started.</think>"], "(empty)", held),
+            (["<thinking>empty</thinking>"], "(empty)", held),
+            (["", ("The log they pasted is empty, so I cannot see the error yet.", True)], "(empty)", held),
+            (["", ("empty", True)], "(empty)", held),
+            # Reasoning counts only as a whole, not a run of words inside it.
+            (["", ("I could say the deploy failed at the migration step, but let me check first.", True)],
+             "The deploy failed at the migration step.", held),
+            (["<think>Maybe: the deploy failed at the migration step. Check first.</think>"],
+             "The deploy failed at the migration step.", held),
+            # A short answer keeps its punctuation and its word edges.
+            (["Button it."], "On it.", held),
         ):
-            with self.subTest(answer=answer):
+            with self.subTest(answer=answer, wrote=wrote):
                 self.fresh()
                 turn = self.open_turn()
                 for text in wrote:
-                    self.participant.model_wrote(turn_id="t1", text=text)
+                    text, reasoning = text if isinstance(text, tuple) else (text, False)
+                    self.participant.model_wrote(turn_id="t1", text=text, reasoning=reasoning)
                 self.assertEqual("silent", self.participant.finish(turn_id="t1", answer=answer).kind)
                 self.assertIsNone(turn.action)
                 self.assertIn(detail, turn.unattributed)
@@ -762,10 +780,11 @@ class ModelTextTests(unittest.TestCase):
                 box = self.end(ok=True)
                 self.assertNotIn("ok", box)
                 self.assertIsInstance(box["error"], TurnError)
-                self.assertIn("the agent's run ended with text its model did not write", str(box["error"]))
+                self.assertIn("the agent's run ended with an answer that is not its model's reported words", str(box["error"]))
                 self.assertIn(detail, str(box["error"]))
 
     def test_the_models_words_reshaped_by_its_harness_are_still_its_own(self):
+        reasoning = lambda text: (text, True)  # noqa: E731
         for wrote, answer in (
             # The harness strips thinking or a tool call the model wrote as text.
             (["<think>Sam asked me directly.</think>The migration step timed out."], "The migration step timed out."),
@@ -774,15 +793,41 @@ class ModelTextTests(unittest.TestCase):
             (["**The migration** step _timed out_."], "The migration step timed out."),
             # It joins a continuation cut at the length limit, with or without a
             # separator, with the reasoning reported between the parts.
-            (["The migration step timed out at 02:00 and the", "(reasoning)", "rollback finished cleanly."],
+            (["The migration step timed out at 02:00 and the", reasoning("(reasoning)"), "rollback finished cleanly."],
              "The migration step timed out at 02:00 and the\nrollback finished cleanly."),
             (["The migra", "tion step timed out."], "The migration step timed out."),
-            # It answers with the model's reasoning when the content was empty.
-            (["", "Sam asked me; the migration step timed out at 02:00."], "Sam asked me; the migration step timed out at 02:00."),
+            # A cut inside a tagged block, such as an HTML snippet, leaves half
+            # the pair in each part.
+            (["Here is the banner, then the steps.\n\n```html\n<div class=\"banner\">\n  <p>Deploys are paused.",
+              "</p>\n</div>\n```\n\nThen merge it and deploy to the canary first."],
+             "Here is the banner, then the steps.\n\n```html\n<div class=\"banner\">\n  <p>Deploys are paused."
+             "</p>\n</div>\n```\n\nThen merge it and deploy to the canary first."),
+            # A short reply cut between its two words.
+            (["On", "it."], "On\nit."),
+            # It joins a stream cut mid-answer to a continuation that repeats
+            # the last words, dropping the repeat.
+            (["Freeze deploys first. Then scale the canary down and confirm traffic drains",
+              "confirm traffic drains in the dashboard. Then run the down migration."],
+             "Freeze deploys first. Then scale the canary down and confirm traffic drains in the dashboard. "
+             "Then run the down migration."),
+            # It answers with the model's reasoning when the content was empty,
+            # whole, or the parts of its reasoning joined.
+            (["", reasoning("Sam asked me; the migration step timed out at 02:00.")],
+             "Sam asked me; the migration step timed out at 02:00."),
+            (["", reasoning("On it.")], "On it."),
+            (["", reasoning("Run <code>make rollback</code> first, then redeploy the canary.")],
+             "Run <code>make rollback</code> first, then redeploy the canary."),
+            (["", reasoning("The migration step timed out.\n\nRerunning it should fix it.")],
+             "The migration step timed out.\n\nRerunning it should fix it."),
             # It reuses what the model wrote before a tool call.
             (["Checking the logs now.", ""], "Checking the logs now."),
+            # A short reply, alone or at the start of what the model wrote.
+            (["On it."], "On it."),
+            (["Done. Next I'll check the logs."], "Done."),
+            (["<think>Sam asked me.</think>On it."], "On it."),
             # An emoji alone, with or without its presentation selector.
             (["👍️"], "👍"),
+            (["👍"], "👍️"),
             (["…"], "…"),
             # Thinking in the answer is the agent's own and is not compared.
             (["On it."], "<thinking>Sam asked me, and nobody else has looked.</thinking>On it."),
@@ -791,11 +836,25 @@ class ModelTextTests(unittest.TestCase):
                 self.fresh()
                 turn = self.open_turn()
                 for text in wrote:
-                    self.participant.model_wrote(turn_id="t1", text=text)
+                    text, kind = text if isinstance(text, tuple) else (text, False)
+                    self.participant.model_wrote(turn_id="t1", text=text, reasoning=kind)
                 decision = self.finish_and_commit(turn, answer)
                 self.assertEqual("deliver", decision.kind, turn.unattributed)
                 self.thread.join(5)
                 self.assertEqual("message", self.box["ok"]["kind"])
+
+    def test_a_long_or_repetitive_answer_is_checked_in_bounded_time(self):
+        # A harness gives up on a slow output hook (Hermes then posts the raw draft).
+        import time
+
+        from nunchi.turn import _written_by_model
+
+        text = " ".join(["alpha beta gamma delta epsilon zeta eta theta iota kappa"] * 4000)
+        half = len(text) // 2
+        started = time.monotonic()
+        self.assertTrue(_written_by_model(text, [text[:half], text[half - 500:]]))
+        self.assertFalse(_written_by_model(text + " omega", [text[:half], "x", text[half:]]))
+        self.assertLess(time.monotonic() - started, 5)
 
     def test_an_integration_that_reports_nothing_fails_loudly(self):
         turn = self.open_turn()
@@ -1167,6 +1226,7 @@ class LocalTurnProtocolTests(unittest.TestCase):
         self.post("/v1/turn/bind", {"turn_id": "t1", "wake_id": turn.wake_id})
         self.assertEqual({"kept": False}, self.post("/v1/turn/model-text", {"turn_id": "other", "text": "hi"})[1])
         self.assertIn("error", self.post("/v1/turn/model-text", {"turn_id": "t1", "text": 7})[1])
+        self.assertIn("error", self.post("/v1/turn/model-text", {"turn_id": "t1", "text": "hi", "reasoning": "yes"})[1])
         self.assertEqual({"kept": True}, self.post("/v1/turn/model-text", {"turn_id": "t1", "text": "On it."})[1])
         answer = {}
         threading.Thread(
@@ -1190,9 +1250,12 @@ class LocalTurnProtocolTests(unittest.TestCase):
         turn = self.driver.started[0]
         self.post("/v1/turn/bind", {"turn_id": "t1", "wake_id": turn.wake_id})
         self.post("/v1/turn/model-text", {"turn_id": "t1", "text": ""})
+        # Reasoning is reported apart; the stand-in is not a word inside it.
+        self.assertEqual({"kept": True}, self.post(
+            "/v1/turn/model-text", {"turn_id": "t1", "text": "The log is empty.", "reasoning": True})[1])
         status, body = self.post("/v1/turn/finish", {"turn_id": "t1", "answer": "(empty)"})
         self.assertEqual(("silent", ""), (body["finish"], body["text"]))
-        self.assertIn("its model wrote nothing", body["failed"])
+        self.assertIn('"(empty)": no reported model response holds this text', body["failed"])
         self.post("/v1/turn/end", {"turn_id": "t1", "ok": True})
         thread.join(5)
         self.assertIsInstance(box["error"], TurnError)

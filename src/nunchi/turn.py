@@ -117,6 +117,9 @@ def _silence_form(text: str) -> str:
 _BLOCK = re.compile(r"<([A-Za-z][\w:.-]*)(?:\s[^<>]*)?>(.*?)</\1\s*>", re.S | re.I)
 _TAG = re.compile(r"</?[A-Za-z][\w:.-]*(?:\s[^<>]*)?/?>")
 _QUOTE_CHARACTERS = 80
+# Bounds on matching an answer joined from several responses.
+_CANDIDATES = 16
+_REPEATED_CHARACTERS = 4096
 
 
 def _key(text: str) -> tuple[str, set[int], set[int]]:
@@ -153,17 +156,6 @@ def _key(text: str) -> tuple[str, set[int], set[int]]:
     return "".join(characters), starts, ends
 
 
-def _without_blocks(text: str) -> str:
-    return _TAG.sub(" ", _BLOCK.sub(" ", text))
-
-
-def _model_pieces(text: str) -> list[str]:
-    """What one report of the model's text could become: its text without tagged
-    blocks, and each block's own text (some harnesses answer with reasoning)."""
-
-    return [_without_blocks(text), *(_TAG.sub(" ", match.group(2)) for match in _BLOCK.finditer(text))]
-
-
 def _silent_forms(
     silence_marker: str | None, also_silent: Sequence[str], model_text: bool
 ) -> frozenset[str]:
@@ -189,43 +181,137 @@ def _silent_forms(
     return frozenset(forms)
 
 
-def _written_by_model(answer: str, written: Sequence[str]) -> bool:
+def _without_blocks(text: str) -> str:
+    return _TAG.sub(" ", _BLOCK.sub(" ", text))
+
+
+def _fold(text: str) -> str:
+    """``text`` with case, whitespace and emoji presentation selectors folded; punctuation kept."""
+
+    folded = unicodedata.normalize("NFKC", text).casefold()
+    return " ".join("".join(c for c in folded if not 0xFE00 <= ord(c) <= 0xFE0F).split())
+
+
+def _holds(piece: str, answer: str) -> bool:
+    """Whether the folded ``piece`` holds the folded ``answer``, not inside a longer word."""
+
+    at = piece.find(answer)
+    while at != -1:
+        end = at + len(answer)
+        if not (answer[0].isalnum() and at > 0 and piece[at - 1].isalnum()) and not (
+            answer[-1].isalnum() and end < len(piece) and piece[end].isalnum()
+        ):
+            return True
+        at = piece.find(answer, at + 1)
+    return False
+
+
+def _overlaps(before: str, key: str, limit: int | None = None) -> list[int]:
+    """Lengths ``m`` below ``len(key)``, and at most ``limit``, where ``before``
+    ends with ``key[:m]``: the longest few, longest first."""
+
+    key = key[:limit] if limit is not None else key
+    if not key or not before:
+        return []
+    text = key + "\0" + before[-len(key):]
+    border = [0] * len(text)
+    for index in range(1, len(text)):
+        length = border[index - 1]
+        while length and text[index] != text[length]:
+            length = border[length - 1]
+        if text[index] == text[length]:
+            length += 1
+        border[index] = length
+    found: list[int] = []
+    length = border[-1]
+    whole = len(key) if limit is None or len(key) < limit else None
+    while length and len(found) < _CANDIDATES:
+        if length != whole:
+            found.append(length)
+        length = border[length - 1]
+    return found
+
+
+def _written_by_model(answer: str, written: Sequence[str], reasoned: Sequence[str] = ()) -> bool:
     """Whether ``answer`` is words the model wrote.
 
-    It is when its words are a contiguous run in one thing the model wrote,
-    or run on from the end of one into the start of later ones, as a length
-    continuation does. The run starts and ends on whole words. Case,
-    whitespace, punctuation, markup and tagged blocks do not count.
+    ``written`` is the text of the model's responses, in order; ``reasoned``
+    is its reasoning. A tagged block in a response, such as ``<think>``, and
+    the reasoning count only as a whole: the answer must be all of one.
+    Otherwise the answer's words must be a contiguous run in one response's
+    text outside its blocks, or run on from the end of one into the start
+    of later ones, as a length continuation does. The run starts and ends on
+    whole words. Case, whitespace, punctuation and markup do not count,
+    except that an answer of one or two words keeps its punctuation: a
+    harness's own ``(empty)`` is not the model's word "empty". When a cut
+    between responses falls inside a tagged block, such as an HTML snippet
+    in a long answer, the answer is also matched against all the responses
+    joined, with blocks removed after joining.
     """
 
-    target, _, _ = _key(_without_blocks(answer))
+    visible = [_without_blocks(text) for text in written]
+    blocks = [match.group(2) for text in written for match in _BLOCK.finditer(text)]
+    # A whole block or reasoning, read with its inner tags as text and, as the
+    # answer is read, with its own tagged blocks removed.
+    whole = [
+        form
+        for text in (*blocks, *reasoned)
+        for form in dict.fromkeys((_TAG.sub(" ", text), _without_blocks(text)))
+    ]
+    # Every response in order, as a harness joins a cut answer.
+    joined = ("\n".join(written), "".join(written))
+    shown = _without_blocks(answer)
+    target, starts, _ = _key(shown)
     if not target:
         # Nothing but punctuation or markup: compare the text itself.
         bare = "".join(answer.split()).casefold()
-        return any(bare in "".join(text.split()).casefold() for text in written)
-    pieces = [key for text in written for piece in _model_pieces(text) if (key := _key(piece))[0]]
-    for key, starts, ends in pieces:
+        return any(bare in "".join(text.split()).casefold() for text in written) or any(
+            bare == "".join(text.split()).casefold() for text in whole
+        )
+    if len(starts) <= 2:
+        folded = _fold(shown)
+        return any(
+            _holds(_fold(text), folded)
+            for text in (*visible, *(_without_blocks(text) for text in joined))
+        ) or any(_fold(text) == folded for text in whole)
+    if any(_key(text)[0] == target for text in whole):
+        return True
+    pieces = [key for text in visible if (key := _key(text))[0]]
+    for key, key_starts, key_ends in pieces:
         at = key.find(target)
         while at != -1:
-            if at in starts and at + len(target) in ends:
+            if at in key_starts and at + len(target) in key_ends:
                 return True
             at = key.find(target, at + 1)
-    # How much of the answer is matched at the end of an earlier piece.
+    # How much of the answer is matched at the end of an earlier piece. The
+    # work is bounded: a harness gives up on a slow output hook.
     reached: set[int] = set()
-    for key, starts, ends in pieces:
+    for key, key_starts, key_ends in pieces:
         later: set[int] = set()
         for done in reached:
-            rest = target[done:]
-            if key.startswith(rest) and len(rest) in ends:
-                return True
-            if rest.startswith(key):
-                later.add(done + len(key))
+            if len(target) - len(key) <= done and target.endswith(key):
+                return True  # the piece ends the answer, perhaps repeating what came before
+            # The piece goes on from there, or first repeats the words before
+            # it: a harness that joins a stream cut mid-answer to its
+            # continuation drops what the continuation repeats.
+            for repeated in (0, *_overlaps(target[:done], key, _REPEATED_CHARACTERS)):
+                rest = target[done - repeated:]
+                if key.startswith(rest) and len(rest) in key_ends:
+                    return True
+                if rest.startswith(key):
+                    later.add(done - repeated + len(key))
         # This piece's last words that begin the answer.
-        floor = len(key) - len(target)
-        for start in starts:
-            if start > floor and target.startswith(key[start:]):
-                later.add(len(key) - start)
-        reached |= later
+        later.update(length for length in _overlaps(key, target) if len(key) - length in key_starts)
+        reached = set(sorted(reached | later, reverse=True)[:_CANDIDATES])
+    # A cut inside a tagged block leaves half the pair in each response, so
+    # remove blocks only once the responses are joined.
+    for text in joined:
+        key, key_starts, key_ends = _key(_without_blocks(text))
+        at = key.find(target)
+        while at != -1:
+            if at in key_starts and at + len(target) in key_ends:
+                return True
+            at = key.find(target, at + 1)
     return False
 
 
@@ -417,9 +503,11 @@ class Turn:
         self.silence_marker = silence_marker
         self.also_silent = tuple(also_silent)
         self.model_text = bool(model_text)
-        # What the agent's model wrote in this turn's runs, and how many
-        # times the integration reported it (`model_wrote`).
+        # What the agent's model wrote in this turn's runs: the text of its
+        # responses and, apart, its reasoning; and how many times the
+        # integration reported it (`model_wrote`).
         self.written: list[str] = []
+        self.reasoned: list[str] = []
         self.model_reports = 0
         # Why the final answer was not the model's own words; the turn then fails.
         self.unattributed: str | None = None
@@ -599,18 +687,19 @@ class Turn:
 
     # -- final-answer posting -------------------------------------------------
 
-    def model_wrote(self, text: str | None) -> None:
+    def model_wrote(self, text: str | None, *, reasoning: bool = False) -> None:
         """Keep what the agent's model wrote in one of this turn's runs.
 
-        Report each model response: its text and, separately, any reasoning
-        the provider returned, even when empty. With ``model_text`` the final
-        answer must be words from these (see `decide`).
+        Report each model response's text, even when empty, and, separately
+        with ``reasoning=True``, any reasoning the provider returned. With
+        ``model_text`` the final answer must be words from these (see
+        `decide`); reasoning counts only as a whole.
         """
 
         with self.lock:
             self.model_reports += 1
             if isinstance(text, str) and text.strip():
-                self.written.append(text)
+                (self.reasoned if reasoning else self.written).append(text)
 
     def _not_the_models(self, text: str) -> str | None:
         """Why ``text``, a non-empty answer, is not the model's own words; None when it is."""
@@ -624,11 +713,11 @@ class Turn:
         if self.guard.refusal({"kind": "message", "text": text}) is None:
             shown = text if len(text) <= _QUOTE_CHARACTERS else text[:_QUOTE_CHARACTERS] + "…"
             quoted = json.dumps(shown, ensure_ascii=False)
-        if not self.written:
-            return f"{quoted} came from the harness; its model wrote nothing in this turn"
-        if not _written_by_model(text, self.written):
-            return f"{quoted} is not what its model wrote"
-        return None
+        if _written_by_model(text, self.written, self.reasoned):
+            return None
+        if not self.written and not self.reasoned:
+            return f"{quoted}: no reported model response holds this text (each was empty)"
+        return f"{quoted}: no reported model response holds this text"
 
     def decide(self, answer: str | None) -> Finish:
         """What becomes of the agent's final answer, before the host commits it.
@@ -941,7 +1030,7 @@ class TurnParticipant:
                     # The harness's text in place of the agent's answer: a
                     # failure, never a reply, never silence, never remembered.
                     raise TurnError(
-                        f"the agent's run ended with text its model did not write: {turn.unattributed}"
+                        f"the agent's run ended with an answer that is not its model's reported words: {turn.unattributed}"
                     )
                 if turn.end_ok and turn.turn_id is not None:
                     # Silence; the agent's own thinking, if any, is its reason.
@@ -1068,7 +1157,7 @@ class TurnParticipant:
             return False, "No room opportunity is open for this turn. Nothing was posted."
         return turn.call(role, arguments, name=tool)
 
-    def model_wrote(self, *, turn_id: str | None, text: str | None) -> bool:
+    def model_wrote(self, *, turn_id: str | None, text: str | None, reasoning: bool = False) -> bool:
         """What the model wrote in a bound run of the open turn; see `Turn.model_wrote`.
 
         Returns whether an open turn bound as ``turn_id`` kept it.
@@ -1077,7 +1166,7 @@ class TurnParticipant:
         turn = self.active
         if turn is None or not turn.bound(turn_id):
             return False
-        turn.model_wrote(text)
+        turn.model_wrote(text, reasoning=reasoning)
         return True
 
     def finish(self, *, turn_id: str | None, answer: str | None) -> Finish:

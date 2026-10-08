@@ -94,7 +94,7 @@ Everything that decides behavior, once, for every harness:
 | After each tool call | no | Add the library's room update to what the agent reads next (steering). | Updates ride on the result of the agent's next room tool call. |
 | Continue before posting | no | In final-answer posting, keep the agent going when new messages arrived while it composed (looking again). | Silence the draft and start a fresh turn that carries it. Failing that, the answer is delivered and what arrived meanwhile becomes the next moment; the parity table shows the gap. |
 | Silent answers | final-answer posting | Name every whole answer the harness treats as silence besides its marker (`also_silent`). | — |
-| What the model wrote | final-answer posting, when the harness can put its own text in place of an answer | Report each model response's text and reasoning (`model_wrote`), so only the model's own words are posted. | The harness's text for a run that gave no answer can become the agent's reply and memory; the parity table shows the gap. |
+| What the model wrote | final-answer posting, when the harness can put its own text in place of an answer | Report every model response's text, and apart its reasoning (`model_wrote`), so only the model's own words are posted. A response the harness hides from its hooks cannot be reported, and an answer built from it fails the turn: record it as a gap. | The harness's text for a run that gave no answer can become the agent's reply and memory; the parity table shows the gap. |
 | Start a turn itself | harness-hosted only | Start the agent's turn with the library's text, without an inbound message. | Without it, the integration must gate the harness's own runs, which loses silence and looking again on harnesses like Hermes (see Topologies). |
 | Reactions | no | Let the agent react as itself. | The react tool is not offered. |
 | Stable guide slot | no | Keep the guide in a stable part of the prompt, such as a system section. | The guide goes with each turn's text. |
@@ -117,7 +117,7 @@ class Turn:
 
     def call(self, role: str, arguments: Mapping) -> ToolResult: ...
     def after_tool_call(self) -> str | None: ...   # a room update, or nothing
-    def model_wrote(self, text: str) -> None: ...  # final-answer posting: what the model wrote
+    def model_wrote(self, text: str, *, reasoning: bool = False) -> None: ...  # final-answer posting: what the model wrote
     def finish(self, answer: str) -> Finish: ...   # final-answer posting: deliver, continue, or silent
     def end(self, status: str, detail: str = "") -> None: ...
 
@@ -161,7 +161,7 @@ class Room:                                        # harness-hosted entry point
   | `/v1/tool` | `turn/call` |
   | `/v1/news` | `turn/after-tool` |
   | none | `turn/finish` and `turn/end` |
-  | none | `turn/model-text` (@2) |
+  | none | `turn/model-text` (@2), with `reasoning` for reasoning |
 
   The protocol joins `v2_contracts.INTERFACE_VERSIONS` like the others, as
   `I-040D LocalTurnProtocolV2@2`.
@@ -240,7 +240,7 @@ maintainers.
 | Room view | mod tool | per-thread MCP server in `thread/start` config (stable); client tools need an experimental opt-in | `register_tool` | room-view action |
 | Reaction | mod tool | the same MCP server | a tool calling `platform_actions.add_reaction`, if the user grants it | action |
 | Silence | a bound turn ends without an action; its final message is the reason | a bound turn ends without an action (bound from `turn/start`'s answer once the room server is ready); its last agent message is the reason | `[SILENT]` on the injected turn; its `<thinking>` is the reason; Hermes's other silent answers (`SILENT`, `NO_REPLY`, `NO REPLY` and the zh forms) as `also_silent`, checked against the installed Hermes (verified offline, `a50406d9`) | silence action, with its `why` |
-| Only the model's words are posted | n/a (tools) | n/a (tools) | `post_api_request` reports each response's content and reasoning (`model_wrote`), so Hermes's own text for a run that gave no answer (`(empty)`, its iteration-limit notice) fails the turn (verified offline, `a50406d9`). A failed run still shows Hermes's failed-turn notice (gap 7) | n/a: the model's reply is the answer |
+| Only the model's words are posted | n/a (tools) | n/a (tools) | `post_api_request` reports each response's content and, apart, its reasoning (from the provider data too, as under `plugins.isolation: host`); `pre_api_request` reports the part of an answer the length limit or a dropped stream cut (`model_wrote`). Hermes's own text for a run that gave no answer (`(empty)`, its iteration-limit notice) fails the turn, also when the model wrote the word "empty" (verified offline, `a50406d9`). The summary at Hermes's iteration limit reaches no hook and fails the turn (gap 9). A failed run still shows Hermes's failed-turn notice (gap 7) | n/a: the model's reply is the answer |
 | Look again before posting | send tool holds | send tool holds | `transform_llm_output` silences the draft; the plugin injects a fresh run with the draft and the new messages (verified offline, `a50406d9`). Needs streaming off: Discord's default, while Telegram streams unless `display.platforms.telegram.streaming` is false | action held |
 | Steering | mod, after each tool call | with each room tool's result; `turn/steer` after every other tool call | `transform_tool_result` | between room views |
 | Pause and outcome turns | library | library | `inject_message`, like every turn | library |
@@ -251,7 +251,7 @@ maintainers.
 | Native tool approvals | user's rules; prompts declined | user's rules; approval requests declined | Hermes's own approvals, whose prompts reach the room (gap 8) | — |
 | Secret guard (the room's, from `room_guard`; the host checks every action again) | plus the launch secret, which the session's environment holds, so the agent can read it | plus the bridge's launch secret, which the room's MCP server holds; the agent can read it when Codex runs commands without a sandbox | plus Hermes's platform tokens (Telegram, Discord, Slack) when the config names none | the room's guard (old Codex runner, reference adapters) |
 | Runs without patching the harness | yes | yes | yes, also under `plugins.isolation: host` (a turn verified offline, `a50406d9`) | yes |
-| Operator setup needed | none | the project's trust level, used when the user's config has none (see gap 5); no MCP server named `nunchi_room` | `allow_gateway_injection`; the injected turns' identity among the platform's allowed users; per-user group sessions (Hermes's default); `gateway.platform_actions` for reactions. So that people see only what the agent chose: for the room's platform, `streaming`, `tool_progress`, `interim_assistant_messages`, `long_running_notifications` and `show_reasoning` off and `suppress_warning_notifications` on; for the whole profile, `display.file_mutation_verifier`, `display.turn_completion_explainer` and `display.busy_ack_enabled` off and the `clarify` and `cronjob` toolsets disabled; for the whole bot, `typing_indicator` and `reactions` off. A dedicated profile and bot per room. The kit runs with exactly these | none |
+| Operator setup needed | none | the project's trust level, used when the user's config has none (see gap 5); no MCP server named `nunchi_room` | `allow_gateway_injection`; the injected turns' identity among the platform's allowed users; per-user group sessions (Hermes's default); `gateway.platform_actions` for reactions. So that people see only what the agent chose: for the room's platform, `streaming`, `tool_progress`, `interim_assistant_messages`, `long_running_notifications`, `show_reasoning` and `runtime_footer` off and `suppress_warning_notifications` on; for the whole profile, `display.file_mutation_verifier`, `display.turn_completion_explainer` and `display.busy_ack_enabled` off and the `clarify` and `cronjob` toolsets disabled; for the whole bot, `typing_indicator` and `reactions` off. `agent.max_turns` and `HERMES_MAX_ITERATIONS` unset (gap 9), and the environment variables that override these keys unset. A dedicated profile and bot per room, with `group_allow_admin_from` set (gap 11). The kit runs with exactly these settings | none |
 
 ## Conformance kit (step 9d)
 
@@ -327,8 +327,9 @@ action runs, and the delivery lane starts the outcome turn on its own worker.
 Three final-answer scenarios check that the room and the agent's memory
 hold only what the agent's own model wrote. In `final-not-own-words` the
 model writes a line beside a tool call and the harness ends the run with its
-own text; in `final-no-answer` the model writes nothing. Either way nothing
-is posted, the agent's memory holds no move, and the turn fails. They need a
+own text; in `final-no-answer` the model writes nothing. Either way the
+harness posts nothing, the library commits nothing, the agent's memory holds
+no move, and the turn fails. They need a
 harness that can answer for its model: the reference does, and so does
 Hermes. Through Hermes, `final-not-own-words` gives the run a budget of one
 model call (`agent.max_turns: 1`), so Hermes ends it with its own "I reached
@@ -337,10 +338,11 @@ the model answers empty each time, so Hermes retries and hands the plugin
 `(empty)`. Hermes runs with the room settings from the plugin's README.
 Tool-posting harnesses do not post a final answer, so the scenarios do not
 apply to them.
-`final-silence-forms` plays four silent answers (`**[SILENT]**`,
-`` `[SILENT]` ``, `[silent].`, `NO_REPLY`) and one post that only looks
-like one ("No reply from Bob yet. Want me to ping him?"). The reference
-lists `NO_REPLY` as its harness's other silent answer.
+`final-silence-forms` plays three wrapped markers (`**[SILENT]**`,
+`` `[SILENT]` ``, `[silent].`), the first of the integration's own other
+silent answers (`also_silent`; skipped when it lists none), and one post
+that only looks like silence ("No reply from Bob yet. Want me to ping
+him?"). The reference lists `NO_REPLY`; Hermes's first is `SILENT`.
 
 The kit's room offers one reaction, the agent's own "mhm", so the `mhm`
 scenarios check it through each integration's react tool. Through Hermes,
@@ -421,8 +423,11 @@ None goes to a harness's maintainers without Zoe's decision.
    for runs that did not fail (`gateway/response_filters.py`), and a provider
    failure fires no output or end hook. The library ends the turn as failed
    and remembers no move. After a provider failure the plugin ends it once
-   `api_request_error` is final and no new `pre_api_request` follows within
-   5 s, so the room's next moment is not held up.
+   Hermes stops asking the model: no new `pre_api_request` within 5 s of an
+   error Hermes marks not retryable, or within 130 s of a retryable error
+   with its retries spent, since Hermes's auto-recovery ladder (on by
+   default) waits up to 120 s and asks again. Until then the room's next
+   moment waits.
    - Alternatives: a blank output (`' '`), which relies on undocumented
      handling; asking Hermes to let a plugin-injected turn end silently when
      it fails.
@@ -431,6 +436,28 @@ None goes to a harness's maintainers without Zoe's decision.
    everything. The safe route is to disable the `terminal` and
    `code_execution` toolsets. Hermes already has unattended approvals for
    webhook turns (`approvals.unattended_mode`), not for plugin-injected ones.
+9. **Hermes, the summary at its iteration limit.** With `agent.max_turns` or
+   `HERMES_MAX_ITERATIONS` set, a run that uses up its budget ends with a
+   summary Hermes requests outside `pre_api_request` and `post_api_request`
+   (`handle_max_iterations`). The plugin cannot report it, so the model's own
+   summary fails the turn and is not posted. The room settings leave the
+   limit unset (Hermes's default). A test pins the gap.
+   - Alternatives: asking Hermes for `post_api_request` on that call; accepting
+     an answer that follows Hermes's summary request, which would let other
+     unreported text through.
+10. **Hermes, typing on a look-again run.** The fresh run the plugin starts
+    after a look-again runs as Hermes's queued follow-up, which calls
+    `send_typing` directly, whatever `typing_indicator` says. No setting stops
+    it. A test pins the gap.
+    - Alternatives: injecting the fresh run only after Hermes releases the
+      session; asking Hermes to honor `typing_indicator` there.
+11. **Hermes, built-in slash commands.** Hermes answers its commands in the
+    room before any plugin hook, and a room member can change display
+    settings for the whole profile with them: `/reasoning show` posts the
+    agent's private thinking with each answer. Gating with
+    `group_allow_admin_from` limits who can; a denied command still gets a
+    reply. Dropping or rewriting built-in commands in the bound chat is
+    decision D4.
 
 Resolved during 9b:
 

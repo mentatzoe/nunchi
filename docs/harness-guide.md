@@ -378,19 +378,27 @@ whitespace, and the punctuation or `` ` `` and `~` around it:
 
   ```python
   participant.model_wrote(turn_id=harness_run_id, text=content)
-  participant.model_wrote(turn_id=harness_run_id, text=reasoning)  # if the provider returned any
+  participant.model_wrote(turn_id=harness_run_id, text=reasoning, reasoning=True)  # if the provider returned any
   ```
 
-  Report every response, even an empty one, in order. The final answer must
-  then be words the model wrote: a run of words in one response, or running
-  on across responses, as a continuation after the length limit does. Case,
-  whitespace, punctuation, markdown and tagged blocks such as `<think>` do
-  not count, so stripping them is fine. Anything else is not the agent's:
-  `finish` answers `silent`, and the turn ends as a failure, never as the
-  agent's reply or silence. The empty answer is still silence. If you
-  declare `model_text` and report nothing, every answer fails, so a missing
-  report shows up at once. Hermes shows plugins each response in
-  `post_api_request`.
+  Report every response, even an empty one, in order, including a part your
+  harness keeps when the length limit or a dropped stream cuts an answer.
+  The final answer must then be words the model wrote: a run of words in one
+  response's text, or running on across responses, as a continuation after
+  the length limit does, even when the cut falls inside a tag pair such as an
+  HTML snippet. Case, whitespace, punctuation, markdown and tagged
+  blocks such as `<think>` do not count, so stripping them is fine. Reasoning
+  and a tagged block count only as a whole: the answer must be all of one,
+  as when a harness answers with the model's reasoning. An answer of one or
+  two words keeps its punctuation, so a harness's `(empty)` is not the
+  model's word "empty". Anything else is not the agent's: `finish` answers
+  `silent`, and the turn ends as a failure, never as the agent's reply or
+  silence. The empty answer is still silence. If you declare `model_text`
+  and report nothing, every answer fails, so a missing report shows up at
+  once. Check which model calls your harness shows plugins: Hermes shows
+  most responses in `post_api_request`, the part of a cut answer in the
+  next `pre_api_request`, and the summary at its iteration limit in none
+  (the plugin's README, Known gaps).
 
 - **Hand `finish` the answer as the model wrote it, thinking included.** The
   library keeps `<thinking>` as the move's reason and never posts it. If your
@@ -448,9 +456,11 @@ participant.end_turn(turn_id=None, ok=False, detail="the harness refused the run
 - `ok=False` for errors, crashes, timeouts and interruptions.
 - Some runs end with no end hook, such as a Hermes run whose provider
   refused for good. Report those too, from whatever hook shows the failure,
-  or the turn holds up the room until the library's deadline. If the harness
-  may still recover (a fallback provider), wait a few seconds for a new model
-  request first.
+  or the turn holds up the room until the library's deadline. First wait for
+  the harness to give up: never end a turn the harness may still answer, or
+  the agent's answer is lost. A refusal may move to a fallback provider at
+  once, so a few seconds will do; after spent retries Hermes may wait in its
+  recovery ladder for up to 120 s and ask again.
 - In final-answer posting with a pending fresh run (step 4), report the end
   only after that run ends.
 
@@ -642,17 +652,21 @@ table names the Hermes hooks for each step.
    session and task keys that tool handlers get to the run's id.
 5. **Steering.** The tool-result hook adds `news(turn_id=…)` to each result.
 6. **Finish.** The hook after each model response reports what the model
-   wrote with `model_wrote`. The output hook calls `finish` with the raw
+   wrote with `model_wrote`: its text, and its reasoning with
+   `reasoning=True`. The hook before each model request reports the part of
+   a cut answer Hermes kept. The output hook calls `finish` with the raw
    answer, thinking included, and returns `decision.text` for `deliver`, or
    the silence marker otherwise. For `continue`, it notes the fresh run to
    start.
 7. **End.** The run-end hook starts the noted fresh run, which step 4 binds
    with `wake_id=None`. With none pending, it reports the end with
    `end_turn`. A harness may drop a run without its end hook, as Hermes does
-   when the provider refuses for good. Watch its error hook: when it will not
-   retry, wait a few seconds for a new model request (a fallback provider may
-   take over), then end the turn as failed. Otherwise the turn holds up the
-   room until the library's deadline.
+   when the provider refuses for good. Watch its error hook, and end the turn
+   as failed only once no new model request has started: within 5 s of an
+   error Hermes will not retry (a fallback provider may take over at once),
+   or within 130 s of a retryable error with its retries spent (Hermes's
+   recovery ladder waits up to 120 s). Each new request cancels the wait.
+   Otherwise the turn holds up the room until the library's deadline.
 8. **Cancel.** Hermes cannot interrupt a plugin's run, so `interrupt` does
    nothing: the library closes the cancelled turn, `finish` answers `silent`,
    and step 6 returns the silence marker. Tools already run stay run. The
@@ -674,13 +688,14 @@ LocalTurnProtocolV2@2`):
 | `/v1/turn/bind` | `turn_id`, `wake_id` | `bound` |
 | `/v1/turn/call` | `turn_id`, `tool`, `input` | `ok` with `text`, or `error` |
 | `/v1/turn/after-tool` | `turn_id` | `text` or null |
-| `/v1/turn/model-text` | `turn_id`, `text` | `kept` |
+| `/v1/turn/model-text` | `turn_id`, `text`, `reasoning` (optional) | `kept` |
 | `/v1/turn/finish` | `turn_id`, `answer` | `finish` (`deliver`, `continue`, `silent`) and `text`; `failed` when the answer was not the model's |
 | `/v1/turn/end` | `turn_id` (optional), `ok`, `detail`, `note` (optional) | `ended` |
 
 - When `attach` answers `model_text: true`, send each model response to
   `/v1/turn/model-text` before `/v1/turn/finish` (step 4, "Report what the
-  model wrote"). A `finish` answer with `failed` means the turn failed: post
+  model wrote"), and its reasoning in a report of its own with
+  `reasoning: true`. A `finish` answer with `failed` means the turn failed: post
   nothing, and say why in your logs.
 
 - Every request carries the launch secret in `X-Nunchi-Session`. Others are
@@ -734,9 +749,12 @@ Every integration joins the turn conformance kit before it replaces anything.
      nothing), and the harness ends the run with its own text. Use the
      harness's real path, as the Hermes kit does: a budget of one model call
      when the model wrote something, empty model replies when it wrote
-     nothing. The harness's own words may stand in for `text`. Without it, the
-     `final-not-own-words` and `final-no-answer` scenarios are not
-     applicable.
+     nothing. The harness's own words may stand in for `text`. Return what
+     the harness posted, `("silent", "")` for nothing: the kit checks that
+     it posted nothing. Without it, the `final-not-own-words` and
+     `final-no-answer` scenarios are not applicable.
+   - `final-silence-forms` plays the first answer your participant lists in
+     `also_silent`, and skips that play when it lists none.
    - Library-hosted: run the harness for real when it speaks a protocol, and
      stub only its model, as `nunchi.integrations.codex_app_server_conformance`
      does; scripting the harness process would skip the protocol under test.

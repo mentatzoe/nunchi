@@ -338,9 +338,13 @@ harness's other silent answers (`also_silent`), and there is no send tool:
   `also_silent`, an empty answer, a turn that already took its room action
   such as a reaction, and an ended turn.
 - With `model_text=True` the integration reports what the model wrote in
-  each response (`Turn.model_wrote`). The answer must be those words: a run
-  of them in one response, or running on across responses. Case, whitespace,
-  punctuation, markdown and tagged blocks do not count. Any other answer,
+  each response (`Turn.model_wrote`): its text, and its reasoning apart
+  (`reasoning=True`). The answer must be those words: a run of them in one
+  response's text, or running on across responses. Case, whitespace,
+  punctuation, markdown and tagged blocks do not count. Reasoning and a
+  tagged block count only as a whole answer, and an answer of one or two
+  words keeps its punctuation, so a harness's `(empty)` is not the model's
+  word "empty". Any other answer,
   such as the harness's own notice for a run that produced nothing, is
   `silent` here and fails the turn (`TurnError`): it is never posted, never
   the agent's silence, and never in its memory. An empty answer is still
@@ -370,7 +374,7 @@ A secret shorter than 16 characters is refused at start.
 | `/v1/turn/bind` | `turn_id`, `wake_id` | `bound` |
 | `/v1/turn/call` | `turn_id`, `tool`, `input` | `ok` with `text`, or `error` |
 | `/v1/turn/after-tool` | `turn_id` | `text` or null |
-| `/v1/turn/model-text` | `turn_id`, `text` | `kept` |
+| `/v1/turn/model-text` | `turn_id`, `text`, `reasoning` (optional, true for the model's reasoning) | `kept` |
 | `/v1/turn/finish` | `turn_id`, `answer` | `finish` (`deliver`, `continue` or `silent`) and `text`; `failed`, with the reason, when the answer was not the model's and the turn failed |
 | `/v1/turn/end` | `turn_id` (optional: without it, the open turn ends even if it was never bound, which is a failure), `ok`, `detail` | `ended` |
 

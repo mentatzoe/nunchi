@@ -14,7 +14,7 @@ any other withheld secret. This is interface ``I-040D LocalTurnProtocolV2@2``:
 | `/v1/turn/bind` | `turn_id`, `wake_id` | `bound` |
 | `/v1/turn/call` | `turn_id`, `tool`, `input` | `ok` with `text`, or `error` |
 | `/v1/turn/after-tool` | `turn_id` | `text` or null (steering) |
-| `/v1/turn/model-text` | `turn_id`, `text` | `kept` |
+| `/v1/turn/model-text` | `turn_id`, `text`, `reasoning` (optional) | `kept` |
 | `/v1/turn/finish` | `turn_id`, `answer` | `finish` (`deliver`, `continue`, `silent`) and `text`; `failed` when the answer was not the model's |
 | `/v1/turn/end` | `turn_id` (optional), `ok`, `detail`, `note` (optional) | `ended` |
 
@@ -23,9 +23,11 @@ for bind, call and after-tool, and stay as aliases.
 
 When attach answers ``model_text: true`` the integration must report what
 the model wrote, each response, with `/v1/turn/model-text` before it
-finishes the turn (@2). A final answer that is not those words is never
-posted: the turn fails, and `finish` says why in ``failed``. An integration
-that never reports gets that failure on every answer, not silence.
+finishes the turn (@2): the response's text, and any reasoning in a report
+of its own with ``reasoning: true``. A final answer that is not those words
+is never posted: the turn fails, and `finish` says why in ``failed``. An
+integration that never reports gets that failure on every answer, not
+silence.
 """
 
 from __future__ import annotations
@@ -189,7 +191,10 @@ class TurnServer:
             text = body.get("text")
             if text is not None and not isinstance(text, str):
                 return {"error": "text must be a string"}
-            return {"kept": participant.model_wrote(turn_id=turn_id, text=text)}
+            reasoning = body.get("reasoning", False)
+            if not isinstance(reasoning, bool):
+                return {"error": "reasoning must be true or false"}
+            return {"kept": participant.model_wrote(turn_id=turn_id, text=text, reasoning=reasoning)}
         if path == "/v1/turn/finish":
             answer = body.get("answer")
             if participant.silence_marker is None:

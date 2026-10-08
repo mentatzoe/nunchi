@@ -57,18 +57,21 @@ NO_SECRET = "I can't share that here."
 SILENCE = "[SILENT]"
 # Another answer the reference harness treats as silence, as many harnesses do.
 NO_REPLY = "NO_REPLY"
+# Stands for the first of the integration's own other silent answers
+# (``also_silent``) in a form; a play with none to use is skipped.
+ALSO_SILENT = "@also-silent"
 # What the model wrote before its run ended without an answer, and the text a
 # harness puts in place of the missing answer.
 CHECKING = "Let me check the deploy logs first."
 STAND_IN = "I reached the iteration limit and couldn't generate a summary."
 EMPTY_STAND_IN = "(empty)"
-# The agent's silence, as models write it: wrapped, or in another word. Each
-# keeps the agent's thinking as its reason.
+# The agent's silence, as models write it: wrapped, or in its harness's other
+# silence word. Each keeps the agent's thinking as its reason.
 SILENCE_FORMS = (
     "**[SILENT]**",
     "`[SILENT]`",
     "[silent].",
-    NO_REPLY,
+    ALSO_SILENT,
 )
 # A post that only looks like a silence word: it must go out.
 NEAR_SILENCE = "No reply from Bob yet. Want me to ping him?"
@@ -116,7 +119,9 @@ class Scenario:
     applicable to an integration whose harness never does.
 
     ``forms``: the scenario plays once per form, with the form in place of
-    "@form" in its steps; it passes when every play passes.
+    "@form" in its steps; it passes when every play passes. The form
+    ``@also-silent`` is the first answer the integration's participant lists
+    in ``also_silent``; when it lists none, that play is skipped.
     """
 
     posting: str
@@ -658,6 +663,7 @@ def _check_not_own_words(played: Played) -> list[str]:
     """The harness's text in place of an answer: never posted or remembered, and the turn fails."""
 
     failures: list[str] = []
+    _expect(played.answer(1)[0] == "silent", f"the harness posted {played.answer(1)}", failures)
     _expect(not played.dispatched, f"the harness's text was committed as the agent's post: {_texts(played)}", failures)
     _expect(
         played.host_result is not None and played.host_result.delivery == "failed",
@@ -1002,17 +1008,23 @@ def run_scenario(name: str, integration: KitIntegration, *, timeout: float = 15.
     if not scenario.forms:
         return _play(name, scenario, integration, steps=scenario.steps, form=None, timeout=timeout)
     failures: list[str] = []
+    skipped: list[str] = []
     for form in scenario.forms:
         steps = tuple(_with_form(step, form) for step in scenario.steps)
         result = _play(name, scenario, integration, steps=steps, form=form, timeout=timeout)
         if result["status"] == "n/a":
             return result
+        if result["status"] == "skipped":
+            skipped.append(form)
+            continue
+        form = result.get("form", form)
         failures += [f"{form!r}: {failure}" for failure in result.get("failures", ())]
     return {
         "scenario": name,
         "integration": integration.name,
         "status": "pass" if not failures else "fail",
         "failures": failures,
+        **({"skipped": skipped} if skipped else {}),
     }
 
 
@@ -1100,6 +1112,21 @@ def _play(
                 integration.close()
                 return {"scenario": name, "integration": integration.name, "status": "n/a"}
             agent.launch_secret = played.launch_secret = secret
+        if form == ALSO_SILENT:
+            # The integration's own other silence word, if its harness has one.
+            also = tuple(getattr(participant, "also_silent", ()) or ())
+            if not also:
+                integration.close()
+                return {"scenario": name, "integration": integration.name, "status": "skipped"}
+            played.form = also[0]
+            agent.turns = tuple(
+                tuple(
+                    tuple(part.replace(ALSO_SILENT, also[0]) if isinstance(part, str) else part for part in step)
+                    for step in turn
+                )
+                for turn in agent.turns
+            )
+            agent.steps = agent.turns[0]
         # The same assembly every integration uses (`nunchi.room`).
         room = Room(
             settings,
@@ -1162,6 +1189,7 @@ def _play(
         "integration": integration.name,
         "status": "pass" if not failures else "fail",
         "failures": failures,
+        **({"form": played.form} if played.form is not None else {}),
     }
 
 

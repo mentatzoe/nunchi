@@ -20,9 +20,14 @@ How a turn goes:
 4. **Steering.** `transform_tool_result` adds the room's news to every tool
    result in a bound run.
 5. **What the model wrote.** `post_api_request` reports each of the run's
-   model responses to the library (``model_text``), so only the model's own
-   words can become the agent's post. Text Hermes puts in place of a missing
-   answer, such as ``(empty)`` or its iteration-limit notice, fails the turn.
+   model responses to the library (``model_text``): its text, and apart its
+   reasoning. `pre_api_request` reports the part of an answer Hermes keeps
+   when the length limit or a dropped stream cut it, which no
+   `post_api_request` shows. Only the model's own words can become the
+   agent's post: text Hermes puts in place of a missing answer, such as
+   ``(empty)`` or its iteration-limit notice, fails the turn. Hermes shows
+   no hook the summary it asks for at its iteration limit, so that summary
+   fails the turn too (README, Known gaps).
 6. **Finish.** `transform_llm_output` hands the final answer to the library
    and returns what Hermes should deliver: the answer, or `[SILENT]`. On
    ``continue`` the answer is silenced and, when the run ends, a fresh run is
@@ -31,7 +36,9 @@ How a turn goes:
    raw draft.
 7. **End.** `on_session_end` reports the run's end. A provider failure that
    Hermes does not recover from fires no end hook; `api_request_error` and
-   `pre_api_request` let the plugin end that turn as a failure promptly.
+   `pre_api_request` let the plugin end that turn as a failure: within
+   seconds when the provider refused, or once Hermes's own recovery waits
+   are over when it kept retrying.
 
 The adapter decides nothing about whether or what the agent says. Any run that
 carries a Nunchi marker but is not bound to the open turn (a cancelled or
@@ -42,7 +49,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hmac
 import json
@@ -103,10 +110,19 @@ _REACTION_TIMEOUT_SECONDS = 20.0
 # abandons a transform hook after `plugins.hook_callback_timeout` (30 s by
 # default) and then delivers the raw draft, so stay well under it.
 DEFAULT_RESULT_WAIT_SECONDS = 20.0
-# After a provider failure Hermes will not retry, how long to wait for it to
-# start another model request (a fallback provider, a rotated credential)
-# before the turn ends as a failure. Hermes fires no end hook on that path.
+# After a provider error Hermes will not retry (``retryable`` false), how long
+# to wait for it to start another model request (a fallback provider, a
+# rotated credential) before the turn ends as a failure. Hermes fires no end
+# hook on that path.
 DEFAULT_FAILURE_GRACE_SECONDS = 5.0
+# After a retryable error whose retries are spent, Hermes may still recover:
+# it rebuilds the client and waits up to 8 s, or, by default, parks the run in
+# its auto-recovery ladder (agent/turn_recovery_autorecover.py: up to 5
+# cycles, waits of 15/30/60/60/60 s plus up to 20 % jitter, or the provider's
+# Retry-After up to 120 s) and asks again. Each new request cancels the wait
+# and each spent error starts it again, so the turn ends only once Hermes has
+# stopped asking.
+DEFAULT_RECOVERY_GRACE_SECONDS = 130.0
 # Attention on Hermes's own model (`ctx.llm`), instead of a configured route.
 HOST_MODEL_KIND = "hermes-host"
 HOST_MODEL_REFUSED = (
@@ -275,9 +291,11 @@ class _Run:
     raw_answer: str | None = None
     # Model requests Hermes started in this run (`pre_api_request`).
     requests: int = 0
-    # Why the run is failing: a provider error Hermes will not retry. Cleared
-    # when Hermes starts another request.
+    # Why the run is failing: a provider error Hermes may not recover from.
+    # Cleared when Hermes starts another request.
     failure: str | None = None
+    # Parts of an answer cut at the length limit, already reported.
+    fragments: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -378,6 +396,7 @@ class HermesRoomPlugin:
         result_wait_seconds: float = DEFAULT_RESULT_WAIT_SECONDS,
         start_timeout_seconds: float = DEFAULT_START_TIMEOUT_SECONDS,
         failure_grace_seconds: float = DEFAULT_FAILURE_GRACE_SECONDS,
+        recovery_grace_seconds: float = DEFAULT_RECOVERY_GRACE_SECONDS,
         room_factory: Any = None,
     ) -> None:
         self.route = route
@@ -386,6 +405,7 @@ class HermesRoomPlugin:
         self.ctx: Any = None
         self.gateway_loop: asyncio.AbstractEventLoop | None = None
         self.failure_grace_seconds = float(failure_grace_seconds)
+        self.recovery_grace_seconds = float(recovery_grace_seconds)
         self.participant = TurnParticipant(
             profile=profile,
             driver=self,
@@ -631,19 +651,30 @@ class HermesRoomPlugin:
         update = self.participant.news(turn_id=turn_id)
         return f"{result}\n\n{update}" if update else None
 
-    def on_api_request(self, turn_id: str = "") -> None:
+    def on_api_request(self, turn_id: str = "", conversation_history: Any = None) -> None:
         """Hermes starts a model request in a Nunchi run: it has not given up on the run.
 
-        The signature is narrow on purpose: Hermes passes a hook only the
-        arguments it declares, and this one need not carry the conversation
-        into the plugin host.
+        When the length limit or a dropped stream cut the model's answer,
+        Hermes keeps the part it got in the run's messages, marked as a
+        length-continuation fragment, and asks the model to go on; it later
+        joins the parts into one answer. No `post_api_request` shows that
+        part, so it is reported here from ``conversation_history``. Under
+        `plugins.isolation: host` that carries the run's messages into the
+        plugin host with each request.
         """
 
         with self._lock:
             run = self._runs.get(turn_id)
-            if run is not None:
-                run.requests += 1
-                run.failure = None
+            if run is None:
+                return None
+            run.requests += 1
+            run.failure = None
+            parts = [part for part in _fragments(conversation_history) if part not in run.fragments]
+            run.fragments.update(parts)
+            bound = run.bound
+        if bound:
+            for part in parts:
+                self.participant.model_wrote(turn_id=turn_id, text=part)
         return None
 
     def on_api_response(
@@ -653,10 +684,12 @@ class HermesRoomPlugin:
 
         Hermes strips `<thinking>` before the output hook; the raw answer keeps
         it. The library compares the final answer with what the model wrote
-        (``model_text``): its text, and its reasoning when the provider sent
-        any. Under `plugins.isolation: host` the message object does not cross
-        into the plugin host, so its text comes from Hermes's JSON summary of
-        the response instead.
+        (``model_text``): its text, and apart its reasoning, read as Hermes
+        reads it when it answers with the reasoning (``extract_reasoning``).
+        Under `plugins.isolation: host` the message arrives as a record of its
+        fields, so reasoning Hermes keeps in its provider data is read from
+        there; if the message is missing, the text comes from Hermes's JSON
+        summary of the response.
         """
 
         with self._lock:
@@ -669,10 +702,8 @@ class HermesRoomPlugin:
         run.raw_answer = content if isinstance(content, str) else None
         if run.bound:
             self.participant.model_wrote(turn_id=turn_id, text=run.raw_answer or "")
-            for name in ("reasoning", "reasoning_content"):
-                reasoning = _field(assistant_message, name)
-                if isinstance(reasoning, str):
-                    self.participant.model_wrote(turn_id=turn_id, text=reasoning)
+            for reasoning in _reasoning(assistant_message):
+                self.participant.model_wrote(turn_id=turn_id, text=reasoning, reasoning=True)
         return None
 
     def on_api_error(
@@ -686,17 +717,29 @@ class HermesRoomPlugin:
     ) -> None:
         """A model request in a Nunchi run failed.
 
-        When Hermes will not retry it (the provider refused, or the retries
-        are spent), Hermes ends the run with no output or end hook, and posts
-        its own failed-turn notice. Before that it may still recover, through a
-        fallback provider or a rotated credential, so the turn ends as a
-        failure only if no new model request starts within
-        ``failure_grace_seconds``. Without this the turn would stay open until
-        the library's deadline, holding up the room's next moment.
+        When Hermes gives up on the run it ends it with no output or end hook,
+        and posts its own failed-turn notice. Until then it may recover, and
+        the turn stays open while it might:
+
+        - The provider refused (``retryable`` false): Hermes moves to a
+          fallback provider or a rotated credential at once, or gives up. The
+          turn ends as a failure if no new model request starts within
+          ``failure_grace_seconds``.
+        - A retryable error with its retries spent: Hermes may rebuild the
+          client, or wait in its auto-recovery ladder, then ask again. The
+          wait is ``recovery_grace_seconds``, longer than Hermes's longest.
+        - Otherwise Hermes retries, and nothing is needed.
+
+        Each new model request cancels the wait; each spent error starts it
+        again.
         """
 
         spent = isinstance(retry_count, int) and isinstance(max_retries, int) and retry_count + 1 >= max_retries
-        if retryable is not False and not spent:
+        if retryable is False:
+            grace = self.failure_grace_seconds
+        elif spent:
+            grace = self.recovery_grace_seconds
+        else:
             return None  # Hermes retries it
         with self._lock:
             run = self._runs.get(turn_id)
@@ -705,7 +748,7 @@ class HermesRoomPlugin:
             what = ", ".join(str(part) for part in (status_code, reason) if part not in (None, ""))
             run.failure = f"the model provider failed ({what or 'no detail'}) and Hermes did not recover"
             seen = run.requests
-        timer = threading.Timer(self.failure_grace_seconds, self._end_failed_run, args=(turn_id, seen))
+        timer = threading.Timer(grace, self._end_failed_run, args=(turn_id, seen))
         timer.daemon = True
         timer.start()
         return None
@@ -834,6 +877,72 @@ def _field(message: Any, name: str) -> Any:
         return getattr(message, name, None)
     except Exception:
         return None
+
+
+def _flat(value: Any) -> str | None:
+    """Text from a string or a list of text parts, as Hermes flattens message text."""
+
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return "".join(
+            part if isinstance(part, str) else str(part.get("text") or "")
+            for part in value
+            if isinstance(part, str) or isinstance(part, Mapping)
+        )
+    return None
+
+
+def _reasoning(message: Any) -> list[str]:
+    """The model's reasoning in one response, as Hermes reads it (``extract_reasoning``).
+
+    Its parts (``reasoning``, ``reasoning_content``, each ``reasoning_details``
+    entry), then, when there are several, the parts joined as Hermes joins
+    them to answer with the reasoning. ``reasoning_content`` and
+    ``reasoning_details`` live in the response's provider data, which is
+    all a record of the message carries under `plugins.isolation: host`.
+    """
+
+    provider = _field(message, "provider_data")
+    parts: list[str] = []
+
+    def add(value: Any) -> None:
+        text = _flat(value)
+        if text and text not in parts:
+            parts.append(text)
+
+    add(_field(message, "reasoning"))
+    add(_field(message, "reasoning_content") or _field(provider, "reasoning_content"))
+    details = _field(message, "reasoning_details") or _field(provider, "reasoning_details")
+    for detail in details if isinstance(details, list) else ():
+        if isinstance(detail, Mapping):
+            add(detail.get("summary") or detail.get("thinking") or detail.get("content") or detail.get("text"))
+    return parts + (["\n\n".join(parts)] if len(parts) > 1 else [])
+
+
+def _fragments(history: Any) -> list[str]:
+    """This run's parts of an answer cut at the length limit, oldest first.
+
+    Hermes marks them ``_length_continuation_fragment`` among the run's
+    messages; the run's own messages are those after its last user message
+    that is not Hermes's request to continue. A part is reported as Hermes
+    keeps it. With streaming on, Hermes can add its own stall warning to a
+    part; the room settings turn streaming off.
+    """
+
+    if not isinstance(history, list):
+        return []
+    parts: list[str] = []
+    for message in reversed(history):
+        if not isinstance(message, Mapping):
+            continue
+        if message.get("role") == "user" and not message.get("_length_continuation_nudge"):
+            break
+        if message.get("role") == "assistant" and message.get("_length_continuation_fragment"):
+            text = _flat(message.get("content"))
+            if text and text.strip():
+                parts.append(text)
+    return parts[::-1]
 
 
 def _text(message: Any) -> str:

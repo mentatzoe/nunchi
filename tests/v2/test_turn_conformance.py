@@ -75,16 +75,51 @@ class TurnConformanceTests(unittest.TestCase):
             failures = failed()
         self.assertEqual({"final-silence-forms"}, set(failures))
         self.assertIn("'**[SILENT]**': expected silence", failures["final-silence-forms"][0])
-        # The harness's other silent answer is not listed.
+        # The harness's other silent answer is listed but not read as silence.
+        silent_forms = turn._silent_forms
+
+        def only_the_marker(silence_marker, also_silent, model_text):
+            return silent_forms(silence_marker, (), model_text)
+
+        with mock.patch.object(turn, "_silent_forms", only_the_marker):
+            failures = failed()
+        self.assertEqual({"final-silence-forms"}, set(failures))
+        self.assertTrue(all(failure.startswith("'NO_REPLY'") for failure in failures["final-silence-forms"]))
+        # The harness posts its own text although the library said silent.
+        stand_in = kit._DirectSurface.stand_in
+
+        def posts_anyway(self, turn_id, text, wrote):
+            stand_in(self, turn_id, text, wrote)
+            return "deliver", text
+
+        with mock.patch.object(kit._DirectSurface, "stand_in", posts_anyway):
+            failures = failed()
+        self.assertEqual({"final-not-own-words", "final-no-answer"}, set(failures))
+        self.assertIn("the harness posted ('deliver', '(empty)')", failures["final-no-answer"])
+
+    def test_the_other_silence_word_is_the_integrations_own(self):
+        # A harness with no silent answer besides its marker lists none: that
+        # play is skipped, and no word the harness lacks is required.
         init = turn.TurnParticipant.__init__
 
         def without_also_silent(self, **kwargs):
             init(self, **{**kwargs, "also_silent": ()})
 
         with mock.patch.object(turn.TurnParticipant, "__init__", without_also_silent):
-            failures = failed()
-        self.assertEqual({"final-silence-forms"}, set(failures))
-        self.assertTrue(all(failure.startswith("'NO_REPLY'") for failure in failures["final-silence-forms"]))
+            result = kit.run_scenario("final-silence-forms", kit.ReferenceIntegration("final-answer"))
+        self.assertEqual(("pass", [kit.ALSO_SILENT]), (result["status"], result.get("skipped")))
+
+        # A harness with another word is tested on its own word.
+        def other_word(self, **kwargs):
+            init(self, **{**kwargs, "also_silent": ("NOTHING_TO_ADD",)})
+
+        with mock.patch.object(turn.TurnParticipant, "__init__", other_word):
+            self.assertEqual("pass", kit.run_scenario(
+                "final-silence-forms", kit.ReferenceIntegration("final-answer"))["status"])
+            with mock.patch.object(turn, "_silent_forms", lambda marker, also, model_text: frozenset({"[silent]"})):
+                result = kit.run_scenario("final-silence-forms", kit.ReferenceIntegration("final-answer"))
+        self.assertEqual("fail", result["status"])
+        self.assertTrue(all(failure.startswith("'NOTHING_TO_ADD'") for failure in result["failures"]))
 
     def test_the_stand_in_scenarios_need_a_harness_that_puts_its_own_text_in(self):
         class NeverStandsIn(kit.ReferenceIntegration):
