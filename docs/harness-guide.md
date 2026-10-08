@@ -89,7 +89,7 @@ reaches your output hook. List everything the harness can show by itself:
   that the run produced nothing;
 - typing indicators and processing reactions;
 - its own prompts (clarifying questions, approvals), scheduled posts, command
-  replies and busy notices.
+  replies, busy notices and restart notices.
 
 Turn each off for the room in the harness's configuration, document it as
 operator setup with the reason, and test both the harness's default and the
@@ -109,7 +109,15 @@ what reaches its hook. List what the harness does to a message before then:
   bot), user and channel allowlists, ignored channels, filters for other
   bots. Open each for the room;
 - what it does first: opening a thread for the message, processing
-  reactions, typing. Turn each off; no hook can take it back.
+  reactions, typing. Turn each off; no hook can take it back;
+- what it merges: batching quick messages, or one session shared by
+  everyone in a thread, can turn several people's messages into one under
+  the first one's id and author. Give each person their own session and
+  turn batching off where the harness allows;
+- what it queues: a message that arrives while the harness still handles
+  the sender's previous one. Check that each reaches your ingress hook on
+  its own, in order, and with the facts your other hooks note; Hermes runs
+  some without its dispatch hook.
 
 Places nested in the room, such as the threads under a channel or the
 topics in a group, belong to the room. Consume their messages too, with
@@ -514,10 +522,11 @@ room.deliver(
   checked by `nunchi.v2_contracts.validate_canonical_event`.
 - Actor `kind`: `human`, `bot`, `system`, or `unknown`. Never invent a kind
   you do not know.
-- `actors` describes everyone the event names: its author and each actor in
-  `mentioned_actor_ids` the room has not seen yet, with what the platform
-  says about them. The room refuses an event that names an unknown actor.
-  The agent itself is known from the binding.
+- `actors` describes every actor the event names, on every event: its
+  author and each actor in `mentioned_actor_ids`, with what the platform
+  says about them. The room forgets actors whose events left its log, and
+  refuses an event naming one it does not know. The agent itself is known
+  from the binding.
 - Ids must be the platform's own and stable. The agent's replies and
   reactions target them. If the harness gives a message no id, use a unique
   one of your own; nothing can target that message.
@@ -671,7 +680,9 @@ table names the Hermes hooks for each step.
    on the first message the gateway admits.
 2. **Ingress.** Every message in the room, and in the threads inside it,
    reaches the plugin's ingress hook, once the harness's own gates are open
-   for the room (on Discord, Hermes's `free_response_channels`). The plugin
+   for the room (on Discord, Hermes's `free_response_channels` and its
+   allowlist), except what the harness drops whatever its settings (the
+   plugin's known gaps). The plugin
    hands it to `room.deliver` and tells the harness it is handled,
    with no reply, even when the hand-over failed. Give the room every fact the
    harness has: who a message mentions, the message it replies to, when it was

@@ -11,9 +11,12 @@ How a turn goes:
    message it replies to, when it was sent, who it mentions, and whether its
    author is a bot. `post_gateway_admission` hands the message to the `Room`
    with those facts and answers ``handled`` with no reply, so Hermes never
-   runs its agent on a person's message. A thread inside the bound chat (a
-   Discord thread under the channel) is part of the room: its messages are
-   handled the same way, with the thread they belong to.
+   runs its agent on a person's message. A message Hermes runs from its busy
+   queue skips the dispatch hook and arrives without them; on Discord its
+   time is read from its id. A thread inside the bound chat (a
+   Discord thread under the channel, a Telegram topic in the group) is part
+   of the room: its messages are handled the same way, with the thread they
+   belong to.
 2. **Start.** When the library decides, `start` injects the turn's text into
    the chat as the plugin's own message (`ctx.inject_message(origin=...)`),
    after a wake marker that only this plugin knows.
@@ -139,8 +142,12 @@ _THINKING = re.compile(r"<thinking>.*?(?:</thinking>|\Z)", re.S | re.I)
 _NOTED_MESSAGES = 256
 _CLOSED_RUNS = 256
 # Messages in a place inside the room (a thread), by id, with the chat Hermes
-# reacts in: more than the room log keeps by default (512 events).
+# reacts in: more than the room log keeps by default (512 events). After a
+# restart the room log names each message's thread instead.
 _INSIDE_MESSAGES = 1024
+# A platform's thread id for the main chat: Hermes gives a Telegram forum's
+# General topic the id 1.
+_MAIN_THREAD = {"telegram": "1"}
 # What the room needs when Hermes opened a thread for a room message itself.
 AUTO_THREAD_SETUP = (
     "nunchi-room: Hermes opened a Discord thread for room message %s before the plugin saw it. "
@@ -239,6 +246,34 @@ class HermesRoute:
         parent = source.get("parent_chat_id")
         return self.thread_id is None and parent is not None and str(parent) == self.chat_id
 
+    def thread_of(self, source: Mapping[str, Any]) -> str | None:
+        """The thread inside the room a held message was posted in, or None
+        for the room's main chat.
+
+        A Discord thread under the bound channel is a chat of its own, with
+        the channel as its parent. A Telegram forum topic is a thread of the
+        bound group itself (``thread_id``); Hermes gives the General topic,
+        which is the group's main chat, the thread id 1. A message Hermes
+        moved into a thread it opened itself is that thread's start, and
+        stays in the main chat.
+        """
+
+        if self.thread_id is not None or source.get("auto_thread_created"):
+            return None
+        thread = source.get("thread_id")
+        if str(source.get("chat_id")) != self.chat_id:
+            return str(thread or source.get("chat_id")) if self.inside(source) else None
+        if thread is not None and str(thread) != _MAIN_THREAD.get(self.platform):
+            return str(thread)
+        return None
+
+    @property
+    def threads_are_chats(self) -> bool:
+        """Whether a thread inside the room is a chat of its own, reached by
+        its id: a Discord thread is; a Telegram topic is not."""
+
+        return self.platform == "discord"
+
     def event_id(self, message_id: str) -> str:
         return f"{self.platform}:message:{message_id}"
 
@@ -275,6 +310,23 @@ def _timestamp(value: Any) -> str | None:
     # Hermes's default is a naive local time; platforms give aware ones.
     moment = value.astimezone(timezone.utc)
     return moment.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+# Discord's epoch (2015-01-01T00:00:00Z) in milliseconds: a Discord id (a
+# snowflake) holds the milliseconds since then in its bits above the 22nd.
+DISCORD_EPOCH_MS = 1_420_070_400_000
+
+
+def _discord_sent_at(message_id: str) -> str | None:
+    """When a Discord message was sent, read from its id; None for an id that is no snowflake."""
+
+    try:
+        since_epoch = int(message_id) >> 22
+        if since_epoch <= 0:
+            return None
+        return _timestamp(datetime.fromtimestamp((DISCORD_EPOCH_MS + since_epoch) / 1000, timezone.utc))
+    except (ValueError, OverflowError, OSError):
+        return None
 
 
 def _is_bot(user: Any) -> bool | None:
@@ -603,6 +655,15 @@ class HermesRoomPlugin:
             event_id = self.route.event_id(f"unidentified-{time.time_ns()}")
         with self._lock:
             facts = self._noted.pop(str(message_id), None) if message_id else None
+        if facts is None and message_id:
+            # Hermes admitted a message its dispatch hook never saw: one it
+            # rescued from its busy queue (README, Known gaps). Its mentions,
+            # reply target and bot flag are lost; on Discord its id still
+            # says when it was sent, so the room files it in order.
+            logger.warning("nunchi-room: message %s reached the room without its dispatch facts "
+                           "(mentions, reply target, time)", message_id)
+            sent_at = _discord_sent_at(str(message_id)) if self.route.platform == "discord" else None
+            facts = _MessageFacts(timestamp=sent_at)
         facts = facts or _MessageFacts()
         mentioned = list(facts.mentioned or ())
         own = self.participant.profile.actor_id
@@ -622,16 +683,17 @@ class HermesRoomPlugin:
             event["timestamp"] = facts.timestamp
         if facts.reply_to_message_id is not None:
             event["reply_to_event_id"] = self.route.event_id(facts.reply_to_message_id)
-        chat = str(source.get("chat_id"))
-        if chat != self.route.chat_id and self.route.inside(source) and not source.get("auto_thread_created"):
-            # Posted in a thread inside the room. The thread's id names the
-            # message that started it, when one did; it groups the thread
-            # either way. A message Hermes moved into a thread of its own is
-            # the start of that thread, and stays in the channel.
-            thread = self.route.event_id(str(source.get("thread_id") or chat))
-            if thread != event_id:
-                event["thread_root_event_id"] = thread
-            if message_id:
+        thread = self.route.thread_of(source)
+        if thread is not None:
+            # Posted in a thread inside the room: a Discord thread under the
+            # channel, a Telegram topic in the group. The thread's id names
+            # the message that started it, when one did; it groups the thread
+            # either way.
+            root = self.route.event_id(thread)
+            if root != event_id:
+                event["thread_root_event_id"] = root
+            chat = str(source.get("chat_id"))
+            if message_id and chat != self.route.chat_id:
                 with self._lock:
                     self._inside[str(message_id)] = chat
                     while len(self._inside) > _INSIDE_MESSAGES:
@@ -645,10 +707,28 @@ class HermesRoomPlugin:
 
     def chat_of(self, message_id: str) -> str:
         """The chat a room message was posted in: its thread's, for a message in
-        a thread inside the room, or the bound chat."""
+        a Discord thread inside the room, or the bound chat.
+
+        The plugin notes the chat when the message arrives. After a restart,
+        the room log's thread for the message gives it; a thread's first
+        message in a Discord forum, whose id is the thread's, has none.
+        """
 
         with self._lock:
-            return self._inside.get(message_id, self.route.chat_id)
+            chat = self._inside.get(message_id)
+        if chat is not None:
+            return chat
+        room = self.room
+        if self.route.threads_are_chats and room is not None:
+            try:
+                event = room.observation.resolve_event(self.route.event_id(message_id))
+            except Exception:
+                event = None
+            root = event.get("thread_root_event_id") if isinstance(event, Mapping) else None
+            thread = self.route.message_id(str(root)) if root else None
+            if thread:
+                return thread
+        return self.route.chat_id
 
     # -- the driver (the library calls these) ------------------------------------------
 
