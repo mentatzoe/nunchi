@@ -548,6 +548,107 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Fixed
 
+- In final-answer posting, only words the agent's own model wrote can be its
+  post ([leak audit in #135](https://github.com/mentatzoe/nunchi/issues/135#issuecomment-6057394431), row 5).
+  A harness that put its own text in place of a missing answer, such as
+  Hermes's `(empty)`, "I reached the iteration limit…" or "No reply: …",
+  had that text committed as the agent's reply and kept in its memory, so
+  the agent and attention took the person's question as answered.
+  - `TurnParticipant(..., model_text=True)` declares that the integration
+    reports what the model wrote: `model_wrote(turn_id=, text=)` for each
+    response's text, and `reasoning=True` for its reasoning
+    (`Turn.model_wrote`). The answer must be a run of words in one
+    response's text, or running on across responses, as a length
+    continuation does, also when the harness drops the words a continuation
+    repeats, or when the cut falls inside a tag pair such as an HTML
+    snippet. Case, whitespace, punctuation, markdown and tagged blocks such as
+    `<think>` do not count. Reasoning and a tagged block count only as a
+    whole answer, and an answer of one or two words keeps its punctuation,
+    so Hermes's `(empty)` is not the model's word "empty" in its text, its
+    thinking or its reasoning. Matching is bounded in time, so a long answer
+    cannot stall a harness's output hook.
+  - Any other answer is `silent` at `finish`, and the turn fails with
+    `TurnError` ("the agent's run ended with an answer that is not its
+    model's reported words: … no reported model response holds this text"),
+    even when the harness reports the run as finished. It is never posted,
+    never the agent's silence, and never remembered. An empty answer is still
+    silence. An integration that declares `model_text` and reports nothing
+    fails every answer, with that reason, instead of going quiet.
+  - The local turn protocol is `I-040D LocalTurnProtocolV2@2`: `/v1/attach`
+    answers `model_text`, the new `/v1/turn/model-text` route takes
+    `turn_id`, `text` and an optional `reasoning`, and a failed
+    `/v1/turn/finish` answers `failed` with the reason. Tool-posting
+    integrations are unchanged.
+  - The kit's final-answer reference reports what its scripted model wrote.
+    Two new scenarios, `final-not-own-words` and `final-no-answer`, check
+    that the harness's text is never posted or remembered and the turn
+    fails. They need a harness that can answer for its model
+    (`KitIntegration.harness_text`, a surface `stand_in` step). The Hermes
+    kit plays them on Hermes's real paths: a budget of one model call
+    (`agent.max_turns: 1`), and empty model replies until Hermes gives up.
+  - The Hermes plugin reports each model response's text and, apart, its
+    reasoning from `post_api_request`, reading `reasoning_content` and
+    `reasoning_details` from the provider data as Hermes does (so under
+    `plugins.isolation: host` too). From `pre_api_request` it reports the
+    part of an answer Hermes kept when the length limit or a dropped stream
+    cut it, which no `post_api_request` shows, so the joined answer is still
+    posted and remembered. Hermes's `(empty)` and its iteration-limit notice
+    fail the turn instead of becoming the agent's reply. The summary Hermes
+    asks for at its iteration limit reaches no hook, so it fails the turn
+    too; the README's room settings leave `agent.max_turns` and
+    `HERMES_MAX_ITERATIONS` unset, and a test pins the gap. The retry after
+    a failed turn (decision D5) is not built.
+- The agent's silence is read as silence in whatever form it wrote it
+  ([leak audit in #135](https://github.com/mentatzoe/nunchi/issues/135#issuecomment-6057394431), row 6).
+  `**[SILENT]**` or `` `[SILENT]` `` was posted, or, on Hermes, hidden by
+  Hermes but remembered as the agent's reply. Silence now ignores
+  case, whitespace, punctuation and the markdown wrappers `` ` `` and `~`
+  around the marker (never `[` or `]`), for the prefix, own-line and whole
+  answer rules. `also_silent` on `Turn` and `TurnParticipant` lists the
+  harness's other silent answers, such as `NO_REPLY`, which count only as the
+  whole answer. "No reply from Bob yet." still goes out. The kit's
+  final-answer reference lists `NO_REPLY`, and its new `final-silence-forms`
+  scenario plays three wrapped markers, the integration's own first
+  `also_silent` answer (skipped when it lists none), and one post that only
+  looks like silence. Final-answer behavior-eval runs from before this
+  change posted a wrapped marker and counted it as an internals leak; they
+  now grade it as silence, so compare leak counts and silence grades across
+  this change with care.
+  The Hermes plugin lists Hermes's other silent answers
+  (`HERMES_SILENT_ANSWERS`: `SILENT`, `NO_REPLY`, `NO REPLY` and the zh
+  forms), and a Hermes-lane test checks the list against the installed
+  Hermes's own.
+- In a Hermes room, people now see only what the agent chose to do
+  ([leak audit in #135](https://github.com/mentatzoe/nunchi/issues/135#issuecomment-6057394431), row 3, and the Hermes notices).
+  - The README's room setup, which the kit and the Hermes tests now run with
+    (a test checks they match), turns off what Hermes added on its own: the
+    file-edit footer and the "No reply" explanation appended after the
+    agent's answer or its `[SILENT]`, retry and budget status lines,
+    reasoning, the runtime footer, the busy notice, the typing indicator,
+    processing reactions, and the `clarify` and `cronjob` toolsets. Some of
+    these apply to the whole Hermes profile or bot, so the README recommends
+    one profile and one bot per room, names the environment variables that
+    override these keys, and recommends `group_allow_admin_from` so room
+    members cannot turn reasoning back on with `/reasoning show`.
+  - When the provider refuses for good, Hermes ends the run with no hook the
+    plugin saw, and the turn stayed open until the library's 300 s deadline,
+    holding up the room's next moment. The plugin now watches
+    `api_request_error` and `pre_api_request`, and ends the turn as failed
+    once Hermes stops asking the model: no new request within 5 s of an error
+    Hermes will not retry (a fallback provider that takes over keeps the
+    turn), or within 130 s of a retryable error whose retries are spent,
+    since Hermes's auto-recovery ladder (on by default) waits up to 120 s and
+    asks again. An answer after a short outage is still posted.
+  - If the plugin's output hook fails, the turn fails and Hermes gets
+    `[SILENT]`. Hermes posts the raw draft for a hook that raised.
+  - The kit's scripted model reports zero output tokens for an empty reply,
+    as a provider does, so Hermes stops retrying after two empty replies and
+    the empty-model tests take seconds, not a minute.
+  - Still open: Hermes's own failed-turn notice on a failed run, approval
+    prompts, `hermes send` through the terminal tool, Hermes's built-in slash
+    commands (their replies, and display changes such as `/reasoning show`;
+    decision D4), the summary at Hermes's iteration limit, and typing on a
+    look-again run. The README lists them.
 - Secrets the library holds no longer reach the room through any harness
   ([leak audit in #135](https://github.com/mentatzoe/nunchi/issues/135#issuecomment-6057394431), rows 9 and 10).
   - The launch secret a `TurnServer` serves with is now in its participant's
@@ -555,8 +656,8 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
     agent that pasted its environment posted Claude Code's
     `NUNCHI_CLAUDE_CODE_GATE_SESSION`; the gate now refuses it, and the agent
     can post again without it. The same holds for the Codex app-server
-    bridge's secret. A launch secret under 16 characters is refused. The
-    local turn protocol stays `I-040D@1`: no route or answer changed.
+    bridge's secret. A launch secret under 16 characters is refused. This
+    change added no route or answer to the local turn protocol.
   - One secret guard per room: `nunchi.room.room_guard` withholds the value of
     every variable a config key ending in `_env` names (attention model, the
     integration's sections, authorization), the default key variables the

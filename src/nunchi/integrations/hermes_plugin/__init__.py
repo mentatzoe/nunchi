@@ -8,6 +8,7 @@ library never disagree. See `integrations/hermes-plugin/README.md`.
 """
 
 from nunchi.integrations.hermes_plugin.plugin import (
+    HERMES_SILENT_ANSWERS,
     PLUGIN_NAME,
     SILENCE_MARKER,
     WAKE_MARKER,
@@ -20,6 +21,7 @@ from nunchi.integrations.hermes_plugin.plugin import (
 )
 
 __all__ = [
+    "HERMES_SILENT_ANSWERS",
     "PLUGIN_NAME",
     "SILENCE_MARKER",
     "WAKE_MARKER",

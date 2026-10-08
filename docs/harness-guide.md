@@ -77,13 +77,29 @@ own runs loses silence and looking again (see the contract's "Topologies").
 
 Reactions, the room view, and privileged actions are tools in both styles.
 
-**Whatever else the harness posts.** In final-answer posting the library sees
-only what reaches your output hook. List everything the harness can post by
-itself besides the final answer: streamed drafts, text the model writes beside
-a tool call, tool progress lines, status notices. Turn each off for the room
-in the harness's configuration, document it as operator setup, and test both
-the harness's default and the room's setting. Hermes needs four such settings
-([`integrations/hermes-plugin/README.md`](../integrations/hermes-plugin/README.md)).
+**Whatever else the harness posts.** People in the room should see only what
+the agent chose to do. In final-answer posting the library sees only what
+reaches your output hook. List everything the harness can show by itself:
+
+- streamed drafts, text the model writes beside a tool call, tool progress
+  lines, reasoning, status and error notices;
+- text it adds to the final answer after your output hook, such as a footer
+  or an explanation, even after a silence marker;
+- text it puts in place of an answer the model never gave, such as a notice
+  that the run produced nothing;
+- typing indicators and processing reactions;
+- its own prompts (clarifying questions, approvals), scheduled posts, command
+  replies and busy notices.
+
+Turn each off for the room in the harness's configuration, document it as
+operator setup with the reason, and test both the harness's default and the
+room's setting. Never hand `finish` the harness's stand-in for a missing
+answer: report what the model wrote (`model_text`, step 4), so the library
+fails the turn instead of posting or remembering it. If your output hook
+fails, end the turn as failed and return the harness's silence; some
+harnesses post the raw draft when a hook raises. Whatever no setting or hook
+can stop goes into the integration's known gaps. Hermes's list is in
+[`integrations/hermes-plugin/README.md`](../integrations/hermes-plugin/README.md).
 
 ## The pieces
 
@@ -168,6 +184,8 @@ participant = TurnParticipant(
     tool_names={"send": "room_send", "react": "room_react", "context": "room_context"},
     roles=("send", "react", "context"),
     silence_marker=None,  # or your harness's marker, for final-answer posting
+    also_silent=(),       # final-answer posting: your harness's other silent answers
+    model_text=False,     # final-answer posting: True when you report what the model wrote
 )
 ```
 
@@ -176,7 +194,14 @@ participant = TurnParticipant(
   (the room view), `propose` and `withdraw` (privileged actions, only with
   `authorization`).
 - With a `silence_marker`, the participant uses final-answer posting and
-  offers no `send` tool.
+  offers no `send` tool. The agent is taught that marker.
+- `also_silent` lists the other whole answers your harness treats as
+  silence, such as `NO_REPLY`. Set it whenever your harness has any, or the
+  library remembers a reply the room never saw. Only with a
+  `silence_marker`.
+- `model_text=True` says your integration reports what the model wrote
+  (step 4). Set it whenever your harness can put its own text in place of a
+  missing answer. Only with a `silence_marker`.
 - `tool_names` needs a name for every role in `roles`. The default roles are
   all five.
 - `room_guard` builds the secret guard. Give the `Room` the participant's
@@ -339,6 +364,42 @@ decision = participant.finish(turn_id=harness_run_id, answer=final_answer)
 | `silent` | Replace the answer with the harness's silence marker, so nothing is posted. |
 | `continue` | Keep the agent going with `decision.text` as its next input. It looks again at new messages, or answers again after a refusal. |
 
+The library reads silence the way a harness does. The empty answer is
+silence. So is an answer that starts with the marker, holds it on a line of
+its own, or is wholly the marker or one of `also_silent`, ignoring case,
+whitespace, and the punctuation or `` ` `` and `~` around it:
+`**[SILENT]**`, `` `[SILENT]` `` and `[silent].` are all silence.
+
+- **Report what the model wrote.** Many harnesses put their own text in
+  place of an answer the model never gave: a notice that the run produced
+  nothing, an iteration-limit message, an error. That text must never become
+  the agent's post or its memory. With `model_text=True`, report each model
+  response before you hand over the final answer:
+
+  ```python
+  participant.model_wrote(turn_id=harness_run_id, text=content)
+  participant.model_wrote(turn_id=harness_run_id, text=reasoning, reasoning=True)  # if the provider returned any
+  ```
+
+  Report every response, even an empty one, in order, including a part your
+  harness keeps when the length limit or a dropped stream cuts an answer.
+  The final answer must then be words the model wrote: a run of words in one
+  response's text, or running on across responses, as a continuation after
+  the length limit does, even when the cut falls inside a tag pair such as an
+  HTML snippet. Case, whitespace, punctuation, markdown and tagged
+  blocks such as `<think>` do not count, so stripping them is fine. Reasoning
+  and a tagged block count only as a whole: the answer must be all of one,
+  as when a harness answers with the model's reasoning. An answer of one or
+  two words keeps its punctuation, so a harness's `(empty)` is not the
+  model's word "empty". Anything else is not the agent's: `finish` answers
+  `silent`, and the turn ends as a failure, never as the agent's reply or
+  silence. The empty answer is still silence. If you declare `model_text`
+  and report nothing, every answer fails, so a missing report shows up at
+  once. Check which model calls your harness shows plugins: Hermes shows
+  most responses in `post_api_request`, the part of a cut answer in the
+  next `pre_api_request`, and the summary at its iteration limit in none
+  (the plugin's README, Known gaps).
+
 - **Hand `finish` the answer as the model wrote it, thinking included.** The
   library keeps `<thinking>` as the move's reason and never posts it. If your
   harness strips thinking before your output hook, recover the raw text from
@@ -393,6 +454,13 @@ participant.end_turn(turn_id=None, ok=False, detail="the harness refused the run
   only if the harness cannot have started a newer run since: without an id,
   whatever turn is open ends.
 - `ok=False` for errors, crashes, timeouts and interruptions.
+- Some runs end with no end hook, such as a Hermes run whose provider
+  refused for good. Report those too, from whatever hook shows the failure,
+  or the turn holds up the room until the library's deadline. First wait for
+  the harness to give up: never end a turn the harness may still answer, or
+  the agent's answer is lost. A refusal may move to a fallback provider at
+  once, so a few seconds will do; after spent retries Hermes may wait in its
+  recovery ladder for up to 120 s and ask again.
 - In final-answer posting with a pending fresh run (step 4), report the end
   only after that run ends.
 
@@ -563,7 +631,8 @@ table names the Hermes hooks for each step.
 `nunchi.integrations.hermes_plugin` is the worked example.
 
 1. **Load.** The plugin reads its config into `RoomSettings` and builds a
-   `TurnParticipant` with the harness's silence marker. It registers the
+   `TurnParticipant` with the harness's silence marker, its other silent
+   answers (`also_silent`) and `model_text=True`. It registers the
    reaction and room-view tools from `participant.attach()`, and forwards
    their calls to `call_tool`. It builds the `Room`, with `HarnessDelivery`,
    on the first message the gateway admits.
@@ -582,31 +651,52 @@ table names the Hermes hooks for each step.
    the marker and binds the run if the id is the open turn's. It maps the
    session and task keys that tool handlers get to the run's id.
 5. **Steering.** The tool-result hook adds `news(turn_id=…)` to each result.
-6. **Finish.** The output hook calls `finish` with the raw answer, thinking
-   included, and returns `decision.text` for `deliver`, or the silence marker
-   otherwise. For `continue`, it notes the fresh run to start.
+6. **Finish.** The hook after each model response reports what the model
+   wrote with `model_wrote`: its text, and its reasoning with
+   `reasoning=True`. The hook before each model request reports the part of
+   a cut answer Hermes kept. The output hook calls `finish` with the raw
+   answer, thinking included, and returns `decision.text` for `deliver`, or
+   the silence marker otherwise. For `continue`, it notes the fresh run to
+   start.
 7. **End.** The run-end hook starts the noted fresh run, which step 4 binds
    with `wake_id=None`. With none pending, it reports the end with
-   `end_turn`.
+   `end_turn`. A harness may drop a run without its end hook, as Hermes does
+   when the provider refuses for good. Watch its error hook, and end the turn
+   as failed only once no new model request has started: within 5 s of an
+   error Hermes will not retry (a fallback provider may take over at once),
+   or within 130 s of a retryable error with its retries spent (Hermes's
+   recovery ladder waits up to 120 s). Each new request cancels the wait.
+   Otherwise the turn holds up the room until the library's deadline.
 8. **Cancel.** Hermes cannot interrupt a plugin's run, so `interrupt` does
    nothing: the library closes the cancelled turn, `finish` answers `silent`,
    and step 6 returns the silence marker. Tools already run stay run. The
    parity table records the gap.
 
+What the Hermes plugin cannot stop: on a failed run, Hermes posts its own
+failed-turn notice, after `[SILENT]` when the output hook ran. The plugin's
+README lists this and its other known gaps.
+
 ## Outside Python
 
 `nunchi.turn_server.TurnServer(participant, socket_path=..., session_secret=...)`
 serves the same calls as JSON over a Unix socket (`I-040D
-LocalTurnProtocolV2@1`):
+LocalTurnProtocolV2@2`):
 
 | Route | Body | Answer |
 |---|---|---|
-| `/v1/attach` | `{}` | `protocol`, `version`, `posting`, `silence_marker`, `tools` |
+| `/v1/attach` | `{}` | `protocol`, `version`, `posting`, `silence_marker`, `model_text`, `tools` |
 | `/v1/turn/bind` | `turn_id`, `wake_id` | `bound` |
 | `/v1/turn/call` | `turn_id`, `tool`, `input` | `ok` with `text`, or `error` |
 | `/v1/turn/after-tool` | `turn_id` | `text` or null |
-| `/v1/turn/finish` | `turn_id`, `answer` | `finish` (`deliver`, `continue`, `silent`) and `text` |
+| `/v1/turn/model-text` | `turn_id`, `text`, `reasoning` (optional) | `kept` |
+| `/v1/turn/finish` | `turn_id`, `answer` | `finish` (`deliver`, `continue`, `silent`) and `text`; `failed` when the answer was not the model's |
 | `/v1/turn/end` | `turn_id` (optional), `ok`, `detail`, `note` (optional) | `ended` |
+
+- When `attach` answers `model_text: true`, send each model response to
+  `/v1/turn/model-text` before `/v1/turn/finish` (step 4, "Report what the
+  model wrote"), and its reasoning in a report of its own with
+  `reasoning: true`. A `finish` answer with `failed` means the turn failed: post
+  nothing, and say why in your logs.
 
 - Every request carries the launch secret in `X-Nunchi-Session`. Others are
   refused.
@@ -653,6 +743,18 @@ Every integration joins the turn conformance kit before it replaces anything.
      `launch_secret` on your `KitIntegration` in `participant`. The
      `launch-secret` scenario then has the agent post it. Without one, that
      scenario is not applicable.
+   - In final-answer posting, if your harness can end a run with its own
+     text in place of an answer, set `harness_text = True` and give your
+     surface `stand_in(turn_id, text, wrote)`: the model writes `wrote` ("" for
+     nothing), and the harness ends the run with its own text. Use the
+     harness's real path, as the Hermes kit does: a budget of one model call
+     when the model wrote something, empty model replies when it wrote
+     nothing. The harness's own words may stand in for `text`. Return what
+     the harness posted, `("silent", "")` for nothing: the kit checks that
+     it posted nothing. Without it, the `final-not-own-words` and
+     `final-no-answer` scenarios are not applicable.
+   - `final-silence-forms` plays the first answer your participant lists in
+     `also_silent`, and skips that play when it lists none.
    - Library-hosted: run the harness for real when it speaks a protocol, and
      stub only its model, as `nunchi.integrations.codex_app_server_conformance`
      does; scripting the harness process would skip the protocol under test.
@@ -720,11 +822,16 @@ Each is tracked in [#135](https://github.com/mentatzoe/nunchi/issues/135).
 ## Checklist
 
 - [ ] Public extension points only; nothing patched.
-- [ ] Everything the harness posts besides the final answer is off for the
-  room, documented and tested.
+- [ ] Everything the harness shows by itself besides the agent's own acts is
+  off for the room, documented with the reason and tested; what nothing can
+  stop is in the integration's known gaps.
 - [ ] No decision about whether or what the agent says.
 - [ ] Every room event delivered, the agent's own included.
-- [ ] Every run bound when it starts, and its end reported once.
+- [ ] Every run bound when it starts, and its end reported once, also when
+  the harness drops the run without an end hook.
+- [ ] Final-answer posting: every silent answer of the harness in
+  `also_silent`, and what the model wrote reported (`model_text`) if the
+  harness can answer for it. The output hook fails closed.
 - [ ] Steering after every tool call, where the harness has a hook for it.
 - [ ] The guard comes from `room_guard`. The `Room` gets the participant's
   guard, built after any `TurnServer`.

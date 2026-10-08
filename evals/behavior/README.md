@@ -136,8 +136,9 @@ agent's side of the room:
   reply, as an agent does in a harness whose final answer is its post
   (Hermes), instead of one JSON envelope per reply (`envelope`, the
   default). The core `Turn` decides each reply: it is posted, it is silence
-  (a reply starting with `[SILENT]`), or the agent replies again after
-  looking again. This style has no tools, so the agent cannot react or ask
+  (the `[SILENT]` marker in any case or formatting, such as `**[SILENT]**`,
+  at the start of the reply or on a line of its own), or the agent replies
+  again after looking again. This style has no tools, so the agent cannot react or ask
   for more of the room; compare it with the envelope arm on the same
   attention route. In the workflow, the `agent_posting` input sets it, and
   `agent_model: none` grades attention alone. Each record keeps the agent's

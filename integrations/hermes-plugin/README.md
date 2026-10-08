@@ -27,9 +27,11 @@ harness-hosted, consume-and-start shape with final-answer posting
 | Bind | `pre_llm_call` | The run whose message carries the turn's wake marker is bound to the turn. |
 | Steering | `transform_tool_result` | What others posted meanwhile is added to every tool result in a bound run. |
 | Room view, reactions | `room_context`, `room_react` tools | Forwarded to the library. Reactions go through `ctx.platform_actions`. |
-| Finish | `transform_llm_output` | The final answer goes to the library. Hermes delivers it, or `[SILENT]`. When others posted meanwhile, the draft is silenced and a fresh run starts with it. |
+| What the model wrote | `post_api_request`, `pre_api_request` | Each model response's text, and apart its reasoning, go to the library (`model_text`). When the length limit or a dropped stream cuts an answer, Hermes keeps the part it got and asks the model to go on; no `post_api_request` shows that part, so the plugin reports it from `pre_api_request`. Only the model's own words can be the agent's post. Text Hermes puts in place of a missing answer, such as `(empty)` or "I reached the iteration limit and couldn't generate a summary.", fails the turn: it is never posted or remembered, also when the model wrote the word "empty". The summary the model writes at Hermes's iteration limit reaches no hook, so it fails the turn too (Known gaps). |
+| Finish | `transform_llm_output` | The final answer goes to the library. Hermes delivers it, or `[SILENT]`. Hermes's other silent answers (`SILENT`, `NO_REPLY`, `NO REPLY` and the zh forms) and a marker in markdown are the agent's silence too, remembered as silence. When others posted meanwhile, the draft is silenced and a fresh run starts with it. If the hook fails, the turn fails and Hermes gets `[SILENT]`: Hermes posts the raw draft for a hook that raised. |
 | Thinking | `post_api_request` | Hermes strips `<thinking>` before the output hook; the plugin hands the library the model's raw answer, so the agent's thinking is kept as its reason and never posted. |
 | End | `on_session_end` | The run's end is reported. |
+| Provider failure | `api_request_error`, `pre_api_request` | When Hermes gives up on a run it ends it without an end hook, so the plugin ends the turn as a failure once Hermes has stopped asking the model. If the provider refused (Hermes marks the error not retryable), Hermes moves to a fallback provider or a rotated credential at once, or gives up: the wait is 5 s. If a retryable error used up Hermes's retries, Hermes may still rebuild its client, or wait in its auto-recovery ladder (on by default: up to 5 cycles of 15 to 60 s, or the provider's Retry-After up to 120 s) and ask again: the wait is 130 s, so an answer after an outage is still posted. Each new model request cancels the wait. |
 
 ## Install
 
@@ -107,7 +109,17 @@ plus a `hermes` section:
 
 ## Hermes setup the room needs
 
-In the profile's `config.yaml`:
+People in the room should see only what the agent chose to do. By default
+Hermes also posts and shows things of its own, which the library never
+committed and the agent never remembers. These settings turn them off.
+
+Give each Nunchi room its own Hermes profile and its own bot. Several of
+these settings apply to the whole profile or the whole bot, not to one chat:
+the flags at the top of `display`, `typing_indicator`, `reactions` and
+`agent.disabled_toolsets`. On a profile or bot you also use elsewhere, they
+change those chats too.
+
+In the room's profile `config.yaml`:
 
 ```yaml
 plugins:
@@ -118,19 +130,57 @@ plugins:
       settings:
         config_path: /etc/nunchi/vigil.json
 display:
+  file_mutation_verifier: false            # top level only, for the whole profile
+  turn_completion_explainer: false
+  busy_ack_enabled: false
   platforms:
     telegram:                              # the room's platform
-      streaming: false                     # a streamed draft is visible before Nunchi decides
+      streaming: false
       tool_progress: "off"
-      interim_assistant_messages: false    # see below
+      interim_assistant_messages: false
       long_running_notifications: false
+      suppress_warning_notifications: true
+      show_reasoning: false
+      runtime_footer: {enabled: false}
+telegram:                                  # the room's bot
+  typing_indicator: false
+  reactions: false
+agent:
+  disabled_toolsets: [clarify, cronjob]
 ```
 
-- **`interim_assistant_messages: false` is required.** By default Hermes posts
-  text the model writes beside a tool call straight to the chat, before any
-  final answer. That text never reaches Nunchi: no look-again, no secret
-  guard, no one-action rule. No plugin hook can stop it (checked, see the
-  tests).
+For a Discord room, put the same keys under `display.platforms.discord` and
+`discord:`. Leave the `TELEGRAM_REACTIONS`, `DISCORD_REACTIONS`,
+`HERMES_TURN_COMPLETION_EXPLAINER` and `HERMES_FILE_MUTATION_VERIFIER`
+environment variables unset or false: each wins over the config.
+
+Leave `agent.max_turns` unset (Hermes's default: no limit) and the
+`HERMES_MAX_ITERATIONS` environment variable unset. At that limit Hermes asks
+the model for a summary outside every plugin hook, so the turn fails and the
+summary is not posted (Known gaps).
+
+Why each key. The conformance kit and `tests/v2/test_hermes_plugin.py` run
+Hermes with these settings, and a test checks that this block matches them.
+
+| Key | Without it |
+|---|---|
+| `allow_gateway_injection: true` | The plugin cannot start the agent's turns. |
+| `display.file_mutation_verifier: false` | After a failed `write_file` or `patch`, Hermes appends a footer with local file paths to the agent's answer, or to its silence, after the library committed it. Hermes reads this key only at the top of `display`. |
+| `display.turn_completion_explainer: false` | When a run ends abnormally, Hermes adds "⚠️ No reply: …" to a short answer, `[SILENT]` included. Top level only. |
+| `display.busy_ack_enabled: false` | When someone posts twice quickly, Hermes answers "⚡ Interrupting current task…". Checked with a probe; the kit does not wire Hermes's busy handler. |
+| `streaming: false` | A streamed draft is visible before the library decides. |
+| `tool_progress: "off"` | Hermes posts a line for each tool call. |
+| **`interim_assistant_messages: false`** (required) | Hermes posts text the model writes beside a tool call straight to the chat, before any final answer. That text never reaches Nunchi: no look-again, no secret guard, no one-action rule. No plugin hook can stop it. |
+| `long_running_notifications: false` | Hermes posts "still working" notes. |
+| `suppress_warning_notifications: true` | Hermes posts its retry and iteration-budget status lines, and "❌ … rejected the request" when the provider refuses. |
+| `show_reasoning: false` | Hermes puts the model's reasoning before the answer. Off by default; pinned because a top-level `display.show_reasoning` would turn it on for every platform (from Hermes's source). A room member's `/reasoning show` still turns it on (Known gaps). |
+| `runtime_footer: {enabled: false}` | Hermes appends a footer with the model, context use and working directory to every post. Off by default; pinned because it outranks the top-level setting a room member's `/footer on` writes. |
+| `typing_indicator: false` | A typing bubble shows on each person's message and through every turn, even one that ends in silence, so people wait for an answer that never comes. For the whole bot. A look-again run still shows typing (Known gaps). |
+| `reactions: false` | On Discord (on by default), every message the plugin takes in gets 👀 and then ✅, a nod on every message. Telegram's default is already off. For the whole bot. |
+| `agent.disabled_toolsets: [clarify, cronjob]` | `clarify` posts a numbered question form that nobody in the room is meant to answer; `cronjob` schedules a post into the room that arrives later without reading the room. For the whole profile. |
+
+More setup:
+
 - `turn_user_id` must be one of the platform's allowed users (for example
   `TELEGRAM_ALLOWED_USERS`). Otherwise Hermes accepts the injection and then
   drops it; Nunchi ends that turn as a failure when its run has not started
@@ -165,6 +215,47 @@ display:
   names a user (Telegram's `text_mention`) counts. A Discord mention or a
   Telegram text mention of the bot addresses the agent when the binding's
   `actor_id` is `<platform>:user:<the bot's user id>`.
+- **Hermes's failed-turn reply.** When a run fails (the provider refuses or
+  its retries and recovery waits run out, a tool result is left pending,
+  repeated errors), Hermes posts its own notice, such as "…Your request was
+  not processed. Send it again if you still want me to carry it out." When
+  the output hook ran, `[SILENT]` comes before it. No hook or setting stops
+  this: Hermes honors silence only for runs that did not fail
+  (`gateway/response_filters.py`). The library ends the turn as a failure
+  and remembers no move, so the agent does not know the room saw the notice.
+  Offering the moment again after a failure is open (decision D5).
+- **Approval prompts.** When the agent runs a command Hermes wants approved
+  (`terminal`, `code_execution`), Hermes asks in the room and waits for
+  `/approve`. No setting removes the prompt safely: `approvals.mode: off`
+  approves everything. To keep prompts out of the room, also disable the
+  `terminal` and `code_execution` toolsets, and lose those tools.
+- **`hermes send`.** With the `terminal` or `code_execution` tool, the agent
+  can run `hermes send` and post to the room without Nunchi. Disabling those
+  toolsets closes it.
+- **Built-in slash commands.** Hermes answers `/help`, `/status` and its
+  other commands in the room before the plugin sees the message. Nunchi sees
+  neither the command nor the reply, so the agent's memory misses both. No
+  setting turns built-in commands off. Room members can also change display
+  settings with them, for the whole profile: `/reasoning show` makes Hermes
+  post the agent's private thinking with each answer, unchecked by the secret
+  guard. Until the slash-command work (decision D4), list the room's admins
+  in `group_allow_admin_from` under the platform's block (`telegram:`) so
+  only they can run commands other than `/help` and `/whoami`. A denied
+  command still gets Hermes's reply in the room.
+- **The summary at Hermes's iteration limit.** With `agent.max_turns` or
+  `HERMES_MAX_ITERATIONS` set, a run that uses up its budget ends with a
+  summary Hermes asks the model for outside its model-request hooks. No hook
+  shows the plugin that text, so the turn fails and the summary is not
+  posted, though the model wrote it. The room settings leave both unset.
+  Closing it needs a hook from Hermes (an issue here first, per `AGENTS.md`).
+  Likewise, when the length limit cuts the same answer four times, Hermes
+  stops asking and keeps what it got: the last part reaches no hook, so the
+  turn fails.
+- **Typing on a look-again run.** When others posted while the agent
+  composed, the fresh run the plugin starts runs as Hermes's queued
+  follow-up, which sends typing whatever `typing_indicator` says: one typing
+  action on Telegram, typing for the whole run on Discord. No setting stops
+  it.
 - **No interrupt.** Hermes gives plugins no way to stop a run. Nunchi closes
   a cancelled turn, so its answer is silenced; tools it already ran stay run.
 - **Reactions** are add-only (Hermes's `platform_actions`) and were checked up

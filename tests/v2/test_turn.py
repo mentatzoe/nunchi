@@ -578,6 +578,350 @@ class FinalAnswerTurnTests(unittest.TestCase):
         self.assertNotIn("never posted to the room", text)
 
 
+class SilenceFormTests(unittest.TestCase):
+    """The agent's silence is silence in whatever form it wrote it (leak audit row 6)."""
+
+    def turn(self, also_silent=("NO_REPLY", "SILENT")):
+        from nunchi.participant_model import build_participant_turn_request
+        from nunchi.turn import Turn
+
+        return Turn(
+            profile=PROFILE,
+            request=build_participant_turn_request(test_wake(), deepcopy(OPPORTUNITY)),
+            tool_names={"react": "emoji", "context": "look"},
+            expand=Room().expand,
+            result_wait_seconds=2,
+            silence_marker="[SILENT]",
+            also_silent=also_silent,
+        )
+
+    def test_a_wrapped_marker_or_the_harnesss_other_silent_answer_is_silence(self):
+        for answer in (
+            "**[SILENT]**",
+            "`[SILENT]`",
+            "~~[SILENT]~~",
+            "[silent].",
+            '"[SILENT]"',
+            "_[SILENT]_",
+            "**[SILENT]** Castor has this one.",
+            "Castor has it.\n`[SILENT]`",
+            "NO_REPLY",
+            "no_reply.",
+            "Silent",
+            "(silent)",
+            "<thinking>Bob asked Castor.</thinking>\nSILENT.",
+        ):
+            with self.subTest(answer=answer):
+                turn = self.turn()
+                self.assertEqual("silent", turn.decide(answer).kind)
+                self.assertIsNone(turn.action)
+        quiet = self.turn()
+        quiet.decide("<thinking>Bob asked Castor.</thinking>\n**NO_REPLY**")
+        self.assertEqual("Bob asked Castor.", quiet.note)
+
+    def test_a_post_that_only_looks_like_silence_goes_out(self):
+        for answer in (
+            "No reply from Bob yet. Want me to ping him?",
+            "I pinged the vendor twice.\nNo reply.\nWant me to escalate?",
+            "Use `[SILENT]` when nothing changed.",
+            "Silent night is my favourite carol.",
+            "SILENT is a great film.",
+            "Done: NO_REPLY was the wrong flag name.",
+            "> [SILENT]",
+        ):
+            with self.subTest(answer=answer):
+                turn = self.turn()
+                decision = turn.decide(answer)
+                self.assertEqual(("deliver", answer), (decision.kind, decision.text))
+                self.assertEqual(answer, turn.action["text"])
+
+    def test_another_silent_answer_counts_only_when_the_integration_lists_it(self):
+        turn = self.turn(also_silent=())
+        self.assertEqual("deliver", turn.decide("NO_REPLY").kind)
+
+    def test_also_silent_needs_a_marker_and_real_answers(self):
+        from nunchi.participant_model import build_participant_turn_request
+        from nunchi.turn import Turn
+
+        for kwargs in (
+            {"silence_marker": "..."},
+            {"also_silent": ("NO_REPLY",)},
+            {"silence_marker": "[SILENT]", "also_silent": "NO_REPLY"},
+            {"silence_marker": "[SILENT]", "also_silent": ("NO_REPLY", "**")},
+            {"silence_marker": "[SILENT]", "also_silent": (None,)},
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError):
+                    Turn(
+                        profile=PROFILE,
+                        request=build_participant_turn_request(test_wake(), deepcopy(OPPORTUNITY)),
+                        **kwargs,
+                    )
+                with self.assertRaises(ValueError):
+                    TurnParticipant(
+                        profile=PROFILE, driver=RecordingDriver(), guard=SecretGuard(()), tool_names=NAMES, **kwargs
+                    )
+
+
+def run_in_thread(participant, room=None):
+    """Run the participant's turn; the box gets ("ok", action) or ("error", exception)."""
+
+    box = {}
+    cancel = threading.Event()
+
+    def play():
+        try:
+            box["ok"] = participant.run_protocol(
+                wake=test_wake(), opportunity=deepcopy(OPPORTUNITY), expand=(room or Room()).expand, cancel=cancel
+            )
+        except BaseException as exc:  # recorded for the test
+            box["error"] = exc
+
+    thread = threading.Thread(target=play, daemon=True)
+    thread.start()
+    return box, thread, cancel
+
+
+class ModelTextTests(unittest.TestCase):
+    """Only words the agent's model wrote can be its post (leak audit row 5)."""
+
+    def setUp(self):
+        self.fresh()
+
+    def fresh(self):
+        # Each turn of the same wake has the same request id: one per participant.
+        self.driver = RecordingDriver()
+        self.participant = TurnParticipant(
+            profile=PROFILE,
+            driver=self.driver,
+            guard=SecretGuard(["a-withheld-secret-value"]),
+            tool_names=NAMES,
+            result_wait_seconds=5,
+            silence_marker="[SILENT]",
+            model_text=True,
+        )
+
+    def open_turn(self):
+        self.box, self.thread, cancel = run_in_thread(self.participant)
+        self.addCleanup(cancel.set)
+        self.assertTrue(self.driver.started_event.wait(5))
+        turn = self.driver.started[0]
+        self.assertTrue(self.participant.bind_turn(turn_id="t1", wake_id=turn.wake_id))
+        return turn
+
+    def end(self, ok=True):
+        self.participant.end_turn(turn_id="t1", ok=ok, detail="the run ended")
+        self.thread.join(5)
+        return self.box
+
+    def finish_and_commit(self, turn, answer):
+        from nunchi.turn import HARNESS_DELIVERS
+
+        answered = {}
+        thread = threading.Thread(
+            target=lambda: answered.setdefault("finish", self.participant.finish(turn_id="t1", answer=answer)),
+            daemon=True,
+        )
+        thread.start()
+        if turn.action_ready.wait(2):
+            self.participant.settle(turn.request_id, TransportResult("unknown", HARNESS_DELIVERS))
+        thread.join(5)
+        return answered["finish"]
+
+    def test_an_answer_its_model_wrote_is_delivered(self):
+        turn = self.open_turn()
+        self.assertTrue(self.participant.model_wrote(turn_id="t1", text="On it, checking the logs now."))
+        decision = self.finish_and_commit(turn, "On it, checking the logs now.")
+        self.assertEqual(("deliver", "On it, checking the logs now."), (decision.kind, decision.text))
+        self.thread.join(5)
+        self.assertEqual("On it, checking the logs now.", self.box["ok"]["text"])
+        self.assertIsNone(turn.unattributed)
+
+    def test_the_harnesss_text_is_never_posted_and_fails_the_turn_even_when_the_run_ended_ok(self):
+        held = "no reported model response holds this text"
+        empty = f"{held} (each was empty)"
+        for wrote, answer, detail in (
+            (["Let me check the deploy logs first."], "I reached the iteration limit and couldn't generate a summary.", held),
+            ([""], "(empty)", empty),
+            (["", ""], "⚠️ No reply: the model didn't produce a reply this time. Send `continue` to try again.", empty),
+            (["Looking into it now."], "Hermes hit repeated errors. Details: RuntimeError: boom", held),
+            # Scattered words are not a contiguous run.
+            (["I reached the end of the logs; the iteration count hit its limit."], "I reached the iteration limit", held),
+            # The marker counts only when the model wrote it.
+            (["On it."], "[SILENT]", held),
+            # A harness's one-word stand-in is not the model's word inside
+            # what it wrote, its thinking or its reasoning (leak audit row 5).
+            (["The queue is not empty."], "(empty)", held),
+            (["Let me see whether the deploy queue is empty.", ""], "(empty)", held),
+            (["<think>The deploy log is empty, so the job never started.</think>"], "(empty)", held),
+            (["<thinking>empty</thinking>"], "(empty)", held),
+            (["", ("The log they pasted is empty, so I cannot see the error yet.", True)], "(empty)", held),
+            (["", ("empty", True)], "(empty)", held),
+            # Reasoning counts only as a whole, not a run of words inside it.
+            (["", ("I could say the deploy failed at the migration step, but let me check first.", True)],
+             "The deploy failed at the migration step.", held),
+            (["<think>Maybe: the deploy failed at the migration step. Check first.</think>"],
+             "The deploy failed at the migration step.", held),
+            # A short answer keeps its punctuation and its word edges.
+            (["Button it."], "On it.", held),
+        ):
+            with self.subTest(answer=answer, wrote=wrote):
+                self.fresh()
+                turn = self.open_turn()
+                for text in wrote:
+                    text, reasoning = text if isinstance(text, tuple) else (text, False)
+                    self.participant.model_wrote(turn_id="t1", text=text, reasoning=reasoning)
+                self.assertEqual("silent", self.participant.finish(turn_id="t1", answer=answer).kind)
+                self.assertIsNone(turn.action)
+                self.assertIn(detail, turn.unattributed)
+                # Whatever comes next in the run, the turn posts nothing.
+                self.participant.model_wrote(turn_id="t1", text="On it.")
+                self.assertEqual("silent", self.participant.finish(turn_id="t1", answer="On it.").kind)
+                box = self.end(ok=True)
+                self.assertNotIn("ok", box)
+                self.assertIsInstance(box["error"], TurnError)
+                self.assertIn("the agent's run ended with an answer that is not its model's reported words", str(box["error"]))
+                self.assertIn(detail, str(box["error"]))
+
+    def test_the_models_words_reshaped_by_its_harness_are_still_its_own(self):
+        reasoning = lambda text: (text, True)  # noqa: E731
+        for wrote, answer in (
+            # The harness strips thinking or a tool call the model wrote as text.
+            (["<think>Sam asked me directly.</think>The migration step timed out."], "The migration step timed out."),
+            (["Checking.<tool_call>{\"name\": \"room_context\"}</tool_call> The migration timed out."], "Checking. The migration timed out."),
+            # It strips markdown.
+            (["**The migration** step _timed out_."], "The migration step timed out."),
+            # It joins a continuation cut at the length limit, with or without a
+            # separator, with the reasoning reported between the parts.
+            (["The migration step timed out at 02:00 and the", reasoning("(reasoning)"), "rollback finished cleanly."],
+             "The migration step timed out at 02:00 and the\nrollback finished cleanly."),
+            (["The migra", "tion step timed out."], "The migration step timed out."),
+            # A cut inside a tagged block, such as an HTML snippet, leaves half
+            # the pair in each part.
+            (["Here is the banner, then the steps.\n\n```html\n<div class=\"banner\">\n  <p>Deploys are paused.",
+              "</p>\n</div>\n```\n\nThen merge it and deploy to the canary first."],
+             "Here is the banner, then the steps.\n\n```html\n<div class=\"banner\">\n  <p>Deploys are paused."
+             "</p>\n</div>\n```\n\nThen merge it and deploy to the canary first."),
+            # A short reply cut between its two words.
+            (["On", "it."], "On\nit."),
+            # It joins a stream cut mid-answer to a continuation that repeats
+            # the last words, dropping the repeat.
+            (["Freeze deploys first. Then scale the canary down and confirm traffic drains",
+              "confirm traffic drains in the dashboard. Then run the down migration."],
+             "Freeze deploys first. Then scale the canary down and confirm traffic drains in the dashboard. "
+             "Then run the down migration."),
+            # It answers with the model's reasoning when the content was empty,
+            # whole, or the parts of its reasoning joined.
+            (["", reasoning("Sam asked me; the migration step timed out at 02:00.")],
+             "Sam asked me; the migration step timed out at 02:00."),
+            (["", reasoning("On it.")], "On it."),
+            (["", reasoning("Run <code>make rollback</code> first, then redeploy the canary.")],
+             "Run <code>make rollback</code> first, then redeploy the canary."),
+            (["", reasoning("The migration step timed out.\n\nRerunning it should fix it.")],
+             "The migration step timed out.\n\nRerunning it should fix it."),
+            # It reuses what the model wrote before a tool call.
+            (["Checking the logs now.", ""], "Checking the logs now."),
+            # A short reply, alone or at the start of what the model wrote.
+            (["On it."], "On it."),
+            (["Done. Next I'll check the logs."], "Done."),
+            (["<think>Sam asked me.</think>On it."], "On it."),
+            # An emoji alone, with or without its presentation selector.
+            (["👍️"], "👍"),
+            (["👍"], "👍️"),
+            (["…"], "…"),
+            # Thinking in the answer is the agent's own and is not compared.
+            (["On it."], "<thinking>Sam asked me, and nobody else has looked.</thinking>On it."),
+        ):
+            with self.subTest(answer=answer):
+                self.fresh()
+                turn = self.open_turn()
+                for text in wrote:
+                    text, kind = text if isinstance(text, tuple) else (text, False)
+                    self.participant.model_wrote(turn_id="t1", text=text, reasoning=kind)
+                decision = self.finish_and_commit(turn, answer)
+                self.assertEqual("deliver", decision.kind, turn.unattributed)
+                self.thread.join(5)
+                self.assertEqual("message", self.box["ok"]["kind"])
+
+    def test_a_long_or_repetitive_answer_is_checked_in_bounded_time(self):
+        # A harness gives up on a slow output hook (Hermes then posts the raw draft).
+        import time
+
+        from nunchi.turn import _written_by_model
+
+        text = " ".join(["alpha beta gamma delta epsilon zeta eta theta iota kappa"] * 4000)
+        half = len(text) // 2
+        started = time.monotonic()
+        self.assertTrue(_written_by_model(text, [text[:half], text[half - 500:]]))
+        self.assertFalse(_written_by_model(text + " omega", [text[:half], "x", text[half:]]))
+        self.assertLess(time.monotonic() - started, 5)
+
+    def test_an_integration_that_reports_nothing_fails_loudly(self):
+        turn = self.open_turn()
+        self.assertEqual("silent", self.participant.finish(turn_id="t1", answer="On it.").kind)
+        self.assertIn("reported nothing its model wrote", turn.unattributed)
+        box = self.end()
+        self.assertIn("declared model_text", str(box["error"]))
+
+    def test_an_empty_answer_is_still_silence(self):
+        turn = self.open_turn()
+        self.assertEqual("silent", self.participant.finish(turn_id="t1", answer="").kind)
+        self.assertEqual("silent", self.participant.finish(turn_id="t1", answer="<thinking>Castor has it.</thinking>").kind)
+        self.assertIsNone(turn.unattributed)
+        self.assertEqual({"ok": {"kind": "silence", "why": "Castor has it."}}, self.end())
+
+    def test_after_its_reaction_the_harnesss_text_posts_nothing_more(self):
+        turn = self.open_turn()
+        reacting = threading.Thread(
+            target=self.participant.call_tool,
+            kwargs={"turn_id": "t1", "tool": "emoji", "arguments": {"target_event_id": "e1", "reaction": "👍"}},
+            daemon=True,
+        )
+        reacting.start()
+        self.assertTrue(turn.action_ready.wait(5))
+        self.assertEqual("silent", self.participant.finish(turn_id="t1", answer="(empty)").kind)
+        self.thread.join(5)
+        self.assertEqual("reaction", self.box["ok"]["kind"])
+
+    def test_a_harness_text_holding_a_secret_is_not_quoted(self):
+        turn = self.open_turn()
+        self.participant.model_wrote(turn_id="t1", text="Checking.")
+        self.participant.finish(turn_id="t1", answer="Error: a-withheld-secret-value was rejected")
+        self.assertNotIn("a-withheld-secret-value", turn.unattributed)
+        self.assertNotIn("a-withheld-secret-value", str(self.end()["error"]))
+
+    def test_a_report_for_another_run_is_not_kept(self):
+        turn = self.open_turn()
+        self.assertFalse(self.participant.model_wrote(turn_id="other", text="On it."))
+        self.assertEqual([], turn.written)
+        self.assertEqual(0, turn.model_reports)
+
+    def test_model_text_needs_final_answer_posting(self):
+        with self.assertRaises(ValueError):
+            TurnParticipant(
+                profile=PROFILE, driver=RecordingDriver(), guard=SecretGuard(()), tool_names=NAMES, model_text=True
+            )
+
+    def test_without_model_text_the_answer_is_not_checked(self):
+        participant = TurnParticipant(
+            profile=PROFILE,
+            driver=RecordingDriver(),
+            guard=SecretGuard(()),
+            tool_names=NAMES,
+            silence_marker="[SILENT]",
+        )
+        self.assertFalse(participant.model_text)
+        from nunchi.participant_model import build_participant_turn_request
+        from nunchi.turn import Turn
+
+        turn = Turn(
+            profile=PROFILE,
+            request=build_participant_turn_request(test_wake(), deepcopy(OPPORTUNITY)),
+            silence_marker="[SILENT]",
+        )
+        self.assertEqual("deliver", turn.decide("(empty)").kind)
+
+
 class HarnessHostedFinalAnswerTests(unittest.TestCase):
     """A harness that posts its agent's answer itself, through the library's turn."""
 
@@ -792,8 +1136,8 @@ class LocalTurnProtocolTests(unittest.TestCase):
         status, body = self.post("/v1/attach", {})
         self.assertEqual(200, status)
         self.assertEqual(
-            ("nunchi.turn-session", 1, "tools", None),
-            (body["protocol"], body["version"], body["posting"], body["silence_marker"]),
+            ("nunchi.turn-session", 2, "tools", None, False),
+            (body["protocol"], body["version"], body["posting"], body["silence_marker"], body["model_text"]),
         )
         self.assertEqual(["say", "emoji", "ask_operator", "take_back", "look"], [tool["name"] for tool in body["tools"]])
         self.assertTrue(self.participant.attached)
@@ -865,6 +1209,74 @@ class LocalTurnProtocolTests(unittest.TestCase):
     def test_finish_is_refused_for_a_participant_that_posts_through_tools(self):
         self.serve()
         self.assertIn("error", self.post("/v1/turn/finish", {"turn_id": "t1", "answer": "hi"})[1])
+
+    def test_attach_says_the_integration_must_report_what_the_model_wrote(self):
+        self.serve(silence_marker="[SILENT]", model_text=True)
+        status, body = self.post("/v1/attach", {})
+        self.assertEqual((200, True), (status, body["model_text"]))
+
+    def test_model_text_over_the_socket_lets_only_the_models_words_post(self):
+        from nunchi.turn import HARNESS_DELIVERS
+
+        self.serve(silence_marker="[SILENT]", model_text=True)
+        box, thread, cancel = run_in_thread(self.participant, self.room)
+        self.addCleanup(cancel.set)
+        self.assertTrue(self.driver.started_event.wait(5))
+        turn = self.driver.started[0]
+        self.post("/v1/turn/bind", {"turn_id": "t1", "wake_id": turn.wake_id})
+        self.assertEqual({"kept": False}, self.post("/v1/turn/model-text", {"turn_id": "other", "text": "hi"})[1])
+        self.assertIn("error", self.post("/v1/turn/model-text", {"turn_id": "t1", "text": 7})[1])
+        self.assertIn("error", self.post("/v1/turn/model-text", {"turn_id": "t1", "text": "hi", "reasoning": "yes"})[1])
+        self.assertEqual({"kept": True}, self.post("/v1/turn/model-text", {"turn_id": "t1", "text": "On it."})[1])
+        answer = {}
+        threading.Thread(
+            target=lambda: answer.setdefault(
+                "body", self.post("/v1/turn/finish", {"turn_id": "t1", "answer": "On it."})[1]
+            ),
+            daemon=True,
+        ).start()
+        self.assertTrue(turn.action_ready.wait(5))
+        self.participant.settle(turn.request_id, TransportResult("unknown", HARNESS_DELIVERS))
+        thread.join(5)
+        self.assertTrue(wait_until(lambda: "body" in answer))
+        self.assertEqual({"finish": "deliver", "text": "On it."}, answer["body"])
+        self.assertEqual("On it.", box["ok"]["text"])
+
+    def test_the_harnesss_own_text_over_the_socket_fails_the_turn_and_says_why(self):
+        self.serve(silence_marker="[SILENT]", model_text=True)
+        box, thread, cancel = run_in_thread(self.participant, self.room)
+        self.addCleanup(cancel.set)
+        self.assertTrue(self.driver.started_event.wait(5))
+        turn = self.driver.started[0]
+        self.post("/v1/turn/bind", {"turn_id": "t1", "wake_id": turn.wake_id})
+        self.post("/v1/turn/model-text", {"turn_id": "t1", "text": ""})
+        # Reasoning is reported apart; the stand-in is not a word inside it.
+        self.assertEqual({"kept": True}, self.post(
+            "/v1/turn/model-text", {"turn_id": "t1", "text": "The log is empty.", "reasoning": True})[1])
+        status, body = self.post("/v1/turn/finish", {"turn_id": "t1", "answer": "(empty)"})
+        self.assertEqual(("silent", ""), (body["finish"], body["text"]))
+        self.assertIn('"(empty)": no reported model response holds this text', body["failed"])
+        self.post("/v1/turn/end", {"turn_id": "t1", "ok": True})
+        thread.join(5)
+        self.assertIsInstance(box["error"], TurnError)
+
+    def test_a_harness_that_declares_model_text_and_never_reports_fails_loudly(self):
+        self.serve(silence_marker="[SILENT]", model_text=True)
+        box, thread, cancel = run_in_thread(self.participant, self.room)
+        self.addCleanup(cancel.set)
+        self.assertTrue(self.driver.started_event.wait(5))
+        turn = self.driver.started[0]
+        self.post("/v1/turn/bind", {"turn_id": "t1", "wake_id": turn.wake_id})
+        body = self.post("/v1/turn/finish", {"turn_id": "t1", "answer": "On it."})[1]
+        self.assertEqual("silent", body["finish"])
+        self.assertIn("reported nothing its model wrote", body["failed"])
+        self.post("/v1/turn/end", {"turn_id": "t1", "ok": True})
+        thread.join(5)
+        self.assertIn("declared model_text", str(box["error"]))
+
+    def test_model_text_is_refused_for_a_participant_that_posts_through_tools(self):
+        self.serve()
+        self.assertIn("error", self.post("/v1/turn/model-text", {"turn_id": "t1", "text": "hi"})[1])
 
     def test_the_launch_secret_is_refused_on_a_tool_call(self):
         self.serve()

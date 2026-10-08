@@ -13,6 +13,16 @@ So the script reaches its turn exactly as a model would: the plugin's driver
 injects the turn, `pre_llm_call` binds it, a ``finish`` step is the model's
 final text (`transform_llm_output`), a ``call`` step is a tool call the model
 makes, and what the agent is told comes back in Hermes's next model request.
+A ``stand_in`` step is a run whose model gives no answer, so Hermes ends it
+with its own text. When the model wrote something, it wrote it beside a tool
+call: with the kit's budget of one model call (``agent.max_turns: 1``), Hermes
+ends the run with its iteration-limit text. When the model wrote nothing, it
+answers empty every time Hermes asks: Hermes retries, then ends the run with
+``(empty)``.
+
+Hermes runs with the room settings `integrations/hermes-plugin/README.md`
+gives (`room_settings`), and the recording adapter takes its platform settings
+from the config Hermes loads, so the README's keys are what the kit tests.
 
 Hermes must be importable (a clean, pinned install; see `.github/workflows`).
 """
@@ -22,6 +32,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 import contextlib
+import copy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -36,19 +47,53 @@ from typing import Any
 from ..attention import ParticipantProfile
 from ..turn import SecretGuard
 from ..turn_conformance import ScriptedAgent
-from .hermes_plugin.plugin import PLUGIN_NAME, TOOL_NAMES, WAKE_MARKER, HermesRoomPlugin, HermesRoute
+from .hermes_plugin.plugin import (
+    DEFAULT_FAILURE_GRACE_SECONDS,
+    DEFAULT_RECOVERY_GRACE_SECONDS,
+    PLUGIN_NAME,
+    TOOL_NAMES,
+    WAKE_MARKER,
+    HermesRoomPlugin,
+    HermesRoute,
+)
 
 ROOM = "conformance-room"
 TURN_USER = "nunchi-turns"
-# Hermes's per-platform display settings a Nunchi room needs: no streamed
-# drafts, tool progress lines, interim assistant text or "still working" notes.
+# The Hermes settings a Nunchi room needs, so that people see only what the
+# agent chose to do (integrations/hermes-plugin/README.md, "Hermes setup the
+# room needs"). Per platform, under display.platforms.<platform>: no streamed
+# drafts, tool progress lines, interim assistant text, "still working" notes,
+# retry and budget status lines, reasoning, or runtime footer. The per-platform
+# footer setting outranks the top-level one Hermes's /footer command writes.
 ROOM_DISPLAY = {
     "streaming": False,
     "tool_progress": "off",
     "interim_assistant_messages": False,
     "long_running_notifications": False,
+    "suppress_warning_notifications": True,
+    "show_reasoning": False,
+    "runtime_footer": {"enabled": False},
 }
+# Display settings Hermes reads only at the top level of `display`, for the
+# whole profile: no footer after a failed file edit, no explanation added to
+# a short or missing answer (agent/turn_explainers.py), and no busy notice.
+ROOM_DISPLAY_GLOBAL = {
+    "file_mutation_verifier": False,
+    "turn_completion_explainer": False,
+    "busy_ack_enabled": False,
+}
+# The platform's own block (`telegram:`, `discord:`), for the whole bot: no
+# typing indicator and no processing reactions on people's messages.
+ROOM_PLATFORM = {
+    "typing_indicator": False,
+    "reactions": False,
+}
+# Hermes toolsets that reach people outside the agent's answer: clarify
+# prompts and scheduled deliveries.
+ROOM_DISABLED_TOOLSETS = ("clarify", "cronjob")
 _STEP_SECONDS = 20.0
+# Hermes's own text for a run with no answer can take a few retries.
+_STAND_IN_SECONDS = 90.0
 _PLUGIN_YAML = Path(__file__).parent / "hermes_plugin" / "plugin.yaml"
 _KIT_PLUGIN_INIT = (
     '"""The Nunchi Hermes plugin, wired to the turn conformance kit."""\n'
@@ -58,6 +103,16 @@ _KIT_PLUGIN_INIT = (
 # The scenario being set up: what `register_for_kit` builds the plugin from.
 _PENDING: dict[str, Any] = {}
 _ISOLATION: dict[str, Any] = {}
+
+
+def room_settings(platform: str = "telegram") -> dict[str, Any]:
+    """The Hermes config a Nunchi room on ``platform`` needs, beside the plugin's entry."""
+
+    return {
+        "display": {**ROOM_DISPLAY_GLOBAL, "platforms": {platform: copy.deepcopy(ROOM_DISPLAY)}},
+        platform: dict(ROOM_PLATFORM),
+        "agent": {"disabled_toolsets": list(ROOM_DISABLED_TOOLSETS)},
+    }
 
 
 def hermes_available() -> bool:
@@ -99,6 +154,8 @@ def register_for_kit(ctx: Any) -> None:
         route=_PENDING["route"],
         result_wait_seconds=_PENDING.get("result_wait_seconds", 5.0),
         start_timeout_seconds=_PENDING.get("start_timeout_seconds", 30.0),
+        failure_grace_seconds=_PENDING.get("failure_grace_seconds", DEFAULT_FAILURE_GRACE_SECONDS),
+        recovery_grace_seconds=_PENDING.get("recovery_grace_seconds", DEFAULT_RECOVERY_GRACE_SECONDS),
         roles=_PENDING.get("roles", ("react", "context")),
         # The kit builds its own Room; an end-to-end test lets the plugin build one.
         room_factory=_PENDING.get("room_factory"),
@@ -114,7 +171,12 @@ class ScriptedModel:
     """An OpenAI-compatible chat endpoint whose answers the scripted agent supplies.
 
     Only the agent's own model calls (those offering tools) are scripted. Hermes's
-    auxiliary calls, such as naming the session, get a fixed answer.
+    auxiliary calls, such as naming the session, get a fixed answer. A reply
+    is ``{"text": ...}``, ``{"tool": name, "arguments": {...}}`` (with optional
+    text), or ``{"status": 400, "error": message}``: the provider refuses, or
+    with a 5xx status is out of service. A text reply may add ``reasoning``
+    (the provider's ``reasoning_content``), ``finish`` (its finish reason,
+    such as ``length``), or ``drop``: the stream breaks off after the text.
     """
 
     def __init__(self) -> None:
@@ -187,6 +249,16 @@ class ScriptedModel:
                     self._json({})
                     return
                 reply = model._answer(request)
+                if "status" in reply:
+                    kind = "server_error" if int(reply["status"]) >= 500 else "invalid_request_error"
+                    payload = json.dumps({"error": {"message": str(reply.get("error", "refused")),
+                                                    "type": kind}}).encode()
+                    self.send_response(int(reply["status"]))
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return
                 message: dict[str, Any] = {"role": "assistant", "content": reply.get("text", "")}
                 finish = "stop"
                 if "tool" in reply:
@@ -203,7 +275,12 @@ class ScriptedModel:
                         ],
                     }
                     finish = "tool_calls"
-                usage = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+                if reply.get("reasoning"):
+                    message["reasoning_content"] = reply["reasoning"]
+                finish = reply.get("finish", finish)
+                # An empty reply generated nothing, as a provider reports it.
+                output = 5 if message.get("content") or message.get("tool_calls") or reply.get("reasoning") else 0
+                usage = {"prompt_tokens": 10, "completion_tokens": output, "total_tokens": 10 + output}
                 if not request.get("stream"):
                     self._json(
                         {
@@ -221,12 +298,21 @@ class ScriptedModel:
                 self.send_header("Connection", "close")
                 self.end_headers()
                 delta: dict[str, Any] = {"role": "assistant"}
+                if message.get("reasoning_content"):
+                    delta["reasoning_content"] = message["reasoning_content"]
                 if message.get("content"):
                     delta["content"] = message["content"]
                 if message.get("tool_calls"):
                     delta["tool_calls"] = [dict(call, index=i) for i, call in enumerate(message["tool_calls"])]
                 base = {"id": "conformance", "object": "chat.completion.chunk", "created": int(time.time()),
                         "model": "conformance/model"}
+                if reply.get("drop"):
+                    # The connection breaks mid-answer: no finish reason, no [DONE].
+                    chunk = dict(base, choices=[{"index": 0, "delta": delta, "finish_reason": None}])
+                    self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
+                    self.wfile.flush()
+                    self.close_connection = True
+                    return
                 for chunk in (
                     dict(base, choices=[{"index": 0, "delta": delta, "finish_reason": None}]),
                     dict(base, choices=[{"index": 0, "delta": {}, "finish_reason": finish}], usage=usage),
@@ -279,8 +365,8 @@ class HermesGateway:
                       "api_key": "sk-local-conformance"},
             "plugins": {"enabled": [PLUGIN_NAME], "entries": {PLUGIN_NAME: entry}},
             # Operator setup for a Nunchi room (integrations/hermes-plugin/README.md):
-            # only the final answer the library committed may reach the room.
-            "display": {"platforms": {"telegram": dict(ROOM_DISPLAY)}},
+            # only what the agent chose to do may reach the room.
+            **room_settings("telegram"),
             "tools": {"tool_search": {"enabled": tool_search}},
         }
         for key, value in (extra_config or {}).items():
@@ -291,8 +377,19 @@ class HermesGateway:
         # JSON is YAML: Hermes reads it as its config.yaml.
         (self.home / "config.yaml").write_text(json.dumps(config), encoding="utf-8")
         (self.home / ".env").write_text(f"TELEGRAM_ALLOWED_USERS={allowed_users}\n", encoding="utf-8")
+        # Hermes copies agent.max_turns into HERMES_MAX_ITERATIONS, and
+        # display.busy_ack_enabled into HERMES_GATEWAY_BUSY_ACK_ENABLED, for the
+        # whole process (gateway/run.py), so they are put back with the rest on
+        # close. Hermes bridges busy_ack_enabled only when it first imports
+        # gateway.run: each gateway sets it from its own config, as that would.
         self._saved_env = {key: os.environ.get(key) for key in (
-            "HERMES_HOME", "TELEGRAM_ALLOWED_USERS", "GATEWAY_ALLOWED_USERS", "GATEWAY_ALLOW_ALL_USERS")}
+            "HERMES_HOME", "TELEGRAM_ALLOWED_USERS", "GATEWAY_ALLOWED_USERS", "GATEWAY_ALLOW_ALL_USERS",
+            "HERMES_MAX_ITERATIONS", "HERMES_GATEWAY_BUSY_ACK_ENABLED")}
+        busy_ack = config.get("display", {}).get("busy_ack_enabled")
+        if busy_ack is None:
+            os.environ.pop("HERMES_GATEWAY_BUSY_ACK_ENABLED", None)
+        else:
+            os.environ["HERMES_GATEWAY_BUSY_ACK_ENABLED"] = str(busy_ack)
         os.environ["HERMES_HOME"] = str(self.home)
         os.environ["TELEGRAM_ALLOWED_USERS"] = allowed_users
         os.environ.pop("GATEWAY_ALLOWED_USERS", None)
@@ -311,19 +408,31 @@ class HermesGateway:
         return asyncio.run_coroutine_threadsafe(coroutine, self.loop).result(timeout)
 
     async def _start(self) -> tuple[Any, Any]:
-        from gateway.config import GatewayConfig, Platform, PlatformConfig
+        import dataclasses
+
+        from gateway.config import GatewayConfig, Platform, PlatformConfig, load_gateway_config
         from gateway.platforms.base import BasePlatformAdapter, SendResult
+
+        # The platform settings as Hermes loads them from this home's config
+        # (the README's `telegram:` block), as a real adapter gets them.
+        loaded = await asyncio.to_thread(load_gateway_config)
+        settings = loaded.platforms.get(Platform.TELEGRAM) or PlatformConfig()
+        platform_config = dataclasses.replace(
+            settings,
+            enabled=True,
+            token="conformance",
+            extra={**settings.extra, "group_sessions_per_user": True},
+        )
         from gateway.run import GatewayRunner
         from hermes_cli.plugins import discover_plugins
 
         class RecordingAdapter(BasePlatformAdapter):
             def __init__(self) -> None:
-                super().__init__(
-                    PlatformConfig(enabled=True, token="conformance", extra={"group_sessions_per_user": True}),
-                    Platform.TELEGRAM,
-                )
+                super().__init__(platform_config, Platform.TELEGRAM)
                 self.sent: list[tuple[str, str]] = []
                 self.reactions: list[tuple[str, str, str]] = []
+                # Each typing action Hermes sent, by chat.
+                self.typing: list[str] = []
                 self._running = True
 
             async def connect(self, *, is_reconnect: bool = False) -> bool:
@@ -342,6 +451,7 @@ class HermesGateway:
                 return True
 
             async def send_typing(self, chat_id, metadata=None):
+                self.typing.append(str(chat_id))
                 return None
 
             async def get_chat_info(self, chat_id):
@@ -489,6 +599,30 @@ class HermesSurface:
             return "deliver", sent[-1][1]
         return "silent", ""
 
+    def stand_in(self, turn_id: str, text: str, wrote: str) -> tuple[str, str]:
+        # Hermes answers for the model with its own words, not ``text``. When
+        # the model wrote ``wrote``, it wrote it beside a tool call and runs out
+        # of budget; Hermes may ask it to sum up, and it calls a tool again, so
+        # no answer comes. When it wrote nothing, it answers empty each time.
+        before_sent = len(self.gateway.adapter.sent)
+        if wrote:
+            again: dict[str, Any] = {"tool": TOOL_NAMES["context"], "arguments": {}}
+            first = {**again, "text": wrote}
+        else:
+            again = first = {"text": ""}
+        self.model.reply(first)
+        answered = self.model.count()
+        deadline = time.monotonic() + _STAND_IN_SECONDS
+        while time.monotonic() < deadline:
+            if self.model.count() > answered:
+                answered += 1
+                self.model.reply(again)
+            if self.turn.ended.is_set() and self.gateway.idle():
+                break
+            time.sleep(0.02)
+        sent = self.gateway.adapter.sent[before_sent:]
+        return ("deliver", sent[-1][1]) if sent else ("silent", "")
+
     def end(self, turn_id: str, ok: bool, note: str | None = None) -> None:
         # The run ends by itself after its final answer; wait for Hermes to report it.
         deadline = time.monotonic() + _STEP_SECONDS
@@ -504,6 +638,12 @@ class HermesHarness:
 
     ``room_factory`` lets the plugin build its own `Room` (end-to-end, through
     Hermes's ingress); without it the caller builds the room, as the kit does.
+
+    Hermes runs with the room settings (`room_settings`). ``display`` replaces
+    the platform's display settings, ``agent`` adds Hermes agent settings, and
+    ``extra_config`` changes any other part of the config, one level deep
+    (``{"display": {"turn_completion_explainer": True}}`` keeps the rest of
+    ``display``).
     """
 
     def __init__(
@@ -519,6 +659,10 @@ class HermesHarness:
         platform_actions: bool = False,
         display: Mapping[str, Any] | None = None,
         roles: tuple[str, ...] = ("react", "context"),
+        agent: Mapping[str, Any] | None = None,
+        extra_config: Mapping[str, Any] | None = None,
+        failure_grace_seconds: float | None = None,
+        recovery_grace_seconds: float | None = None,
     ) -> None:
         if not hermes_available():
             raise RuntimeError("Hermes is not installed in this Python environment")
@@ -533,14 +677,25 @@ class HermesHarness:
             start_timeout_seconds=start_timeout_seconds,
             result_wait_seconds=result_wait_seconds,
             roles=roles,
+            **({} if failure_grace_seconds is None else {"failure_grace_seconds": failure_grace_seconds}),
+            **({} if recovery_grace_seconds is None else {"recovery_grace_seconds": recovery_grace_seconds}),
         )
+        extra: dict[str, Any] = {}
+        if display is not None:
+            extra["display"] = {"platforms": {"telegram": dict(display)}}
+        if agent is not None:
+            # Hermes's own agent settings, such as its budget of model calls.
+            extra["agent"] = dict(agent)
+        for key, value in (extra_config or {}).items():
+            if isinstance(value, Mapping) and isinstance(extra.get(key), dict):
+                extra[key] = {**extra[key], **value}
+            else:
+                extra[key] = value
         try:
             self.gateway = HermesGateway(
                 model=self.model, tool_search=tool_search, allowed_users=allowed_users,
                 platform_actions=platform_actions,
-                extra_config=(
-                    {"display": {"platforms": {"telegram": dict(display)}}} if display is not None else None
-                ),
+                extra_config=extra or None,
             )
         except BaseException:
             self.model.close()
@@ -602,6 +757,8 @@ class HermesHarness:
 class HermesKitIntegration:
     name = "Hermes plugin"
     posting = "final-answer"
+    # Hermes ends a run with its own text when its model gives no answer.
+    harness_text = True
 
     def __init__(self, *, tool_search: str = "off") -> None:
         self.tool_search = tool_search
@@ -610,11 +767,15 @@ class HermesKitIntegration:
     def participant(
         self, *, profile: ParticipantProfile, guard: SecretGuard, agent: ScriptedAgent, privileged: bool = False
     ) -> Any:
+        # A model that writes beside a tool call and gets no further: one model
+        # call, then Hermes's own text.
+        budget = any(step[0] == "stand_in" and step[2] for turn in agent.turns for step in turn)
         self.harness = harness = HermesHarness(
             profile=profile,
             guard=guard,
             tool_search=self.tool_search,
             roles=("react", "context", "propose", "withdraw") if privileged else ("react", "context"),
+            agent={"max_turns": 1} if budget else None,
         )
         plugin = harness.plugin
 
@@ -643,9 +804,14 @@ __all__ = [
     "HermesKitIntegration",
     "HermesSurface",
     "ScriptedModel",
+    "ROOM_DISABLED_TOOLSETS",
+    "ROOM_DISPLAY",
+    "ROOM_DISPLAY_GLOBAL",
+    "ROOM_PLATFORM",
     "WAKE_MARKER",
     "conformance_integrations",
     "hermes_available",
     "isolate",
     "register_for_kit",
+    "room_settings",
 ]

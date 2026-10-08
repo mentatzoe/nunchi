@@ -6,19 +6,28 @@ integration's process can reach. Each request carries the per-launch session
 secret the integration was given; any other caller is refused. The harness
 holds that secret, so its agent may read it: the server adds it to its
 participant's secret guard, and a room action that carries it is refused like
-any other withheld secret. This is interface ``I-040D LocalTurnProtocolV2@1``:
+any other withheld secret. This is interface ``I-040D LocalTurnProtocolV2@2``:
 
 | Route | Body | Answer |
 |---|---|---|
-| `/v1/attach` | `{}` | `protocol`, `version`, `posting`, `silence_marker`, `tools` |
+| `/v1/attach` | `{}` | `protocol`, `version`, `posting`, `silence_marker`, `model_text`, `tools` |
 | `/v1/turn/bind` | `turn_id`, `wake_id` | `bound` |
 | `/v1/turn/call` | `turn_id`, `tool`, `input` | `ok` with `text`, or `error` |
 | `/v1/turn/after-tool` | `turn_id` | `text` or null (steering) |
-| `/v1/turn/finish` | `turn_id`, `answer` | `finish` (`deliver`, `continue`, `silent`) and `text` |
+| `/v1/turn/model-text` | `turn_id`, `text`, `reasoning` (optional) | `kept` |
+| `/v1/turn/finish` | `turn_id`, `answer` | `finish` (`deliver`, `continue`, `silent`) and `text`; `failed` when the answer was not the model's |
 | `/v1/turn/end` | `turn_id` (optional), `ok`, `detail`, `note` (optional) | `ended` |
 
 `/v1/turn-start`, `/v1/tool` and `/v1/news` are the first integration's names
 for bind, call and after-tool, and stay as aliases.
+
+When attach answers ``model_text: true`` the integration must report what
+the model wrote, each response, with `/v1/turn/model-text` before it
+finishes the turn (@2): the response's text, and any reasoning in a report
+of its own with ``reasoning: true``. A final answer that is not those words
+is never posted: the turn fails, and `finish` says why in ``failed``. An
+integration that never reports gets that failure on every answer, not
+silence.
 """
 
 from __future__ import annotations
@@ -36,7 +45,7 @@ from typing import Any
 from .turn import TurnParticipant
 
 PROTOCOL = "nunchi.turn-session"
-VERSION = 1
+VERSION = 2
 MAX_BODY_BYTES = 256 * 1024
 # A launch secret shorter than this is refused: the guard must be able to hold it.
 MIN_SECRET_CHARACTERS = 16
@@ -154,6 +163,8 @@ class TurnServer:
                 "version": VERSION,
                 "posting": "tools" if participant.silence_marker is None else "final-answer",
                 "silence_marker": participant.silence_marker,
+                # Whether the integration must report what the model wrote.
+                "model_text": participant.model_text,
                 "tools": participant.attach(),
             }
         if path == "/v1/turn/bind":
@@ -174,14 +185,29 @@ class TurnServer:
             return {"ok": True, "text": text} if ok else {"ok": False, "error": text}
         if path == "/v1/turn/after-tool":
             return {"text": participant.news(turn_id=turn_id)}
+        if path == "/v1/turn/model-text":
+            if participant.silence_marker is None:
+                return {"error": "this participant posts through tools"}
+            text = body.get("text")
+            if text is not None and not isinstance(text, str):
+                return {"error": "text must be a string"}
+            reasoning = body.get("reasoning", False)
+            if not isinstance(reasoning, bool):
+                return {"error": "reasoning must be true or false"}
+            return {"kept": participant.model_wrote(turn_id=turn_id, text=text, reasoning=reasoning)}
         if path == "/v1/turn/finish":
             answer = body.get("answer")
             if participant.silence_marker is None:
                 return {"error": "this participant posts through tools"}
+            turn = participant.active
             decision = participant.finish(
                 turn_id=turn_id, answer=answer if isinstance(answer, str) else None
             )
-            return {"finish": decision.kind, "text": decision.text}
+            answered: dict[str, Any] = {"finish": decision.kind, "text": decision.text}
+            if turn is not None and turn.bound(turn_id) and turn.unattributed is not None:
+                # Loud for the integration: the turn failed, it was not silence.
+                answered["failed"] = turn.unattributed
+            return answered
         if path == "/v1/turn/end":
             ok = body.get("ok")
             detail = body.get("detail")

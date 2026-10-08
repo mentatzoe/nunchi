@@ -326,15 +326,29 @@ them the same way:
 
 Final-answer posting is the other style, for harnesses whose agent's final
 answer is its post and whose plugins cannot send, such as Hermes. The
-integration names its harness's silence marker (`silence_marker`), and
-there is no send tool:
+integration names its harness's silence marker (`silence_marker`) and the
+harness's other silent answers (`also_silent`), and there is no send tool:
 
 - `Turn.decide(answer)` says what becomes of the answer: `deliver` makes it
   the turn's one message; `continue` has the agent answer again with the
   turn's text in view, once for looking again and once for a refused secret;
-  `silent` covers the marker (at the start or on a line of its own; anything
-  else in that answer is never posted), an empty answer, a turn that already
-  took its room action such as a reaction, and an ended turn.
+  `silent` covers the marker (at the start, on a line of its own, or the
+  whole answer, with any punctuation, `` ` `` or `~` around it; anything else
+  in that answer is never posted), a whole answer that is one of
+  `also_silent`, an empty answer, a turn that already took its room action
+  such as a reaction, and an ended turn.
+- With `model_text=True` the integration reports what the model wrote in
+  each response (`Turn.model_wrote`): its text, and its reasoning apart
+  (`reasoning=True`). The answer must be those words: a run of them in one
+  response's text, or running on across responses. Case, whitespace,
+  punctuation, markdown and tagged blocks do not count. Reasoning and a
+  tagged block count only as a whole answer, and an answer of one or two
+  words keeps its punctuation, so a harness's `(empty)` is not the model's
+  word "empty". Any other answer,
+  such as the harness's own notice for a run that produced nothing, is
+  `silent` here and fails the turn (`TurnError`): it is never posted, never
+  the agent's silence, and never in its memory. An empty answer is still
+  silence.
 - The agent may think first inside `<thinking></thinking>`. That text is never
   posted; it becomes the move's reason in the agent's memory, as `why` does in
   the envelope, so a later turn knows why it spoke or held back. An unclosed
@@ -349,18 +363,19 @@ there is no send tool:
 
 A harness outside Python makes the same calls as versioned JSON over a
 private Unix socket (`nunchi.turn_server`, interface `I-040D
-LocalTurnProtocolV2@1`). Every request carries the per-launch session secret
+LocalTurnProtocolV2@2`). Every request carries the per-launch session secret
 the integration was given. The harness holds that secret, so the server adds
 it to its participant's guard, and a room action that carries it is refused.
 A secret shorter than 16 characters is refused at start.
 
 | Route | Body | Answer |
 |---|---|---|
-| `/v1/attach` | `{}` | `protocol` (`nunchi.turn-session`), `version`, `posting` (`tools` or `final-answer`), `silence_marker`, `tools` |
+| `/v1/attach` | `{}` | `protocol` (`nunchi.turn-session`), `version` (2), `posting` (`tools` or `final-answer`), `silence_marker`, `model_text`, `tools` |
 | `/v1/turn/bind` | `turn_id`, `wake_id` | `bound` |
 | `/v1/turn/call` | `turn_id`, `tool`, `input` | `ok` with `text`, or `error` |
 | `/v1/turn/after-tool` | `turn_id` | `text` or null |
-| `/v1/turn/finish` | `turn_id`, `answer` | `finish` (`deliver`, `continue` or `silent`) and `text` |
+| `/v1/turn/model-text` | `turn_id`, `text`, `reasoning` (optional, true for the model's reasoning) | `kept` |
+| `/v1/turn/finish` | `turn_id`, `answer` | `finish` (`deliver`, `continue` or `silent`) and `text`; `failed`, with the reason, when the answer was not the model's and the turn failed |
 | `/v1/turn/end` | `turn_id` (optional: without it, the open turn ends even if it was never bound, which is a failure), `ok`, `detail` | `ended` |
 
 The Claude Code mod's route names, `/v1/turn-start`, `/v1/tool` and
