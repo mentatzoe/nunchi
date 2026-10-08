@@ -761,8 +761,11 @@ class HermesGatewayTest(unittest.TestCase):
 
     def test_kit_final_answer_scenarios(self):
         from nunchi import turn_conformance as kit
-        from nunchi.integrations.hermes_plugin_conformance import HermesKitIntegration
+        from nunchi.integrations.hermes_plugin_conformance import HERMES_KNOWN_GAPS, HermesKitIntegration
 
+        # Hermes's known gaps show where declared, as 'gap' and never 'pass';
+        # once Hermes closes one, its scenario passes and the docs must change.
+        gapped = {name for gap in HERMES_KNOWN_GAPS for name in gap.scenarios}
         for platform in ("telegram", "discord"):
             integration = HermesKitIntegration(platform=platform)
             for name, scenario in kit.SCENARIOS.items():
@@ -772,7 +775,9 @@ class HermesGatewayTest(unittest.TestCase):
                     if platform == "discord" and not discord_available():
                         self.skipTest("the Discord lane needs discord.py (hermes-agent[messaging])")
                     result = kit.run_scenario(name, integration)
-                    self.assertEqual(result["status"], "pass", result.get("failures"))
+                    expected = "gap" if name in gapped else "pass"
+                    self.assertEqual(expected, result["status"], (result.get("failures"), result.get("gaps")))
+                    self.assertEqual(len(result.get("gaps", ())), result["leak_count"])
 
     def test_the_room_sees_hermess_reply_target_time_and_mentions(self):
         harness = self._harness()
@@ -881,6 +886,24 @@ class HermesGatewayTest(unittest.TestCase):
         self.assertEqual([(ROOM, post)], sent)
         self.assertIn(("reply", post), [(move.get("kind"), move.get("text")) for move in wake["memory"]["own_moves"]])
         self.assertEqual(1, wake["pace"]["own_messages"])
+
+    # -- the library's commit check, through the real gateway (leak audit row 7) ---------
+
+    def test_thinking_in_any_tag_and_an_echoed_wake_marker_never_reach_the_room(self):
+        # Hermes strips <think> itself; the plugin hands the library the raw
+        # answer, which takes the echoed marker out and keeps the thinking.
+        echoed = WAKE_MARKER.format("an-old-wake-id-from-history")
+        wake, sent = self._next_turn_after(f"<think>Plan: check the logs.</think>\n{echoed}\nChecking now.")
+        self.assertEqual([(ROOM, "Checking now.")], sent)
+        moves = [(move.get("kind"), move.get("text"), move.get("why")) for move in wake["memory"]["own_moves"]]
+        self.assertEqual([("reply", "Checking now.", "Plan: check the logs.")], moves)
+
+    def test_the_marker_after_a_sentence_is_silence_and_the_sentence_is_its_reason(self):
+        wake, sent = self._next_turn_after(f"I'll leave this to Castor. {SILENCE_MARKER}")
+        self.assertEqual([], sent)
+        moves = [(move.get("kind"), move.get("about_event_id"), move.get("why"))
+                 for move in wake["memory"]["own_moves"]]
+        self.assertEqual([("silence", "telegram:message:100", "I'll leave this to Castor.")], moves)
 
     def _after_a_failed_file_edit(self, harness, answer):
         # The model's edit fails (the file does not exist), then it answers.

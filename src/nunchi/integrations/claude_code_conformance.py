@@ -3,8 +3,14 @@
 The scripted agent plays each turn the way the mod does: it reads the wake
 marker from the turn the gate wrote to the session, binds, calls the room
 tools, and asks for steering over the gate's private socket with the launch
-secret. The session's end of turn reaches the gate as it does from
-stream-json. Only the model and the session process are scripted.
+secret. The session's end of turn reaches the gate as a stream-json
+``result``, read by the gate's own reader (`turn_ending`); a failed model call
+is the ``result`` Claude Code writes for a run that ended in an error. Only
+the model and the session process are scripted.
+
+Claude Code reaches the room only through the gate's room tools, which the
+library's transport carries, so the harness shows the room nothing of its own
+(`visible` is empty).
 """
 
 from __future__ import annotations
@@ -22,8 +28,8 @@ from typing import Any, Mapping
 
 from ..attention import ParticipantProfile
 from ..turn import SecretGuard as CoreSecretGuard
-from ..turn_conformance import ScriptedAgent
-from .claude_code_gate import WAKE_MARKER, GatedParticipant, GateServer, full_tool_name
+from ..turn_conformance import MODEL_REFUSED, KnownGap, ScriptedAgent
+from .claude_code_gate import WAKE_MARKER, GatedParticipant, GateServer, full_tool_name, turn_ending
 
 _WAKE = re.compile("^" + re.escape(WAKE_MARKER).replace(r"\{\}", "([A-Za-z0-9_-]+)"))
 
@@ -86,6 +92,10 @@ class _SocketSurface:
         # socket, with its final message as the result.
         self.session.ended(ok, note)
 
+    def fail(self, turn_id: str) -> None:
+        # The model call fails: Claude Code ends the run with an error result.
+        self.session.result({"subtype": "success", "is_error": True, "result": f"API Error: 400 {MODEL_REFUSED}"})
+
 
 class _ScriptedSession:
     """Stands in for the `claude -p` process: the scripted agent is its model."""
@@ -109,12 +119,24 @@ class _ScriptedSession:
         pass
 
     def ended(self, ok: bool, note: str | None = None) -> None:
-        self.on_turn_end(ok=ok, detail="success" if ok else "error_during_execution", note=note)
+        if ok:
+            self.result({"subtype": "success", "is_error": False, "result": note})
+        else:
+            self.result({"subtype": "error_during_execution", "is_error": True})
+
+    def result(self, fields: Mapping[str, Any]) -> None:
+        """A stream-json ``result`` line, through the gate's own reader."""
+
+        ending = turn_ending({"type": "result", **fields})
+        assert ending is not None
+        self.on_turn_end(**ending)
 
 
 class ClaudeCodeKitIntegration:
     name = "Claude Code gate"
     posting = "tools"
+    model_failure = True
+    known_gaps: tuple[KnownGap, ...] = ()
 
     def __init__(self) -> None:
         self._directory: str | None = None
@@ -142,6 +164,11 @@ class ClaudeCodeKitIntegration:
         participant.attach()
         self.launch_secret = secret
         return participant
+
+    def visible(self) -> list[dict[str, Any]]:
+        """Nothing: Claude Code reaches the room only through the library's transport."""
+
+        return []
 
     def close(self) -> None:
         if self._server is not None:

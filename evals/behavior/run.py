@@ -59,6 +59,7 @@ from nunchi.participant import (
 )
 from nunchi.participant_model import OpenAICompatibleParticipant
 from nunchi.pipeline import NunchiV2Pipeline
+from nunchi.turn import machinery_in
 from nunchi.receipts import ReceiptJournal
 
 from .scene import SCENES, Moment, Scene, load_scenes, parse_offset, profile_sha256
@@ -189,6 +190,9 @@ class RecordingAgent:
         self.memory_reasons: list[str] = []
         self.memory_threads: list[dict[str, Any]] = []
         self.replies: list[Any] = []
+        # What the model wrote for the room in this turn, before the
+        # library's commit: each plain reply, or each envelope's text.
+        self.written: list[str] = []
 
     def reset(self) -> None:
         """Forget a played earlier turn, so the record shows only the judged one."""
@@ -201,6 +205,7 @@ class RecordingAgent:
         self.memory_reasons = []
         self.memory_threads = []
         self.replies = []
+        self.written = []
 
     def _usage_since(self, start: int) -> dict[str, Any] | None:
         log = getattr(self.inner, "usage_log", None)
@@ -226,6 +231,8 @@ class RecordingAgent:
         first_call = self._calls_so_far()
         replies = getattr(self.inner, "reply_log", None)
         first_reply = len(replies) if isinstance(replies, list) else 0
+        written = getattr(self.inner, "written_log", None)
+        first_written = len(written) if isinstance(written, list) else 0
         try:
             self.action = self.inner.run_protocol(
                 wake=wake, expand=self._recorded(expand, "with reading"), **kwargs
@@ -239,6 +246,8 @@ class RecordingAgent:
             self.usage = self._usage_since(first_call)
             if isinstance(replies, list):
                 self.replies = list(replies[first_reply:])
+            if isinstance(written, list):
+                self.written = list(written[first_written:])
         if self.paired and self.attention.get("advice"):
             self.without_reading = self._play_without_reading(wake, expand, kwargs)
         return self.action
@@ -593,6 +602,9 @@ class RecordingParticipant(OpenAICompatibleParticipant):
         self.usage_log: list[dict[str, Any]] = []
         # Every plain reply, in order, so a silence's reply can be read too.
         self.reply_log: list[Any] = []
+        # What each reply wrote for the room, before the library's commit:
+        # a plain reply whole, or an envelope's message text.
+        self.written_log: list[str] = []
 
     def _complete(self, messages: Any, *, json_reply: bool) -> Any:
         self.last_reply = None
@@ -600,6 +612,9 @@ class RecordingParticipant(OpenAICompatibleParticipant):
             self.last_reply = super()._complete(messages, json_reply=json_reply)
             if not json_reply:
                 self.reply_log.append(self.last_reply)
+            written = envelope_text(self.last_reply) if json_reply else self.last_reply
+            if isinstance(written, str):
+                self.written_log.append(written)
             return self.last_reply
         finally:
             if self.last_response is not None:
@@ -608,23 +623,53 @@ class RecordingParticipant(OpenAICompatibleParticipant):
 
 RAW_REPLY_MAX_CHARS = 4000
 
-# Words that belong to Nunchi's machinery, never to a post: the agent leaked
-# its own deliberation or the turn's facts into the room.
-INTERNALS = re.compile(
-    r"\battention model|\bnunchi\b|\[silent\]|</?thinking>|own_moves|judged_through|"
-    r"trigger_event_id|attention\.advice|memory\.threads",
-    re.IGNORECASE,
-)
+# The leak count (2026-10-08): the room receives only what the library
+# committed, and nothing that names Nunchi's machinery. The core's
+# `machinery_in` is the one definition, shared with the conformance kit.
+# The <thinking> block final-answer posting teaches is the agent's private
+# place: what the model writes there is never counted as written for the room.
+_TAUGHT_THINKING = re.compile(r"<thinking\s*>.*?</thinking\s*>", re.S | re.I)
 
 
-def mentions_internals(action: Any) -> bool:
-    """Whether a posted message or reply names Nunchi's machinery."""
+def envelope_text(reply: Any) -> str | None:
+    """The text an envelope reply wrote for the room: its message or reply action's text."""
 
-    return (
-        isinstance(action, Mapping)
-        and action.get("kind") in ("message", "reply")
-        and bool(INTERNALS.search(str(action.get("text", ""))))
-    )
+    text = reply.strip() if isinstance(reply, str) else None
+    if text is not None and text.startswith("```"):
+        body = text[3:]
+        body = body[4:] if body[:4].lower() == "json" else body
+        end = body.rfind("```")
+        text = body[:end] if end != -1 else body
+    try:
+        document = json.loads(text) if text is not None else reply
+    except json.JSONDecodeError:
+        return None
+    action = document.get("action") if isinstance(document, Mapping) else None
+    if isinstance(action, Mapping) and action.get("kind") in ("message", "reply"):
+        return action.get("text") if isinstance(action.get("text"), str) else None
+    return None
+
+
+def written_machinery(
+    texts: Any, *, ids: tuple[str, ...] = (), final_answer: bool = False
+) -> list[str]:
+    """What the model wrote for the room that names Nunchi's machinery, before the library's commit."""
+
+    found: list[str] = []
+    for text in texts or ():
+        if isinstance(text, str):
+            if final_answer:
+                text = _TAUGHT_THINKING.sub(" ", text)
+            found += machinery_in(text, ids=ids)
+    return list(dict.fromkeys(found))
+
+
+def posted_machinery(action: Any, *, ids: tuple[str, ...] = ()) -> list[str]:
+    """What a committed message or reply names of Nunchi's machinery: what the room received."""
+
+    if not isinstance(action, Mapping) or action.get("kind") not in ("message", "reply"):
+        return []
+    return machinery_in(str(action.get("text", "")), ids=ids)
 
 
 def _raw_reply(agent: Any) -> Any:
@@ -1072,8 +1117,14 @@ def judge_moment(
                 else reply
                 for reply in agent.replies
             ]
-        if mentions_internals(agent.action):
-            record["agent"]["mentions_internals"] = True
+        ids = (request["request_id"],)
+        final_answer = getattr(getattr(agent, "inner", None), "silence_marker", None) is not None
+        written = written_machinery(agent.written, ids=ids, final_answer=final_answer)
+        if written:
+            record["agent"]["machinery_written"] = written
+        posted = posted_machinery(agent.action, ids=ids)
+        if posted:
+            record["agent"]["machinery_posted"] = posted
         if agent.memory_moves:
             record["agent"]["memory_moves"] = agent.memory_moves
         if agent.memory_reasons:
@@ -1243,13 +1294,17 @@ def _agent_turn_sections(records: list[dict[str, Any]], *, paired: bool) -> list
         if isinstance(record["agent"].get("action"), Mapping)
         and record["agent"]["action"].get("kind") in ("message", "reply")
     ]
-    if posts:
-        leaked = sum(1 for record in posts if record["agent"].get("mentions_internals"))
+    wrote = sum(1 for record in turns if record["agent"].get("machinery_written"))
+    if posts or wrote:
+        leaked = sum(1 for record in posts if record["agent"].get("machinery_posted"))
         lines += [
             "",
-            f"{leaked} of {len(posts)} posts mention Nunchi's machinery (the attention model, "
-            "the silence marker, thinking tags, or the turn's field names). A post should hold "
-            "only words for the room.",
+            f"Leaks: in {wrote} of {len(turns)} turns the agent's model wrote Nunchi's "
+            f"machinery for the room, and {leaked} of {len(posts)} posts carried it into the "
+            "room (`nunchi.turn.machinery_in`: wake markers, the turn's tag, Nunchi tool names, "
+            "thinking tags, the silence marker, the turn's field names, its request id). The "
+            "library takes thinking and wake markers out of a post, and a marker after a "
+            "sentence is silence; the rest is posted as written.",
         ]
     looked = [record for record in turns if record["agent"].get("looked_again")]
     if looked:

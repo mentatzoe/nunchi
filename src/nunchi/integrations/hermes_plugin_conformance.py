@@ -46,6 +46,12 @@ On both lanes the gateway installs the handlers Hermes installs on every
 adapter before it connects (`GatewayRunner._wire_adapter_handlers`),
 Hermes's busy-session handler among them.
 
+For the kit's leak count, `HermesKitIntegration.visible` reports everything
+the adapter would have shown the room: messages, reactions, typing, and the
+threads Hermes opened. What nothing public can stop is declared as known
+gaps (`HERMES_KNOWN_GAPS`). A ``fail`` step is the provider refusing the
+model call (HTTP 400).
+
 Hermes must be importable (a clean, pinned install with its ``[messaging]``
 extra for discord.py; see `.github/workflows`). Without discord.py the
 Discord lane is left out (`conformance_integrations`).
@@ -72,7 +78,7 @@ from typing import Any
 
 from ..attention import ParticipantProfile
 from ..turn import SecretGuard
-from ..turn_conformance import ScriptedAgent
+from ..turn_conformance import MODEL_REFUSED, KnownGap, ScriptedAgent
 from .hermes_plugin.plugin import (
     DEFAULT_FAILURE_GRACE_SECONDS,
     DEFAULT_RECOVERY_GRACE_SECONDS,
@@ -1152,6 +1158,12 @@ class HermesSurface:
         sent = self.gateway.adapter.sent[before_sent:]
         return ("deliver", sent[-1][1]) if sent else ("silent", "")
 
+    def fail(self, turn_id: str) -> None:
+        # The provider refuses the call for good (HTTP 400); Hermes fails the
+        # run, and the plugin ends the turn once Hermes stops asking.
+        self.model.reply({"status": 400, "error": MODEL_REFUSED})
+        self.end(turn_id, False)
+
     def end(self, turn_id: str, ok: bool, note: str | None = None) -> None:
         # The run ends by itself after its final answer; wait for Hermes to report it.
         deadline = time.monotonic() + _STEP_SECONDS
@@ -1299,12 +1311,36 @@ class HermesHarness:
 # -- the kit's integration -----------------------------------------------------------------------
 
 
+# What Hermes shows the room by itself, in a room set up as the README says,
+# that no hook or setting stops: the contract's candidate gaps, and the
+# README's Known gaps.
+HERMES_KNOWN_GAPS = (
+    KnownGap(
+        "Hermes posts its own failed-turn notice when the model call fails; no hook or setting stops it "
+        "(harness-contract.md, candidate gap 7)",
+        scenarios=("final-harness-failure",),
+        kind="message",
+        text="Your request was not processed",
+    ),
+    KnownGap(
+        "the fresh run the plugin starts for the agent to answer again (after looking again, or after a "
+        "refused answer) runs as Hermes's queued follow-up, which sends typing whatever typing_indicator "
+        "says (harness-contract.md, candidate gap 10)",
+        scenarios=("final-look-again", "final-secret"),
+        kind="typing",
+    ),
+)
+
+
 class HermesKitIntegration:
     """The plugin in a real Hermes gateway, on one platform's lane."""
 
     posting = "final-answer"
     # Hermes ends a run with its own text when its model gives no answer.
     harness_text = True
+    # The scripted model can refuse a call, as a provider does.
+    model_failure = True
+    known_gaps = HERMES_KNOWN_GAPS
 
     def __init__(self, *, tool_search: str = "off", platform: str = "telegram") -> None:
         self.tool_search = tool_search
@@ -1337,6 +1373,28 @@ class HermesKitIntegration:
         harness.model.on_request = first_request
         return plugin.participant
 
+    def visible(self) -> list[dict[str, Any]]:
+        """Everything the adapter would have shown on the platform: messages, reactions, typing, threads."""
+
+        if self.harness is None:
+            return []
+        adapter = self.harness.gateway.adapter
+        world = self.harness.gateway.world
+        shown: list[dict[str, Any]] = [
+            {"kind": "message", "where": chat, "text": text} for chat, text in adapter.sent
+        ]
+        shown += [
+            {"kind": "reaction", "where": chat, "reaction": emoji} for chat, _, emoji in adapter.reactions
+        ]
+        if world is not None:
+            shown += [
+                {"kind": "reaction removed", "where": chat, "reaction": emoji}
+                for chat, _, emoji in world.reactions_removed
+            ]
+        shown += [{"kind": "typing", "where": chat} for chat in adapter.typing]
+        shown += [{"kind": "thread", "where": thread} for thread in getattr(adapter, "threads", ())]
+        return shown
+
     def close(self) -> None:
         if self.harness is not None:
             self.harness.close()
@@ -1368,6 +1426,7 @@ __all__ = [
     "DISCORD_ROOM",
     "DISCORD_ROOM_ROLE",
     "DiscordWorld",
+    "HERMES_KNOWN_GAPS",
     "HermesGateway",
     "HermesHarness",
     "HermesKitIntegration",

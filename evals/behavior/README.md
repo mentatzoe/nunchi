@@ -137,17 +137,32 @@ agent's side of the room:
   (Hermes), instead of one JSON envelope per reply (`envelope`, the
   default). The core `Turn` decides each reply: it is posted, it is silence
   (the `[SILENT]` marker in any case or formatting, such as `**[SILENT]**`,
-  at the start of the reply or on a line of its own), or the agent replies
-  again after looking again. This style has no tools, so the agent cannot react or ask
+  at the start of the reply, on a line of its own, or after a finished
+  sentence at its end), or the agent replies again after looking again. This style has no tools, so the agent cannot react or ask
   for more of the room; compare it with the envelope arm on the same
   attention route. In the workflow, the `agent_posting` input sets it, and
   `agent_model: none` grades attention alone. Each record keeps the agent's
   plain replies (`agent.replies`), so a silence can be read too.
 
-The grade covers the move, not its words. The summary also counts posts that
-name Nunchi's machinery (the attention model, the silence marker, thinking
-tags, the turn's field names), and each such record has
-`agent.mentions_internals`. A post should hold only words for the room.
+The grade covers the move, not its words. The summary also counts leaks: the
+room should receive only what the library committed, and nothing that names
+Nunchi's machinery. The core's `nunchi.turn.machinery_in` decides what does,
+the same check the conformance kit uses: a wake marker, the turn's tag
+(`<nunchi_participant_turn_v1>`), a Nunchi tool's name (`mcp__nunchi…`),
+thinking tags, the `[SILENT]` marker, the turn's field names (`own_moves`,
+`attention.advice`), and the turn's request id. Prose about Nunchi, or the
+words "attention model", are not counted. It counts two things apart:
+
+- `agent.machinery_written`: what the model wrote for the room in the turn,
+  before the library's commit (each plain reply, or each envelope's message
+  text). In final-answer posting the `<thinking>` block the turn teaches is
+  the agent's private place and is not counted.
+- `agent.machinery_posted`: what the committed post carried into the room.
+
+The library takes thinking and wake markers out of a post, and a marker after
+a sentence is silence, so these count as written and not posted. The rest,
+such as a field name or the turn's tag, is posted as written: whether the
+library refuses a post that quotes the turn's tag is still open (D6).
 
 A pause moment, such as "five minutes later, nobody has answered", plays
 the scene through the message before the pause as it happened live: that

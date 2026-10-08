@@ -135,15 +135,29 @@ class Room:                                        # harness-hosted entry point
 - `call` does what the Claude Code gate does today, once, for everyone:
   - it refuses a call outside a bound, current turn;
   - it holds the first post when others posted meanwhile;
+  - it takes the agent's private thinking and any wake marker out of a
+    post, and keeps the thinking as the move's reason (`split_private`);
+  - it refuses a post with nothing else in it, which is never posted empty;
   - it refuses secret values: the room's guard, plus the launch secret of
     the socket it serves (`TurnServer`);
   - it waits for the commit and describes the result.
+- One commit check, `Turn.prepare`, serves every commit point: `call`,
+  `finish`, and the one-reply style. Thinking is a closed `<think>`,
+  `<thinking>`, `<reasoning>` or `<thought>` block, an unclosed
+  `<thinking>`, or an unclosed other tag that starts a line. The wake
+  marker is the core's `WAKE_MARKER`. Nothing else in a post changes: one
+  that quotes the turn's own tag (`<nunchi_participant_turn_v1>`) or its
+  field names is still posted. Whether the library refuses the turn's tag
+  is open (D6, Zoe). `machinery_in` counts these leaks for the conformance
+  kit and the behavior eval; it never refuses a post.
 - `finish` is the final-answer counterpart:
   - **deliver**: the integration posts the answer through the harness;
   - **continue**: the integration keeps the agent going with the library's
     message, so the agent looks again;
   - **silent**: the integration uses the harness's own silence, such as
-    Hermes's `[SILENT]`.
+    Hermes's `[SILENT]`. An answer that ends with the marker after a
+    finished sentence ("I'll leave this to Castor. [SILENT]") is silence,
+    and the words beside the marker are its reason.
   - With `model_text`, an answer that is not words the model wrote is
     **silent** too, and the turn fails: it is never the agent's reply, its
     silence, or its memory.
@@ -180,8 +194,9 @@ class Room:                                        # harness-hosted entry point
 
 - The agent's final answer is the post. The library decides at `finish`.
 - Silence uses the harness's own markers: the one the agent is taught, with
-  any formatting around it, and the harness's other silent answers
-  (`also_silent`).
+  any formatting around it, at the start, on a line of its own, or after a
+  finished sentence at the end; and the harness's other silent answers
+  (`also_silent`), as the whole answer.
 - Only words the agent's model wrote can be the post. The integration
   reports them (`model_wrote`). Text the harness puts in their place, such as
   a notice that the run produced nothing, fails the turn.
@@ -267,6 +282,53 @@ The kit builds the room with the same `Room` the integrations use.
 calls the room tools and asks for steering over the gate's socket, as the mod
 does. CI runs the kit on a clean install.
 
+**The leak count.** In every scenario the room must receive only what the
+library committed, and nothing that names Nunchi's machinery: the wake
+marker, the turn's tag, its field names, the silence marker, thinking tags
+and internal ids (the turn's request id). After each scenario the kit takes
+what reached the room: what the library's own transport sent, and what the
+harness itself showed, which the integration reports (`visible()`:
+messages, reactions, typing, threads it opened). Anything the harness
+showed that is not a committed action is a leak, and so is a committed post
+that `nunchi.turn.machinery_in` says names machinery. A leak fails the scenario,
+unless the integration declares it as a known gap (`KnownGap`, with the
+reason and where it is documented); the cell then reads `gap`, never
+`pass`. The table's last row counts every leak per integration. An
+integration that cannot report what its harness showed has `n/a` there.
+The count covers what the scenarios play: a person's message reaches the
+kit's room directly, not through the harness's ingress, so what a harness
+shows on people's messages (processing reactions, typing, command replies)
+is checked in the integration's own tests.
+
+The reference, Claude Code and Codex reach the room only through the
+library's transport, so they pass the count by construction, as parity
+proof. Hermes posts final answers itself, so its count is real: the kit
+reads everything Hermes's adapter would have shown on Telegram or Discord.
+It finds two known gaps, each in the scenarios named: Hermes's failed-turn
+notice (gap 7, `final-harness-failure`), and typing on the fresh run the
+plugin starts for the agent to answer again (gap 10, `final-look-again`
+and `final-secret`). The second was documented only for looking again
+until the kit found it after a refused answer too.
+
+Five scenarios check what the agent writes that the room must not read. In
+tool posting, `leak` sends `<think>` thinking and an echoed wake marker
+before the words, and only the words are posted; `leak-markup` sends only
+`<thinking>` and a wake marker, which is refused, and the agent's next post
+goes out. In final-answer posting, `final-leak` does the same as `leak` and
+keeps the thinking as the post's reason; `final-leak-markup` answers with
+only `<reasoning>` and a wake marker, which is silence with the thinking as
+its reason; `final-trailing-silence` answers "Castor was asked, not me.
+[SILENT]", which is silence with those words as its reason. A post that
+quotes the turn's own tag is still posted (D6, open), so no scenario plays
+one.
+
+`harness-failure` and `final-harness-failure` fail the agent's model call:
+the reference harness's call raises; Claude Code ends the run with a failed
+`result` (`is_error: true`), read by the gate's own stream-json reader;
+Codex and Hermes get HTTP 400 from the scripted model. The turn must end as a
+failure before the library's deadline (15 s in the kit), with nothing
+committed and no move remembered.
+
 Today's table, generated by `nunchi-turn-conformance --integration reference
 --integration nunchi.integrations.claude_code_conformance --integration
 nunchi.integrations.hermes_plugin_conformance --integration
@@ -277,7 +339,7 @@ channels and messages; the Codex column on Codex CLI 0.160.1, a real
 `codex app-server` from a clean npm install; only the model scripted in
 all):
 
-| Scenario | reference (tools) | reference (final-answer) | Claude Code gate | Hermes plugin (Telegram) | Hermes plugin (Discord) | Codex app-server |
+| Scenario | reference (tools) | reference (final-answer) | Claude Code gate | Hermes plugin (Telegram) | Hermes plugin (Discord) | Codex app-server (codex-cli 0.160.1) |
 |---|---|---|---|---|---|---|
 | post: one post goes to the room, and the tool call says so | pass | n/a | pass | n/a | n/a | pass |
 | bound-silence: a bound turn that ends without an action is silence, remembered | pass | n/a | pass | n/a | n/a | pass |
@@ -292,18 +354,26 @@ all):
 | cancel: a cancelled turn posts nothing | pass | n/a | pass | n/a | n/a | pass |
 | pause: after a pause the library starts a turn with no new message, which remembers why the agent waited | pass | n/a | pass | n/a | n/a | pass |
 | outcome: an approved action's outcome starts a turn, and the agent reports it | pass | n/a | pass | n/a | n/a | pass |
+| leak: a post loses the agent's thinking, kept as its reason, and an echoed wake marker | pass | n/a | pass | n/a | n/a | pass |
+| leak-markup: a post of only thinking and a wake marker is refused, and the agent writes again | pass | n/a | pass | n/a | n/a | pass |
+| harness-failure: a failed model call ends the turn as a failure promptly, and nothing reaches the room | pass | n/a | pass | n/a | n/a | pass |
 | final-deliver: the final answer is the post, committed for the harness to deliver, and remembered | n/a | pass | n/a | pass | pass | n/a |
 | final-silence: the silence marker is silence, and the agent's thinking is its reason | n/a | pass | n/a | pass | pass | n/a |
 | final-mhm: the agent's own mhm is one reaction through its react tool, and the answer after it posts nothing | n/a | pass | n/a | pass | pass | n/a |
-| final-look-again: the final answer is held once when someone posted meanwhile | n/a | pass | n/a | pass | pass | n/a |
+| final-look-again: the final answer is held once when someone posted meanwhile | n/a | pass | n/a | gap | gap | n/a |
 | final-thinking: thinking is never posted | n/a | pass | n/a | pass | pass | n/a |
-| final-secret: a withheld secret is refused once, and the agent answers again | n/a | pass | n/a | pass | pass | n/a |
+| final-secret: a withheld secret is refused once, and the agent answers again | n/a | pass | n/a | gap | gap | n/a |
 | final-cancel: a cancelled turn's final answer is silent | n/a | pass | n/a | pass | pass | n/a |
 | final-pause: after a pause the library starts a turn with no new message, which remembers why the agent waited | n/a | pass | n/a | pass | pass | n/a |
 | final-outcome: an approved action's outcome starts a turn, and the agent's answer reports it | n/a | pass | n/a | pass | pass | n/a |
 | final-not-own-words: text the harness puts in place of the agent's answer is never posted or remembered, and the turn fails | n/a | pass | n/a | pass | pass | n/a |
 | final-no-answer: a run whose model wrote nothing, with the harness's text as its answer, posts nothing and fails | n/a | pass | n/a | pass | pass | n/a |
 | final-silence-forms: a wrapped marker or the harness's other silence word is silence, remembered with its reason; a post that only looks like one goes out | n/a | pass | n/a | pass | pass | n/a |
+| final-leak: an answer loses the agent's thinking, kept as its reason, and an echoed wake marker | n/a | pass | n/a | pass | pass | n/a |
+| final-leak-markup: an answer of only thinking and a wake marker is silence, and the thinking is its reason | n/a | pass | n/a | pass | pass | n/a |
+| final-trailing-silence: the silence marker after the agent's words is silence, and the words are its reason | n/a | pass | n/a | pass | pass | n/a |
+| final-harness-failure: a failed model call ends the turn as a failure promptly, and nothing reaches the room | n/a | pass | n/a | gap | gap | n/a |
+| **leak count**: what reached the room beyond what the library committed, or named its machinery | 0 | 0 | 0 | 3 (3 known gaps) | 3 (3 known gaps) | 0 |
 
 Through Codex the integration binds a run itself, from `turn/start`'s answer,
 so the scripted agent cannot leave it unbound: the Codex column's
@@ -359,8 +429,8 @@ and mhm. Each now has a scenario through every integration, and so do a
 scene's pause and outcome moments. Replaying every scene moment through each
 harness would run the same paths again, at about four minutes per harness in
 CI, so the kit does not (Claude's recommendation, 2026-10-07). The behavior
-suite still measures how a model makes those moves. Still to add: the leak
-count.
+suite still measures how a model makes those moves, and counts the machinery
+the model wrote apart from what was posted.
 
 The plan for the kit, as accepted:
 
@@ -430,6 +500,8 @@ None goes to a harness's maintainers without Zoe's decision.
    with its retries spent, since Hermes's auto-recovery ladder (on by
    default) waits up to 120 s and asks again. Until then the room's next
    moment waits.
+   The conformance kit counts the notice as a known gap
+   (`final-harness-failure`).
    - Alternatives: a blank output (`' '`), which relies on undocumented
      handling; asking Hermes to let a plugin-injected turn end silently when
      it fails.
@@ -447,10 +519,12 @@ None goes to a harness's maintainers without Zoe's decision.
    - Alternatives: asking Hermes for `post_api_request` on that call; accepting
      an answer that follows Hermes's summary request, which would let other
      unreported text through.
-10. **Hermes, typing on a look-again run.** The fresh run the plugin starts
-    after a look-again runs as Hermes's queued follow-up, which calls
-    `send_typing` directly, whatever `typing_indicator` says. No setting stops
-    it. A test pins the gap.
+10. **Hermes, typing on a fresh run.** The fresh run the plugin starts for
+    the agent to answer again, after looking again or after a refused
+    answer (it held a secret), runs as Hermes's queued follow-up, which
+    calls `send_typing` directly, whatever `typing_indicator` says. No
+    setting stops it. A test pins the gap, and the conformance kit counts it
+    as a known gap (`final-look-again`, `final-secret`).
     - Alternatives: injecting the fresh run only after Hermes releases the
       session; asking Hermes to honor `typing_indicator` there.
 11. **Hermes, built-in slash commands.** Hermes answers its commands in the

@@ -6,6 +6,7 @@ import unittest
 from unittest import mock
 
 from nunchi import pipeline, turn, turn_conformance as kit
+from nunchi.integrations import claude_code_conformance
 from nunchi.integrations.claude_code_conformance import ClaudeCodeKitIntegration
 
 
@@ -36,8 +37,8 @@ class TurnConformanceTests(unittest.TestCase):
             {
                 "look-again", "steering", "secret", "silence-reason", "pause",
                 "final-look-again", "final-secret", "final-silence", "final-pause",
-                # Each silent form keeps its reason.
-                "final-silence-forms",
+                # Each silent form keeps its reason, and so does each leak scenario.
+                "final-silence-forms", "final-leak", "final-leak-markup", "final-trailing-silence",
             },
             failed,
         )
@@ -217,13 +218,183 @@ class TurnConformanceTests(unittest.TestCase):
         results = _run([kit.ReferenceIntegration("tools")])
         table = kit.parity_table(results).splitlines()
         self.assertEqual("| Scenario | reference (tools) |", table[0])
-        self.assertEqual(len(kit.SCENARIOS) + 2, len(table))
+        # A row per scenario, then the leak count.
+        self.assertEqual(len(kit.SCENARIOS) + 3, len(table))
         self.assertIn("| final-deliver: ", table[2 + list(kit.SCENARIOS).index("final-deliver")])
         self.assertTrue(table[2 + list(kit.SCENARIOS).index("final-deliver")].endswith("| n/a |"))
+        self.assertTrue(table[-1].startswith("| **leak count**"), table[-1])
+        self.assertTrue(table[-1].endswith("| 0 |"), table[-1])
 
     def test_the_command_runs_the_reference_by_default(self):
         with mock.patch("builtins.print"):
             self.assertEqual(0, kit.main([]))
+
+
+LEAK_SCENARIOS = ("leak", "leak-markup", "final-leak", "final-leak-markup", "final-trailing-silence")
+FAILURE_SCENARIOS = ("harness-failure", "final-harness-failure")
+
+
+def _reference(name):
+    return kit.ReferenceIntegration(kit.SCENARIOS[name].posting)
+
+
+class _ShowsMore(kit.ReferenceIntegration):
+    """A harness that shows the room more than the library committed: typing, and a notice."""
+
+    def __init__(self, posting, *, gaps=()):
+        super().__init__(posting)
+        self.known_gaps = tuple(gaps)
+
+    def visible(self):
+        return [*super().visible(), {"kind": "typing"}, {"kind": "message", "text": "⚠️ Something went wrong."}]
+
+
+class LeakCountTests(unittest.TestCase):
+    def test_the_leak_scenarios_pass_with_nothing_leaked(self):
+        for name in (*LEAK_SCENARIOS, *FAILURE_SCENARIOS):
+            with self.subTest(name):
+                result = kit.run_scenario(name, _reference(name))
+                self.assertEqual(("pass", 0, []), (result["status"], result["leak_count"], result["failures"]))
+
+    def test_the_leak_scenarios_fail_when_the_library_posts_what_is_private(self):
+        def nothing_private(text):
+            return (text or "").strip(), ""
+
+        with mock.patch.object(turn, "split_private", nothing_private):
+            results = {name: kit.run_scenario(name, _reference(name)) for name in LEAK_SCENARIOS}
+        failed = {name for name, result in results.items() if result["status"] == "fail"}
+        # The marker after the agent's words is silence without split_private.
+        self.assertEqual({"leak", "leak-markup", "final-leak", "final-leak-markup"}, failed)
+        # The leak count names the machinery the library committed.
+        leaked = " ".join(results["leak"]["failures"])
+        self.assertIn("a committed post names Nunchi's machinery", leaked)
+        self.assertIn("<think>", leaked)
+        self.assertIn("<nunchi_wake", leaked)
+        self.assertEqual(1, results["leak"]["leak_count"])
+
+    def test_the_trailing_marker_scenario_fails_when_it_is_not_silence(self):
+        with mock.patch.object(turn, "_ends_with_silence", lambda text, taught: False):
+            result = kit.run_scenario("final-trailing-silence", _reference("final-trailing-silence"))
+        self.assertEqual("fail", result["status"])
+        self.assertIn("expected silence", result["failures"][0])
+        # The marker it posted is machinery, and the leak count says so.
+        self.assertTrue(any("[SILENT]" in failure for failure in result["failures"]), result["failures"])
+
+    def test_the_detector_is_what_counts_committed_machinery(self):
+        def nothing_private(text):
+            return (text or "").strip(), ""
+
+        with mock.patch.object(turn, "split_private", nothing_private), mock.patch.object(
+            kit, "machinery_in", lambda text, ids=(): []
+        ):
+            result = kit.run_scenario("leak", _reference("leak"))
+        # The scenario's own check still fails, but nothing counts the machinery.
+        self.assertEqual("fail", result["status"])
+        self.assertEqual(0, result["leak_count"])
+        self.assertNotIn("machinery", " ".join(result["failures"]))
+        # The turn's request ids are internal: a post that names one is a leak.
+        played = kit.Played(
+            dispatched=[{"kind": "message", "text": "See request req-1234."}], shown=[], ids={"req-1234"}
+        )
+        self.assertEqual(
+            (["a committed post names Nunchi's machinery ['req-1234']: 'See request req-1234.'"], []),
+            kit.leaks("post", played),
+        )
+
+    def test_whatever_else_the_harness_shows_is_a_leak(self):
+        for name in ("post", "final-deliver", "harness-failure", "final-harness-failure", "final-leak"):
+            with self.subTest(name):
+                result = kit.run_scenario(name, _ShowsMore(kit.SCENARIOS[name].posting))
+                self.assertEqual("fail", result["status"])
+                self.assertEqual(2, result["leak_count"])
+                self.assertIn("the room got typing, which the library never committed", result["failures"])
+                self.assertIn(
+                    "the room got a message: '⚠️ Something went wrong.', which the library never committed",
+                    result["failures"],
+                )
+
+    def test_a_declared_known_gap_reads_gap_never_pass(self):
+        typing = kit.KnownGap("the harness types on every run (documented)", scenarios=("post",), kind="typing")
+        notice = kit.KnownGap(
+            "the harness's notice (documented)", scenarios=("post",), kind="message", text="went wrong"
+        )
+        result = kit.run_scenario("post", _ShowsMore("tools", gaps=(typing, notice)))
+        self.assertEqual(("gap", 2, []), (result["status"], result["leak_count"], result["failures"]))
+        self.assertEqual(
+            ["typing: the harness types on every run (documented)",
+             "a message: '⚠️ Something went wrong.': the harness's notice (documented)"],
+            result["gaps"],
+        )
+        table = kit.parity_table([result])
+        self.assertIn("| post: one post goes to the room, and the tool call says so | gap |", table)
+        self.assertTrue(table.endswith("| 2 (2 known gaps) |"), table)
+        with mock.patch("builtins.print"):
+            self.assertEqual(0, kit.main(["--integration", f"{__name__}:_gapped"]))
+        # A gap covers only what it names, where it names: anything else still fails.
+        result = kit.run_scenario("post", _ShowsMore("tools", gaps=(typing,)))
+        self.assertEqual(("fail", 2), (result["status"], result["leak_count"]))
+        self.assertEqual(["typing: the harness types on every run (documented)"], result["gaps"])
+        result = kit.run_scenario("one-action", _ShowsMore("tools", gaps=(typing, notice)))
+        self.assertEqual("fail", result["status"])
+        # A harness that shows only what it committed passes, its gaps unused.
+        self.assertEqual("pass", kit.run_scenario("post", kit.ReferenceIntegration("tools"))["status"])
+
+    def test_a_harness_that_posts_what_it_was_told_twice_leaks_the_second(self):
+        class PostsTwice(kit.ReferenceIntegration):
+            def visible(self):
+                return [*super().visible(), *super().visible()]
+
+        result = kit.run_scenario("final-deliver", PostsTwice("final-answer"))
+        self.assertEqual(("fail", 1), (result["status"], result["leak_count"]))
+        self.assertIn("the room got a message: 'On it.', which the library never committed", result["failures"])
+
+    def test_without_visible_the_leak_count_is_not_applicable(self):
+        class Unseen(kit.ReferenceIntegration):
+            visible = None
+
+        results = [kit.run_scenario(name, Unseen("tools")) for name in ("post", "leak")]
+        self.assertEqual([("pass", "n/a"), ("pass", "n/a")], [(r["status"], r["leak_count"]) for r in results])
+        self.assertTrue(kit.parity_table(results).endswith("| n/a |"))
+
+    def test_the_failure_scenarios_need_a_surface_that_can_fail_the_model(self):
+        class NoFailure(kit.ReferenceIntegration):
+            model_failure = False
+
+        for name in FAILURE_SCENARIOS:
+            with self.subTest(name):
+                self.assertEqual("n/a", kit.run_scenario(name, NoFailure(kit.SCENARIOS[name].posting))["status"])
+
+    def test_the_failure_scenarios_catch_a_failure_read_as_silence_or_left_open(self):
+        # The harness reports the failed run as a good end: the turn is silence.
+        def as_success(self, turn_id):
+            self.participant.end_turn(turn_id=None, ok=True, detail="scripted end", note="API Error: 400")
+
+        with mock.patch.object(kit._DirectSurface, "fail", as_success):
+            results = {name: kit.run_scenario(name, _reference(name)) for name in FAILURE_SCENARIOS}
+        for name, result in results.items():
+            self.assertEqual("fail", result["status"], name)
+            self.assertIn("must end as a failure", result["failures"][0])
+        # The harness never reports the end: the turn waits for the library's deadline.
+        with mock.patch.object(kit._DirectSurface, "fail", lambda self, turn_id: None):
+            result = kit.run_scenario("harness-failure", _reference("harness-failure"), timeout=2)
+        self.assertEqual("fail", result["status"])
+        self.assertIn("deadline", " ".join(result["failures"]))
+        # Claude Code: a gate that reads only the result's subtype takes the
+        # API error for the agent's last words.
+        def subtype_only(message):
+            return {"ok": message.get("subtype") == "success", "detail": "success", "note": message.get("result")}
+
+        with mock.patch.object(claude_code_conformance, "turn_ending", subtype_only):
+            result = kit.run_scenario("harness-failure", ClaudeCodeKitIntegration())
+        self.assertEqual("fail", result["status"])
+        self.assertIn("must end as a failure", " ".join(result["failures"]))
+        self.assertEqual("pass", kit.run_scenario("harness-failure", ClaudeCodeKitIntegration())["status"])
+
+
+def _gapped():
+    typing = kit.KnownGap("documented", scenarios=tuple(kit.SCENARIOS), kind="typing")
+    notice = kit.KnownGap("documented", scenarios=tuple(kit.SCENARIOS), kind="message", text="went wrong")
+    return [_ShowsMore("tools", gaps=(typing, notice))]
 
 
 if __name__ == "__main__":

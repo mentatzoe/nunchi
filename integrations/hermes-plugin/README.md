@@ -189,7 +189,7 @@ Hermes with these settings, and a test checks that this block matches them.
 | `suppress_warning_notifications: true` | Hermes posts its retry and iteration-budget status lines, and "❌ … rejected the request" when the provider refuses. |
 | `show_reasoning: false` | Hermes puts the model's reasoning before the answer. Off by default; pinned because a top-level `display.show_reasoning` would turn it on for every platform (from Hermes's source). A room member's `/reasoning show` still turns it on (Known gaps). |
 | `runtime_footer: {enabled: false}` | Hermes appends a footer with the model, context use and working directory to every post. Off by default; pinned because it outranks the top-level setting a room member's `/footer on` writes. |
-| `typing_indicator: false` | A typing bubble shows on each person's message and through every turn, even one that ends in silence, so people wait for an answer that never comes. For the whole bot. A look-again run still shows typing (Known gaps). |
+| `typing_indicator: false` | A typing bubble shows on each person's message and through every turn, even one that ends in silence, so people wait for an answer that never comes. For the whole bot. A fresh run after looking again or after a refused answer still shows typing (Known gaps). |
 | `reactions: false` | On Discord (on by default), every message the plugin takes in gets 👀 and then ✅, a nod on every message. Telegram's default is already off. For the whole bot. |
 | `agent.disabled_toolsets: [clarify, cronjob]` | `clarify` posts a numbered question form that nobody in the room is meant to answer; `cronjob` schedules a post into the room that arrives later without reading the room. For the whole profile. |
 
@@ -345,11 +345,12 @@ More setup on Discord:
   Likewise, when the length limit cuts the same answer four times, Hermes
   stops asking and keeps what it got: the last part reaches no hook, so the
   turn fails.
-- **Typing on a look-again run.** When others posted while the agent
-  composed, the fresh run the plugin starts runs as Hermes's queued
-  follow-up, which sends typing whatever `typing_indicator` says: one typing
-  action on Telegram, typing for the whole run on Discord. No setting stops
-  it.
+- **Typing on a fresh run.** When others posted while the agent composed,
+  or its answer was refused once (it held a secret), the fresh run the
+  plugin starts for it to answer again runs as Hermes's queued follow-up,
+  which sends typing whatever `typing_indicator` says: one typing action on
+  Telegram, typing for the whole run on Discord. No setting stops it. The
+  conformance kit counts it, with the failed-turn reply, as a known gap.
 - **No interrupt.** Hermes gives plugins no way to stop a run. Nunchi closes
   a cancelled turn, so its answer is silenced; tools it already ran stay run.
 - **Reactions** are add-only (Hermes's `platform_actions`) and were checked up
