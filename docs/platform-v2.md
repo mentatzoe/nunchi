@@ -372,9 +372,11 @@ shape and the pages the model asked for, and hands each action to the turn's
 `look_again` and `take`. A one-reply participant gets the room's guard too
 (`nunchi.room.room_guard`, which the old Codex runner and the reference
 adapters pass); a refused action is shown to the model once, and a second
-refusal fails the turn. The room's host checks every action against the same
-guard before it leaves, whatever the participant did. `OpenAICompatibleParticipant` with a `silence_marker` drives the
-same `Turn` in final-answer posting: its plain reply is the post, through
+refusal fails the turn. A reason (`why`) that holds a secret is dropped and
+the action checked without it. The room's host checks every action against
+the same guard before it leaves, whatever the participant did.
+`OpenAICompatibleParticipant` with a `silence_marker` drives the same `Turn`
+in final-answer posting: its plain reply is the post, through
 `Turn.decide`. The behavior eval uses it for `--agent-posting final-answer`.
 
 ## The participant's view of the room

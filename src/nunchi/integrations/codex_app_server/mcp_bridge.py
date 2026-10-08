@@ -14,7 +14,8 @@ socket, which speaks the library's local turn protocol (`nunchi.turn_server`,
 It runs as a plain script (``python -I mcp_bridge.py``) and imports only the
 standard library, so it needs no path setup and starts fast. The socket path
 and the launch secret come from its environment, which Codex sets from the
-thread's config and nobody else sees.
+thread's config. A command Codex runs outside its sandbox can read them; the
+guard keeps the secret out of the room.
 """
 
 from __future__ import annotations

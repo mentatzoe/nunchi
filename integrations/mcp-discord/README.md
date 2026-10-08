@@ -88,8 +88,24 @@ privileged intents for the configured bot.
 The transport audit contains participant, delivery, and room IDs, never room
 content or bot tokens. Logging installs token redaction before network startup.
 
-On Linux the server makes its own process private before it reads the token
-or the HMAC key (`nunchi.private_process.keep_private`): another process of
-the same OS user, such as an agent's shell command, gets `PermissionError` on
-its `/proc/<pid>/environ` and `/proc/<pid>/mem`. Other programs started with
-the same variables, environment files and root are not covered.
+On Linux the server makes its own process private first thing in `main`
+(`nunchi.private_process.keep_private`). From then on another process of the
+same OS user, such as an agent's shell command, gets `PermissionError` on its
+`/proc/<pid>/environ` and `/proc/<pid>/mem`.
+
+That does not make the token and the HMAC key safe from an agent of the same
+OS user:
+
+- At every start, any process of that user can read them in the server's
+  starting environment for about a tenth of a second (Python's start-up and
+  Nunchi's imports, before the call).
+- An agent with an unsandboxed shell can leave a reader running and force a
+  start: a signal needs only the same user, so it can kill the supervised
+  server, and the supervisor starts it again.
+- Other programs started with the same variables, environment files and
+  root are not covered.
+
+What closes the first two is a separation the agent cannot cross: Claude
+Code's Bash sandbox (a fresh `/proc`), Codex's `workspace-write` or
+`read-only` sandbox (its own process namespace), or running the agent as its
+own OS user, which is not supported yet.

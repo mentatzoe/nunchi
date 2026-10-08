@@ -438,6 +438,14 @@ class ClaudeCodeRoomRuntime:
         )
         session.on_turn_end = participant.turn_ended
         self.participant = participant
+        # The gate server adds the launch secret to the participant's guard.
+        # It is built before the room, which gets that guard, so the room's
+        # host refuses the launch secret too. `start` binds the socket later.
+        self.server = GateServer(
+            participant,
+            socket_path=self.socket_path,
+            session_secret=self.session_secret,
+        )
         # Claude Code adds no authorization semantics of its own: it supplies
         # the pinned policy and the exact native executors, and the shared
         # coordinator makes every decision (see `_executors`).
@@ -458,18 +466,13 @@ class ClaudeCodeRoomRuntime:
                 else None
             ),
             participant_timeout_seconds=self.settings["timeout_seconds"],
-            guard=guard,
+            guard=participant.guard,
         )
         self.connection.attach(self.room)
         self.privileged = self.room.privileged
         self.pipeline = self.room.pipeline
         self.lane = self.room.lane
         self.client = client
-        self.server = GateServer(
-            participant,
-            socket_path=self.socket_path,
-            session_secret=self.session_secret,
-        )
 
     @staticmethod
     def _claude_code_settings(raw: Any, state: Path) -> dict[str, Any]:

@@ -100,6 +100,10 @@ plus a `hermes` section:
   variable the config names in a `*_env` key, such as an attention route's
   `api_key_env`, is withheld too. Telegram, Discord and Slack token shapes
   are refused.
+- The keys a keyed attention route reads (`api_key_env`) and the platform
+  tokens live in Hermes's own process: the plugin runs there and cannot
+  keep them out. The guard keeps their values out of the room. Prefer the
+  `hermes-host` attention model, which needs no key of Nunchi's own.
 
 ## Hermes setup the room needs
 

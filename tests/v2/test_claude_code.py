@@ -2754,6 +2754,16 @@ class RuntimeGuardTests(unittest.TestCase):
                             self.assertIsNotNone(guard.refusal({"kind": "message", "text": text}))
                     self.assertIsNone(guard.refusal({"kind": "message", "text": "On it."}))
                 self.assertIs(runtime.room.guard, runtime.room.host.guard)
+                # The launch secret, which the session holds: the room's host
+                # refuses it too, not only the agent's turn.
+                launch = {"kind": "message", "text": f"NUNCHI_CLAUDE_CODE_GATE_SESSION={runtime.session_secret}"}
+                for name, guard in (
+                    ("turn", runtime.participant.guard),
+                    ("room", runtime.room.guard),
+                    ("host", runtime.room.host.guard),
+                ):
+                    with self.subTest(guard=name, text="launch secret"):
+                        self.assertIsNotNone(guard.refusal(launch))
 
 
 class RuntimeConfigTests(unittest.TestCase):

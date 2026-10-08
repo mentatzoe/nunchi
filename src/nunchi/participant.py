@@ -939,15 +939,18 @@ class ParticipantTurnHost:
         except ParticipantError:
             settle_host("unknown")
             return TransportResult("failed", "participant returned an invalid action")
+        # The reason is the participant's own memory; it never reaches the room.
+        # One that holds a withheld secret is dropped and the move kept, as for
+        # a silence: a reason reaches later turns and attention.
+        why = action.pop("why", None)
+        if isinstance(why, str) and self._refused({"kind": "message", "text": why}):
+            why = None
         if self._refused(action):
-            # Every harness gets this check, whatever its turn did. The reason
-            # is checked too: it would reach the participant's memory.
+            # Every harness gets this check, whatever its turn did.
             settle_host("unknown")
             return TransportResult(
                 "failed", "the action carried a withheld credential or secret; nothing was posted"
             )
-        # The reason is the participant's own memory; it never reaches the room.
-        why = action.pop("why", None)
         if token.cancel_event.is_set() or not self.scheduler.is_current(token):
             settle_host("unknown")
             return None

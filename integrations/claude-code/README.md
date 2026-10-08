@@ -103,13 +103,25 @@ user can normally read another one's starting environment
 (`/proc/<pid>/environ`) and memory (`/proc/<pid>/mem`), and the gate's hold
 the transport's key and the attention model's key.
 
-- On Linux the gate makes its own process private before it reads any
-  secret (`nunchi.private_process.keep_private`). The agent's Bash, its Read
-  tool and any other process of your user then get `PermissionError` on both
-  files. `nunchi-mcp-discord` does the same for the bot token and the output
-  key. The probe reports `"process_private": true` and
+- On Linux the gate makes its own process private first thing in `main`
+  (`nunchi.private_process.keep_private`). From then on the agent's Bash,
+  its Read tool and any other process of your user get `PermissionError` on
+  both files. `nunchi-mcp-discord` does the same for the bot token and the
+  output key. The probe reports `"process_private": true` and
   `"agent_os_user": "same"`.
-- That does not cover what else your OS user can read:
+- `"process_private": true` does not mean the keys are safe. An agent with
+  an unsandboxed Bash can still get them:
+  - at every start, any process of your user can read the keys in the
+    gate's or the transport's starting environment for about a tenth of a
+    second (Python's start-up and Nunchi's imports, before the call);
+  - the agent can leave a reader running and force a start. A signal needs
+    only the same user, so it can kill a supervised gate or transport, and
+    the supervisor starts it again.
+
+  Claude Code's Bash sandbox (below) closes this: Bash gets a fresh `/proc`
+  and cannot see Nunchi's processes. Running the agent as its own OS user
+  would close it too; that is not supported yet.
+- It does not cover what else your OS user can read either:
   - every other program started from the shell you exported the keys in,
     such as a terminal multiplexer or an editor: its starting environment
     holds them. With Yama's `ptrace_scope` at 0 or absent, that shell's own
@@ -185,8 +197,9 @@ NUNCHI_CLAUDE_CODE_CONFIG_SHA256=<64 hex> \
 
 The probe reports the binding, the Claude Code version found, the mod version,
 the room tools, the deny rules, whether the runner's process is private
-(`process_private`), and that the agent runs as the runner's OS user
-(`agent_os_user`). The runner refuses to start on Claude Code
+after start-up (`process_private`; not that its keys are safe, see
+[Secrets](#nunchis-processes-and-the-agents-bash)), and that the agent runs
+as the runner's OS user (`agent_os_user`). The runner refuses to start on Claude Code
 older than 2.1.287. Starting Claude Code with `--tools ""`, `--safe-mode`, or
 `--bare` would disable mods; the gate passes none of them.
 

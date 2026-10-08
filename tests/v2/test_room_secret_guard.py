@@ -154,11 +154,15 @@ class CodexV2GuardTests(unittest.TestCase):
             def communicate(self):
                 prompts.append(self.command[-1])
                 protocol = protocols[-1]
-                text = replies[min(len(prompts) - 1, len(replies) - 1)]
+                reply = replies[min(len(prompts) - 1, len(replies) - 1)]
+                text, why = reply if isinstance(reply, tuple) else (reply, None)
+                action = {"kind": "message", "origin_event_id": "discord:message:1", "text": text}
+                if why is not None:
+                    action["why"] = why
                 envelope = {
                     "protocol": protocol.request["protocol"],
                     "binding": protocol.request["binding"],
-                    "action": {"kind": "message", "origin_event_id": "discord:message:1", "text": text},
+                    "action": action,
                 }
                 started = {"type": "thread.started", "thread_id": "019f9432-9300-7dd1-8225-d7f10f921968"}
                 line = {
@@ -220,6 +224,31 @@ class CodexV2GuardTests(unittest.TestCase):
         self.assertEqual([CLEAN], posted)
         self.assertEqual(2, len(prompts))
         self.assertIn("Refused: this action contains a credential or secret", prompts[1])
+
+    def test_a_reason_with_a_token_is_dropped_and_the_reply_posts_at_once(self):
+        # The reason is never posted: it is dropped, the reply kept, as on
+        # every other path.
+        warning = "Sam, that is a live bot token. Revoke it now."
+        runtime, posted, prompts, _receipts = self._play([(warning, f"Sam pasted {DISCORD_TOKEN}; warn him")])
+        self.assertEqual([warning], posted)
+        self.assertEqual(1, len(prompts))
+        observation = runtime.room.pipeline.observation
+        observation.observe(
+            delivery_id="d-own",
+            event={
+                "id": "discord:message:101",
+                "type": "message",
+                "author_id": "discord:actor:9",
+                "text": warning,
+                "mentioned_actor_ids": [],
+                "mentions_room": False,
+            },
+            actors={},
+        )
+        facts = runtime.room.host.memory_facts("discord:message:101") or {}
+        (move,) = [move for move in facts.get("own_moves", ()) if move.get("kind") == "message"]
+        self.assertNotIn("why", move)
+        self.assertNotIn(DISCORD_TOKEN, json.dumps(facts))
 
     def test_the_output_key_or_the_attention_key_twice_posts_nothing(self):
         for secret in (OUTPUT_KEY, ATTENTION_KEY):

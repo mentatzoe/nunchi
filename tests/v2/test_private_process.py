@@ -43,7 +43,7 @@ _CAP_SYS_PTRACE = 19
 # memory, optionally calls keep_private, then starts the "agent" without the
 # key in its environment and reports what the agent could read.
 _RUNTIME = r"""
-import ctypes, json, os, subprocess, sys
+import ctypes, json, os, resource, subprocess, sys
 sys.path.insert(0, sys.argv[1])
 mode, key_name = sys.argv[2], sys.argv[3]
 key = os.environ[key_name]
@@ -55,6 +55,7 @@ libc = ctypes.CDLL(None, use_errno=True)
 libc.prctl(ctypes.c_int(0x59616D61), ctypes.c_ulong((1 << 64) - 1), ctypes.c_ulong(0),
            ctypes.c_ulong(0), ctypes.c_ulong(0))
 status = None
+core_limit = resource.getrlimit(resource.RLIMIT_CORE)
 if mode == "private":
     from nunchi.private_process import keep_private
     status = keep_private()
@@ -63,7 +64,12 @@ agent = subprocess.run(
     [sys.executable, "-I", "-c", sys.argv[4], str(os.getpid()), str(ctypes.addressof(held)), key_name, key],
     env=agent_env, capture_output=True, text=True, timeout=60,
 )
-print(json.dumps({"status": status, "agent": agent.stdout.strip(), "agent_error": agent.stderr[-500:]}))
+print(json.dumps({
+    "status": status,
+    "core_limit_kept": resource.getrlimit(resource.RLIMIT_CORE) == core_limit,
+    "agent": agent.stdout.strip(),
+    "agent_error": agent.stderr[-500:],
+}))
 """
 
 # The "agent": a child of the runtime that reads its parent through /proc.
@@ -167,6 +173,9 @@ class ProcReadTests(unittest.TestCase):
         self.assertFalse(result["agent"]["own_environment_has_key"])
         self.assertEqual("PermissionError", result["agent"]["environ"])
         self.assertEqual("PermissionError", result["agent"]["mem"])
+        # A process that is not dumpable writes no core file; the core size
+        # limit, which the harness and its commands inherit, is left alone.
+        self.assertTrue(result["core_limit_kept"])
 
 
 class StatusTests(unittest.TestCase):
@@ -180,10 +189,9 @@ class StatusTests(unittest.TestCase):
     def test_a_refusal_is_a_status_and_a_warning_not_a_crash(self):
         with mock.patch.object(private_process, "_linux", return_value=True), mock.patch.object(
             private_process, "_not_dumpable", side_effect=OSError(1, "Operation not permitted")
-        ), mock.patch.object(private_process, "_no_core_files") as no_core:
+        ):
             with self.assertLogs("nunchi.private_process", "WARNING") as logs:
                 self.assertEqual("failed", private_process.keep_private())
-        no_core.assert_not_called()
         self.assertIn("could not be made private", logs.output[0])
 
     def test_probe_facts(self):

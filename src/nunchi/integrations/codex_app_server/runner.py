@@ -22,11 +22,17 @@ from nunchi.adapters.model_apis import ATTENTION_KINDS
 from nunchi.adapters.runtime import load_pinned_config
 from nunchi.errors import NunchiError, ValidationError
 from nunchi.private_process import keep_private, probe_facts
-from nunchi.room import Room
+from nunchi.room import Room, RoomSettings
 
 from ..discord_room import DiscordRoomConnection, output_secret, transport_client
 from ..mcp_client import StreamableMCPClient
-from .integration import MCP_SERVER_NAME, TOOL_NAMES, CodexIntegrationError, build_integration
+from .integration import (
+    MCP_SERVER_NAME,
+    SECTION as CODEX_SECTION,
+    TOOL_NAMES,
+    CodexIntegrationError,
+    build_integration,
+)
 
 SURFACE = "codex-app-server"
 LABEL = "Codex app-server"
@@ -54,24 +60,31 @@ class CodexRoomRunner:
         if not isinstance(transport, Mapping):
             raise ValidationError(f"{LABEL} transport config must be an object")
         secret = output_secret(transport, label=LABEL, environ=environ)
-        # The transport's key never reaches Codex, and the room never sees it.
+        # The room's connection comes first: the guard holds what its
+        # transport declares. The integration checks the same settings again.
+        binding = RoomSettings.from_config(
+            config, label=LABEL, sections=(CODEX_SECTION, "transport")
+        ).binding
+        if binding.platform != "discord":
+            raise ValidationError(f"{LABEL} currently requires the shared Discord transport")
+        self.connection = DiscordRoomConnection(
+            client=client,
+            binding=binding,
+            secret=secret,
+            label=LABEL,
+            surface=SURFACE,
+        )
+        # The transport's key never reaches Codex (``withhold``), and the room
+        # never sees it (the transport declares it).
         settings, integration = build_integration(
             config,
             environ=environ,
             sections=("transport",),
             withhold=(transport["output_key_env"],),
+            transport=self.connection.transport,
         )
-        if settings.binding.platform != "discord":
-            raise ValidationError(f"{LABEL} currently requires the shared Discord transport")
         self.settings = settings
         self.integration = integration
-        self.connection = DiscordRoomConnection(
-            client=client,
-            binding=settings.binding,
-            secret=secret,
-            label=LABEL,
-            surface=SURFACE,
-        )
         self.room = Room(
             settings,
             participant=integration.participant,

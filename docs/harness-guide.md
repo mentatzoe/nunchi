@@ -102,7 +102,7 @@ All are in the core package, `nunchi`, standard library only.
 | `Finish` | `nunchi.turn` | What becomes of a final answer: `deliver`, `continue`, or `silent`, with `text`. |
 | `HostTextAttentionModel`, `HostStructuredAttentionModel` | `nunchi.attention` | Attention on the harness's own model. |
 | `TurnServer` | `nunchi.turn_server` | The same turn calls as JSON over a private socket, for code outside Python. |
-| `keep_private` | `nunchi.private_process` | Makes a library-hosted runner's process unreadable to other processes of its OS user (Linux). Call it first in `main`. |
+| `keep_private` | `nunchi.private_process` | From the call on, other processes of its OS user cannot read a library-hosted runner's process (Linux). Call it first in `main`. It does not cover start-up (step 2). |
 | `KitIntegration` | `nunchi.turn_conformance` | How your adapter joins the conformance kit. |
 
 ## Step by step
@@ -179,12 +179,12 @@ participant = TurnParticipant(
   offers no `send` tool.
 - `tool_names` needs a name for every role in `roles`. The default roles are
   all five.
-- `room_guard` builds the secret guard. Pass the same guard to the `Room`
-  (`Room(..., guard=guard)`); the room's host then checks every action
-  again. The participant's guard must hold at least what the room's holds,
-  or the agent loses its chance to answer again: a refusal in its turn is a
-  tool error it can act on, a refusal at the host is not. The guard
-  withholds:
+- `room_guard` builds the secret guard. Give the `Room` the participant's
+  guard (`Room(..., guard=participant.guard)`, step 8); the room's host then
+  checks every action again. The participant's guard must hold at least what
+  the room's holds, or the agent loses its chance to answer again: a refusal
+  in its turn is a tool error it can act on, a refusal at the host is not.
+  The guard withholds:
   - the value of every variable that a config key ending in `_env` names, in
     the attention model, your own sections and the authorization section. A
     key holds one name or a list of names. Such a key always names a secret:
@@ -197,20 +197,36 @@ participant = TurnParticipant(
   - `values=` and `patterns=`, for what your config does not name, such as a
     default variable your integration reads.
 
-  Values shorter than 12 characters are ignored. Keep the same variables out
-  of the harness's environment: `nunchi.room.withheld_env_names(settings)`
-  lists them. Drop every `NUNCHI_*` variable too, and keep the agent's
-  working directory outside `state_directory`.
+  Values shorter than 12 characters are ignored. Keep the agent's working
+  directory outside `state_directory`.
+- Library-hosted: your integration starts the harness, so keep these
+  variables out of the harness's environment.
+  `nunchi.room.withheld_env_names(settings)` lists them. Drop every
+  `NUNCHI_*` variable too.
+- Harness-hosted: the harness's own process holds whatever your config names
+  there, such as a keyed attention route's key and the platform's tokens.
+  The guard still withholds their values from the room. Prefer an attention
+  route the host serves (its own model), so Nunchi adds no key of its own to
+  that process, and say in your README which keys live there.
 - If your integration is its own program (library-hosted), call
   `nunchi.private_process.keep_private()` first in its `main`, before any
-  secret is read and before the harness starts. The agent runs as the same
-  OS user and could otherwise read your process's keys through `/proc`.
-  Report the result in your probe (`probe_facts(status)`, plus
-  `agent_os_user`). An integration that runs inside the harness's own
+  secret is read and before the harness starts. From then on, other
+  processes of the same OS user cannot read your process's keys through
+  `/proc`. It does not cover start-up: keys in the starting environment are
+  readable by any process of that user for about a tenth of a second at
+  each start (Python's start-up and your imports). An agent with an
+  unsandboxed shell can leave a reader running and force a start by killing
+  a supervised runner; a signal needs only the same user. Only a separation
+  the agent cannot cross closes that: the harness's sandbox, if it hides
+  other processes, or running the agent as its own OS user. Document the
+  harness's sandbox setting in your README. Report the call's result in
+  your probe (`probe_facts(status)`, plus `agent_os_user`); it does not
+  mean the keys are safe. An integration that runs inside the harness's own
   process must not call it: that process is the harness's.
 - If you serve `TurnServer` (see "Outside Python"), it adds its launch
   secret to the participant's guard when you build it. Build it before the
-  first turn.
+  `Room` and before the first turn, so the guard the `Room` gets holds the
+  launch secret too.
 - A driver may add `ready(cancel) -> bool`. The library calls it before
   starting a turn, to start the harness or wait until it is idle. Return
   False only when `cancel` is set. If the harness cannot take the turn,
@@ -447,7 +463,7 @@ room = Room(
     event_visibility={"message": "history-and-live", "reaction": "live-only", "membership": "unavailable"},
     state_prefix="my-harness-",
     attention_kinds=ATTENTION_KINDS,
-    guard=guard,  # the participant's guard, from step 2
+    guard=participant.guard,  # after the TurnServer, if you serve one (step 2)
 )
 ```
 
@@ -457,8 +473,10 @@ room = Room(
   `unknown` or `unavailable`, with a detail. If it holds a secret, give it
   `withheld_values()` and `credential_patterns()` (step 2).
 - `guard`: the room's host checks every action against it before dispatch.
-  A refused action posts nothing, and its result is `failed`. Without a
-  guard the room builds one with `room_guard`.
+  A refused action posts nothing, and its result is `failed`. A reason
+  (`why`) that holds a secret is dropped and the move goes on: the reason
+  never reaches the room. Without a guard the room builds one with
+  `room_guard`.
 - `transport`, harness-hosted: `HarnessDelivery(native, room_shows_own_messages=...)`.
   The harness posts messages. In final-answer posting the answer is a
   message, never a reply to a chosen message. `room_shows_own_messages` says
@@ -507,13 +525,14 @@ room = Room(
 The Claude Code integration, in order (`nunchi.integrations.claude_code_v2`,
 `claude_code_gate`, and the mod in `claude_code_mod/hooks/register.ts`):
 
-1. The runtime reads the config into `RoomSettings`, builds a
+1. The runtime reads the config into `RoomSettings` and builds a
    `GatedParticipant` (a `TurnParticipant` whose driver writes to a dedicated
-   Claude Code session), and builds a `Room` with the shared Discord
-   transport.
-2. The gate serves `TurnServer` on a private socket, with a per-launch secret
-   passed to the session's environment. The server adds that secret to the
-   participant's guard: the agent can read it, but cannot post it.
+   Claude Code session).
+2. It builds the gate's `TurnServer`, with a per-launch secret passed to the
+   session's environment. The server adds that secret to the participant's
+   guard: the agent can read it, but cannot post it. Then the runtime builds
+   a `Room` with the shared Discord transport and the participant's guard,
+   and the gate serves the socket when it starts.
 3. The mod, at session start, calls `/v1/attach` and registers the room tools.
 4. For each turn, the driver submits `<nunchi_wake id="…"/>` and `turn.text`
    to the session.
@@ -607,8 +626,9 @@ LocalTurnProtocolV2@1`):
 Give the secret only to the harness process you start, through its
 environment or its server configuration. Keep it out of the agent's view
 where the harness lets you. Claude Code cannot: the mod reads it from the
-session's environment, so the agent can read it with a shell command. The
-guard still keeps it out of the room.
+session's environment, so the agent can read it with a shell command. Codex
+gives it to the room's MCP server, whose environment a command outside
+Codex's sandbox can read. The guard still keeps it out of the room.
 
 ## Prove it
 
@@ -706,10 +726,11 @@ Each is tracked in [#135](https://github.com/mentatzoe/nunchi/issues/135).
 - [ ] Every room event delivered, the agent's own included.
 - [ ] Every run bound when it starts, and its end reported once.
 - [ ] Steering after every tool call, where the harness has a hook for it.
-- [ ] The guard comes from `room_guard`, and the participant and the `Room`
-  share it.
-- [ ] Every variable the config names in a `*_env` key is out of the
-  harness's environment.
+- [ ] The guard comes from `room_guard`. The `Room` gets the participant's
+  guard, built after any `TurnServer`.
+- [ ] Library-hosted: every variable the config names in a `*_env` key is
+  out of the harness's environment. Harness-hosted: the README says which
+  keys live in the harness's process.
 - [ ] A library-hosted runner calls `keep_private()` first; an integration
   inside the harness's process does not.
 - [ ] The conformance kit passes on a clean, pinned install, in CI, with the

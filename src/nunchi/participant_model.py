@@ -792,6 +792,12 @@ class ParticipantTurnProtocol:
             # A silence with a reason goes to the host, which remembers it.
             return True, action if "why" in action else None
         if action["kind"] != "expand":
+            # The reason is never posted. One that holds a secret is dropped
+            # and the move kept, as on every other path; only the move itself
+            # is refused.
+            why = action.pop("why", None)
+            if why is not None and self.turn.guard.refusal({"kind": "message", "text": why}) is not None:
+                why = None
             refusal = self.turn.guard.refusal(action)
             if refusal is not None:
                 if self.refused:
@@ -799,6 +805,8 @@ class ParticipantTurnProtocol:
                 self.refused = True
                 self.pages.append({"events": [], "note": refusal})
                 return False, None
+            if why is not None:
+                action["why"] = why
             # Look again before speaking: if others posted while the
             # participant was composing, show it those messages, once, and
             # let it send, change, or drop its action.

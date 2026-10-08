@@ -17,6 +17,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import secrets
 import stat
@@ -179,6 +180,29 @@ class SettingsTest(unittest.TestCase):
                 build_integration(inside, environ=environ)
             with self.assertRaisesRegex(ValidationError, "project_trust_level"):
                 build_integration(dict(config, codex={"working_directory": str(base / "work")}), environ=environ)
+
+            # Another platform's transport declares what it holds and its
+            # tokens' shape; the turn's guard holds them, in place of the
+            # Discord shape. Its variable stays out of Codex's environment
+            # only when named in ``withhold``.
+            class Transport:
+                def withheld_values(self):
+                    return ("held-by-the-transport-0123",)
+
+                def credential_patterns(self):
+                    return (re.compile(r"tok_[a-z]{8}"),)
+
+            environ["OTHER_PLATFORM_TOKEN"] = "held-by-the-transport-0123"
+            _settings, other = build_integration(
+                config, environ=environ, transport=Transport(), withhold=("OTHER_PLATFORM_TOKEN",)
+            )
+            guard = other.participant.guard
+            for text in ("held-by-the-transport-0123", "a token tok_abcdefgh", f"x {other._secret}"):
+                with self.subTest(text=text[:12]):
+                    self.assertIsNotNone(guard.refusal({"kind": "message", "text": text}))
+            self.assertIsNone(guard.refusal({"kind": "message", "text": token}))
+            self.assertNotIn("OTHER_PLATFORM_TOKEN", other.environment)
+            other.close()
 
     def test_a_codex_run_ends_ok_only_when_completed(self):
         self.assertEqual(_ending({"status": "completed"}), (True, "completed"))

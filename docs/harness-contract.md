@@ -74,8 +74,10 @@ Everything that decides behavior, once, for every harness:
 - **The secret guard**: one per room (`nunchi.room.room_guard`), built from
   the config's `*_env` keys and what the transport holds. The agent's turn
   refuses a secret and tells the agent, so it can answer again; the room's
-  host refuses it again before anything leaves. A harness's launch secret,
-  which its room tools call the library with, is withheld too.
+  host refuses it again before anything leaves. A reason that holds a secret
+  is dropped and the move kept, since a reason is never posted. A harness's
+  launch secret, which its room tools call the library with, is withheld
+  too.
 - **The commit point and receipts**: whether a post may go out (the turn is
   still current, not cancelled, its action valid), and the record of what
   happened.
@@ -233,7 +235,7 @@ maintainers.
 | Own message in memory | transport id | transport id | the library records it in the room log with an id of its own (no delivery id; Hermes drops the bot's own messages before hooks) | transport id |
 | Attention routes | all | all | all, plus the host's model through `ctx.llm` | all |
 | Native tool approvals | user's rules; prompts declined | user's rules; approval requests declined | Hermes's own approvals | — |
-| Secret guard (the room's, from `room_guard`; the host checks every action again) | plus the launch secret, which the session's environment holds, so the agent can read it | plus the bridge's launch secret, which only the room's MCP server gets | plus Hermes's platform tokens (Telegram, Discord, Slack) when the config names none | the room's guard (old Codex runner, reference adapters) |
+| Secret guard (the room's, from `room_guard`; the host checks every action again) | plus the launch secret, which the session's environment holds, so the agent can read it | plus the bridge's launch secret, which the room's MCP server holds; the agent can read it when Codex runs commands without a sandbox | plus Hermes's platform tokens (Telegram, Discord, Slack) when the config names none | the room's guard (old Codex runner, reference adapters) |
 | Runs without patching the harness | yes | yes | yes, also under `plugins.isolation: host` (a turn verified offline, `a50406d9`) | yes |
 | Operator setup needed | none | the project's trust level, used when the user's config has none (see gap 5); no MCP server named `nunchi_room` | `allow_gateway_injection`; the injected turns' identity among the platform's allowed users; per-user group sessions (Hermes's default); `interim_assistant_messages`, `tool_progress` and `long_running_notifications` off for the room's platform, or Hermes posts text the library never saw; `gateway.platform_actions` for reactions | none |
 

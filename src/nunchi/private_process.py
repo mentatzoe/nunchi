@@ -4,16 +4,17 @@ An agent that runs code as the same OS user as Nunchi can read another
 process of that user through ``/proc``: ``/proc/<pid>/environ`` holds the
 environment the process started with, keys included, and ``/proc/<pid>/mem``
 its memory. A participant's keys then let the agent post to the room without
-the library. `keep_private` closes both for Nunchi's own processes.
+the library. `keep_private` stops those reads of Nunchi's own processes from
+the moment it is called. It does not stop them during start-up (below).
 
 On Linux it marks the process not dumpable (``prctl(PR_SET_DUMPABLE, 0)``)
 and checks that this took. Another process of the same user then gets
 ``PermissionError`` on both files; only a process with ``CAP_SYS_PTRACE``
-(root, usually) still reads them. It also sets the process's core size limit
-to zero, so a crash writes no core file that holds the keys.
+(root, usually) still reads them. A process that is not dumpable writes no
+core file either.
 
-Call it first in an entry point that holds a secret: before any secret is
-read, and before any agent process starts. It returns one status:
+Call it first in an entry point that holds a secret: before it reads any
+secret, and before any agent process starts. It returns one status:
 
 - ``"private"``: done and checked.
 - ``"unsupported"``: not Linux. On macOS another process of the same user
@@ -23,16 +24,25 @@ read, and before any agent process starts. It returns one status:
   would turn a hardening step into an outage on an unusual kernel; the
   process's probe reports the status instead.
 
-What it does not cover:
+``"private"`` means reads are stopped from now on. It does not mean the keys
+are safe. What it does not cover:
 
+- Start-up. Keys in the starting environment are readable by any process of
+  the same user from the program's start until the call: Python's start-up
+  and Nunchi's imports, about a tenth of a second, at every start. An agent
+  with an unsandboxed shell can leave a reader running and force a start: it
+  can kill a supervised runner (a signal needs only the same user), and the
+  supervisor starts it again. Only a separation the agent cannot cross
+  closes this: a harness sandbox that runs the agent's commands in their own
+  process namespace or with a fresh ``/proc`` (each integration's README
+  names its harness's setting), or running the agent as its own OS user.
 - Anything else the same OS user can read: the shell that exported the keys,
   environment files, a service manager's view of a unit's environment (for
   systemd, ``systemctl show`` of ``Environment=``), and any process started
   without this call.
 - Programs this process starts. The setting is reset when a child runs a new
-  program, so a harness Nunchi starts is not private (it gets no Nunchi key);
-  the zero core size limit is inherited.
-- The few milliseconds between the program's start and the call.
+  program, so a harness Nunchi starts is not private. It holds only its
+  launch secret, which the guard withholds.
 - Root, or any process with ``CAP_SYS_PTRACE``.
 
 Never call it in a process that is not Nunchi's own: a harness that loads
@@ -57,7 +67,7 @@ PR_SET_DUMPABLE = 4
 
 
 def keep_private() -> str:
-    """Make this process's memory and starting environment unreadable to its user's other processes.
+    """Stop this user's other processes reading this process's memory and starting environment from now on.
 
     Returns ``"private"``, ``"unsupported"`` (not Linux) or ``"failed"``
     (the reason is logged); never raises.
@@ -67,7 +77,6 @@ def keep_private() -> str:
         return UNSUPPORTED
     try:
         _not_dumpable()
-        _no_core_files()
     except (OSError, AttributeError, ImportError, ValueError) as exc:
         logger.warning(
             "nunchi: this process could not be made private (%s); other processes of "
@@ -101,9 +110,3 @@ def _not_dumpable() -> None:
     state = prctl(PR_GET_DUMPABLE, 0, 0, 0, 0)
     if state != 0:
         raise OSError(f"prctl(PR_GET_DUMPABLE) reads {state} after PR_SET_DUMPABLE 0")
-
-
-def _no_core_files() -> None:
-    import resource
-
-    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))

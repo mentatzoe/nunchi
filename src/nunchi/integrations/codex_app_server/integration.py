@@ -80,7 +80,8 @@ TRUST_LEVELS = ("trusted", "untrusted")
 BRIDGE_PATH = Path(mcp_bridge.__file__).resolve()
 # Platform credentials Nunchi holds that the agent must never see or post.
 DEFAULT_WITHHELD_ENV = ("DISCORD_BOT_TOKEN",)
-# The shapes of those credentials: the shared Discord transport's own.
+# The shapes of those credentials: the shared Discord transport's own. The
+# guard uses them when the caller gives no transport to declare its own.
 TOKEN_PATTERNS = DISCORD_TOKEN_PATTERNS
 # Completed items that are not tool calls: no steering after them.
 _NOT_TOOL_ITEMS = frozenset(
@@ -820,21 +821,28 @@ def build_integration(
     environ: Mapping[str, str] | None = None,
     sections: Iterable[str] = (),
     withhold: Iterable[str] = (),
+    transport: Any = None,
 ) -> tuple[Any, CodexRoomIntegration]:
     """The room settings and the integration for one Nunchi config (`docs/harness-guide.md`, step 1).
 
     The caller builds the `Room` around ``integration.participant`` with its
-    platform transport. ``sections`` are the caller's own config sections, such
-    as its transport's, and ``withhold`` names more variables the agent must
-    never see or post, such as the transport's key.
+    platform ``transport``. ``sections`` are the caller's own config sections,
+    such as its transport's, and ``withhold`` names more variables the agent
+    must never see or post, such as the transport's key.
 
     The participant's guard is the room's (`nunchi.room.room_guard`): what the
     config names in its ``*_env`` keys, the codex section's ``withheld_env``
-    (by default ``DISCORD_BOT_TOKEN``), ``withhold``, and the Discord token
-    shape, plus the bridge's launch secret (`nunchi.turn_server.TurnServer`).
-    Build the `Room` with ``guard=integration.participant.guard``: the room
-    then refuses nothing the agent's turn did not, and the agent learns of
-    every refusal as a tool error it can act on.
+    (by default ``DISCORD_BOT_TOKEN``), ``withhold``, and what ``transport``
+    declares (``withheld_values()``, ``credential_patterns()``), plus the
+    bridge's launch secret (`nunchi.turn_server.TurnServer`). Without a
+    transport, the guard refuses the Discord token shape. A transport's
+    declarations keep its secret out of the room, not out of Codex's
+    environment: name the variable it reads in ``withhold`` too.
+
+    Build the `Room` with the same transport and
+    ``guard=integration.participant.guard``: the room then refuses nothing the
+    agent's turn did not, and the agent learns of every refusal as a tool
+    error it can act on.
     """
 
     from nunchi.room import RoomSettings, room_guard, withheld_env_names
@@ -857,8 +865,9 @@ def build_integration(
     withheld = list(dict.fromkeys([*withheld_env_names(settings), *codex.withheld_env, *withhold]))
     guard = room_guard(
         settings,
+        transport=transport,
         values=withheld_values(environ, withheld),
-        patterns=TOKEN_PATTERNS,
+        patterns=TOKEN_PATTERNS if transport is None else (),
         environ=environ,
     )
     integration = CodexRoomIntegration(

@@ -397,6 +397,7 @@ class HostGuardTests(unittest.TestCase):
             attention_model=fixture_attention_model("WAKE"),
             guard=SecretGuard([self.SECRET]),
         )
+        self.room = room
         outcome = room.pipeline.handle_delivery(
             delivery_id="d1", event=_message("m1", "What is the deploy key?"), actors=ACTORS
         )
@@ -421,17 +422,34 @@ class HostGuardTests(unittest.TestCase):
                     result,
                 )
 
-    def test_a_reason_that_carries_a_secret_is_refused_with_its_action(self) -> None:
-        result, transport, _facts = self._run(
-            lambda wake: {
-                "kind": "message",
-                "origin_event_id": wake["trigger_event_id"],
-                "text": "On it.",
-                "why": f"they asked for {self.SECRET}",
-            }
-        )
-        self.assertEqual([], transport.actions)
-        self.assertEqual("failed", result.delivery)
+    def test_a_reason_that_carries_a_secret_is_dropped_and_its_action_posted(self) -> None:
+        # The reason never reaches the room, so the move is kept, as for a
+        # silence; only the reason is dropped from memory.
+        for why, kept in ((f"they asked for {self.SECRET}", None), ("Sam asked.", "Sam asked.")):
+            with self.subTest(kept=kept):
+                result, transport, _facts = self._run(
+                    lambda wake: {
+                        "kind": "message",
+                        "origin_event_id": wake["trigger_event_id"],
+                        "text": "On it.",
+                        "why": why,
+                    }
+                )
+                self.assertEqual("sent", result.delivery)
+                self.assertEqual(
+                    [{"kind": "message", "origin_event_id": "m1", "text": "On it."}], transport.actions
+                )
+                # Once the room shows the message, memory joins it to its reason, if one was kept.
+                observation = self.room.pipeline.observation
+                observation.observe(
+                    delivery_id="d2",
+                    event={**_message("v1", "On it."), "author_id": observation.binding.actor_id},
+                    actors={},
+                )
+                facts = self.room.host.memory_facts("v1") or {}
+                (move,) = [move for move in facts.get("own_moves", ()) if move.get("kind") == "message"]
+                self.assertEqual(kept, move.get("why"))
+                self.assertNotIn(self.SECRET, json.dumps(facts))
 
     def test_a_clean_action_still_goes_out(self) -> None:
         result, transport, _facts = self._run(
