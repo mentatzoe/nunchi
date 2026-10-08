@@ -13,15 +13,23 @@ import asyncio
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 
 from nunchi.attention import AttentionPolicy, ParticipantProfile
 from nunchi.conformance import fixture_attention_model
-from nunchi.integrations.hermes_plugin import SILENCE_MARKER, WAKE_MARKER, HermesRoomPlugin, HermesRoute
+from nunchi.integrations.hermes_plugin import (
+    HERMES_SILENT_ANSWERS,
+    SILENCE_MARKER,
+    WAKE_MARKER,
+    HermesRoomPlugin,
+    HermesRoute,
+)
 from nunchi.integrations.hermes_plugin.plugin import TOKEN_PATTERNS
-from nunchi.integrations.hermes_plugin_conformance import ROOM, TURN_USER, hermes_available
+from nunchi.integrations.hermes_plugin_conformance import ROOM, TURN_USER, hermes_available, room_settings
 from nunchi.observation import ObservationLimits, ParticipantBinding
 from nunchi.room import Room, RoomSettings
 from nunchi.turn import SecretGuard
@@ -43,6 +51,9 @@ PROFILE = ParticipantProfile(
     sha256="0" * 64,
 )
 ROUTE = HermesRoute(platform="telegram", chat_id=ROOM, turn_user_id=TURN_USER)
+REPO = Path(__file__).resolve().parents[2]
+PLUGIN_DIR = REPO / "src" / "nunchi" / "integrations" / "hermes_plugin"
+README = REPO / "integrations" / "hermes-plugin" / "README.md"
 
 
 class _StubContext:
@@ -121,8 +132,26 @@ class RegistrationTest(unittest.TestCase):
         self.assertEqual(
             set(ctx.hooks),
             {"pre_gateway_dispatch", "post_gateway_admission", "pre_llm_call", "transform_tool_result",
-             "post_api_request", "transform_llm_output", "on_session_end"},
+             "pre_api_request", "post_api_request", "api_request_error", "transform_llm_output",
+             "on_session_end"},
         )
+
+    def test_the_manifest_declares_every_hook_and_tool(self):
+        # `hermes plugins validate` compares these with what register() registers.
+        ctx = _StubContext()
+        _plugin().register(ctx)
+        manifest = (PLUGIN_DIR / "plugin.yaml").read_text(encoding="utf-8")
+        self.assertEqual(set(_manifest_list(manifest, "provides_hooks")), set(ctx.hooks))
+        self.assertEqual(set(_manifest_list(manifest, "provides_tools")), {"room_react", "room_context"})
+
+    def test_only_the_models_own_words_and_hermess_silence(self):
+        # Hermes's own text in place of an answer is never the agent's post
+        # (leak audit row 5), and every answer Hermes hides is the agent's
+        # silence, never a reply nobody saw (row 6).
+        participant = _plugin().participant
+        self.assertTrue(participant.model_text)
+        self.assertEqual(SILENCE_MARKER, participant.silence_marker)
+        self.assertEqual(HERMES_SILENT_ANSWERS, participant.also_silent)
 
     def test_platform_token_shapes_are_withheld(self):
         guard = SecretGuard([], patterns=TOKEN_PATTERNS)
@@ -211,6 +240,13 @@ class IngressTest(unittest.TestCase):
         self.assertEqual(answer, {"action": "handled"})
 
 
+def _manifest_list(manifest: str, key: str) -> list[str]:
+    """One list from plugin.yaml (a block of ``  - item`` lines)."""
+
+    block = re.search(rf"^{key}:\n((?:  - .+\n)+)", manifest, re.M)
+    return [line[4:].strip() for line in block.group(1).splitlines()] if block else []
+
+
 class RunTest(unittest.TestCase):
     def test_only_nunchi_runs_are_touched(self):
         plugin = _plugin()
@@ -266,6 +302,70 @@ def _user_text(request) -> str:
 
 def _tool_text(request) -> str:
     return next(m["content"] for m in reversed(request["messages"]) if m["role"] == "tool")
+
+
+def _wake_in(text: str) -> dict:
+    """The library's wake inside a turn's text."""
+
+    start = text.index("<nunchi_participant_turn_v1>") + len("<nunchi_participant_turn_v1>")
+    return json.loads(text[start:text.index("</nunchi_participant_turn_v1>")])["participant_turn"]["wake"]
+
+
+def _record_turns(harness) -> list[tuple[str, str]]:
+    """How each of the agent's turns ends, as the library's host gets it: ("failed", why),
+    ("silence", why) or (the action's kind, its text)."""
+
+    outcomes: list[tuple[str, str]] = []
+    participant = harness.plugin.participant
+    run = participant.run_protocol
+
+    def recorded(**kwargs):
+        try:
+            action = run(**kwargs)
+        except Exception as exc:
+            outcomes.append(("failed", str(exc)))
+            raise
+        action = action or {"kind": "silence"}
+        outcomes.append((action["kind"], action.get("text") or action.get("why") or ""))
+        return action
+
+    participant.run_protocol = recorded
+    return outcomes
+
+
+def _own_moves(harness, event_id: str = "telegram:message:100") -> list[tuple]:
+    facts = harness.plugin.room.host.memory_facts(event_id) or {}
+    return [(move.get("kind"), move.get("text") or move.get("why")) for move in facts.get("own_moves", ())]
+
+
+def _readme_settings() -> dict:
+    """The README's "Hermes setup the room needs" YAML block, as Hermes's own reader reads it."""
+
+    try:
+        if not hermes_available():
+            raise ImportError
+        from nunchi.integrations.hermes_plugin_conformance import isolate
+
+        isolate()
+        import hermes_yaml as yaml  # what Hermes reads its config.yaml with
+    except ImportError:
+        try:
+            import yaml
+        except ImportError:
+            raise unittest.SkipTest("needs Hermes or PyYAML to read YAML") from None
+    text = README.read_text(encoding="utf-8")
+    section = text[text.index("## Hermes setup the room needs"):]
+    block = re.search(r"```yaml\n(.*?)```", section, re.S)
+    return yaml.safe_load(block.group(1))
+
+
+class ReadmeTest(unittest.TestCase):
+    def test_the_readme_room_setup_is_what_the_kit_tests(self):
+        settings = _readme_settings()
+        plugins = settings.pop("plugins")
+        self.assertEqual(room_settings("telegram"), settings)
+        self.assertEqual(["nunchi-room"], plugins["enabled"])
+        self.assertIs(True, plugins["entries"]["nunchi-room"]["allow_gateway_injection"])
 
 
 class HostModelAttentionTest(unittest.TestCase):
@@ -406,6 +506,7 @@ class HermesGatewayTest(unittest.TestCase):
         kwargs.setdefault("room_factory", _room_factory(state))
         harness = HermesHarness(profile=PROFILE, guard=SecretGuard(["withheld-secret-value-123"]), **kwargs)
         self.addCleanup(harness.close)
+        harness.state = state
         return harness
 
     def test_kit_final_answer_scenarios(self):
@@ -452,20 +553,24 @@ class HermesGatewayTest(unittest.TestCase):
         self.assertEqual(harness.gateway.adapter.sent, [(ROOM, "On it.")])
         self.assertEqual(harness.model.count(), 1)
 
-    def _next_turn_after_a_delivered_reply(self):
+    def _next_turn_after(self, answer="On it."):
+        """The agent answers ``answer`` to message 100; the wake of its next turn, and what the room got."""
+
         harness = self._harness()
         harness.person_says("Can someone look at the failing deploy?", message_id="100")
         self.assertTrue(harness.wait_for_requests(1))
-        harness.model.reply({"text": "On it."})
+        harness.model.reply({"text": answer})
         self.assertTrue(harness.settle())
+        sent = list(harness.gateway.adapter.sent)
         harness.person_says("Thanks! Ping me when it's green.", message_id="102")
         self.assertTrue(harness.wait_for_requests(2))
         text = _user_text(harness.model.latest())
         harness.model.reply({"text": SILENCE_MARKER})
         self.assertTrue(harness.settle())
-        payload = text[text.index("<nunchi_participant_turn_v1>") + len("<nunchi_participant_turn_v1>"):
-                       text.index("</nunchi_participant_turn_v1>")]
-        return json.loads(payload)["participant_turn"]["wake"]
+        return _wake_in(text), sent
+
+    def _next_turn_after_a_delivered_reply(self):
+        return self._next_turn_after("On it.")[0]
 
     def test_the_delivered_message_is_in_the_agents_memory(self):
         # Hermes drops its agent's own messages before any plugin hook; the
@@ -497,6 +602,214 @@ class HermesGatewayTest(unittest.TestCase):
         facts = harness.plugin.room.host.memory_facts("telegram:message:100") or {}
         reasons = [move.get("why") for move in facts.get("own_moves", ()) if move.get("kind") == "silence"]
         self.assertEqual(reasons, ["Castor was asked, not me."])
+
+    # -- only what the agent chose reaches the room (leak audit rows 3, 5, 6) -------------
+
+    def test_hermess_other_silent_answers_are_remembered_as_silence(self):
+        # Hermes hides NO_REPLY and a marker in markdown; the library must
+        # remember silence, not a reply nobody saw (leak audit row 6). A marker
+        # in backticks, which Hermes would post, is silence too.
+        for answer in ("NO_REPLY", "**[SILENT]**", "`[SILENT]`"):
+            with self.subTest(answer=answer):
+                wake, sent = self._next_turn_after(f"<thinking>Castor has this one.</thinking>\n{answer}")
+                self.assertEqual([], sent)
+                moves = [(move.get("kind"), move.get("about_event_id"), move.get("why"))
+                         for move in wake["memory"]["own_moves"]]
+                self.assertEqual([("silence", "telegram:message:100", "Castor has this one.")], moves)
+                self.assertEqual(0, wake["pace"]["own_messages"])
+                thread = next(item for item in wake["memory"]["threads"]
+                              if item["event_id"] == "telegram:message:100")
+                self.assertEqual([], thread["responses"])
+
+    def test_a_post_that_only_looks_like_silence_is_delivered_and_remembered(self):
+        post = "No reply from Bob yet. Want me to ping him?"
+        wake, sent = self._next_turn_after(post)
+        self.assertEqual([(ROOM, post)], sent)
+        self.assertIn(("reply", post), [(move.get("kind"), move.get("text")) for move in wake["memory"]["own_moves"]])
+        self.assertEqual(1, wake["pace"]["own_messages"])
+
+    def _after_a_failed_file_edit(self, harness, answer):
+        # The model's edit fails (the file does not exist), then it answers.
+        missing = harness.state / "does-not-exist.txt"
+        harness.person_says("Can someone look at the failing deploy?", message_id="100")
+        self.assertTrue(harness.wait_for_requests(1))
+        harness.model.reply({"tool": "patch", "arguments": {
+            "mode": "replace", "path": str(missing), "old_string": "foo", "new_string": "bar"}})
+        self.assertTrue(harness.wait_for_requests(2))
+        self.assertIn("error", _tool_text(harness.model.latest()).lower())
+        harness.model.reply({"text": answer})
+        self.assertTrue(harness.settle())
+        return harness.gateway.adapter.sent
+
+    def test_the_room_setup_adds_nothing_after_a_failed_file_edit(self):
+        self.assertEqual([], self._after_a_failed_file_edit(self._harness(), SILENCE_MARKER))
+        harness = self._harness()
+        self.assertEqual([(ROOM, "On it.")], self._after_a_failed_file_edit(harness, "On it."))
+        self.assertEqual([("reply", "On it.")], _own_moves(harness))
+
+    def test_hermes_defaults_add_a_footer_the_library_never_committed(self):
+        # Hermes's default display.file_mutation_verifier appends a footer
+        # (with local file paths) after the output hook: the room sees more
+        # than the agent's post, and more than the library remembers. Only the
+        # top-level setting stops it (integrations/hermes-plugin/README.md).
+        harness = self._harness(extra_config={"display": {"file_mutation_verifier": True}})
+        ((chat, text),) = self._after_a_failed_file_edit(harness, "On it.")
+        self.assertTrue(text.startswith("On it.") and text != "On it.", text)
+        self.assertEqual([("reply", "On it.")], _own_moves(harness))
+
+    def test_an_empty_model_is_never_the_agents_reply(self):
+        # The model answers nothing, every time Hermes asks. Hermes retries,
+        # then hands the plugin "(empty)": the turn fails, the room gets
+        # nothing, and the agent remembers no reply (leak audit rows 3 and 5).
+        harness = self._harness()
+        turns = _record_turns(harness)
+        harness.model.on_request = lambda: harness.model.reply({"text": ""})
+        harness.person_says("Can someone look at the failing deploy?", message_id="100")
+        self.assertTrue(harness.wait_for_requests(1))
+        self.assertTrue(harness.settle(timeout=90))
+        self.assertGreaterEqual(harness.model.count(), 2)  # Hermes retried
+        self.assertEqual([], harness.gateway.adapter.sent)
+        self.assertEqual([], _own_moves(harness))
+        ((kind, why),) = turns
+        self.assertEqual("failed", kind)
+        self.assertIn('"(empty)" came from the harness', why)
+
+    def test_hermes_defaults_explain_an_empty_model_in_the_room(self):
+        # Without the room setup Hermes posts its retry lines, and appends its
+        # explanation even to the plugin's silence marker; the library still
+        # commits and remembers nothing.
+        harness = self._harness(
+            display={"streaming": False, "tool_progress": "off", "interim_assistant_messages": False},
+            extra_config={"display": {"turn_completion_explainer": True}},
+        )
+        turns = _record_turns(harness)
+        harness.model.on_request = lambda: harness.model.reply({"text": ""})
+        harness.person_says("Can someone look at the failing deploy?", message_id="100")
+        self.assertTrue(harness.wait_for_requests(1))
+        self.assertTrue(harness.settle(timeout=90))
+        sent = [text for _, text in harness.gateway.adapter.sent]
+        self.assertTrue(sent[-1].startswith(f"{SILENCE_MARKER}\n\n"), sent)
+        self.assertGreater(len(sent), 1, sent)
+        self.assertEqual([], _own_moves(harness))
+        self.assertEqual(["failed"], [kind for kind, _ in turns])
+
+    def test_hermess_iteration_limit_text_is_never_the_agents_reply(self):
+        # With a budget of one model call, the model writes beside a tool call
+        # and Hermes ends the run with "I reached the iteration limit and
+        # couldn't generate a summary.": not the model's words.
+        harness = self._harness(agent={"max_turns": 1})
+        turns = _record_turns(harness)
+        tool = {"tool": "room_context", "arguments": {"direction": "before"}}
+        first = dict(tool, text="Let me check the deploy logs first.")
+        harness.model.on_request = lambda: harness.model.reply(first if harness.model.count() == 1 else tool)
+        harness.person_says("Can someone look at the failing deploy?", message_id="100")
+        self.assertTrue(harness.wait_for_requests(1))
+        self.assertTrue(harness.settle(timeout=60))
+        self.assertEqual([], harness.gateway.adapter.sent)
+        self.assertEqual([], _own_moves(harness))
+        ((kind, why),) = turns
+        self.assertEqual("failed", kind)
+        self.assertIn("iteration limit", why)
+        self.assertIn("is not what its model wrote", why)
+
+    def test_the_output_hook_fails_closed(self):
+        # Hermes posts the raw draft when an output hook raises.
+        harness = self._harness()
+        turns = _record_turns(harness)
+
+        def broken(**_):
+            raise RuntimeError("conformance: the library failed")
+
+        harness.plugin.participant.finish = broken
+        with self.assertLogs("nunchi.hermes_plugin", level="ERROR"):
+            harness.person_says("Can someone look at the failing deploy?", message_id="100")
+            self.assertTrue(harness.wait_for_requests(1))
+            harness.model.reply({"text": "On it."})
+            self.assertTrue(harness.settle())
+        self.assertEqual([], harness.gateway.adapter.sent)
+        self.assertEqual(["failed"], [kind for kind, _ in turns])
+
+    def test_a_provider_refusal_ends_the_turn_promptly(self):
+        # Hermes runs no output or end hook when the provider refuses for
+        # good. The plugin ends the turn after a short wait for Hermes to
+        # recover, instead of the library's deadline (300 s).
+        harness = self._harness()
+        turns = _record_turns(harness)
+        harness.model.on_request = lambda: harness.model.reply(
+            {"status": 400, "error": "conformance: the provider refused the request"})
+        harness.person_says("Can someone look at the failing deploy?", message_id="100")
+        self.assertTrue(harness.wait_for_requests(1))
+        refused = time.monotonic()
+        self.assertTrue(harness.settle(timeout=30))
+        self.assertLess(time.monotonic() - refused, 15)
+        ((kind, why),) = turns
+        self.assertEqual("failed", kind)
+        self.assertIn("the model provider failed (400", why)
+        self.assertEqual([], _own_moves(harness))
+        # Known gap: Hermes still posts its failed-turn notice, which no hook
+        # or setting stops (README, Known gaps). Its "❌" status line is muted.
+        ((chat, notice),) = harness.gateway.adapter.sent
+        self.assertFalse(notice.startswith("❌"), notice)
+
+    def test_a_provider_failure_hermes_recovers_from_still_delivers(self):
+        # Hermes reports the refusal before it tries its fallback provider.
+        # The fallback answers after the plugin's wait would have run out: the
+        # new model request keeps the turn open, and the answer is posted.
+        harness = self._harness(failure_grace_seconds=2.0)
+        turns = _record_turns(harness)
+        config = harness.gateway.home / "config.yaml"
+        settings = json.loads(config.read_text(encoding="utf-8"))
+        settings["fallback_providers"] = [{"provider": "custom", "model": "conformance/fallback",
+                                           "base_url": harness.model.base_url, "api_key": "sk-local-conformance"}]
+        config.write_text(json.dumps(settings), encoding="utf-8")  # Hermes reads it for each run
+
+        def on_request():
+            if harness.model.count() == 1:
+                harness.model.reply({"status": 400, "error": "conformance: the provider refused the request"})
+            else:
+                __import__("threading").Timer(4.0, harness.model.reply, args=({"text": "On it."},)).start()
+
+        harness.model.on_request = on_request
+        harness.person_says("Can someone look at the failing deploy?", message_id="100")
+        self.assertTrue(harness.wait_for_requests(2))
+        self.assertEqual("conformance/fallback", harness.model.latest()["model"])
+        self.assertTrue(harness.settle(timeout=30))
+        self.assertEqual([(ROOM, "On it.")], harness.gateway.adapter.sent)
+        self.assertEqual([("message", "On it.")], turns)
+
+    def _offered(self, harness):
+        harness.person_says("Castor, can you check this?", message_id="100")
+        self.assertTrue(harness.wait_for_requests(1))
+        offered = {tool["function"]["name"] for tool in harness.model.latest()["tools"]}
+        harness.model.reply({"text": SILENCE_MARKER})
+        self.assertTrue(harness.settle())
+        return offered
+
+    def test_the_room_setup_offers_no_clarify_form(self):
+        # Hermes's default clarify tool posts a question form that nobody in
+        # the room is meant to answer; the room setup disables its toolset.
+        self.assertIn("clarify", self._offered(self._harness(extra_config={"agent": {"disabled_toolsets": []}})))
+        self.assertNotIn("clarify", self._offered(self._harness()))
+
+    def test_the_room_setup_sends_no_typing(self):
+        harness = self._harness()
+        self.assertFalse(harness.gateway.adapter.config.typing_indicator)
+        harness.person_says("Castor, can you check this?", message_id="100")
+        self.assertTrue(harness.wait_for_requests(1))
+        time.sleep(2.5)  # Hermes refreshes typing every 2 s while a run is on
+        harness.model.reply({"text": SILENCE_MARKER})
+        self.assertTrue(harness.settle())
+        self.assertEqual([], harness.gateway.adapter.typing)
+
+    def test_hermes_defaults_show_typing_for_a_turn_that_stays_silent(self):
+        harness = self._harness(extra_config={"telegram": {"typing_indicator": True}})
+        harness.person_says("Castor, can you check this?", message_id="100")
+        self.assertTrue(harness.wait_for_requests(1))
+        time.sleep(2.5)
+        harness.model.reply({"text": SILENCE_MARKER})
+        self.assertTrue(harness.settle())
+        self.assertEqual([], harness.gateway.adapter.sent)
+        self.assertTrue(harness.gateway.adapter.typing)
 
     def test_steering_shows_a_message_that_arrives_mid_turn(self):
         harness = self._harness()
@@ -624,6 +937,52 @@ class HermesGatewayTest(unittest.TestCase):
         self.assertIn('"direction": "before"', answer["result"])
         harness.model.reply({"text": SILENCE_MARKER})
         self.assertTrue(harness.settle())
+
+
+@unittest.skipUnless(hermes_available(), "requires an installed Hermes (hermes-agent)")
+class HermesSilenceParityTest(unittest.TestCase):
+    """The plugin knows every answer the pinned Hermes hides (leak audit row 6)."""
+
+    @classmethod
+    def setUpClass(cls):
+        from nunchi.integrations.hermes_plugin_conformance import isolate
+
+        isolate()
+
+    def test_the_plugin_lists_every_silent_answer_hermes_has(self):
+        from gateway.response_filters import LIVE_GATEWAY_SILENT_MARKERS
+
+        self.assertEqual(set(LIVE_GATEWAY_SILENT_MARKERS), {SILENCE_MARKER, *HERMES_SILENT_ANSWERS})
+
+    def test_whatever_hermes_hides_the_library_remembers_as_silence(self):
+        from copy import deepcopy
+
+        from gateway.response_filters import LIVE_GATEWAY_SILENT_MARKERS, is_intentional_silence_response
+        from nunchi.participant_model import build_participant_turn_request
+        from nunchi.turn import Turn
+        from tests.v2.test_claude_code import OPPORTUNITY, test_wake
+        from tests.v2.test_turn import Room as Expander
+
+        participant = _plugin().participant
+        hidden = 0
+        for marker in sorted(LIVE_GATEWAY_SILENT_MARKERS):
+            for form in ("{}", "{}.", "**{}**", "*{}*", "_{}_", "({})", '"{}"', "  {}  ", "{}!", "-{}-"):
+                answer = form.format(marker)
+                if not is_intentional_silence_response(answer):
+                    continue
+                hidden += 1
+                turn = Turn(
+                    profile=PROFILE,
+                    request=build_participant_turn_request(test_wake(), deepcopy(OPPORTUNITY)),
+                    tool_names={"react": "room_react", "context": "room_context"},
+                    expand=Expander().expand,
+                    result_wait_seconds=2,
+                    silence_marker=participant.silence_marker,
+                    also_silent=participant.also_silent,
+                )
+                with self.subTest(answer=answer):
+                    self.assertEqual("silent", turn.decide(answer).kind)
+        self.assertGreater(hidden, len(LIVE_GATEWAY_SILENT_MARKERS))
 
 
 @unittest.skipUnless(hermes_available(), "requires an installed Hermes (hermes-agent)")

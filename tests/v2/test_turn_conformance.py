@@ -36,9 +36,67 @@ class TurnConformanceTests(unittest.TestCase):
             {
                 "look-again", "steering", "secret", "silence-reason", "pause",
                 "final-look-again", "final-secret", "final-silence", "final-pause",
+                # Each silent form keeps its reason.
+                "final-silence-forms",
             },
             failed,
         )
+
+    def test_the_final_answer_safety_scenarios_catch_their_rules_turned_off(self):
+        safety = ("final-not-own-words", "final-no-answer", "final-silence-forms")
+
+        def failed():
+            reference = kit.ReferenceIntegration("final-answer")
+            return {
+                name: result["failures"]
+                for name in (*safety, "final-deliver", "final-silence", "final-thinking")
+                if (result := kit.run_scenario(name, reference))["status"] == "fail"
+            }
+
+        self.assertEqual({}, failed())
+        # Any answer counts as the model's: the harness's text is posted and remembered.
+        with mock.patch.object(turn.Turn, "_not_the_models", lambda self, text: None):
+            self.assertEqual({"final-not-own-words", "final-no-answer"}, set(failed()))
+        # The harness's text is read as the agent's silence instead of a failure.
+        decide = turn.Turn.decide
+
+        def as_silence(self, answer):
+            decision = decide(self, answer)
+            self.unattributed = None
+            return decision
+
+        with mock.patch.object(turn.Turn, "decide", as_silence):
+            failures = failed()
+        self.assertEqual({"final-not-own-words", "final-no-answer"}, set(failures))
+        self.assertIn("a move it never made", " ".join(failures["final-no-answer"]))
+        # Formatting around the marker is not stripped.
+        plain = lambda text: " ".join(text.split()).casefold()  # noqa: E731
+        with mock.patch.object(turn, "_silence_form", plain), mock.patch.object(turn, "_silence_lead", plain):
+            failures = failed()
+        self.assertEqual({"final-silence-forms"}, set(failures))
+        self.assertIn("'**[SILENT]**': expected silence", failures["final-silence-forms"][0])
+        # The harness's other silent answer is not listed.
+        init = turn.TurnParticipant.__init__
+
+        def without_also_silent(self, **kwargs):
+            init(self, **{**kwargs, "also_silent": ()})
+
+        with mock.patch.object(turn.TurnParticipant, "__init__", without_also_silent):
+            failures = failed()
+        self.assertEqual({"final-silence-forms"}, set(failures))
+        self.assertTrue(all(failure.startswith("'NO_REPLY'") for failure in failures["final-silence-forms"]))
+
+    def test_the_stand_in_scenarios_need_a_harness_that_puts_its_own_text_in(self):
+        class NeverStandsIn(kit.ReferenceIntegration):
+            def __init__(self):
+                super().__init__("final-answer")
+                self.harness_text = False
+
+        for name in ("final-not-own-words", "final-no-answer"):
+            with self.subTest(name):
+                self.assertEqual("n/a", kit.run_scenario(name, NeverStandsIn())["status"])
+                self.assertEqual("n/a", kit.run_scenario(name, ClaudeCodeKitIntegration())["status"])
+        self.assertEqual("pass", kit.run_scenario("final-silence-forms", NeverStandsIn())["status"])
 
     def test_the_launch_secret_scenario_needs_a_launch_secret_and_catches_a_leak(self):
         # The reference turn has no launch secret: the scenario does not apply.

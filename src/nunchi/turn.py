@@ -12,6 +12,8 @@ do inside its turn, once, so every integration gets the same behavior
 - ending the turn without an action is silence only when the turn was bound
   to its wake, which shows the agent had the room actions; any other ending is
   a failure;
+- in final-answer posting, only words the agent's own model wrote can be its
+  post; text the harness puts in their place makes the turn a failure;
 - secret values never reach the room.
 
 `Turn` is passive: whichever side runs the agent drives it. `TurnParticipant`
@@ -34,6 +36,7 @@ import secrets
 import threading
 import time
 from typing import Any, Protocol
+import unicodedata
 
 from .attention import ParticipantProfile
 from .errors import NunchiError
@@ -69,6 +72,161 @@ class TurnError(NunchiError):
 # In final-answer posting, the agent's own thinking: never posted, and kept as
 # its reason. An unclosed block runs to the end of the answer.
 _NOTE = re.compile(r"<thinking>(.*?)(?:</thinking>|\Z)", re.S | re.I)
+
+
+# -- the agent's silence, in whatever form it wrote it ----------------------------
+
+
+def _silence_edge(character: str) -> bool:
+    # Formatting a model puts around a word: punctuation, and the markdown
+    # wrappers ` and ~ (which are not punctuation in Unicode). Never [ or ]:
+    # they are part of a bracketed marker.
+    return character not in "[]" and (
+        unicodedata.category(character).startswith("P") or character in "`~"
+    )
+
+
+def _silence_lead(text: str) -> str:
+    """``text`` with whitespace and case folded, and its leading formatting stripped."""
+
+    folded = " ".join(text.split()).casefold()
+    start = 0
+    while start < len(folded) and _silence_edge(folded[start]):
+        start += 1
+    return folded[start:]
+
+
+def _silence_form(text: str) -> str:
+    """``text`` with whitespace and case folded, and the formatting at both edges stripped.
+
+    ``**[SILENT]**``, ``[silent].`` and `` `[SILENT]` `` all have the form
+    ``[silent]``; ``No reply.`` has the form ``no reply``.
+    """
+
+    lead = _silence_lead(text)
+    end = len(lead)
+    while end > 0 and _silence_edge(lead[end - 1]):
+        end -= 1
+    return lead[:end].strip()
+
+
+# -- whether the agent's own model wrote an answer ---------------------------------
+
+# A whole tagged block, such as <think>...</think> or a tool call written as
+# text, and any tag on its own. Harnesses strip such blocks from an answer.
+_BLOCK = re.compile(r"<([A-Za-z][\w:.-]*)(?:\s[^<>]*)?>(.*?)</\1\s*>", re.S | re.I)
+_TAG = re.compile(r"</?[A-Za-z][\w:.-]*(?:\s[^<>]*)?/?>")
+_QUOTE_CHARACTERS = 80
+
+
+def _key(text: str) -> tuple[str, set[int], set[int]]:
+    """The words and symbols of ``text``, and where each word or symbol starts and ends.
+
+    Case, whitespace, punctuation, markup and ASCII symbols are left out, so
+    a harness that strips markdown or joins a continuation does not change
+    the key. Each non-ASCII symbol, such as an emoji, is a word of its own.
+    """
+
+    characters: list[str] = []
+    starts: set[int] = set()
+    ends: set[int] = set()
+    in_word = False
+    for character in unicodedata.normalize("NFKC", text).casefold():
+        category = unicodedata.category(character)
+        word = character.isalnum() or (
+            category in ("Mn", "Mc") and in_word and not 0xFE00 <= ord(character) <= 0xFE0F
+        )
+        symbol = not word and category.startswith("S") and ord(character) > 127
+        if in_word and not word:
+            ends.add(len(characters))
+        if symbol:
+            starts.add(len(characters))
+            characters.append(character)
+            ends.add(len(characters))
+        elif word:
+            if not in_word:
+                starts.add(len(characters))
+            characters.append(character)
+        in_word = word
+    if in_word:
+        ends.add(len(characters))
+    return "".join(characters), starts, ends
+
+
+def _without_blocks(text: str) -> str:
+    return _TAG.sub(" ", _BLOCK.sub(" ", text))
+
+
+def _model_pieces(text: str) -> list[str]:
+    """What one report of the model's text could become: its text without tagged
+    blocks, and each block's own text (some harnesses answer with reasoning)."""
+
+    return [_without_blocks(text), *(_TAG.sub(" ", match.group(2)) for match in _BLOCK.finditer(text))]
+
+
+def _silent_forms(
+    silence_marker: str | None, also_silent: Sequence[str], model_text: bool
+) -> frozenset[str]:
+    """The forms of every whole answer that is silence; checks the final-answer options."""
+
+    if isinstance(also_silent, str):
+        raise ValueError("also_silent is a list of answers, not one string")
+    also = tuple(also_silent)
+    if silence_marker is None:
+        if also:
+            raise ValueError("also_silent needs final-answer posting: give a silence marker")
+        if model_text:
+            raise ValueError("model_text needs final-answer posting: give a silence marker")
+        return frozenset()
+    if not _silence_form(silence_marker):
+        # A marker of punctuation alone would make every answer silence.
+        raise ValueError("a silence marker must be more than punctuation")
+    forms = {_silence_form(silence_marker)}
+    for answer in also:
+        if not isinstance(answer, str) or not _silence_form(answer):
+            raise ValueError("each answer in also_silent must be non-empty text")
+        forms.add(_silence_form(answer))
+    return frozenset(forms)
+
+
+def _written_by_model(answer: str, written: Sequence[str]) -> bool:
+    """Whether ``answer`` is words the model wrote.
+
+    It is when its words are a contiguous run in one thing the model wrote,
+    or run on from the end of one into the start of later ones, as a length
+    continuation does. The run starts and ends on whole words. Case,
+    whitespace, punctuation, markup and tagged blocks do not count.
+    """
+
+    target, _, _ = _key(_without_blocks(answer))
+    if not target:
+        # Nothing but punctuation or markup: compare the text itself.
+        bare = "".join(answer.split()).casefold()
+        return any(bare in "".join(text.split()).casefold() for text in written)
+    pieces = [key for text in written for piece in _model_pieces(text) if (key := _key(piece))[0]]
+    for key, starts, ends in pieces:
+        at = key.find(target)
+        while at != -1:
+            if at in starts and at + len(target) in ends:
+                return True
+            at = key.find(target, at + 1)
+    # How much of the answer is matched at the end of an earlier piece.
+    reached: set[int] = set()
+    for key, starts, ends in pieces:
+        later: set[int] = set()
+        for done in reached:
+            rest = target[done:]
+            if key.startswith(rest) and len(rest) in ends:
+                return True
+            if rest.startswith(key):
+                later.add(done + len(key))
+        # This piece's last words that begin the answer.
+        floor = len(key) - len(target)
+        for start in starts:
+            if start > floor and target.startswith(key[start:]):
+                later.add(len(key) - start)
+        reached |= later
+    return False
 
 
 @dataclass(frozen=True)
@@ -221,7 +379,14 @@ class Turn:
     With ``silence_marker`` the turn uses final-answer posting: the agent's
     final answer is its post, handed to `finish` (or `decide`), and an answer
     that starts with the marker is silence. The integration names its
-    harness's own marker. There is no send tool.
+    harness's own marker, the one the agent is taught. ``also_silent`` lists
+    the other whole answers its harness treats as silence, such as
+    ``NO_REPLY``. There is no send tool.
+
+    ``model_text`` says the integration reports what the agent's model wrote
+    (`model_wrote`). The answer must then be the model's own words: text the
+    harness puts in their place, such as its own notice for a run that
+    produced nothing, is never posted or remembered, and the turn fails.
     """
 
     def __init__(
@@ -235,6 +400,8 @@ class Turn:
         guard: SecretGuard | None = None,
         result_wait_seconds: float = DEFAULT_RESULT_WAIT_SECONDS,
         silence_marker: str | None = None,
+        also_silent: Sequence[str] = (),
+        model_text: bool = False,
     ) -> None:
         self.profile = profile
         self.request = request
@@ -246,7 +413,16 @@ class Turn:
                 raise ValueError("a silence marker must be non-empty text")
             if "send" in self.tool_names:
                 raise ValueError("a turn whose final answer is its post has no send tool")
+        self._silent_forms = _silent_forms(silence_marker, also_silent, model_text)
         self.silence_marker = silence_marker
+        self.also_silent = tuple(also_silent)
+        self.model_text = bool(model_text)
+        # What the agent's model wrote in this turn's runs, and how many
+        # times the integration reported it (`model_wrote`).
+        self.written: list[str] = []
+        self.model_reports = 0
+        # Why the final answer was not the model's own words; the turn then fails.
+        self.unattributed: str | None = None
         self.refused = False
         # The agent's own thinking from its final answer, kept as its reason.
         self.note: str | None = None
@@ -423,17 +599,57 @@ class Turn:
 
     # -- final-answer posting -------------------------------------------------
 
+    def model_wrote(self, text: str | None) -> None:
+        """Keep what the agent's model wrote in one of this turn's runs.
+
+        Report each model response: its text and, separately, any reasoning
+        the provider returned, even when empty. With ``model_text`` the final
+        answer must be words from these (see `decide`).
+        """
+
+        with self.lock:
+            self.model_reports += 1
+            if isinstance(text, str) and text.strip():
+                self.written.append(text)
+
+    def _not_the_models(self, text: str) -> str | None:
+        """Why ``text``, a non-empty answer, is not the model's own words; None when it is."""
+
+        if not self.model_reports:
+            return (
+                "the integration reported nothing its model wrote in this turn, "
+                "though it declared model_text"
+            )
+        quoted = "the answer"
+        if self.guard.refusal({"kind": "message", "text": text}) is None:
+            shown = text if len(text) <= _QUOTE_CHARACTERS else text[:_QUOTE_CHARACTERS] + "…"
+            quoted = json.dumps(shown, ensure_ascii=False)
+        if not self.written:
+            return f"{quoted} came from the harness; its model wrote nothing in this turn"
+        if not _written_by_model(text, self.written):
+            return f"{quoted} is not what its model wrote"
+        return None
+
     def decide(self, answer: str | None) -> Finish:
         """What becomes of the agent's final answer, before the host commits it.
 
         ``deliver`` makes the answer this turn's one room action. ``continue``
         comes at most once for a refused answer and once for looking again.
         Thinking inside ``<thinking>`` tags is the agent's own: it is never
-        posted, and it becomes the move's reason (``note``). An answer whose
-        posted part starts with the silence marker, or holds it on a line of
-        its own, is silence: whatever else it says is the agent's own and is
-        never posted. A turn that already took a room action, such as a
-        reaction, or that has ended, posts nothing more.
+        posted, and it becomes the move's reason (``note``). A turn that
+        already took a room action, such as a reaction, or that has ended,
+        posts nothing more.
+
+        With ``model_text``, a posted part that is not the model's own words
+        marks the turn ``unattributed`` and is silent here; the turn then
+        fails (`TurnParticipant.run_protocol`), so the harness's text is never
+        the agent's reply, its silence, or its memory.
+
+        Silence is the empty answer, or an answer whose posted part, ignoring
+        case, whitespace and the punctuation or markdown around it, starts
+        with the silence marker, holds it on a line of its own, or is wholly
+        the marker or one of ``also_silent``. Whatever else a silent answer
+        says is the agent's own and is never posted.
         """
 
         marker = self.silence_marker
@@ -443,15 +659,22 @@ class Turn:
         self.keep_note(" ".join(part.strip() for part in _NOTE.findall(raw) if part.strip()))
         text = _NOTE.sub("", raw).strip()
         with self.lock:
-            if not self.open() or self.action is not None:
+            if not self.open() or self.action is not None or self.unattributed is not None:
                 return Finish("silent")
-            # Models vary the marker's case, and some reason in text before
-            # deciding on silence; the marker wins, and the reasoning stays.
-            folded = marker.strip().casefold()
+            if self.model_text and text:
+                self.unattributed = self._not_the_models(text)
+                if self.unattributed is not None:
+                    return Finish("silent")
+            # Models vary the marker's case and formatting, and some reason in
+            # text before deciding on silence; the marker wins, and the
+            # reasoning stays. The harness's other silent answers count only
+            # as the whole answer, as a harness reads them.
+            taught = _silence_form(marker)
             if (
                 not text
-                or text.casefold().startswith(folded)
-                or any(line.strip().casefold() == folded for line in text.splitlines())
+                or _silence_lead(text).startswith(taught)
+                or any(_silence_form(line) == taught for line in text.splitlines())
+                or _silence_form(text) in self._silent_forms
             ):
                 return Finish("silent")
             try:
@@ -565,6 +788,11 @@ class TurnParticipant:
     text; the agent's room tool calls come back through `call_tool`, bound to
     the open turn. The first room action goes to the host, and the host's
     result goes back to the tool call through `settle`.
+
+    In final-answer posting (``silence_marker``), ``also_silent`` lists the
+    harness's other silent answers, and ``model_text=True`` declares that the
+    integration reports what the model wrote (`model_wrote`), so that only
+    the model's own words can be posted (`Turn.decide`).
     """
 
     core_protocol_version = PARTICIPANT_TURN_PROTOCOL_VERSION
@@ -579,6 +807,8 @@ class TurnParticipant:
         roles: Sequence[str] = TURN_ROLES,
         result_wait_seconds: float = DEFAULT_RESULT_WAIT_SECONDS,
         silence_marker: str | None = None,
+        also_silent: Sequence[str] = (),
+        model_text: bool = False,
         bind_timeout_seconds: float | None = None,
         previous_turn_grace_seconds: float = DEFAULT_PREVIOUS_TURN_GRACE_SECONDS,
     ) -> None:
@@ -588,6 +818,12 @@ class TurnParticipant:
         if silence_marker is not None:
             # Final-answer posting: the answer is the post, so there is no send tool.
             roles = [role for role in roles if role != "send"]
+            if not isinstance(silence_marker, str) or not silence_marker.strip():
+                raise ValueError("a silence marker must be non-empty text")
+        # Checked now, not at the first turn.
+        _silent_forms(silence_marker, also_silent, model_text)
+        self.also_silent = tuple(also_silent)
+        self.model_text = bool(model_text)
         self.silence_marker = silence_marker
         self.profile = profile
         self.driver = driver
@@ -654,6 +890,8 @@ class TurnParticipant:
             guard=guard,
             result_wait_seconds=self.result_wait_seconds,
             silence_marker=self.silence_marker,
+            also_silent=self.also_silent,
+            model_text=self.model_text,
         )
         ready = getattr(self.driver, "ready", None)
         if callable(ready) and not ready(cancel):
@@ -699,6 +937,12 @@ class TurnParticipant:
             if turn.ended.is_set():
                 if turn.action_ready.is_set():
                     return deepcopy(turn.action)
+                if turn.unattributed is not None:
+                    # The harness's text in place of the agent's answer: a
+                    # failure, never a reply, never silence, never remembered.
+                    raise TurnError(
+                        f"the agent's run ended with text its model did not write: {turn.unattributed}"
+                    )
                 if turn.end_ok and turn.turn_id is not None:
                     # Silence; the agent's own thinking, if any, is its reason.
                     return {"kind": "silence", "why": turn.note} if turn.note else None
@@ -823,6 +1067,18 @@ class TurnParticipant:
         if turn is None or not turn.bound(turn_id):
             return False, "No room opportunity is open for this turn. Nothing was posted."
         return turn.call(role, arguments, name=tool)
+
+    def model_wrote(self, *, turn_id: str | None, text: str | None) -> bool:
+        """What the model wrote in a bound run of the open turn; see `Turn.model_wrote`.
+
+        Returns whether an open turn bound as ``turn_id`` kept it.
+        """
+
+        turn = self.active
+        if turn is None or not turn.bound(turn_id):
+            return False
+        turn.model_wrote(text)
+        return True
 
     def finish(self, *, turn_id: str | None, answer: str | None) -> Finish:
         """Final-answer posting for the open turn; see `Turn.finish`."""

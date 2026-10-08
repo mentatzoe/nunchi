@@ -13,10 +13,13 @@ provides_tools:
   - room_react
   - room_context
 provides_hooks:
+  - pre_gateway_dispatch
   - post_gateway_admission
   - pre_llm_call
   - transform_tool_result
+  - pre_api_request
   - post_api_request
+  - api_request_error
   - transform_llm_output
   - on_session_end
 capabilities:

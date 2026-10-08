@@ -548,6 +548,78 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Fixed
 
+- In final-answer posting, only words the agent's own model wrote can be its
+  post ([leak audit in #135](https://github.com/mentatzoe/nunchi/issues/135#issuecomment-6057394431), row 5).
+  A harness that put its own text in place of a missing answer, such as
+  Hermes's `(empty)`, "I reached the iteration limit…" or "No reply: …",
+  had that text committed as the agent's reply and kept in its memory, so
+  the agent and attention took the person's question as answered.
+  - `TurnParticipant(..., model_text=True)` declares that the integration
+    reports what the model wrote: `model_wrote(turn_id=, text=)` for each
+    response's text and reasoning (`Turn.model_wrote`). The answer must be a
+    run of those words, in one response or running on across responses, as
+    a length continuation does. Case, whitespace, punctuation, markdown and
+    tagged blocks such as `<think>` do not count.
+  - Any other answer is `silent` at `finish`, and the turn fails with
+    `TurnError` ("the agent's run ended with text its model did not write"),
+    even when the harness reports the run as finished. It is never posted,
+    never the agent's silence, and never remembered. An empty answer is still
+    silence. An integration that declares `model_text` and reports nothing
+    fails every answer, with that reason, instead of going quiet.
+  - The local turn protocol is `I-040D LocalTurnProtocolV2@2`: `/v1/attach`
+    answers `model_text`, the new `/v1/turn/model-text` route takes
+    `turn_id` and `text`, and a failed `/v1/turn/finish` answers `failed`
+    with the reason. Tool-posting integrations are unchanged.
+  - The kit's final-answer reference reports what its scripted model wrote.
+    Two new scenarios, `final-not-own-words` and `final-no-answer`, check
+    that the harness's text is never posted or remembered and the turn
+    fails. They need a harness that can answer for its model
+    (`KitIntegration.harness_text`, a surface `stand_in` step). The Hermes
+    kit plays them on Hermes's real paths: a budget of one model call
+    (`agent.max_turns: 1`), and empty model replies until Hermes gives up.
+  - The Hermes plugin reports each model response's text and reasoning from
+    `post_api_request`, so Hermes's `(empty)` and its iteration-limit notice
+    fail the turn instead of becoming the agent's reply. The retry after a
+    failed turn (decision D5) is not built.
+- The agent's silence is read as silence in whatever form it wrote it
+  ([leak audit in #135](https://github.com/mentatzoe/nunchi/issues/135#issuecomment-6057394431), row 6).
+  `**[SILENT]**`, `` `[SILENT]` `` or `[silent].` was posted, or, on Hermes,
+  hidden by Hermes but remembered as the agent's reply. Silence now ignores
+  case, whitespace, punctuation and the markdown wrappers `` ` `` and `~`
+  around the marker (never `[` or `]`), for the prefix, own-line and whole
+  answer rules. `also_silent` on `Turn` and `TurnParticipant` lists the
+  harness's other silent answers, such as `NO_REPLY`, which count only as the
+  whole answer. "No reply from Bob yet." still goes out. The kit's
+  final-answer reference lists `NO_REPLY`, and its new `final-silence-forms`
+  scenario plays four silent forms and one post that only looks like one.
+  The Hermes plugin lists Hermes's other silent answers
+  (`HERMES_SILENT_ANSWERS`: `SILENT`, `NO_REPLY`, `NO REPLY` and the zh
+  forms), and a Hermes-lane test checks the list against the installed
+  Hermes's own.
+- In a Hermes room, people now see only what the agent chose to do
+  ([leak audit in #135](https://github.com/mentatzoe/nunchi/issues/135#issuecomment-6057394431), row 3, and the Hermes notices).
+  - The README's room setup, which the kit and the Hermes tests now run with
+    (a test checks they match), turns off what Hermes added on its own: the
+    file-edit footer and the "No reply" explanation appended after the
+    agent's answer or its `[SILENT]`, retry and budget status lines,
+    reasoning, the busy notice, the typing indicator, processing reactions,
+    and the `clarify` and `cronjob` toolsets. Some of these apply to the whole
+    Hermes profile or bot, so the README recommends one profile and one bot
+    per room.
+  - When the provider refuses for good, Hermes ends the run with no hook the
+    plugin saw, and the turn stayed open until the library's 300 s deadline,
+    holding up the room's next moment. The plugin now watches
+    `api_request_error` and `pre_api_request`, and ends the turn as failed if
+    Hermes starts no new model request within 5 s. A fallback provider that
+    takes over keeps the turn.
+  - If the plugin's output hook fails, the turn fails and Hermes gets
+    `[SILENT]`. Hermes posts the raw draft for a hook that raised.
+  - The kit's scripted model reports zero output tokens for an empty reply,
+    as a provider does, so Hermes stops retrying after two empty replies and
+    the empty-model tests take seconds, not a minute.
+  - Still open: Hermes's own failed-turn notice on a failed run, approval
+    prompts, `hermes send` through the terminal tool, and Hermes's replies to
+    its built-in slash commands (decision D4). The README lists them.
 - Secrets the library holds no longer reach the room through any harness
   ([leak audit in #135](https://github.com/mentatzoe/nunchi/issues/135#issuecomment-6057394431), rows 9 and 10).
   - The launch secret a `TurnServer` serves with is now in its participant's

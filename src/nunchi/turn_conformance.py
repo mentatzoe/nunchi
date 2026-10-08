@@ -14,6 +14,12 @@ One scenario, ``launch-secret``, needs a secret the harness itself holds: the
 per-launch secret an integration's room tools call the library with. An
 integration without one reports it as not applicable.
 
+Two final-answer scenarios need a harness that can end a run with its own
+text in place of the model's answer (``final-not-own-words``,
+``final-no-answer``). An integration whose harness never does that reports
+them as not applicable. One scenario plays once per answer in its ``forms``
+(``final-silence-forms``).
+
 An integration takes part by providing a `KitIntegration`: the participant the
 shared turn host invokes, wired so that when its agent is started the scripted
 agent's steps go through the integration's own surface (its tool calls, its
@@ -49,6 +55,23 @@ LAUNCH_SECRET = "@launch-secret"
 # What the agent posts once its post with a secret was refused.
 NO_SECRET = "I can't share that here."
 SILENCE = "[SILENT]"
+# Another answer the reference harness treats as silence, as many harnesses do.
+NO_REPLY = "NO_REPLY"
+# What the model wrote before its run ended without an answer, and the text a
+# harness puts in place of the missing answer.
+CHECKING = "Let me check the deploy logs first."
+STAND_IN = "I reached the iteration limit and couldn't generate a summary."
+EMPTY_STAND_IN = "(empty)"
+# The agent's silence, as models write it: wrapped, or in another word. Each
+# keeps the agent's thinking as its reason.
+SILENCE_FORMS = (
+    "**[SILENT]**",
+    "`[SILENT]`",
+    "[silent].",
+    NO_REPLY,
+)
+# A post that only looks like a silence word: it must go out.
+NEAR_SILENCE = "No reply from Bob yet. Want me to ping him?"
 # The agent's own "mhm" (docs/behavior.md): one reaction the kit's room offers.
 MHM = "👂"
 # Why the agent waits, what it posts after the pause, and its outcome report.
@@ -67,9 +90,12 @@ PROPOSAL = {
 
 # Each step is what the agent does next: ("bind",), ("read",), the turn's text
 # as the agent received it, ("call", role, arguments), ("after_tool",),
-# ("finish", answer), ("end", ok) or ("end", ok, last_words); or what happens
-# around it: ("arrive", text), someone posts; ("cancel",), the library
-# cancels the turn.
+# ("finish", answer), the answer its model wrote, ("end", ok) or ("end", ok,
+# last_words); or what happens around it: ("arrive", text), someone posts;
+# ("cancel",), the library cancels the turn; ("stand_in", text, wrote), the
+# run ends with the harness's own ``text`` in place of an answer, after its
+# model wrote ``wrote`` ("" for nothing). "@form" in a finish step is the
+# scenario's form being played.
 Step = tuple
 
 
@@ -84,6 +110,13 @@ class Scenario:
 
     ``launch_secret``: the scenario needs the integration's launch secret, and
     is not applicable to an integration that has none.
+
+    ``harness_text``: the scenario needs a harness that ends a run with its
+    own text in place of the model's answer (a ``stand_in`` step), and is not
+    applicable to an integration whose harness never does.
+
+    ``forms``: the scenario plays once per form, with the form in place of
+    "@form" in its steps; it passes when every play passes.
     """
 
     posting: str
@@ -93,6 +126,8 @@ class Scenario:
     next_occasion: str | None = None
     next_steps: tuple[Step, ...] = ()
     launch_secret: bool = False
+    harness_text: bool = False
+    forms: tuple[str, ...] = ()
 
 
 @dataclass
@@ -108,6 +143,8 @@ class Played:
     executed: list[dict[str, Any]] = field(default_factory=list)
     # The integration's launch secret, in the scenario that uses it.
     launch_secret: str | None = None
+    # The form this play used, in a scenario with forms.
+    form: str | None = None
     error: str | None = None
 
     def answer(self, index: int) -> Any:
@@ -124,6 +161,9 @@ class TurnSurface(Protocol):
     def finish(self, turn_id: str, answer: str) -> tuple[str, str]: ...
     def end(self, turn_id: str, ok: bool, note: str | None = None) -> None: ...
 
+    # Only for an integration with ``harness_text``.
+    def stand_in(self, turn_id: str, text: str, wrote: str) -> tuple[str, str]: ...
+
 
 class KitIntegration(Protocol):
     """An integration under test.
@@ -132,6 +172,13 @@ class KitIntegration(Protocol):
     its room tools call the library's socket with (`nunchi.turn_server`),
     also sets ``launch_secret`` to it in `participant`. Without one, the
     ``launch-secret`` scenario is not applicable.
+
+    A final-answer integration whose harness can end a run with its own text
+    in place of the model's answer sets ``harness_text = True``, and its
+    surface plays ``stand_in`` steps: the model writes ``wrote``, then the
+    harness ends the run with its own text. A harness that chooses its own
+    words may use them instead of ``text``. Without it, the scenarios that
+    need it are not applicable.
     """
 
     name: str
@@ -236,6 +283,8 @@ class ScriptedAgent:
                         answer = surface.after_tool(turn_id)
                     elif kind == "finish":
                         answer = surface.finish(turn_id, step[1])
+                    elif kind == "stand_in":
+                        answer = surface.stand_in(turn_id, step[1], step[2])
                     elif kind == "arrive":
                         answer = self.arrive(step[1])
                         self.arrivals.append(answer)
@@ -282,7 +331,15 @@ class _DirectSurface:
         return self.participant.news(turn_id=turn_id)
 
     def finish(self, turn_id: str, answer: str) -> tuple[str, str]:
+        # The scripted model wrote the answer, and the harness reports it.
+        self.participant.model_wrote(turn_id=turn_id, text=answer)
         decision = self.participant.finish(turn_id=turn_id, answer=answer)
+        return decision.kind, decision.text
+
+    def stand_in(self, turn_id: str, text: str, wrote: str) -> tuple[str, str]:
+        # The model wrote something else, or nothing; the harness answers for it.
+        self.participant.model_wrote(turn_id=turn_id, text=wrote)
+        decision = self.participant.finish(turn_id=turn_id, answer=text)
         return decision.kind, decision.text
 
     def end(self, turn_id: str, ok: bool, note: str | None = None) -> None:
@@ -304,11 +361,17 @@ class _DirectDriver(TurnDriver):
 
 
 class ReferenceIntegration:
-    """The core turn with no harness around it: what every integration must match."""
+    """The core turn with no harness around it: what every integration must match.
+
+    In final-answer posting its harness reports what the scripted model
+    wrote, treats ``NO_REPLY`` as silence too, and can put its own text in
+    place of a missing answer, as many harnesses do.
+    """
 
     def __init__(self, posting: str = "tools") -> None:
         self.posting = posting
         self.name = f"reference ({posting})"
+        self.harness_text = posting == "final-answer"
 
     def participant(
         self, *, profile: ParticipantProfile, guard: SecretGuard, agent: ScriptedAgent, privileged: bool = False
@@ -321,7 +384,11 @@ class ReferenceIntegration:
             guard=guard,
             tool_names={role: role for role in ("send", "react", "propose", "withdraw", "context")},
             result_wait_seconds=5,
-            silence_marker=SILENCE if self.posting == "final-answer" else None,
+            **(
+                {"silence_marker": SILENCE, "also_silent": (NO_REPLY,), "model_text": True}
+                if self.posting == "final-answer"
+                else {}
+            ),
         )
         driver.participant = participant
         return participant
@@ -587,6 +654,39 @@ def _check_final_secret(played: Played) -> list[str]:
     return failures
 
 
+def _check_not_own_words(played: Played) -> list[str]:
+    """The harness's text in place of an answer: never posted or remembered, and the turn fails."""
+
+    failures: list[str] = []
+    _expect(not played.dispatched, f"the harness's text was committed as the agent's post: {_texts(played)}", failures)
+    _expect(
+        played.host_result is not None and played.host_result.delivery == "failed",
+        f"the turn must fail, host said {played.host_result}",
+        failures,
+    )
+    moves = [(move.get("kind"), move.get("text")) for move in played.own_moves]
+    _expect(not moves, f"the agent's memory holds a move it never made: {moves}", failures)
+    return failures
+
+
+def _check_silence_form(played: Played) -> list[str]:
+    failures: list[str] = []
+    if played.form == NEAR_SILENCE:
+        _expect(played.answer(1) == ("deliver", NEAR_SILENCE), f"the post was not delivered: {played.answer(1)}", failures)
+        _expect(_texts(played) == [NEAR_SILENCE], f"expected the post committed, saw {_texts(played)}", failures)
+        _expect(
+            any(move.get("kind") in ("message", "reply") and move.get("text") == NEAR_SILENCE for move in played.own_moves),
+            "the post is not in the agent's memory",
+            failures,
+        )
+        return failures
+    _expect(played.answer(1)[0] == "silent", f"expected silence, saw {played.answer(1)}", failures)
+    _expect(not played.dispatched, f"a silent answer was committed: {_texts(played)}", failures)
+    moves = [(move.get("kind"), move.get("why")) for move in played.own_moves]
+    _expect(moves == [("silence", WAITED)], f"expected a silence with its reason in memory, saw {moves}", failures)
+    return failures
+
+
 SCENARIOS: dict[str, Scenario] = {
     "post": Scenario(
         "tools",
@@ -769,6 +869,27 @@ SCENARIOS: dict[str, Scenario] = {
         next_occasion="outcome",
         next_steps=(("bind",), ("read",), ("finish", REPORTED), ("end", True)),
     ),
+    "final-not-own-words": Scenario(
+        "final-answer",
+        "text the harness puts in place of the agent's answer is never posted or remembered, and the turn fails",
+        (("bind",), ("stand_in", STAND_IN, CHECKING), ("end", True)),
+        _check_not_own_words,
+        harness_text=True,
+    ),
+    "final-no-answer": Scenario(
+        "final-answer",
+        "a run whose model wrote nothing, with the harness's text as its answer, posts nothing and fails",
+        (("bind",), ("stand_in", EMPTY_STAND_IN, ""), ("end", True)),
+        _check_not_own_words,
+        harness_text=True,
+    ),
+    "final-silence-forms": Scenario(
+        "final-answer",
+        "a wrapped marker or the harness's other silence word is silence, remembered with its reason; a post that only looks like one goes out",
+        (("bind",), ("finish", f"<thinking>{WAITED}</thinking>\n@form"), ("end", True)),
+        _check_silence_form,
+        forms=(*SILENCE_FORMS, NEAR_SILENCE),
+    ),
 }
 
 
@@ -868,13 +989,47 @@ def _start_next_turn(room: Room, occasion: str) -> str | None:
     raise ValueError(f"unknown occasion {occasion!r}")
 
 
+def _with_form(step: Step, form: str) -> Step:
+    return tuple(part.replace("@form", form) if isinstance(part, str) else part for part in step)
+
+
 def run_scenario(name: str, integration: KitIntegration, *, timeout: float = 15.0) -> dict[str, Any]:
     scenario = SCENARIOS[name]
-    if scenario.posting != integration.posting:
+    if scenario.posting != integration.posting or (
+        scenario.harness_text and not getattr(integration, "harness_text", False)
+    ):
         return {"scenario": name, "integration": integration.name, "status": "n/a"}
+    if not scenario.forms:
+        return _play(name, scenario, integration, steps=scenario.steps, form=None, timeout=timeout)
+    failures: list[str] = []
+    for form in scenario.forms:
+        steps = tuple(_with_form(step, form) for step in scenario.steps)
+        result = _play(name, scenario, integration, steps=steps, form=form, timeout=timeout)
+        if result["status"] == "n/a":
+            return result
+        failures += [f"{form!r}: {failure}" for failure in result.get("failures", ())]
+    return {
+        "scenario": name,
+        "integration": integration.name,
+        "status": "pass" if not failures else "fail",
+        "failures": failures,
+    }
+
+
+def _play(
+    name: str,
+    scenario: Scenario,
+    integration: KitIntegration,
+    *,
+    steps: tuple[Step, ...],
+    form: str | None,
+    timeout: float,
+) -> dict[str, Any]:
+    """Play the scenario once, with ``steps`` as its first turn, and check it."""
+
     binding = fixture_binding()
     profile = fixture_profile(binding)
-    played = Played()
+    played = Played(form=form)
     privileged = scenario.next_occasion == "outcome"
     with tempfile.TemporaryDirectory(prefix="nunchi-turn-conformance-") as directory:
         settings = RoomSettings(
@@ -916,7 +1071,7 @@ def run_scenario(name: str, integration: KitIntegration, *, timeout: float = 15.
             return TransportResult("sent", "conformance workspace")
 
         agent = ScriptedAgent(
-            scenario.steps,
+            steps,
             arrive,
             cancel,
             later=(scenario.next_steps,) if scenario.next_occasion else (),
@@ -1046,7 +1201,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.list:
         for name, scenario in SCENARIOS.items():
-            print(f"{name:18s} {scenario.posting:13s} {scenario.description}")
+            print(f"{name:20s} {scenario.posting:13s} {scenario.description}")
         return 0
     integrations = [item for spec in (args.integration or ["reference"]) for item in _load(spec)]
     results = []
