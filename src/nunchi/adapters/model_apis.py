@@ -30,6 +30,7 @@ import urllib.error
 import urllib.request
 
 from ..attention import (
+    DEFAULT_API_KEY_ENV,
     AttentionError,
     attention_input_text,
     attention_judgment_schema,
@@ -161,7 +162,7 @@ class _JsonRoute:
         extra_body = config.get("extra_body")
         if extra_body is not None and not isinstance(extra_body, Mapping):
             raise ValidationError("attention model extra_body must be an object")
-        api_key_env = config.get("api_key_env", "NUNCHI_ATTENTION_API_KEY")
+        api_key_env = config.get("api_key_env", DEFAULT_API_KEY_ENV)
         if not isinstance(api_key_env, str) or not api_key_env:
             raise ValidationError("attention model api_key_env must be non-empty")
         api_key = os.environ.get(api_key_env)

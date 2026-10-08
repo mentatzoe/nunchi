@@ -119,6 +119,8 @@ class ClaudeCodeKitIntegration:
     def __init__(self) -> None:
         self._directory: str | None = None
         self._server: GateServer | None = None
+        # The session's launch secret: the agent can read it in its environment.
+        self.launch_secret: str | None = None
 
     def participant(
         self, *, profile: ParticipantProfile, guard: CoreSecretGuard, agent: ScriptedAgent, privileged: bool = False
@@ -138,6 +140,7 @@ class ClaudeCodeKitIntegration:
         self._server = GateServer(participant, socket_path=socket_path, session_secret=secret)
         self._server.start()
         participant.attach()
+        self.launch_secret = secret
         return participant
 
     def close(self) -> None:

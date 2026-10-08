@@ -21,6 +21,7 @@ from nunchi import __version__
 from nunchi.adapters.model_apis import ATTENTION_KINDS
 from nunchi.adapters.runtime import load_pinned_config
 from nunchi.errors import NunchiError, ValidationError
+from nunchi.private_process import keep_private, probe_facts
 from nunchi.room import Room
 
 from ..discord_room import DiscordRoomConnection, output_secret, transport_client
@@ -78,6 +79,8 @@ class CodexRoomRunner:
             event_visibility=EVENT_VISIBILITY,
             state_prefix=f"{SURFACE}-",
             attention_kinds=ATTENTION_KINDS,
+            # The room refuses what the agent's turn refuses, and no more.
+            guard=integration.participant.guard,
         )
         self.connection.attach(self.room)
 
@@ -87,6 +90,19 @@ class CodexRoomRunner:
     def close(self) -> None:
         self.room.cancel()
         self.integration.close()
+
+    def status(self) -> dict[str, Any]:
+        """What Codex reported once it ran: the sandbox the agent's commands run in.
+
+        ``codex_sandbox`` is None until Codex has started the participant's
+        thread. ``codex_sandbox_warning`` says when that sandbox leaves this
+        runner's processes and files open to the agent's commands.
+        """
+
+        return {
+            "codex_sandbox": self.integration.sandbox,
+            "codex_sandbox_warning": self.integration.sandbox_warning,
+        }
 
     def probe(self) -> dict[str, Any]:
         binding = self.settings.binding
@@ -128,7 +144,16 @@ def _print(document: Mapping[str, Any]) -> None:
     print(json.dumps(document, sort_keys=True, separators=(",", ":")))
 
 
+def _process_facts(private: str) -> dict[str, Any]:
+    """This process's privacy, and the agent's OS user: the same as the runner's."""
+
+    return {**probe_facts(private), "agent_os_user": "same"}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    # First, before any secret is read and before Codex starts: the agent runs
+    # as this OS user, and must not read this process's keys.
+    private = keep_private()
     args = _parser().parse_args(argv)
     try:
         if not args.config:
@@ -140,6 +165,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "generation": 2,
                         "surface": SURFACE,
                         "configured": False,
+                        **_process_facts(private),
                     }
                 )
                 return 0
@@ -150,7 +176,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         client = transport_client(config.get("transport"), label=LABEL)
         runner = CodexRoomRunner(config, client)
         if args.probe:
-            _print(runner.probe())
+            _print({**runner.probe(), **_process_facts(private)})
             runner.close()
             return 0
         try:

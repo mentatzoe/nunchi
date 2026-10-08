@@ -87,3 +87,9 @@ privileged intents for the configured bot.
 
 The transport audit contains participant, delivery, and room IDs, never room
 content or bot tokens. Logging installs token redaction before network startup.
+
+On Linux the server makes its own process private before it reads the token
+or the HMAC key (`nunchi.private_process.keep_private`): another process of
+the same OS user, such as an agent's shell command, gets `PermissionError` on
+its `/proc/<pid>/environ` and `/proc/<pid>/mem`. Other programs started with
+the same variables, environment files and root are not covered.

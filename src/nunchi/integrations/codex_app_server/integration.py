@@ -12,7 +12,9 @@ How a turn goes:
    (`mcp_bridge.py`), on top of the user's servers, and the project's trust
    level, so Codex does not write trust into the user's config (contract,
    gap 5). Model, sandbox, approvals, instructions, tools and skills stay the
-   user's.
+   user's. The integration records the sandbox Codex reports for the thread,
+   and warns when it does not contain the agent's commands
+   (``dangerFullAccess``, ``externalSandbox``).
 2. **Start.** The library calls `start`; the integration sends ``turn/start``
    with the turn's text. Codex answers with the turn's id, and the integration
    binds that run to the wake: Codex itself says the run started with this
@@ -44,7 +46,6 @@ import logging
 import os
 from pathlib import Path
 import queue
-import re
 import secrets
 import shutil
 import sys
@@ -58,6 +59,7 @@ from nunchi.errors import ValidationError
 from nunchi.turn import DEFAULT_RESULT_WAIT_SECONDS, SecretGuard, Turn, TurnParticipant
 from nunchi.turn_server import TurnServer
 
+from ..discord_participant_transport import DISCORD_TOKEN_PATTERNS
 from . import mcp_bridge
 from .client import AppServer, CodexAppServerError, RequestRefused, ServerRequestError
 
@@ -78,10 +80,8 @@ TRUST_LEVELS = ("trusted", "untrusted")
 BRIDGE_PATH = Path(mcp_bridge.__file__).resolve()
 # Platform credentials Nunchi holds that the agent must never see or post.
 DEFAULT_WITHHELD_ENV = ("DISCORD_BOT_TOKEN",)
-TOKEN_PATTERNS = (
-    # A Discord bot token: three dot-separated base64url parts.
-    re.compile(r"[A-Za-z\d_-]{23,28}\.[A-Za-z\d_-]{6}\.[A-Za-z\d_-]{27,}"),
-)
+# The shapes of those credentials: the shared Discord transport's own.
+TOKEN_PATTERNS = DISCORD_TOKEN_PATTERNS
 # Completed items that are not tool calls: no steering after them.
 _NOT_TOOL_ITEMS = frozenset(
     {
@@ -119,6 +119,9 @@ _MAX_SOCKET_PATH = 103 if sys.platform == "darwin" else 107
 _DECLINED = "Nobody is at the terminal in a Nunchi room, so this was declined."
 # How many of Codex's recent turns and tool calls to remember.
 _RECENT = 256
+# Sandbox policies under which the agent's commands are not contained by
+# Codex: they see every process and file of this OS user, and the network.
+UNCONTAINED_SANDBOXES = frozenset({"dangerFullAccess", "externalSandbox"})
 
 
 class CodexIntegrationError(RuntimeError):
@@ -203,22 +206,6 @@ def agent_environment(environ: Mapping[str, str], withheld: Iterable[str]) -> di
     return {
         key: value for key, value in environ.items() if key not in names and not key.startswith("NUNCHI_")
     }
-
-
-def withheld_names(codex: "CodexSettings", attention_model: Mapping[str, Any] | None) -> list[str]:
-    """What the agent must not see: the codex section's names and the attention model's keys.
-
-    An attention route names its credential variables in ``*_env`` keys.
-    """
-
-    names = list(codex.withheld_env)
-    if isinstance(attention_model, Mapping):
-        names += [
-            value
-            for key, value in attention_model.items()
-            if key.endswith("_env") and isinstance(value, str) and value
-        ]
-    return list(dict.fromkeys(names))
 
 
 def runtime_directory() -> Path:
@@ -341,6 +328,11 @@ class CodexRoomIntegration:
         self.steered: list[tuple[str, str]] = []
         self.declined: list[str] = []
         self.warnings: list[str] = []
+        # The sandbox Codex reported for the thread (``type``, and
+        # ``networkAccess`` where it has one), and the warning when Codex does
+        # not contain the agent's commands.
+        self.sandbox: dict[str, Any] | None = None
+        self.sandbox_warning: str | None = None
 
     # -- lifecycle -------------------------------------------------------------------
 
@@ -511,6 +503,7 @@ class CodexRoomIntegration:
                 if thread is None:
                     thread = app.request("thread/start", params, timeout=timeout)
                 thread_id = str(thread["thread"]["id"])
+                self._note_sandbox(thread.get("sandbox"))
             except (CodexAppServerError, KeyError, TypeError) as exc:
                 if started is not None:
                     started.stop()
@@ -522,6 +515,39 @@ class CodexRoomIntegration:
                 self._thread_id = thread_id
             self._store_thread(thread_id)
             return app, thread_id
+
+    def _note_sandbox(self, policy: Any) -> None:
+        """Record the sandbox Codex runs the agent's commands in, and warn when it does not contain them.
+
+        The user's Codex config chooses it; the integration never changes it.
+        """
+
+        if not isinstance(policy, Mapping) or not isinstance(policy.get("type"), str):
+            policy = {"type": "unknown"}
+        sandbox = {key: policy[key] for key in ("type", "networkAccess") if key in policy}
+        kind = sandbox["type"]
+        warning = None
+        if kind in UNCONTAINED_SANDBOXES:
+            if kind == "dangerFullAccess":
+                what = (
+                    "Codex runs the agent's commands without a sandbox (dangerFullAccess): they can "
+                    "read every file this OS user can and every process of this user that is not "
+                    "private, write wherever this user can, and use the network."
+                )
+            else:
+                what = (
+                    "Codex adds no sandbox of its own (externalSandbox): the agent's commands are "
+                    "contained only by whatever runs Codex."
+                )
+            warning = (
+                f"{what} Set sandbox_mode to \"workspace-write\" or \"read-only\" in the Codex "
+                "config (integrations/codex-app-server/README.md)."
+            )
+        with self._lock:
+            changed = sandbox != self.sandbox
+            self.sandbox, self.sandbox_warning = sandbox, warning
+        if warning is not None and changed:
+            logger.warning("nunchi codex: %s", warning)
 
     def _room_tools_ready(self, thread_id: str, cancel: threading.Event) -> bool:
         """Whether this thread's room MCP server is ready, after Codex had time to say so."""
@@ -801,9 +827,17 @@ def build_integration(
     platform transport. ``sections`` are the caller's own config sections, such
     as its transport's, and ``withhold`` names more variables the agent must
     never see or post, such as the transport's key.
+
+    The participant's guard is the room's (`nunchi.room.room_guard`): what the
+    config names in its ``*_env`` keys, the codex section's ``withheld_env``
+    (by default ``DISCORD_BOT_TOKEN``), ``withhold``, and the Discord token
+    shape, plus the bridge's launch secret (`nunchi.turn_server.TurnServer`).
+    Build the `Room` with ``guard=integration.participant.guard``: the room
+    then refuses nothing the agent's turn did not, and the agent learns of
+    every refusal as a tool error it can act on.
     """
 
-    from nunchi.room import RoomSettings
+    from nunchi.room import RoomSettings, room_guard, withheld_env_names
 
     environ = os.environ if environ is None else environ
     settings = RoomSettings.from_config(config, label="Codex app-server", sections=(SECTION, *sections))
@@ -818,8 +852,15 @@ def build_integration(
     roles = ["send", "react", "context"]
     if settings.authorization is not None:
         roles += ["propose", "withdraw"]
-    withheld = list(dict.fromkeys([*withheld_names(codex, settings.attention_model), *withhold]))
-    guard = SecretGuard(withheld_values(environ, withheld), patterns=TOKEN_PATTERNS)
+    # What the agent never sees, and the room never gets: the config's own
+    # secret variables, the codex section's (or its default) and the caller's.
+    withheld = list(dict.fromkeys([*withheld_env_names(settings), *codex.withheld_env, *withhold]))
+    guard = room_guard(
+        settings,
+        values=withheld_values(environ, withheld),
+        patterns=TOKEN_PATTERNS,
+        environ=environ,
+    )
     integration = CodexRoomIntegration(
         profile=settings.profile,
         guard=guard,

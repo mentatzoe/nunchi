@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import time
 from collections.abc import Mapping, Sequence
@@ -15,9 +16,15 @@ import urllib.request
 
 from .. import __version__
 from ..errors import NunchiError, ValidationError
+from ..private_process import keep_private
 from ..reactions import ReactionCapability
 from ..participant import TransportResult
 from .runtime import CAPABILITIES, ReferenceAdapterRuntime, load_pinned_config
+
+# A Telegram bot token's shape: the numeric bot id, a colon, and a long
+# url-safe secret. Every integration that holds a Telegram token refuses posts
+# that match.
+TELEGRAM_TOKEN_PATTERNS = (re.compile(r"\b\d{6,12}:[A-Za-z0-9_-]{30,}\b"),)
 
 
 class TelegramTransport:
@@ -30,10 +37,19 @@ class TelegramTransport:
         if not token:
             raise ValidationError(f"Telegram credential is absent from {env_name}")
         base = str(config.get("api_base", "https://api.telegram.org")).rstrip("/")
+        self._token = token
         self.base_url = f"{base}/bot{token}"
         self.poll_timeout = int(config.get("poll_timeout_seconds", 30))
         if self.poll_timeout < 1 or self.poll_timeout > 50:
             raise ValidationError("Telegram poll timeout must be within 1..50 seconds")
+
+    def withheld_values(self) -> tuple[str, ...]:
+        """What this transport holds that the room must never see: its bot token."""
+
+        return (self._token,)
+
+    def credential_patterns(self) -> tuple[re.Pattern[str], ...]:
+        return TELEGRAM_TOKEN_PATTERNS
 
     def ordinary_action_capabilities(self) -> tuple[str, ...]:
         return ("message", "reply")
@@ -203,6 +219,9 @@ def _poll_updates(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    # First, before any credential is read: another agent of this OS user
+    # must not read this process's keys (`nunchi.private_process`).
+    keep_private()
     args = _parser().parse_args(argv)
     try:
         if not args.config:

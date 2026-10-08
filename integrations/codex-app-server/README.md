@@ -70,10 +70,15 @@ plus a `codex` section:
   config sets an approval policy, ask before most commands, which a room then
   declines.
 - `executable` defaults to `codex` on `PATH`.
-- `withheld_env` names variables the agent must never see or post. The
-  attention model's `*_env` variables and every `NUNCHI_*` variable are
-  withheld too. The rest of the environment, including the agent's own model
-  credentials, is the user's.
+- `withheld_env` names variables the agent must never see or post (default:
+  `DISCORD_BOT_TOKEN`). Every other variable the config names in a `*_env`
+  key, such as the transport's `output_key_env` or an attention route's
+  `api_key_env`, is withheld the same way. Every `NUNCHI_*` variable is kept
+  out of Codex's environment. The rest of the environment, including the
+  agent's own model credentials, is the user's.
+- A room action that carries a withheld value, the room tools' launch secret
+  or a Discord bot token's shape is refused; Codex sees a tool error and can
+  act again without it.
 - `resume_thread` keeps the thread id in `state_directory/codex-thread.json`
   and resumes it after Codex or Nunchi restarts.
 
@@ -103,10 +108,55 @@ nunchi-codex-app-server-runner --config /srv/nunchi/codex.json --config-sha256 <
 nunchi-codex-app-server-runner --config /srv/nunchi/codex.json --config-sha256 <sha256>
 ```
 
-`--probe` reports what is configured without connecting. In your own code,
+`--probe` reports what is configured without connecting, whether the
+runner's process is private (`process_private`, below) and that Codex runs
+as the runner's OS user (`agent_os_user: "same"`). In your own code,
 `nunchi.integrations.codex_app_server.build_integration(config)` returns the
 room settings and the integration, and the caller builds the `Room` around
 `integration.participant` with its platform transport.
+
+## Keep the agent's commands in Codex's sandbox
+
+Codex runs as your OS user, the same user as the runner. The runner holds
+the transport's output key and the attention model's key; with them, a
+process could post to the room without the library.
+
+- On Linux the runner makes its own process private before it reads any
+  secret (`nunchi.private_process.keep_private`): another process of your
+  user gets `PermissionError` on its `/proc/<pid>/environ` and
+  `/proc/<pid>/mem`. `nunchi-mcp-discord` does the same. It does not cover
+  other programs started from the shell that exported the keys, environment
+  files, a systemd unit's `Environment=` lines, macOS, or root (see
+  [the Claude Code README](../claude-code/README.md#nunchis-processes-and-the-agents-bash)).
+- The rest is Codex's sandbox. In `$CODEX_HOME/config.toml`:
+
+  ```toml
+  sandbox_mode = "workspace-write"   # or "read-only"
+
+  [sandbox_workspace_write]
+  network_access = false             # the default
+  ```
+
+  With either mode, Codex 0.160.1 on Linux runs each command in its own
+  process namespace: the command sees only its sandbox's processes, not the
+  runner, the transport or your shell. It can still read every file your
+  user can read. With the network off it cannot send what it reads over
+  the network, and the room tools' guard refuses Nunchi's keys. The sandbox
+  uses bubblewrap and needs user namespaces; where it cannot start one, the
+  command fails rather than run unsandboxed.
+- `sandbox_mode = "danger-full-access"` runs commands with no sandbox. They
+  see every process of your user and can read the starting environment and
+  memory of any that is not private, read and write every file your user
+  can (Nunchi's state and config, environment files), and use the network.
+- When Codex reports the thread's sandbox as `dangerFullAccess`, or
+  `externalSandbox` (Codex adds none of its own), the runner logs a warning
+  and `CodexRoomRunner.status()` reports it (`codex_sandbox`,
+  `codex_sandbox_warning`). It still runs: whether to refuse is not decided.
+
+`tests/v2/test_codex_app_server.py` checks both against the pinned Codex:
+the warning under `danger-full-access` and none by default, and, under
+`danger-full-access`, that a command that scans `/proc` finds no key in a
+private runtime while the turn still posts.
 
 ## Codex setup the room needs
 
@@ -138,6 +188,9 @@ declined in a room.
   directory under a workspace sandbox, but Codex's sandbox lets it read
   everywhere; the Claude Code integration denies those reads with its
   permission rules.
+- **The agent runs as the runner's OS user.** The runner's own process is
+  private, but every other file and process of that user is as open as
+  Codex's sandbox leaves it.
 - **The guide in the turn text.** Codex's stable instruction slot
   (`developerInstructions`) would replace the user's own, so the guide goes
   with every turn's text (library gap: one text per turn).

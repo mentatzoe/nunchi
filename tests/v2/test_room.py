@@ -10,10 +10,14 @@ import threading
 import unittest
 from unittest import mock
 
-from nunchi.conformance import fixture_attention_model
+import re
+
+from nunchi.attention import AttentionPolicy
+from nunchi.conformance import fixture_attention_model, fixture_binding, fixture_profile
 from nunchi.errors import ValidationError
+from nunchi.observation import ObservationLimits
 from nunchi.participant import TransportResult
-from nunchi.room import Room, RoomSettings
+from nunchi.room import Room, RoomSettings, room_guard, withheld_env_names
 from nunchi.turn import HarnessDelivery, SecretGuard, Turn, TurnParticipant
 
 PERSON = "room:person"
@@ -242,6 +246,213 @@ class RoomTests(unittest.TestCase):
                 attention_model=model,
             )
             self.assertIs(model, room.attention.model)
+
+
+def _refuses(guard, text: str) -> bool:
+    return guard.refusal({"kind": "message", "origin_event_id": "m1", "text": text}) is not None
+
+
+def _settings(directory: Path, *, attention_model=None, authorization=None, sections=None) -> RoomSettings:
+    binding = fixture_binding()
+    return RoomSettings(
+        binding=binding,
+        profile=fixture_profile(binding),
+        attention=AttentionPolicy(),
+        attention_model=attention_model,
+        limits=ObservationLimits(),
+        state_directory=directory / "state",
+        authorization=authorization,
+        sections=sections or {},
+    )
+
+
+class _HoldsAToken(_Recording):
+    """A transport that holds a platform token and names its shape."""
+
+    def withheld_values(self):
+        return ("transport-held-token-value",)
+
+    def credential_patterns(self):
+        return (re.compile(r"tok_[a-z]{8}"),)
+
+
+class RoomGuardTests(unittest.TestCase):
+    """One secret guard per room, from what the config and the transport name."""
+
+    ENVIRON = {
+        "ATTENTION_KEY": "attention-route-key-value",
+        "TRANSPORT_KEY": "transport-output-key-value",
+        "FIRST_TOKEN": "first-listed-token-value",
+        "SECOND_TOKEN": "second-listed-token-value",
+        "POLICY_KEY": "authorization-key-value",
+        "NESTED_KEY": "nested-route-key-value",
+        "SHORT": "too-short",
+        "UNNAMED": "a-value-no-config-names",
+    }
+
+    def test_every_variable_an_env_key_names_is_withheld(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = _settings(
+                Path(directory),
+                attention_model={"kind": "example", "api_key_env": "ATTENTION_KEY"},
+                authorization={"policy_path": "p", "policy_sha256": "0", "credential_env": "POLICY_KEY"},
+                sections={
+                    "transport": {"url": "http://127.0.0.1:1/mcp", "output_key_env": "TRANSPORT_KEY"},
+                    # A list of names, and a key deeper in a section.
+                    "harness": {"withheld_env": ["FIRST_TOKEN", "SECOND_TOKEN"], "routes": [{"api_key_env": "NESTED_KEY"}]},
+                    "short": {"token_env": "SHORT"},
+                },
+            )
+            guard = room_guard(settings, environ=self.ENVIRON)
+            self.assertEqual(
+                ["ATTENTION_KEY", "TRANSPORT_KEY", "FIRST_TOKEN", "SECOND_TOKEN", "NESTED_KEY", "SHORT", "POLICY_KEY"],
+                withheld_env_names(settings),
+            )
+        for name in ("ATTENTION_KEY", "TRANSPORT_KEY", "FIRST_TOKEN", "SECOND_TOKEN", "POLICY_KEY", "NESTED_KEY"):
+            with self.subTest(name):
+                self.assertTrue(_refuses(guard, f"here it is: {self.ENVIRON[name]}"))
+        # Values under 12 characters are ignored; plain text and unnamed values pass.
+        self.assertFalse(_refuses(guard, "the word too-short is fine"))
+        self.assertFalse(_refuses(guard, self.ENVIRON["UNNAMED"]))
+        self.assertFalse(_refuses(guard, "On it: the deploy failed on step three."))
+
+    def test_the_default_key_variables_are_withheld_when_the_config_names_none(self) -> None:
+        environ = {
+            "NUNCHI_ATTENTION_API_KEY": "default-attention-key-value",
+            "NUNCHI_PARTICIPANT_API_KEY": "default-participant-key-value",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            settings = _settings(Path(directory), attention_model={"base_url": "http://127.0.0.1:1/v1"})
+            guard = room_guard(settings, environ=environ)
+            self.assertEqual([], withheld_env_names(settings))
+        self.assertTrue(_refuses(guard, "default-attention-key-value"))
+        self.assertTrue(_refuses(guard, "default-participant-key-value"))
+
+    def test_what_the_transport_holds_and_the_integrations_own_values_and_shapes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = _settings(Path(directory))
+            guard = room_guard(
+                settings,
+                transport=_HoldsAToken(),
+                values=["an-integration-default-secret", "short"],
+                patterns=[re.compile(r"key-[0-9]{6}")],
+                environ={},
+            )
+        self.assertTrue(_refuses(guard, "transport-held-token-value"))
+        self.assertTrue(_refuses(guard, "token tok_abcdefgh here"))
+        self.assertTrue(_refuses(guard, "an-integration-default-secret"))
+        self.assertTrue(_refuses(guard, "key-123456"))
+        self.assertFalse(_refuses(guard, "short"))
+        # A transport that declares nothing adds nothing.
+        self.assertFalse(_refuses(room_guard(settings, transport=_Recording(), environ={}), "tok_abcdefgh"))
+
+    def test_the_room_builds_its_guard_and_its_host_checks_with_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = _settings(Path(directory))
+            room = Room(
+                settings,
+                participant=object(),
+                transport=_HoldsAToken(),
+                event_visibility=VISIBILITY,
+                state_prefix="example-",
+                attention_model=fixture_attention_model("WAKE"),
+            )
+            self.assertTrue(_refuses(room.guard, "transport-held-token-value"))
+            self.assertIs(room.guard, room.host.guard)
+            given = SecretGuard(["a-guard-the-integration-built"])
+            room = Room(
+                settings,
+                participant=object(),
+                transport=_HoldsAToken(),
+                event_visibility=VISIBILITY,
+                state_prefix="example-",
+                attention_model=fixture_attention_model("WAKE"),
+                guard=given,
+            )
+            self.assertIs(given, room.guard)
+            self.assertIs(given, room.host.guard)
+
+
+class HostGuardTests(unittest.TestCase):
+    """The host's backstop: a participant that ignores the guard still posts nothing."""
+
+    SECRET = "a-withheld-secret-for-the-host"
+
+    def _run(self, move):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        settings = _settings(Path(directory.name))
+        transport = _Recording()
+
+        def participant(*, wake, expand, cancel):
+            # Never looks at a guard: whatever it says goes to the host.
+            return move(wake)
+
+        room = Room(
+            settings,
+            participant=participant,
+            transport=transport,
+            event_visibility=VISIBILITY,
+            state_prefix="example-",
+            attention_model=fixture_attention_model("WAKE"),
+            guard=SecretGuard([self.SECRET]),
+        )
+        outcome = room.pipeline.handle_delivery(
+            delivery_id="d1", event=_message("m1", "What is the deploy key?"), actors=ACTORS
+        )
+        return outcome.opportunities[0].transport, transport, room.host.memory_facts("m1") or {}
+
+    def test_an_action_that_carries_a_secret_never_reaches_the_transport(self) -> None:
+        for kind, extra in (("message", {}), ("reply", {"target_event_id": "m1"})):
+            with self.subTest(kind):
+                result, transport, _facts = self._run(
+                    lambda wake: {
+                        "kind": kind,
+                        "origin_event_id": wake["trigger_event_id"],
+                        "text": f"The key is {self.SECRET}",
+                        **extra,
+                    }
+                )
+                self.assertEqual([], transport.actions)
+                self.assertEqual(
+                    TransportResult(
+                        "failed", "the action carried a withheld credential or secret; nothing was posted"
+                    ),
+                    result,
+                )
+
+    def test_a_reason_that_carries_a_secret_is_refused_with_its_action(self) -> None:
+        result, transport, _facts = self._run(
+            lambda wake: {
+                "kind": "message",
+                "origin_event_id": wake["trigger_event_id"],
+                "text": "On it.",
+                "why": f"they asked for {self.SECRET}",
+            }
+        )
+        self.assertEqual([], transport.actions)
+        self.assertEqual("failed", result.delivery)
+
+    def test_a_clean_action_still_goes_out(self) -> None:
+        result, transport, _facts = self._run(
+            lambda wake: {"kind": "message", "origin_event_id": wake["trigger_event_id"], "text": "On it."}
+        )
+        self.assertEqual(["On it."], [action["text"] for action in transport.actions])
+        self.assertEqual("sent", result.delivery)
+
+    def test_a_silence_whose_reason_carries_a_secret_keeps_no_reason(self) -> None:
+        result, transport, facts = self._run(lambda wake: {"kind": "silence", "why": f"not posting {self.SECRET}"})
+        self.assertIsNone(result)
+        self.assertEqual([], transport.actions)
+        silences = [move for move in facts.get("own_moves", ()) if move.get("kind") == "silence"]
+        self.assertEqual(1, len(silences))
+        self.assertNotIn("why", silences[0])
+        self.assertNotIn(self.SECRET, json.dumps(facts))
+        _result, _transport, facts = self._run(lambda wake: {"kind": "silence", "why": "Castor was asked."})
+        self.assertEqual(
+            ["Castor was asked."],
+            [move.get("why") for move in facts.get("own_moves", ()) if move.get("kind") == "silence"],
+        )
 
 
 if __name__ == "__main__":

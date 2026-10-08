@@ -3,8 +3,10 @@
 For harnesses outside Python, the same calls a Python integration makes on a
 `TurnParticipant` (`nunchi.turn`), as HTTP over a Unix socket only the
 integration's process can reach. Each request carries the per-launch session
-secret the integration was given; any other caller is refused. This is
-interface ``I-040D LocalTurnProtocolV2@1``:
+secret the integration was given; any other caller is refused. The harness
+holds that secret, so its agent may read it: the server adds it to its
+participant's secret guard, and a room action that carries it is refused like
+any other withheld secret. This is interface ``I-040D LocalTurnProtocolV2@1``:
 
 | Route | Body | Answer |
 |---|---|---|
@@ -36,6 +38,8 @@ from .turn import TurnParticipant
 PROTOCOL = "nunchi.turn-session"
 VERSION = 1
 MAX_BODY_BYTES = 256 * 1024
+# A launch secret shorter than this is refused: the guard must be able to hold it.
+MIN_SECRET_CHARACTERS = 16
 _ALIASES = {
     "/v1/turn-start": "/v1/turn/bind",
     "/v1/tool": "/v1/turn/call",
@@ -57,7 +61,12 @@ def _text(value: Any) -> str | None:
 
 
 class TurnServer:
-    """The integration's only way in to its participant's turns."""
+    """The integration's only way in to its participant's turns.
+
+    Build it before the participant's first turn: it withholds
+    ``session_secret`` from the room through the participant's guard
+    (`TurnParticipant.withhold`), and a turn keeps the guard it started with.
+    """
 
     def __init__(
         self,
@@ -66,10 +75,16 @@ class TurnServer:
         socket_path: Path,
         session_secret: str,
     ) -> None:
+        if not isinstance(session_secret, str) or len(session_secret) < MIN_SECRET_CHARACTERS:
+            raise ValueError(
+                f"the session secret must be at least {MIN_SECRET_CHARACTERS} characters"
+            )
         self.participant = participant
         self.socket_path = socket_path
         self._secret = session_secret.encode()
         self._server: _UnixHTTPServer | None = None
+        # The harness holds the secret, so its agent may read it; never post it.
+        participant.withhold([session_secret])
 
     def start(self) -> None:
         directory = self.socket_path.parent

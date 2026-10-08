@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 import hashlib
 import json
+import re
 import secrets
 from typing import Any
 
@@ -24,7 +25,13 @@ from ..mcp_discord.authorization import make_tool_authorization
 from ..participant import TransportResult
 from .mcp_client import StreamableMCPClient
 
-__all__ = ["MCPDiscordTransport"]
+__all__ = ["DISCORD_TOKEN_PATTERNS", "MCPDiscordTransport"]
+
+# A Discord bot token's shape: three dot-separated base64url parts. Every
+# integration that holds or reaches a Discord token refuses posts that match.
+DISCORD_TOKEN_PATTERNS = (
+    re.compile(r"[A-Za-z\d_-]{23,28}\.[A-Za-z\d_-]{6}\.[A-Za-z\d_-]{27,}"),
+)
 
 
 class MCPDiscordTransport:
@@ -56,6 +63,14 @@ class MCPDiscordTransport:
             + b"\0"
             + actor_id.encode()
         ).hexdigest()
+
+    def withheld_values(self) -> tuple[str, ...]:
+        """What this transport holds that the room must never see: its output key."""
+
+        return (self.output_secret.decode("utf-8", errors="ignore"),)
+
+    def credential_patterns(self) -> tuple[re.Pattern[str], ...]:
+        return DISCORD_TOKEN_PATTERNS
 
     def ordinary_action_capabilities(self) -> tuple[str, ...]:
         return ("message", "reply", "reaction")

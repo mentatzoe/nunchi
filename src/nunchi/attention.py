@@ -47,6 +47,10 @@ from .v2_contracts import (
 )
 
 
+# The variable an attention route reads its key from when its config names none.
+DEFAULT_API_KEY_ENV = "NUNCHI_ATTENTION_API_KEY"
+
+
 class AttentionError(NunchiError):
     """An operational attention failure, never a social result."""
 
@@ -602,7 +606,7 @@ class OpenAICompatibleAttentionModel:
         if extra_body is not None and not isinstance(extra_body, Mapping):
             raise ValidationError("attention model extra_body must be an object")
         model = config.get("model")
-        api_key_env = config.get("api_key_env", "NUNCHI_ATTENTION_API_KEY")
+        api_key_env = config.get("api_key_env", DEFAULT_API_KEY_ENV)
         if not isinstance(api_key_env, str) or not api_key_env:
             raise ValidationError("attention model api_key_env must be non-empty")
         api_key = os.environ.get(api_key_env)

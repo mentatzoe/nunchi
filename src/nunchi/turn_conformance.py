@@ -10,6 +10,10 @@ the library starts itself, with no new message: after a pause, when it looks
 again at a moment it waited on, and after an operator approves an action the
 agent proposed, when it gives the agent a turn about the outcome.
 
+One scenario, ``launch-secret``, needs a secret the harness itself holds: the
+per-launch secret an integration's room tools call the library with. An
+integration without one reports it as not applicable.
+
 An integration takes part by providing a `KitIntegration`: the participant the
 shared turn host invokes, wired so that when its agent is started the scripted
 agent's steps go through the integration's own surface (its tool calls, its
@@ -40,6 +44,10 @@ from .turn import HARNESS_DELIVERS, HarnessDelivery, SecretGuard, Turn, TurnDriv
 PERSON = "conformance:person"
 TRIGGER = "conformance:message:1"
 SECRET = "conformance-withheld-secret-value"
+# Stands for the integration's launch secret in a step's text.
+LAUNCH_SECRET = "@launch-secret"
+# What the agent posts once its post with a secret was refused.
+NO_SECRET = "I can't share that here."
 SILENCE = "[SILENT]"
 # The agent's own "mhm" (docs/behavior.md): one reaction the kit's room offers.
 MHM = "👂"
@@ -73,6 +81,9 @@ class Scenario:
     stays quiet after a moment the agent waited on, and the library looks
     again; ``"outcome"``, an operator approves the action the agent proposed
     in its first turn. The agent plays ``next_steps`` in that turn.
+
+    ``launch_secret``: the scenario needs the integration's launch secret, and
+    is not applicable to an integration that has none.
     """
 
     posting: str
@@ -81,6 +92,7 @@ class Scenario:
     check: Callable[["Played"], list[str]]
     next_occasion: str | None = None
     next_steps: tuple[Step, ...] = ()
+    launch_secret: bool = False
 
 
 @dataclass
@@ -94,6 +106,8 @@ class Played:
     arrivals: list[str] = field(default_factory=list)
     # The privileged operations the room's executor ran.
     executed: list[dict[str, Any]] = field(default_factory=list)
+    # The integration's launch secret, in the scenario that uses it.
+    launch_secret: str | None = None
     error: str | None = None
 
     def answer(self, index: int) -> Any:
@@ -112,7 +126,13 @@ class TurnSurface(Protocol):
 
 
 class KitIntegration(Protocol):
-    """An integration under test."""
+    """An integration under test.
+
+    An integration whose harness holds a launch secret, such as the secret
+    its room tools call the library's socket with (`nunchi.turn_server`),
+    also sets ``launch_secret`` to it in `participant`. Without one, the
+    ``launch-secret`` scenario is not applicable.
+    """
 
     name: str
     posting: str
@@ -137,7 +157,8 @@ class ScriptedAgent:
     have is counted in ``unexpected`` and not played.
 
     A call's argument written ``"@arrival:N"`` names the N-th message that
-    arrived during the scenario, once it has arrived.
+    arrived during the scenario, once it has arrived. ``@launch-secret`` in a
+    call's text stands for ``launch_secret``, the integration's own.
     """
 
     def __init__(
@@ -159,6 +180,7 @@ class ScriptedAgent:
         self.turn_done = tuple(threading.Event() for _ in self.turns)
         self.unexpected = 0
         self.error: BaseException | None = None
+        self.launch_secret: str | None = None
         self._lock = threading.Lock()
         self._started = 0
         self._seen: list[Any] = []
@@ -177,12 +199,18 @@ class ScriptedAgent:
         self.play(surface())
 
     def _arguments(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        return {
-            key: self.arrivals[int(value.split(":")[1])]
-            if isinstance(value, str) and value.startswith("@arrival:")
-            else value
-            for key, value in arguments.items()
-        }
+        def value_of(value: Any) -> Any:
+            if not isinstance(value, str):
+                return value
+            if value.startswith("@arrival:"):
+                return self.arrivals[int(value.split(":")[1])]
+            if LAUNCH_SECRET in value:
+                if self.launch_secret is None:
+                    raise ValueError("this agent has no launch secret to post")
+                return value.replace(LAUNCH_SECRET, self.launch_secret)
+            return value
+
+        return {key: value_of(value) for key, value in arguments.items()}
 
     def play(self, surface: TurnSurface, turn_id: str | None = None) -> None:
         with self._lock:
@@ -394,6 +422,17 @@ def _check_secret(played: Played) -> list[str]:
     refused = played.answer(1)
     _expect(refused[0] is False and "secret" in refused[1], f"the secret was not refused: {refused}", failures)
     _expect(not played.dispatched, "a secret reached the room", failures)
+    return failures
+
+
+def _check_launch_secret(played: Played) -> list[str]:
+    failures: list[str] = []
+    refused = played.answer(1)
+    _expect(refused[0] is False and "secret" in refused[1], f"the launch secret was not refused: {refused}", failures)
+    secret = played.launch_secret or LAUNCH_SECRET
+    _expect(all(secret not in text for text in _texts(played)), "the launch secret reached the room", failures)
+    _expect(played.answer(2)[0] is True, f"the post without the secret failed: {played.answer(2)}", failures)
+    _expect(_texts(played) == [NO_SECRET], f"expected only the post without the secret, saw {_texts(played)}", failures)
     return failures
 
 
@@ -621,6 +660,18 @@ SCENARIOS: dict[str, Scenario] = {
         "a withheld secret never reaches the room",
         (("bind",), ("call", "send", {"text": f"The key is {SECRET}"}), ("end", True)),
         _check_secret,
+    ),
+    "launch-secret": Scenario(
+        "tools",
+        "the launch secret the harness holds never reaches the room, and the agent can post without it",
+        (
+            ("bind",),
+            ("call", "send", {"text": f"My session is {LAUNCH_SECRET}"}),
+            ("call", "send", {"text": NO_SECRET}),
+            ("end", True),
+        ),
+        _check_launch_secret,
+        launch_secret=True,
     ),
     "cancel": Scenario(
         "tools",
@@ -887,6 +938,13 @@ def run_scenario(name: str, integration: KitIntegration, *, timeout: float = 15.
                 "status": "fail",
                 "failures": [f"the integration cannot offer privileged actions: {exc}"],
             }
+        if scenario.launch_secret:
+            # Only an integration whose harness holds a launch secret has one to leak.
+            secret = getattr(integration, "launch_secret", None)
+            if not secret:
+                integration.close()
+                return {"scenario": name, "integration": integration.name, "status": "n/a"}
+            agent.launch_secret = played.launch_secret = secret
         # The same assembly every integration uses (`nunchi.room`).
         room = Room(
             settings,

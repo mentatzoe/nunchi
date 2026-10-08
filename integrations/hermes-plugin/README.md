@@ -96,8 +96,10 @@ plus a `hermes` section:
   `<platform>:user:<user id>`.
 - `turn_user_id` is the identity Hermes runs the injected turns as.
 - `withheld_env` names environment variables whose values the agent must
-  never post (default: the platform bot tokens). Telegram and Discord token
-  shapes are refused too.
+  never post (default: the platform bot tokens). The value of every other
+  variable the config names in a `*_env` key, such as an attention route's
+  `api_key_env`, is withheld too. Telegram, Discord and Slack token shapes
+  are refused.
 
 ## Hermes setup the room needs
 
@@ -164,3 +166,10 @@ display:
 - **Reactions** are add-only (Hermes's `platform_actions`) and were checked up
   to Hermes's Telegram verb with a recording adapter, not against Telegram.
 - **No room history after a restart** beyond Nunchi's own log.
+- **Hermes's process is not private.** The plugin runs inside Hermes's own
+  process, and Nunchi leaves a stock harness's process alone: it does not
+  call `nunchi.private_process.keep_private`, as its own runners do. Another
+  process of the same OS user can read Hermes's starting environment and
+  memory, including any key Nunchi's config names there. The plugin has no
+  probe to report this. With the `hermes-host` attention model, Nunchi adds
+  no key of its own to that process.

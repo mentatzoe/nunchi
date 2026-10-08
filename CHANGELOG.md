@@ -28,10 +28,10 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   through each integration's react tool. The pause scenarios now also check
   that the turn after the pause remembers why the agent waited. The reference
   turn, the Claude Code gate, the Hermes plugin (Hermes main `a50406d9`) and
-  the Codex app-server integration (Codex CLI 0.160.1) pass all 21
-  scenarios. The behavior scenes' four moves (speak, stay quiet, wait, mhm)
-  and their pause and outcome moments each have a scenario through every
-  integration, so the kit does not replay every scene moment.
+  the Codex app-server integration (Codex CLI 0.160.1) passed all 21
+  scenarios the kit had then. The behavior scenes' four moves (speak, stay
+  quiet, wait, mhm) and their pause and outcome moments each have a scenario
+  through every integration, so the kit does not replay every scene moment.
 - A silent turn's reason in tool posting (#135 gap H): `end_turn` and
   `turn_ended` take the agent's last words as `note`, and the local turn
   protocol's `/v1/turn/end` an optional `note`. When the turn ends without a
@@ -548,6 +548,67 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Fixed
 
+- Secrets the library holds no longer reach the room through any harness
+  (leak audit rows 9 and 10).
+  - The launch secret a `TurnServer` serves with is now in its participant's
+    secret guard (`TurnParticipant.withhold`, `SecretGuard.including`). An
+    agent that pasted its environment posted Claude Code's
+    `NUNCHI_CLAUDE_CODE_GATE_SESSION`; the gate now refuses it, and the agent
+    can post again without it. The same holds for the Codex app-server
+    bridge's secret. A launch secret under 16 characters is refused. The
+    local turn protocol stays `I-040D@1`: no route or answer changed.
+  - One secret guard per room: `nunchi.room.room_guard` withholds the value of
+    every variable a config key ending in `_env` names (attention model, the
+    integration's sections, authorization), the default key variables the
+    models read when the config names none (`NUNCHI_ATTENTION_API_KEY`,
+    `NUNCHI_PARTICIPANT_API_KEY`), and what the transport declares with the
+    new optional `withheld_values()` and `credential_patterns()`.
+    `Room` builds it when not given one and exposes it as `room.guard`.
+  - The room's host checks every action against that guard, whatever the
+    participant did. A refused action posts nothing and its result is
+    `failed`; a silence whose reason holds a secret keeps no reason.
+  - The old Codex runner (`nunchi-codex-room-runner`) and the reference
+    adapters had no guard at all. Both now pass the room's guard to their
+    one-reply turns: a reply with a secret is refused once, and the model
+    answers again. The Discord, Telegram and Matrix adapter transports
+    declare the token they hold and its shape.
+  - The Claude Code runtime, the Codex app-server integration and the Hermes
+    plugin build their guard with `room_guard` instead of their own copies of
+    the rule, so the Hermes plugin's guard now also withholds its attention
+    route's key. The Discord token shape lives in one place,
+    `DISCORD_TOKEN_PATTERNS`. The Hermes plugin also refuses Slack token
+    shapes.
+  - The conformance kit has a 22nd scenario, `launch-secret`: the agent posts
+    its harness's launch secret, the post is refused, and its next post goes
+    out. It applies to integrations whose harness holds one (Claude Code,
+    Codex app-server) and is n/a for the reference turn and Hermes.
+- An agent that runs as Nunchi's OS user can no longer read Nunchi's keys
+  out of Nunchi's own processes (leak audit row 8). Before, a shell command
+  of the agent could read the gate's or runner's `/proc/<pid>/environ` and
+  memory, and post to the room with the transport's key, without the
+  library.
+  - `nunchi.private_process.keep_private()` marks the process not dumpable
+    on Linux and sets its core size limit to zero. Another process of the
+    same user then gets `PermissionError` on both files; root still reads
+    them. Off Linux it does nothing and says `unsupported`; if the system
+    refuses, it logs a warning and says `failed`, and the process runs on.
+  - The Claude Code runner, both Codex runners, `nunchi-mcp-discord`, the
+    service worker and the reference adapters call it first, before they
+    read any secret or start an agent. The runners' probes report
+    `process_private` and `agent_os_user: "same"`. The older Hermes
+    integration's probe reports `process_private: false`: it runs inside
+    Hermes's own process, which Nunchi leaves alone; the Hermes plugin has
+    no probe.
+  - It is not the whole boundary. Other programs started from the shell
+    that exported the keys, environment files, a systemd unit's
+    `Environment=` lines, macOS and root are not covered. The Claude Code
+    and Codex app-server READMEs give the harness sandbox settings that keep
+    the agent's commands away from the rest.
+  - The Codex app-server integration records the sandbox Codex reports for
+    the thread, and logs a warning when it is `dangerFullAccess` or
+    `externalSandbox` (`CodexRoomRunner.status()`). It still runs.
+  - The Claude Code runtime ran `claude --version` with its own environment,
+    Nunchi's keys included; it now uses the session's, without them.
 - Hermes: two concurrent native tool calls no longer refuse each other on a
   slow disk. One call's journal write could hold SQLite's lock past the
   journal's 0.25 s budget, so the other call was refused with "native

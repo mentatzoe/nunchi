@@ -76,17 +76,90 @@ call errors. Subagents cannot act in the room.
 
 ## Secrets
 
-- Nunchi's secrets are not in the session's environment. The gate removes the
-  transport output key, every `*_env` variable named in the attention model
-  config, every name in `withhold_env`, and every `NUNCHI_*` variable.
+- The gate removes from the session's environment every variable the config
+  names in a `*_env` key (the transport's `output_key_env`, the attention
+  model's keys, the names in `withhold_env`) and every `NUNCHI_*` variable.
+- Then it adds two back, which the mod needs to reach the gate:
+  `NUNCHI_CLAUDE_CODE_GATE_SOCKET` (the socket path) and
+  `NUNCHI_CLAUDE_CODE_GATE_SESSION` (the per-launch secret). The agent can
+  read both, for example with Bash. The secret only lets a process call this
+  gate, which your OS user can already reach.
+- The gate refuses a room action that contains a withheld secret, the launch
+  secret, the transport's key or a Discord bot token's shape. The agent is
+  told nothing was posted, and can post again without it. The room's host
+  checks every action again before it leaves.
 - By default the session's Read and Edit tools are denied on Nunchi's state
   directory (`protect_nunchi_files`), which holds the journals and receipts.
   The runner config holds no secret values, and editing it breaks its pin, so
   the gate refuses to restart rather than run changed settings. Deny rules
   are not a sandbox: Bash can still read any file your OS user can read.
-- The gate refuses a room action that contains a withheld secret or a
-  bot-token-shaped string. The agent is told nothing was posted.
-- For stronger isolation, run the gate and its session as a separate OS user.
+- The guard matches exact values and token shapes. A secret the agent
+  encodes or splits gets past it.
+
+### Nunchi's processes and the agent's Bash
+
+The agent runs as your OS user, the same user as the gate. A process of that
+user can normally read another one's starting environment
+(`/proc/<pid>/environ`) and memory (`/proc/<pid>/mem`), and the gate's hold
+the transport's key and the attention model's key.
+
+- On Linux the gate makes its own process private before it reads any
+  secret (`nunchi.private_process.keep_private`). The agent's Bash, its Read
+  tool and any other process of your user then get `PermissionError` on both
+  files. `nunchi-mcp-discord` does the same for the bot token and the output
+  key. The probe reports `"process_private": true` and
+  `"agent_os_user": "same"`.
+- That does not cover what else your OS user can read:
+  - every other program started from the shell you exported the keys in,
+    such as a terminal multiplexer or an editor: its starting environment
+    holds them. With Yama's `ptrace_scope` at 0 or absent, that shell's own
+    memory is readable too;
+  - environment files, and any other file your user can read;
+  - a systemd unit's `Environment=` lines, which `systemctl show` prints for
+    any user;
+  - on macOS, any process's starting environment (`ps eww`): the call does
+    nothing there;
+  - anything, for root.
+- Running the gate as a separate OS user keeps the agent away from your own
+  files and processes, but not from the gate's: the gate starts the session
+  as its own user, so the agent and the gate still share one. Running the
+  agent as a different user from the gate is not supported yet.
+
+### Keep Bash in Claude Code's sandbox
+
+Claude Code's sandbox runs Bash in its own namespaces with a fresh `/proc`,
+so a command there does not see the gate, the transport, or the shell that
+started them. Turn it on in your user settings (`~/.claude/settings.json`)
+or in managed settings, not in the project's `.claude/settings.json`, which
+sits in the agent's working directory:
+
+```json
+{
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "enableWeakerNestedSandbox": false
+  }
+}
+```
+
+- `enabled` runs Bash in the sandbox. On Linux it needs bubblewrap and socat
+  (`apt install bubblewrap socat`).
+- `failIfUnavailable` makes the session refuse to start when the sandbox
+  cannot run. The participant's turns then fail, and are recorded as
+  failures, instead of running unprotected.
+- `allowUnsandboxedCommands: false` makes Claude Code ignore a command's
+  request to run outside the sandbox (`dangerouslyDisableSandbox`).
+- `enableWeakerNestedSandbox: false` keeps the fresh `/proc`; the weaker mode
+  leaves the host's `/proc` readable.
+- The sandbox covers Bash only. The Read tool, MCP servers and hooks run
+  outside it. Deny reads of a file that holds Nunchi's keys with a
+  `Read(//path)` rule in `permissions.deny`; Claude Code applies Read deny
+  rules inside the sandbox too.
+
+The setting names come from Claude Code 2.1.294's settings schema. Nunchi's
+tests do not run the sandbox: the kit scripts the session.
 
 ## Configuration
 
@@ -111,7 +184,9 @@ NUNCHI_CLAUDE_CODE_CONFIG_SHA256=<64 hex> \
 ```
 
 The probe reports the binding, the Claude Code version found, the mod version,
-the room tools, and the deny rules. The runner refuses to start on Claude Code
+the room tools, the deny rules, whether the runner's process is private
+(`process_private`), and that the agent runs as the runner's OS user
+(`agent_os_user`). The runner refuses to start on Claude Code
 older than 2.1.287. Starting Claude Code with `--tools ""`, `--safe-mode`, or
 `--bare` would disable mods; the gate passes none of them.
 

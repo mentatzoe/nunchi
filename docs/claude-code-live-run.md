@@ -78,6 +78,22 @@ The gate needs the same HMAC key under the name in `transport.output_key_env`.
 The gate keeps that variable, and every `NUNCHI_*` variable, out of the
 session's environment.
 
+What exporting the keys exposes: the agent runs as your OS user. The
+transport and the gate make their own processes private, so the agent cannot
+read the keys out of them. But every other program you start from the
+shell that exported them holds them in its starting environment, which the
+agent's Bash can read, and with Yama's `ptrace_scope` at 0 or absent it can
+read that shell's memory too. With those keys a process can post as the
+participant without Nunchi. For the live run:
+
+- Put each process's keys in its own `0600` file and start the process from
+  a subshell that loads them and replaces itself, so your shell never holds
+  them: `(set -a; . /srv/nunchi/transport.env; exec /tmp/nunchi-live/bin/nunchi-mcp-discord)`.
+- Deny the agent reads of those files (`Read(//srv/nunchi/*.env)` in
+  `permissions.deny`), and keep its Bash in Claude Code's sandbox; see
+  [the integration README](../integrations/claude-code/README.md#nunchis-processes-and-the-agents-bash).
+- Check that the gate's configured probe says `"process_private": true`.
+
 ## 4. Profile and pinned configuration
 
 Profile, exactly these five non-empty string fields:

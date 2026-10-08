@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import sys
 from collections.abc import Mapping, Sequence
@@ -17,9 +18,15 @@ import urllib.request
 
 from .. import __version__
 from ..errors import NunchiError, ValidationError
+from ..private_process import keep_private
 from ..reactions import ReactionCapability
 from ..participant import TransportResult
 from .runtime import CAPABILITIES, ReferenceAdapterRuntime, load_pinned_config
+
+# Matrix fixes no access-token shape. Synapse's tokens look like
+# ``syt_<user>_<20 characters>_<6 characters>`` (``syr_`` for refresh
+# tokens); another homeserver's token is withheld by its value only.
+MATRIX_TOKEN_PATTERNS = (re.compile(r"\bsy[tr]_[A-Za-z0-9_-]+_[A-Za-z0-9]{20}_[A-Za-z0-9]{6}\b"),)
 
 
 class MatrixTransport:
@@ -60,6 +67,14 @@ class MatrixTransport:
         self.sync_timeout_ms = int(config.get("sync_timeout_ms", 30_000))
         if self.sync_timeout_ms < 1 or self.sync_timeout_ms > 60_000:
             raise ValidationError("Matrix sync_timeout_ms must be within 1..60000")
+
+    def withheld_values(self) -> tuple[str, ...]:
+        """What this transport holds that the room must never see: its access token."""
+
+        return (self.token,)
+
+    def credential_patterns(self) -> tuple[re.Pattern[str], ...]:
+        return MATRIX_TOKEN_PATTERNS
 
     def ordinary_action_capabilities(self) -> tuple[str, ...]:
         return ("message", "reply", "reaction")
@@ -263,6 +278,9 @@ def _save_token(path: Path, token: str) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    # First, before any credential is read: another agent of this OS user
+    # must not read this process's keys (`nunchi.private_process`).
+    keep_private()
     args = _parser().parse_args(argv)
     try:
         if not args.config:

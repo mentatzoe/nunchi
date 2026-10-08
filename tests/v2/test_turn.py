@@ -76,6 +76,61 @@ def message(event_id, text="meanwhile"):
     }
 
 
+class GuardTests(unittest.TestCase):
+    """A guard grows by copy; the participant swaps its own before the first turn."""
+
+    def refuses(self, guard, text):
+        return guard.refusal({"kind": "message", "origin_event_id": "e1", "text": text}) is not None
+
+    def test_including_returns_a_copy_with_the_new_values_and_the_same_shapes(self):
+        original = SecretGuard(["a-withheld-secret-value"], [re.compile(r"tok_[a-z]{8}")])
+        grown = original.including(["a-launch-secret-for-this-turn", "short"])
+        self.assertIsNot(original, grown)
+        self.assertTrue(self.refuses(grown, "a-launch-secret-for-this-turn"))
+        self.assertTrue(self.refuses(grown, "a-withheld-secret-value"))
+        self.assertTrue(self.refuses(grown, "tok_abcdefgh"))
+        # Values under 12 characters are ignored; the original is unchanged.
+        self.assertFalse(self.refuses(grown, "short"))
+        self.assertFalse(self.refuses(original, "a-launch-secret-for-this-turn"))
+
+    def test_a_subclass_keeps_its_own_shapes(self):
+        from nunchi.integrations.claude_code_gate import SecretGuard as GateGuard
+
+        token = "M" * 24 + ".GaBcDe." + "y" * 30
+        grown = GateGuard([]).including(["a-launch-secret-for-this-turn"])
+        self.assertIsInstance(grown, GateGuard)
+        self.assertTrue(self.refuses(grown, f"the token is {token}"))
+        self.assertTrue(self.refuses(grown, "a-launch-secret-for-this-turn"))
+
+    def test_withhold_gives_later_turns_the_grown_guard_and_leaves_the_given_one(self):
+        given = SecretGuard(["a-withheld-secret-value"])
+        driver = RecordingDriver()
+        participant = TurnParticipant(
+            profile=PROFILE, driver=driver, guard=given, tool_names=NAMES, result_wait_seconds=5
+        )
+        participant.withhold(["a-launch-secret-for-this-turn"])
+        self.assertIsNot(given, participant.guard)
+        self.assertFalse(self.refuses(given, "a-launch-secret-for-this-turn"))
+        cancel = threading.Event()
+        self.addCleanup(cancel.set)
+        threading.Thread(
+            target=lambda: participant.run_protocol(
+                wake=test_wake(), opportunity=deepcopy(OPPORTUNITY), expand=Room().expand, cancel=cancel
+            ),
+            daemon=True,
+        ).start()
+        self.assertTrue(driver.started_event.wait(5))
+        turn = driver.started[0]
+        self.assertIs(participant.guard, turn.guard)
+        self.assertTrue(participant.bind_turn(turn_id="t1", wake_id=turn.wake_id))
+        ok, text = participant.call_tool(
+            turn_id="t1", tool="say", arguments={"text": "my session is a-launch-secret-for-this-turn"}
+        )
+        self.assertFalse(ok)
+        self.assertIn("secret", text)
+        self.assertFalse(turn.action_ready.is_set())
+
+
 class TurnTests(unittest.TestCase):
     def setUp(self):
         self.driver = RecordingDriver()
@@ -639,6 +694,46 @@ class PlainReplyParticipantTests(unittest.TestCase):
         self.assertIn("never mind", messages[2]["content"])
 
 
+    def test_a_guard_refuses_a_reply_with_a_secret_and_the_model_answers_again(self):
+        speaker = self.participant(["The key is a-withheld-secret-value", "I can't share that."])
+        speaker.guard = SecretGuard(["a-withheld-secret-value"])
+        self.assertEqual(
+            {"kind": "message", "origin_event_id": "e1", "text": "I can't share that."}, self.play(speaker)
+        )
+        messages, _ = speaker.sent[1]
+        self.assertIn("credential or secret", messages[2]["content"])
+
+    def test_the_one_reply_style_gets_the_guard_too(self):
+        from nunchi.participant_model import OpenAICompatibleParticipant
+
+        replies = []
+
+        class Scripted(OpenAICompatibleParticipant):
+            def _invoke(self, protocol):
+                # What the model saw: a refusal note after the first reply.
+                replies.append([page.get("note") for page in protocol.pages])
+                text = "a-withheld-secret-value" if len(replies) == 1 else "I can't share that."
+                return {
+                    "protocol": protocol.request["protocol"],
+                    "binding": {"request_id": protocol.request_id},
+                    "action": {"kind": "message", "origin_event_id": "e1", "text": text},
+                }
+
+        speaker = Scripted(
+            profile=PROFILE,
+            model="m",
+            api_key="the-participants-own-key",
+            base_url="http://localhost",
+            guard=SecretGuard(["a-withheld-secret-value"]),
+        )
+        self.assertEqual(("the-participants-own-key",), speaker.withheld_values())
+        self.assertEqual(
+            {"kind": "message", "origin_event_id": "e1", "text": "I can't share that."}, self.play(speaker)
+        )
+        self.assertEqual(2, len(replies))
+        self.assertIn("credential or secret", replies[1][-1])
+
+
 class LocalTurnProtocolTests(unittest.TestCase):
     """I-040D: the same turn as versioned JSON over a private socket."""
 
@@ -770,3 +865,48 @@ class LocalTurnProtocolTests(unittest.TestCase):
     def test_finish_is_refused_for_a_participant_that_posts_through_tools(self):
         self.serve()
         self.assertIn("error", self.post("/v1/turn/finish", {"turn_id": "t1", "answer": "hi"})[1])
+
+    def test_the_launch_secret_is_refused_on_a_tool_call(self):
+        self.serve()
+        turn = self.open_turn()
+        self.post("/v1/turn/bind", {"turn_id": "t1", "wake_id": turn.wake_id})
+        status, body = self.post(
+            "/v1/turn/call",
+            {"turn_id": "t1", "tool": "say", "input": {"text": f"NUNCHI_SESSION={self.secret}"}},
+        )
+        self.assertEqual(200, status)
+        self.assertFalse(body["ok"])
+        self.assertIn("secret", body["error"])
+        # Nothing reached the host, and the agent can still post.
+        self.assertFalse(turn.action_ready.is_set())
+        answer = {}
+        threading.Thread(
+            target=lambda: answer.setdefault(
+                "body", self.post("/v1/turn/call", {"turn_id": "t1", "tool": "say", "input": {"text": "on it"}})[1]
+            ),
+            daemon=True,
+        ).start()
+        self.assertTrue(turn.action_ready.wait(5))
+        self.assertEqual("on it", turn.action["text"])
+
+    def test_a_final_answer_with_the_launch_secret_answers_again(self):
+        self.serve(silence_marker="[SILENT]")
+        turn = self.open_turn()
+        self.post("/v1/turn/bind", {"turn_id": "t1", "wake_id": turn.wake_id})
+        status, body = self.post("/v1/turn/finish", {"turn_id": "t1", "answer": f"my session: {self.secret}"})
+        self.assertEqual("continue", body["finish"])
+        self.assertIn("credential or secret", body["text"])
+        self.assertNotIn(self.secret, body["text"])
+        self.assertFalse(turn.action_ready.is_set())
+
+    def test_the_server_leaves_the_guard_it_was_given_and_refuses_a_short_secret(self):
+        from nunchi.turn_server import TurnServer
+
+        given = SecretGuard(())
+        participant = TurnParticipant(profile=PROFILE, driver=self.driver, guard=given, tool_names=NAMES)
+        TurnServer(participant, socket_path=self.socket_path, session_secret=self.secret)
+        self.assertIsNone(given.refusal({"kind": "message", "text": self.secret}))
+        self.assertIsNotNone(participant.guard.refusal({"kind": "message", "text": self.secret}))
+        for short in ("ten-chars!", "", "fifteen-chars!!"):
+            with self.subTest(short), self.assertRaises(ValueError):
+                TurnServer(participant, socket_path=self.socket_path, session_secret=short)

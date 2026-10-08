@@ -2517,6 +2517,11 @@ class NunchiHermesV2Plugin:
             "hermes_package_files_written_by_nunchi": False,
             "dashboard_bridge_files_written": True,
             "hermes_dependency_required_by_nunchi": False,
+            # Nunchi runs inside Hermes's own process and leaves its process
+            # settings alone (`nunchi.private_process`): other processes of
+            # this OS user can read its starting environment and memory.
+            "process_private": False,
+            "process_private_status": "harness-process",
             "discord_bot_admission": (
                 "configured-rooms"
                 if any(platform == "discord" for platform, _ in self._rooms)

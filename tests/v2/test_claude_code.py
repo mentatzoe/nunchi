@@ -2470,6 +2470,11 @@ for line in sys.stdin:
     if scenario == "send":
         note({"answer": post("/v1/tool", {"turn_id": turn_id, "tool": "mcp__nunchi__room_send",
                                           "input": {"text": "on it"}})})
+    if scenario.startswith("leak:"):
+        # The agent posts a variable from its own environment.
+        value = os.environ.get(scenario.split(":", 1)[1], "<absent>")
+        note({"answer": post("/v1/tool", {"turn_id": turn_id, "tool": "mcp__nunchi__room_send",
+                                          "input": {"text": "my env says " + value}})})
     if scenario == "reason":
         result(text="Castor was asked, not me.")
         continue
@@ -2621,12 +2626,34 @@ class RealSessionTests(unittest.TestCase):
                 self.assertEqual("1", env["KEEP_ME"])
                 self.assertEqual(str(harness.runtime.socket_path), env[SOCKET_ENV])
                 self.assertEqual(harness.runtime.session_secret, env[SESSION_ENV])
+                # The session must hold the launch secret; the room never gets it.
+                guard = harness.runtime.participant.guard
+                self.assertIsNotNone(guard.refusal({"kind": "message", "text": env[SESSION_ENV]}))
+                self.assertIsNotNone(guard.refusal({"kind": "message", "text": "m" * 30}))
+                self.assertIsNone(guard.refusal({"kind": "message", "text": env[SOCKET_ENV]}))
                 self.assertEqual(
                     os.path.realpath(Path(directory) / "work"),
                     os.path.realpath(start["cwd"]),
                 )
                 host = self._stage(harness, "participant-host")[-1]
                 self.assertEqual("silent", host["body"]["outcome"])
+
+    def test_the_agent_cannot_post_the_launch_secret_from_its_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self._harness(directory, scenario=f"leak:{SESSION_ENV}") as harness:
+                harness.runtime.start()
+                self.assertTrue(self._deliver(harness))
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline and not any(
+                    "answer" in entry for entry in self._records()
+                ):
+                    time.sleep(0.05)
+                self.assertEqual([], harness.client.outbound())
+                answers = [entry["answer"] for entry in self._records() if "answer" in entry]
+                self.assertEqual(1, len(answers))
+                self.assertFalse(answers[0]["ok"])
+                self.assertIn("contains a credential or secret", answers[0]["error"])
+                self.assertNotIn(harness.runtime.session_secret, json.dumps(answers))
 
     def test_a_persistent_session_is_resumed_after_it_restarts(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2706,6 +2733,27 @@ class RealSessionTests(unittest.TestCase):
                     [entry for entry in self._records() if "control" in entry],
                 )
                 self.assertEqual([], harness.client.outbound())
+
+
+class RuntimeGuardTests(unittest.TestCase):
+    """The runtime's one guard: the agent's turns and the room refuse the same secrets."""
+
+    def test_the_turns_and_the_room_refuse_the_transport_key_attention_key_and_token_shape(self):
+        token = "MTA" + "x" * 21 + ".GaBcDe." + "y" * 30
+        with tempfile.TemporaryDirectory() as directory:
+            harness = RuntimeHarness(
+                directory, documents=(), environment={"TEST_ATTENTION_KEY": "an-attention-route-key"}
+            )
+            harness.config["attention"]["model"] = {"kind": "example", "api_key_env": "TEST_ATTENTION_KEY"}
+            with harness:
+                runtime = harness.runtime
+                self.assertNotIn("TEST_ATTENTION_KEY", runtime.session_environment())
+                for name, guard in (("turn", runtime.participant.guard), ("room", runtime.room.guard)):
+                    for text in (OUTPUT_SECRET, "an-attention-route-key", f"the token is {token}"):
+                        with self.subTest(guard=name, text=text[:12]):
+                            self.assertIsNotNone(guard.refusal({"kind": "message", "text": text}))
+                    self.assertIsNone(guard.refusal({"kind": "message", "text": "On it."}))
+                self.assertIs(runtime.room.guard, runtime.room.host.guard)
 
 
 class RuntimeConfigTests(unittest.TestCase):
@@ -2810,7 +2858,9 @@ class InstalledSurfaceTests(unittest.TestCase):
         from contextlib import redirect_stdout
 
         output = io.StringIO()
-        with redirect_stdout(output):
+        with mock.patch.object(
+            claude_code_v2, "keep_private", return_value="private"
+        ), redirect_stdout(output):
             self.assertEqual(0, claude_code_v2.main(["--probe"]))
         probe = json.loads(output.getvalue())
         self.assertEqual(2, probe["generation"])
@@ -2818,6 +2868,10 @@ class InstalledSurfaceTests(unittest.TestCase):
         self.assertFalse(probe["configured"])
         self.assertEqual(__version__, probe["mod_version"])
         self.assertFalse(probe["v1_fallback"])
+        # The runner's process is private; the agent still runs as its user.
+        self.assertTrue(probe["process_private"])
+        self.assertEqual("private", probe["process_private_status"])
+        self.assertEqual("same", probe["agent_os_user"])
 
     def test_configured_probe_reports_the_exact_binding_and_guarantees(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2854,6 +2908,8 @@ class InstalledSurfaceTests(unittest.TestCase):
             output = io.StringIO()
             with mock.patch.dict(os.environ, {OUTPUT_KEY_ENV: OUTPUT_SECRET}), mock.patch.object(
                 claude_code_v2.shutil, "which", return_value=None
+            ), mock.patch.object(
+                claude_code_v2, "keep_private", return_value="unsupported"
             ), redirect_stdout(output):
                 code = claude_code_v2.main(
                     [
@@ -2869,9 +2925,13 @@ class InstalledSurfaceTests(unittest.TestCase):
             self.assertTrue(probe["configured"])
             self.assertIsNone(probe["claude_code_executable"])
             self.assertFalse(probe["claude_code_supported"])
+            self.assertFalse(probe["process_private"])
+            self.assertEqual("unsupported", probe["process_private_status"])
+            self.assertEqual("same", probe["agent_os_user"])
 
     def test_runner_requires_a_pinned_configuration_digest(self):
-        self.assertEqual(3, claude_code_v2.main(["--config", "/nonexistent.json"]))
+        with mock.patch.object(claude_code_v2, "keep_private", return_value="private"):
+            self.assertEqual(3, claude_code_v2.main(["--config", "/nonexistent.json"]))
 
     def test_claude_code_older_than_the_mod_minimum_is_refused(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2895,6 +2955,19 @@ class InstalledSurfaceTests(unittest.TestCase):
                 environment=environment,
             ) as harness:
                 self.assertEqual((2, 1, 289), harness.runtime.require_supported_claude_code())
+            # `claude --version` runs with the session's environment, never
+            # the runtime's: no Nunchi key, no NUNCHI_* variable.
+            records = [
+                json.loads(line)
+                for line in (root / "record.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            versions = [record for record in records if record.get("argv") == ["--version"]]
+            self.assertTrue(versions)
+            for record in versions:
+                self.assertNotIn(OUTPUT_KEY_ENV, record["env"])
+                self.assertNotIn(OUTPUT_SECRET, json.dumps(record["env"]))
+                self.assertFalse([name for name in record["env"] if name.startswith("NUNCHI_")])
+                self.assertEqual(str(root / "record.jsonl"), record["env"]["STUB_RECORD"])
 
     def test_the_mod_ships_inside_the_package(self):
         manifest = json.loads(
