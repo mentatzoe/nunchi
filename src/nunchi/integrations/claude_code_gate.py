@@ -29,7 +29,6 @@ from copy import deepcopy
 import json
 import os
 from pathlib import Path
-import re
 import secrets
 import subprocess
 import threading
@@ -40,6 +39,7 @@ from ..attention import ParticipantProfile
 from ..participant_model import PARTICIPANT_TOOL_SPECS
 from ..turn import TURN_ROLES, SecretGuard as CoreSecretGuard, Turn, TurnError, TurnParticipant
 from ..turn_server import TurnServer
+from .discord_participant_transport import DISCORD_TOKEN_PATTERNS
 
 SOCKET_ENV = "NUNCHI_CLAUDE_CODE_GATE_SOCKET"
 SESSION_ENV = "NUNCHI_CLAUDE_CODE_GATE_SESSION"
@@ -56,10 +56,6 @@ WAKE_MARKER = '<nunchi_wake id="{}"/>'
 _RESULT_WAIT_SECONDS = 25.0
 _INTERRUPT_GRACE_SECONDS = 10.0
 _DIAGNOSTIC_LINES = 40
-# A Discord bot token has three dot-separated base64url parts.
-_TOKEN_PATTERNS = (
-    re.compile(r"[A-Za-z\d_-]{23,28}\.[A-Za-z\d_-]{6}\.[A-Za-z\d_-]{27,}"),
-)
 
 
 class ClaudeCodeGateError(RuntimeError):
@@ -93,10 +89,15 @@ def full_tool_name(role: str) -> str:
 
 
 class SecretGuard(CoreSecretGuard):
-    """The core's guard, which also refuses a platform bot token's shape."""
+    """The core's guard, which also refuses a Discord bot token's shape.
+
+    The runtime builds its guard with `nunchi.room.room_guard`, which takes
+    the shape from the shared Discord transport; this class is for a gate
+    built without a room config.
+    """
 
     def __init__(self, values: Iterable[str]) -> None:
-        super().__init__(values, _TOKEN_PATTERNS)
+        super().__init__(values, DISCORD_TOKEN_PATTERNS)
 
 
 class _SessionDriver:
@@ -174,8 +175,10 @@ class ClaudeCodeSession:
 
     The session starts on the first wake and again on the next wake after it
     exits.  It runs in the configured working directory with the user's own
-    Claude Code configuration, the Nunchi mod, and an environment that holds
-    none of Nunchi's secrets.
+    Claude Code configuration, the Nunchi mod, and the environment the runtime
+    gives it: without the secrets the config names, but with the gate's socket
+    path and the per-launch session secret, which the mod needs.  The agent
+    can read that secret; the gate refuses a room action that carries it.
     """
 
     def __init__(

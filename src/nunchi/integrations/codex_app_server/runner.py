@@ -21,11 +21,18 @@ from nunchi import __version__
 from nunchi.adapters.model_apis import ATTENTION_KINDS
 from nunchi.adapters.runtime import load_pinned_config
 from nunchi.errors import NunchiError, ValidationError
-from nunchi.room import Room
+from nunchi.private_process import keep_private, probe_facts
+from nunchi.room import Room, RoomSettings
 
 from ..discord_room import DiscordRoomConnection, output_secret, transport_client
 from ..mcp_client import StreamableMCPClient
-from .integration import MCP_SERVER_NAME, TOOL_NAMES, CodexIntegrationError, build_integration
+from .integration import (
+    MCP_SERVER_NAME,
+    SECTION as CODEX_SECTION,
+    TOOL_NAMES,
+    CodexIntegrationError,
+    build_integration,
+)
 
 SURFACE = "codex-app-server"
 LABEL = "Codex app-server"
@@ -53,24 +60,31 @@ class CodexRoomRunner:
         if not isinstance(transport, Mapping):
             raise ValidationError(f"{LABEL} transport config must be an object")
         secret = output_secret(transport, label=LABEL, environ=environ)
-        # The transport's key never reaches Codex, and the room never sees it.
+        # The room's connection comes first: the guard holds what its
+        # transport declares. The integration checks the same settings again.
+        binding = RoomSettings.from_config(
+            config, label=LABEL, sections=(CODEX_SECTION, "transport")
+        ).binding
+        if binding.platform != "discord":
+            raise ValidationError(f"{LABEL} currently requires the shared Discord transport")
+        self.connection = DiscordRoomConnection(
+            client=client,
+            binding=binding,
+            secret=secret,
+            label=LABEL,
+            surface=SURFACE,
+        )
+        # The transport's key never reaches Codex (``withhold``), and the room
+        # never sees it (the transport declares it).
         settings, integration = build_integration(
             config,
             environ=environ,
             sections=("transport",),
             withhold=(transport["output_key_env"],),
+            transport=self.connection.transport,
         )
-        if settings.binding.platform != "discord":
-            raise ValidationError(f"{LABEL} currently requires the shared Discord transport")
         self.settings = settings
         self.integration = integration
-        self.connection = DiscordRoomConnection(
-            client=client,
-            binding=settings.binding,
-            secret=secret,
-            label=LABEL,
-            surface=SURFACE,
-        )
         self.room = Room(
             settings,
             participant=integration.participant,
@@ -78,6 +92,8 @@ class CodexRoomRunner:
             event_visibility=EVENT_VISIBILITY,
             state_prefix=f"{SURFACE}-",
             attention_kinds=ATTENTION_KINDS,
+            # The room refuses what the agent's turn refuses, and no more.
+            guard=integration.participant.guard,
         )
         self.connection.attach(self.room)
 
@@ -87,6 +103,19 @@ class CodexRoomRunner:
     def close(self) -> None:
         self.room.cancel()
         self.integration.close()
+
+    def status(self) -> dict[str, Any]:
+        """What Codex reported once it ran: the sandbox the agent's commands run in.
+
+        ``codex_sandbox`` is None until Codex has started the participant's
+        thread. ``codex_sandbox_warning`` says when that sandbox leaves this
+        runner's processes and files open to the agent's commands.
+        """
+
+        return {
+            "codex_sandbox": self.integration.sandbox,
+            "codex_sandbox_warning": self.integration.sandbox_warning,
+        }
 
     def probe(self) -> dict[str, Any]:
         binding = self.settings.binding
@@ -128,7 +157,16 @@ def _print(document: Mapping[str, Any]) -> None:
     print(json.dumps(document, sort_keys=True, separators=(",", ":")))
 
 
+def _process_facts(private: str) -> dict[str, Any]:
+    """This process's privacy, and the agent's OS user: the same as the runner's."""
+
+    return {**probe_facts(private), "agent_os_user": "same"}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    # First, before any secret is read and before Codex starts: the agent runs
+    # as this OS user, and must not read this process's keys.
+    private = keep_private()
     args = _parser().parse_args(argv)
     try:
         if not args.config:
@@ -140,6 +178,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "generation": 2,
                         "surface": SURFACE,
                         "configured": False,
+                        **_process_facts(private),
                     }
                 )
                 return 0
@@ -150,7 +189,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         client = transport_client(config.get("transport"), label=LABEL)
         runner = CodexRoomRunner(config, client)
         if args.probe:
-            _print(runner.probe())
+            _print({**runner.probe(), **_process_facts(private)})
             runner.close()
             return 0
         try:

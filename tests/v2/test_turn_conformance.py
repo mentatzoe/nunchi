@@ -40,6 +40,16 @@ class TurnConformanceTests(unittest.TestCase):
             failed,
         )
 
+    def test_the_launch_secret_scenario_needs_a_launch_secret_and_catches_a_leak(self):
+        # The reference turn has no launch secret: the scenario does not apply.
+        self.assertEqual("n/a", kit.run_scenario("launch-secret", kit.ReferenceIntegration("tools"))["status"])
+        self.assertEqual("pass", kit.run_scenario("launch-secret", ClaudeCodeKitIntegration())["status"])
+        # A server that does not withhold its secret lets the agent post it.
+        with mock.patch.object(turn.TurnParticipant, "withhold", lambda self, values: None):
+            result = kit.run_scenario("launch-secret", ClaudeCodeKitIntegration())
+        self.assertEqual("fail", result["status"])
+        self.assertIn("the launch secret was not refused", result["failures"][0])
+
     def test_the_pause_and_outcome_checks_catch_a_library_that_does_not_start_them(self):
         later = {"pause", "outcome", "final-pause", "final-outcome"}
 

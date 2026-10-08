@@ -11,16 +11,22 @@ Around the agent's turn, every integration needs the same parts:
 `Room` builds them from the shared config sections, the integration's
 participant and its transport. Every harness then gets the same behavior, and
 no integration wires the parts by hand (`docs/harness-guide.md`).
+
+`room_guard` builds the one secret guard for the room from the same config,
+and the host checks every action against it before anything leaves.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
+import re
 from typing import Any
 
 from .attention import (
+    DEFAULT_API_KEY_ENV as ATTENTION_KEY_ENV,
     AttentionEngine,
     AttentionPolicy,
     ParticipantProfile,
@@ -30,8 +36,10 @@ from .authorization import AuthorizationCoordinator, AuthorizationJournal, Pinne
 from .errors import ValidationError
 from .observation import ObservationLimits, ObservationProvider, ParticipantBinding
 from .participant import ConversationOpportunityScheduler, ParticipantTurnHost, Transport
+from .participant_model import DEFAULT_API_KEY_ENV as PARTICIPANT_KEY_ENV
 from .pipeline import AsyncDeliveryLane, DeliveryOutcome, NunchiV2Pipeline
 from .receipts import ReceiptJournal
+from .turn import SecretGuard
 
 SHARED_SECTIONS = frozenset(
     {"schema_version", "binding", "profile", "attention", "limits", "state_directory"}
@@ -40,6 +48,11 @@ SHARED_SECTIONS = frozenset(
 # that still has it loads, and the setting is ignored.
 SHARED_OPTIONAL = frozenset({"authorization", "ack"})
 DEFAULT_PARTICIPANT_TIMEOUT_SECONDS = 300.0
+# A config key with this ending names environment variables that hold secrets.
+SECRET_ENV_SUFFIX = "_env"
+# The variables the attention and participant models read their keys from
+# when the config names none; always withheld.
+DEFAULT_SECRET_ENV = (ATTENTION_KEY_ENV, PARTICIPANT_KEY_ENV)
 
 
 @dataclass(frozen=True)
@@ -153,6 +166,79 @@ class RoomSettings:
         )
 
 
+def _env_names(value: Any) -> Iterable[str]:
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if isinstance(key, str) and key.endswith(SECRET_ENV_SUFFIX):
+                if isinstance(item, str) and item:
+                    yield item
+                elif isinstance(item, (list, tuple)):
+                    yield from (name for name in item if isinstance(name, str) and name)
+            else:
+                yield from _env_names(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _env_names(item)
+
+
+def withheld_env_names(settings: "RoomSettings") -> list[str]:
+    """The environment variables the config names as secrets.
+
+    A key ending in ``_env`` names one variable, or a list of them, that holds
+    a secret: an attention route's ``api_key_env``, a transport's
+    ``output_key_env``, an integration's ``withhold_env``. The attention model,
+    the integration's own sections and the authorization section are read, at
+    any depth. Keep these variables out of the agent's environment.
+    """
+
+    names = [
+        *_env_names(settings.attention_model or {}),
+        *_env_names(dict(settings.sections)),
+        *_env_names(settings.authorization or {}),
+    ]
+    return list(dict.fromkeys(names))
+
+
+def room_guard(
+    settings: "RoomSettings",
+    *,
+    transport: Any = None,
+    values: Iterable[str] = (),
+    patterns: Iterable[re.Pattern[str]] = (),
+    environ: Mapping[str, str] | None = None,
+) -> SecretGuard:
+    """The one secret guard for a participant's room.
+
+    It withholds:
+
+    - the value of every variable `withheld_env_names` finds in the config,
+      and of the default key variables a model reads when the config names
+      none (`DEFAULT_SECRET_ENV`);
+    - what the transport says it holds, from its optional
+      ``withheld_values()``;
+    - ``values``, which the integration adds, such as defaults its config
+      leaves unnamed.
+
+    It refuses the credential shapes the transport names in its optional
+    ``credential_patterns()``, and ``patterns``. Values shorter than 12
+    characters are ignored. Give the participant's turns a guard that holds
+    at least this one, so the agent is told about a refusal and can answer
+    again.
+    """
+
+    environ = os.environ if environ is None else environ
+    names = dict.fromkeys([*withheld_env_names(settings), *DEFAULT_SECRET_ENV])
+    held = [environ[name] for name in names if environ.get(name)]
+    declared = getattr(transport, "withheld_values", None)
+    if callable(declared):
+        held += [value for value in declared() if isinstance(value, str) and value]
+    shapes = getattr(transport, "credential_patterns", None)
+    return SecretGuard(
+        [*held, *values],
+        [*(shapes() if callable(shapes) else ()), *patterns],
+    )
+
+
 class Room:
     """Everything the library owns for one participant in one room.
 
@@ -171,6 +257,11 @@ class Room:
     directory, in files named ``{state_prefix}receipts.jsonl``,
     ``{state_prefix}observations.jsonl`` and
     ``{state_prefix}authorization.jsonl``.
+
+    ``guard`` is the room's secret guard (``room.guard``); without one the
+    room builds it with `room_guard` from the settings and the transport.
+    The host refuses any action that carries what it withholds, whatever the
+    participant's turn did.
     """
 
     def __init__(
@@ -185,8 +276,10 @@ class Room:
         attention_kinds: Mapping[str, Callable[..., Any]] | None = None,
         privileged_executors: Mapping[str, Any] | None = None,
         participant_timeout_seconds: float = DEFAULT_PARTICIPANT_TIMEOUT_SECONDS,
+        guard: SecretGuard | None = None,
     ) -> None:
         self.settings = settings
+        self.guard = guard if guard is not None else room_guard(settings, transport=transport)
         binding = settings.binding
         state = settings.state_directory
         state.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -228,6 +321,7 @@ class Room:
             receipts=self.receipts,
             privileged=self.privileged,
             participant_timeout_seconds=participant_timeout_seconds,
+            guard=self.guard,
         )
         self.attention = AttentionEngine(
             profile=settings.profile,

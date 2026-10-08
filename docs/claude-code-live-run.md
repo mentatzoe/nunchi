@@ -62,21 +62,62 @@ version, and exit 0.
 The participant needs its own bot account. Enable the **message content** and
 **server members** privileged intents, then invite it.
 
+Each process loads its keys from its own file, mode `0600`, in a subshell
+that replaces itself, so your shell never holds them. The reasons are below.
+
+`/srv/nunchi/transport.env` holds the transport's token, routes, output key
+and state directory:
+
 ```sh
-export NUNCHI_DISCORD_TOKEN=...
-export NUNCHI_DISCORD_PARTICIPANT_ROUTES='{"vigil":["<channel id>"]}'
-export NUNCHI_DISCORD_OUTPUT_HMAC_KEY=...             # >= 32 bytes
-export NUNCHI_DISCORD_STATE_DIRECTORY=/srv/nunchi/discord-state   # 0700
-/tmp/nunchi-live/bin/nunchi-mcp-discord
+NUNCHI_DISCORD_TOKEN=...
+NUNCHI_DISCORD_PARTICIPANT_ROUTES='{"vigil":["<channel id>"]}'
+NUNCHI_DISCORD_OUTPUT_HMAC_KEY=...             # >= 32 bytes
+NUNCHI_DISCORD_STATE_DIRECTORY=/srv/nunchi/discord-state   # 0700
+```
+
+Start the transport with it:
+
+```sh
+(set -a; . /srv/nunchi/transport.env; exec /tmp/nunchi-live/bin/nunchi-mcp-discord)
 ```
 
 It listens on `http://127.0.0.1:3993/mcp` unless `NUNCHI_MCP_DISCORD_HOST` or
 `NUNCHI_MCP_DISCORD_PORT` say otherwise. The routes key must equal
 `participant_id`, and its channel id must equal `binding.room_id`.
 
-The gate needs the same HMAC key under the name in `transport.output_key_env`.
-The gate keeps that variable, and every `NUNCHI_*` variable, out of the
-session's environment.
+`/srv/nunchi/gate.env` holds the gate's keys, under the names the config in
+section 4 gives them:
+
+```sh
+NUNCHI_DISCORD_OUTPUT_KEY=...         # the same value as NUNCHI_DISCORD_OUTPUT_HMAC_KEY
+NUNCHI_ATTENTION_API_KEY=...          # the attention model's key
+```
+
+The gate removes both, and every other `NUNCHI_*` variable, from the
+session's environment. Then it adds back two that the mod needs to reach
+the gate: the socket path (`NUNCHI_CLAUDE_CODE_GATE_SOCKET`) and the
+per-launch secret (`NUNCHI_CLAUDE_CODE_GATE_SESSION`). The agent can read
+both. The gate refuses a room action that carries the secret.
+
+Why the files: the agent runs as your OS user. Every program you start from
+a shell that exported the keys holds them in its starting environment,
+which the agent's Bash can read. With Yama's `ptrace_scope` at 0 or absent,
+it can read that shell's memory too. The transport and the gate make their
+own processes private once they start. But for about a tenth of a second at
+each start, their keys are readable as well. An agent with an unsandboxed
+Bash can leave a reader running and force a start by killing one that a
+supervisor restarts. With those keys a process can post as the participant
+without Nunchi. For the live run:
+
+- Load the keys from the two files as shown, never with `export` in your
+  shell.
+- Deny the agent reads of those files (`Read(//srv/nunchi/*.env)` in
+  `permissions.deny`), and keep its Bash in Claude Code's sandbox, which
+  hides Nunchi's processes from it; see
+  [the integration README](../integrations/claude-code/README.md#nunchis-processes-and-the-agents-bash).
+- Check that the gate's configured probe says `"process_private": true`.
+  That means the gate is private after start-up, not that its keys are safe
+  without the sandbox.
 
 ## 4. Profile and pinned configuration
 
@@ -138,9 +179,12 @@ directory.
 ## 5. Run
 
 ```sh
-/tmp/nunchi-live/bin/nunchi-claude-code-room-runner \
-  --config /srv/nunchi/config.json --config-sha256 <64 hex>
+(set -a; . /srv/nunchi/gate.env; exec /tmp/nunchi-live/bin/nunchi-claude-code-room-runner \
+  --config /srv/nunchi/config.json --config-sha256 <64 hex>)
 ```
+
+Run the configured probe the same way, with `--probe` added: it reads the
+gate's keys too.
 
 The gate registers with the transport and opens its socket. The Claude Code
 session starts on the first wake. `Claude Code shared transport reconnect

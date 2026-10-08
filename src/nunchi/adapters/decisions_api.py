@@ -21,7 +21,7 @@ from typing import Any, Mapping
 import urllib.error
 import urllib.request
 
-from ..attention import AttentionError
+from ..attention import DEFAULT_API_KEY_ENV, AttentionError
 from ..errors import ValidationError
 
 
@@ -157,7 +157,7 @@ class DecisionsAttentionModel:
         allowed = {"model", "url", "name", "provider", "api_key_env"}
         if not isinstance(config, Mapping) or set(config) - allowed:
             raise ValidationError("typed decision model config has unexpected fields")
-        api_key_env = config.get("api_key_env", "NUNCHI_ATTENTION_API_KEY")
+        api_key_env = config.get("api_key_env", DEFAULT_API_KEY_ENV)
         if not isinstance(api_key_env, str) or not api_key_env:
             raise ValidationError("typed decision model api_key_env must be non-empty")
         api_key = os.environ.get(api_key_env)

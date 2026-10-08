@@ -29,7 +29,8 @@ from ..participant_model import (
     ParticipantTurnProtocol,
 )
 from ..pipeline import DeliveryOutcome
-from ..room import Room, RoomSettings
+from ..private_process import keep_private, probe_facts
+from ..room import Room, RoomSettings, room_guard
 from ..v2_contracts import validate_canonical_event
 from ..mcp_discord.authorization import make_tool_authorization
 from .discord_participant_transport import MCPDiscordTransport
@@ -129,11 +130,15 @@ class CodexParticipant:
         config: Mapping[str, Any],
         binding: ParticipantBinding,
         state_directory: str | Path,
+        guard: Any = None,
     ) -> None:
         allowed = {"model", "timeout_seconds", "session_mode"}
         if set(config) - allowed:
             raise ValidationError("Codex participant config has unexpected fields")
         self.profile = profile
+        # The room's secret guard (`nunchi.room.room_guard`): a reply that
+        # carries a secret is refused, and Codex is asked once more.
+        self.guard = guard
         self.binding = binding
         binary = shutil.which("codex")
         if binary is None:
@@ -281,6 +286,7 @@ class CodexParticipant:
             profile=self.profile,
             wake=wake,
             opportunity=opportunity,
+            guard=self.guard,
         )
         with self._lock:
             active_thread = self._load_session()
@@ -414,18 +420,22 @@ class CodexRoomRuntime:
             raise ValidationError("Codex V2 currently requires the shared Discord transport")
         state = settings.state_directory
         state.mkdir(parents=True, exist_ok=True, mode=0o700)
-        participant = CodexParticipant(
-            profile=settings.profile,
-            config=config["codex"],
-            binding=self.binding,
-            state_directory=state,
-        )
         transport = MCPDiscordTransport(
             client,
             self.binding.room_id,
             self.binding.participant_id,
             self.binding.actor_id,
             self._output_secret(config["transport"]),
+        )
+        # One guard for the participant's turns and the room's host: the
+        # config's secrets, the transport's key and its token shape.
+        guard = room_guard(settings, transport=transport)
+        participant = CodexParticipant(
+            profile=settings.profile,
+            config=config["codex"],
+            binding=self.binding,
+            state_directory=state,
+            guard=guard,
         )
         self.room = Room(
             settings,
@@ -439,6 +449,7 @@ class CodexRoomRuntime:
             state_prefix="codex-v2-",
             attention_kinds=ATTENTION_KINDS,
             participant_timeout_seconds=participant.timeout_seconds + 5,
+            guard=guard,
         )
         self.pipeline = self.room.pipeline
         self.lane = self.room.lane
@@ -572,7 +583,16 @@ def _parser():
     return parser
 
 
+def _process_facts(private: str) -> dict[str, Any]:
+    """This process's privacy, and Codex's OS user: the same as the runner's."""
+
+    return {**probe_facts(private), "agent_os_user": "same"}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    # First, before any secret is read and before Codex starts: Codex runs as
+    # this OS user, and must not read this process's keys.
+    private = keep_private()
     args = _parser().parse_args(argv)
     try:
         if not args.config:
@@ -586,6 +606,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             "surface": "codex",
                             "configured": False,
                             "v1_fallback": False,
+                            **_process_facts(private),
                         },
                         sort_keys=True,
                         separators=(",", ":"),
@@ -611,6 +632,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.probe:
             probe = runtime.probe()
             probe["configured"] = True
+            probe.update(_process_facts(private))
             print(json.dumps(probe, sort_keys=True, separators=(",", ":")))
             return 0
         delay = 1.0

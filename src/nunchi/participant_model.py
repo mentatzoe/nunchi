@@ -28,6 +28,8 @@ PARTICIPANT_TURN_PROTOCOL = "nunchi.participant-turn"
 PARTICIPANT_TURN_PROTOCOL_VERSION = 1
 PARTICIPANT_ACTION_SCHEMA_NAME = "nunchi_participant_turn_v1_action"
 DEFAULT_MAX_EXPANSIONS = 3
+# The variable the participant model reads its key from when its config names none.
+DEFAULT_API_KEY_ENV = "NUNCHI_PARTICIPANT_API_KEY"
 
 # Every move, silence included, may say why, for the participant's own memory
 # (#94 step 5); it never reaches the room.
@@ -790,6 +792,12 @@ class ParticipantTurnProtocol:
             # A silence with a reason goes to the host, which remembers it.
             return True, action if "why" in action else None
         if action["kind"] != "expand":
+            # The reason is never posted. One that holds a secret is dropped
+            # and the move kept, as on every other path; only the move itself
+            # is refused.
+            why = action.pop("why", None)
+            if why is not None and self.turn.guard.refusal({"kind": "message", "text": why}) is not None:
+                why = None
             refusal = self.turn.guard.refusal(action)
             if refusal is not None:
                 if self.refused:
@@ -797,6 +805,8 @@ class ParticipantTurnProtocol:
                 self.refused = True
                 self.pages.append({"events": [], "note": refusal})
                 return False, None
+            if why is not None:
+                action["why"] = why
             # Look again before speaking: if others posted while the
             # participant was composing, show it those messages, once, and
             # let it send, change, or drop its action.
@@ -1239,6 +1249,11 @@ class OpenAICompatibleParticipant:
     instead of an envelope (final-answer posting, #94 step 9c), as an agent
     in a harness whose final answer is its post would; the core `Turn`
     decides whether it goes out. A reply starting with the marker is silence.
+
+    ``guard`` is the room's secret guard (`nunchi.room.room_guard`): a reply
+    that carries a withheld secret is refused, and the model is asked once
+    more. `withheld_values` names the key this participant holds, for the
+    guard.
     """
 
     core_protocol_version = PARTICIPANT_TURN_PROTOCOL_VERSION
@@ -1255,6 +1270,7 @@ class OpenAICompatibleParticipant:
         max_expansions: int = DEFAULT_MAX_EXPANSIONS,
         extra_body: Mapping[str, Any] | None = None,
         silence_marker: str | None = None,
+        guard: Any = None,
     ) -> None:
         if silence_marker is not None:
             _nonempty(silence_marker, "silence marker")
@@ -1289,12 +1305,18 @@ class OpenAICompatibleParticipant:
         self._url = base_url.rstrip("/") + "/chat/completions"
         self._extra_body = deepcopy(extra)
         self.silence_marker = silence_marker
+        self.guard = guard
         # The provider's last full response, for audits and evaluations: the
         # served model and its token usage, when the endpoint reports them.
         self.last_response: Mapping[str, Any] | None = None
 
     def _prompt(self) -> str:
         return participant_turn_prompt(self.profile)
+
+    def withheld_values(self) -> tuple[str, ...]:
+        """What this participant holds that the room must never see: its API key."""
+
+        return (self._api_key,)
 
     @classmethod
     def from_trusted_config(
@@ -1303,6 +1325,7 @@ class OpenAICompatibleParticipant:
         profile: ParticipantProfile,
         config: Mapping[str, Any],
         environment: Mapping[str, str],
+        guard: Any = None,
     ) -> "OpenAICompatibleParticipant":
         allowed = {
             "model",
@@ -1320,7 +1343,7 @@ class OpenAICompatibleParticipant:
                 "participant model base_url is required: name the OpenAI-compatible "
                 "endpoint explicitly"
             )
-        api_key_env = config.get("api_key_env", "NUNCHI_PARTICIPANT_API_KEY")
+        api_key_env = config.get("api_key_env", DEFAULT_API_KEY_ENV)
         if not isinstance(api_key_env, str) or not api_key_env:
             raise ValidationError("participant api_key_env must be non-empty")
         api_key = environment.get(api_key_env)
@@ -1335,6 +1358,7 @@ class OpenAICompatibleParticipant:
             timeout_seconds=config.get("timeout_seconds", 60),
             max_expansions=config.get("max_expansions", DEFAULT_MAX_EXPANSIONS),
             extra_body=config.get("extra_body"),
+            guard=guard,
         )
 
     def _invoke(self, protocol: ParticipantTurnProtocol) -> Any:
@@ -1399,6 +1423,7 @@ class OpenAICompatibleParticipant:
             wake=wake,
             opportunity=opportunity,
             max_expansions=self.max_expansions,
+            guard=self.guard,
         )
         while True:
             if cancel.is_set():
@@ -1423,6 +1448,7 @@ class OpenAICompatibleParticipant:
             request=build_participant_turn_request(wake, opportunity),
             expand=expand if callable(expand) else None,
             cancel=cancel,
+            guard=self.guard,
             silence_marker=self.silence_marker,
         )
         messages: list[dict[str, Any]] = [{"role": "user", "content": turn.text}]

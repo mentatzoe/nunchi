@@ -38,6 +38,7 @@ import threading
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
+from ..private_process import keep_private
 from .config import Config, load_config
 from .hygiene import install_redaction
 
@@ -425,6 +426,9 @@ async def pump_notifications(
 
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the ``nunchi-mcp-discord`` console script."""
+    # First, before the bot token and the output key are read: an agent of
+    # this OS user must not read them out of this process.
+    keep_private()
     try:
         import mcp  # noqa: F401
     except ImportError:

@@ -15,7 +15,9 @@ from collections.abc import Mapping, Sequence
 
 from .. import __version__
 from ..errors import NunchiError, ValidationError
+from ..private_process import keep_private
 from ..reactions import ReactionCapability
+from ..integrations.discord_participant_transport import DISCORD_TOKEN_PATTERNS
 from ..participant import TransportResult
 from .runtime import CAPABILITIES, ReferenceAdapterRuntime, load_pinned_config
 
@@ -75,10 +77,22 @@ class DurableGatewaySequence:
 
 
 class DiscordPyTransport:
-    def __init__(self, bot, loop: asyncio.AbstractEventLoop, room_id: str) -> None:
+    def __init__(
+        self, bot, loop: asyncio.AbstractEventLoop, room_id: str, *, token: str | None = None
+    ) -> None:
         self.bot = bot
         self.loop = loop
         self.room_id = room_id
+        # The bot token this transport runs as, for the room's secret guard.
+        self._token = token
+
+    def withheld_values(self) -> tuple[str, ...]:
+        """What this transport holds that the room must never see: its bot token."""
+
+        return (self._token,) if self._token else ()
+
+    def credential_patterns(self) -> tuple:
+        return DISCORD_TOKEN_PATTERNS
 
     def ordinary_action_capabilities(self) -> tuple[str, ...]:
         return ("message", "reply", "reaction")
@@ -194,6 +208,9 @@ def _declare_fresh_gateway_gap(runtime: ReferenceAdapterRuntime) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    # First, before any credential is read: another agent of this OS user
+    # must not read this process's keys (`nunchi.private_process`).
+    keep_private()
     args = _parser().parse_args(argv)
     try:
         if not args.config:
@@ -247,6 +264,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         bot,
                         asyncio.get_running_loop(),
                         config["binding"]["room_id"],
+                        token=token,
                     ),
                 )
                 _declare_fresh_gateway_gap(runtime_holder["runtime"])

@@ -10,6 +10,7 @@ from collections.abc import Sequence
 
 from .. import __version__
 from ..errors import NunchiError, ValidationError
+from ..private_process import keep_private
 from .runtime import CAPABILITIES, JsonLineTransport, ReferenceAdapterRuntime, load_pinned_config
 
 
@@ -37,6 +38,9 @@ def _static_probe() -> dict:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    # First, before any credential is read: another agent of this OS user
+    # must not read this process's keys (`nunchi.private_process`).
+    keep_private()
     args = _parser().parse_args(argv)
     try:
         if not args.config:

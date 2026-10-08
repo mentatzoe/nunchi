@@ -17,7 +17,7 @@ from ..errors import InputError, ValidationError
 from ..participant import Transport, TransportResult
 from ..participant_model import OpenAICompatibleParticipant
 from ..pipeline import DeliveryOutcome
-from ..room import DEFAULT_PARTICIPANT_TIMEOUT_SECONDS, Room, RoomSettings
+from ..room import DEFAULT_PARTICIPANT_TIMEOUT_SECONDS, Room, RoomSettings, room_guard
 from ..v2_contracts import INTERFACE_VERSIONS
 from .model_apis import ATTENTION_KINDS
 from .v2 import NORMALIZERS
@@ -164,6 +164,14 @@ class ReferenceAdapterRuntime:
             config=participant_raw,
             environment=os.environ,
         )
+        # One guard for the participant's turns and the room's host: the
+        # config's secrets, the participant's own key, and what the transport
+        # holds. The participant's key may come from a default variable the
+        # config does not name.
+        self.guard = room_guard(
+            settings, transport=transport, values=participant.withheld_values()
+        )
+        participant.guard = self.guard
         stem = hashlib.sha256(
             f"{surface}\0{self.binding.participant_id}\0{self.binding.continuity_scope_id}".encode()
         ).hexdigest()[:24]
@@ -178,6 +186,7 @@ class ReferenceAdapterRuntime:
             participant_timeout_seconds=settings.sections.get(
                 "participant_timeout_seconds", DEFAULT_PARTICIPANT_TIMEOUT_SECONDS
             ),
+            guard=self.guard,
         )
         self.surface = surface
         self.transport = transport

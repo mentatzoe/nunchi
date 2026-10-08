@@ -17,8 +17,11 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
+import secrets
 import stat
+import subprocess
 import sys
 import tempfile
 import threading
@@ -46,6 +49,7 @@ from nunchi.integrations.codex_app_server_conformance import (
     CodexHarness,
     CodexKitIntegration,
     codex_available,
+    codex_executable,
 )
 from nunchi.observation import ObservationLimits
 from nunchi.participant import TransportResult
@@ -162,6 +166,13 @@ class SettingsTest(unittest.TestCase):
             self.assertEqual(integration.environment, {"PATH": "/bin", "OPENAI_API_KEY": "the-agent-own-model-key"})
             for secret in ("nunchi-attention-model-key", "nunchi-discord-bot-secret"):
                 self.assertIsNotNone(integration.participant.guard.refusal({"kind": "message", "text": secret}))
+            # The bridge's launch secret: Codex holds it for the room's server.
+            self.assertIsNotNone(
+                integration.participant.guard.refusal({"kind": "message", "text": f"x {integration._secret}"})
+            )
+            token = "MTA" + "x" * 21 + ".GaBcDe." + "y" * 30
+            self.assertIsNotNone(integration.participant.guard.refusal({"kind": "message", "text": token}))
+            self.assertIsNone(integration.participant.guard.refusal({"kind": "message", "text": "On it."}))
             self.assertEqual(integration.thread_store, base / "state" / "codex-thread.json")
             self.assertLessEqual(len(str(integration.server.socket_path)), 107)
             inside = dict(config, codex={"working_directory": str(base / "state" / "work"), "project_trust_level": "trusted"})
@@ -169,6 +180,29 @@ class SettingsTest(unittest.TestCase):
                 build_integration(inside, environ=environ)
             with self.assertRaisesRegex(ValidationError, "project_trust_level"):
                 build_integration(dict(config, codex={"working_directory": str(base / "work")}), environ=environ)
+
+            # Another platform's transport declares what it holds and its
+            # tokens' shape; the turn's guard holds them, in place of the
+            # Discord shape. Its variable stays out of Codex's environment
+            # only when named in ``withhold``.
+            class Transport:
+                def withheld_values(self):
+                    return ("held-by-the-transport-0123",)
+
+                def credential_patterns(self):
+                    return (re.compile(r"tok_[a-z]{8}"),)
+
+            environ["OTHER_PLATFORM_TOKEN"] = "held-by-the-transport-0123"
+            _settings, other = build_integration(
+                config, environ=environ, transport=Transport(), withhold=("OTHER_PLATFORM_TOKEN",)
+            )
+            guard = other.participant.guard
+            for text in ("held-by-the-transport-0123", "a token tok_abcdefgh", f"x {other._secret}"):
+                with self.subTest(text=text[:12]):
+                    self.assertIsNotNone(guard.refusal({"kind": "message", "text": text}))
+            self.assertIsNone(guard.refusal({"kind": "message", "text": token}))
+            self.assertNotIn("OTHER_PLATFORM_TOKEN", other.environment)
+            other.close()
 
     def test_a_codex_run_ends_ok_only_when_completed(self):
         self.assertEqual(_ending({"status": "completed"}), (True, "completed"))
@@ -180,6 +214,14 @@ class SettingsTest(unittest.TestCase):
 
 
 class ThreadConfigTest(unittest.TestCase):
+    def test_the_bridges_launch_secret_is_withheld_from_the_room(self):
+        with tempfile.TemporaryDirectory() as directory:
+            integration = _integration(Path(directory))
+            secret = integration._secret
+            self.assertIn(secret, json.dumps(integration.thread_config(None)["mcp_servers"]))
+            self.assertNotIn(secret, integration.environment.values())
+            self.assertIsNotNone(integration.participant.guard.refusal({"kind": "message", "text": f"x {secret}"}))
+
     def test_the_room_tools_and_the_projects_trust_ride_in_the_threads_own_config(self):
         with tempfile.TemporaryDirectory() as directory:
             integration = _integration(Path(directory))
@@ -460,6 +502,86 @@ for line in sys.stdin:
 '''
 
 
+# A runtime process as the runner starts: keep_private first, then the
+# integration with the throwaway user's own Codex config (argv 1). The keys
+# are in its starting environment and in its memory. The scripted model asks
+# Codex to run a command that looks for them in every process, and in the
+# runtime's memory, then posts once.
+_PRIVATE_RUNTIME = r'''
+import ctypes, hashlib, json, os, sys
+from nunchi.private_process import keep_private
+private = keep_private()
+from nunchi.conformance import fixture_binding, fixture_profile
+from nunchi.turn import SecretGuard
+from nunchi.integrations.codex_app_server_conformance import CodexHarness
+from tests.v2.test_codex_app_server import _room, _person, _wait
+
+names = ["TEST_ROOM_OUTPUT_KEY", "TEST_ATTENTION_KEY"]
+held = ctypes.create_string_buffer(os.environ[names[0]].encode())
+digests = {name: hashlib.sha256(os.environ[name].encode()).hexdigest() for name in names}
+reader = f"""
+import hashlib, json, os
+digests, runtime, address = {json.dumps(digests)}, "{os.getpid()}", {ctypes.addressof(held)}
+found, environ_error = [], None
+for pid in [p for p in os.listdir("/proc") if p.isdigit()]:
+    try:
+        raw = open(f"/proc/{{pid}}/environ", "rb").read()
+    except OSError as exc:
+        environ_error = type(exc).__name__ if pid == runtime else environ_error
+        continue
+    for entry in raw.split(b"\\0"):
+        name, _, value = entry.partition(b"=")
+        if hashlib.sha256(value).hexdigest() == digests.get(name.decode(errors="replace")):
+            found.append(name.decode())
+try:
+    with open(f"/proc/{{runtime}}/mem", "rb", buffering=0) as handle:
+        handle.seek(address)
+        mem = "read" if handle.read(64).split(b"\\0")[0] else "empty"
+except OSError as exc:
+    mem = type(exc).__name__
+print("PROBE " + json.dumps({{"found": found, "environ": environ_error, "mem": mem}}))
+"""
+harness = CodexHarness(profile=fixture_profile(fixture_binding()), guard=SecretGuard([]), user_config=sys.argv[1])
+try:
+    (harness.work / "reader.py").write_text(reader)
+    room, transport = _room(harness)
+    model = harness.model
+    thread, outcome = _person(room, "test:message:1", "Can someone look at the failing deploy?")
+    assert _wait(lambda: model.count() >= 1, 60), "Codex never asked the model"
+    model.reply({"tool": "exec_command", "namespace": None, "call_id": "call-probe",
+                 "arguments": {"cmd": f"{sys.executable} -I reader.py"}})
+    assert _wait(lambda: model.count() >= 2, 60), "the command never ran"
+    probe = None
+    for item in model.latest().get("input", []):
+        if isinstance(item, dict) and item.get("call_id") == "call-probe" and item.get("type") == "function_call_output":
+            output = item.get("output")
+            text = output if isinstance(output, str) else "\n".join(
+                part.get("text", "") for part in output or [] if isinstance(part, dict))
+            lines = [line for line in text.splitlines() if line.startswith("PROBE ")]
+            probe = json.loads(lines[-1][6:]) if lines else text[-300:]
+    model.reply({"tool": "room_send", "call_id": "call-send", "arguments": {"text": "Looking at it now."}})
+    assert _wait(lambda: model.count() >= 3, 60), "the room tool never answered"
+    model.reply({"text": "Done."})
+    thread.join(60)
+    print(json.dumps({"private": private, "probe": probe, "sandbox": harness.integration.sandbox,
+                      "warned": harness.integration.sandbox_warning is not None,
+                      "posted": [action.get("text") for action in transport.actions]}))
+finally:
+    harness.close()
+'''
+
+
+def _without_ptrace_capability() -> list[str] | None:
+    """A command prefix that drops CAP_SYS_PTRACE, which reads any process; None when impossible."""
+
+    status = Path("/proc/self/status").read_text(encoding="utf-8")
+    effective = next(int(line.split()[1], 16) for line in status.splitlines() if line.startswith("CapEff:"))
+    if not effective >> 19 & 1:
+        return []
+    setpriv = shutil.which("setpriv")
+    return [setpriv, "--inh-caps=-all", "--bounding-set=-all"] if setpriv else None
+
+
 @unittest.skipUnless(codex_available(), "Codex is not installed (set NUNCHI_CODEX_BIN to a pinned codex)")
 class CodexKitTest(unittest.TestCase):
     def test_every_tool_posting_scenario_passes_through_codex(self):
@@ -581,6 +703,61 @@ class CodexRoomTest(unittest.TestCase):
         thread.join(30)
         self.assertIsNone(outcome["value"].opportunities[0].transport)
         self.assertEqual(transport.actions, [])
+
+    def test_codex_s_sandbox_is_recorded_and_an_uncontained_one_warned_about(self):
+        harness = self._harness()
+        with self.assertNoLogs("nunchi.codex_app_server", "WARNING"):
+            self.assertTrue(harness.integration.ready(threading.Event()))
+        self.assertEqual("workspaceWrite", harness.integration.sandbox["type"])
+        self.assertFalse(harness.integration.sandbox["networkAccess"])
+        self.assertIsNone(harness.integration.sandbox_warning)
+
+        harness = self._harness(user_config='sandbox_mode = "danger-full-access"')
+        with self.assertLogs("nunchi.codex_app_server", "WARNING") as logs:
+            self.assertTrue(harness.integration.ready(threading.Event()))
+        self.assertEqual({"type": "dangerFullAccess"}, harness.integration.sandbox)
+        self.assertIn("dangerFullAccess", harness.integration.sandbox_warning)
+        self.assertIn("dangerFullAccess", "\n".join(logs.output))
+        # Codex still runs; the user's choice is reported, not refused.
+        self.assertTrue(harness.user_config_unchanged())
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "keep_private acts on Linux only")
+    def test_the_agent_cannot_read_a_private_runtime_even_without_a_sandbox(self):
+        prefix = _without_ptrace_capability()
+        if prefix is None:
+            self.skipTest("this process can read any process (CAP_SYS_PTRACE), and setpriv is not installed")
+        base = Path(tempfile.mkdtemp(prefix="nkp-"))
+        self.addCleanup(shutil.rmtree, base, True)
+        (base / "home").mkdir()
+        (base / "t").mkdir()
+        source = Path(mcp_bridge.__file__).resolve().parents[3]
+        root = Path(__file__).resolve().parents[2]
+        environment = {
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "HOME": str(base / "home"),
+            "TMPDIR": str(base / "t"),
+            "PYTHONPATH": os.pathsep.join([str(source), str(root)]),
+            "NUNCHI_CODEX_BIN": codex_executable(),
+            "TEST_ROOM_OUTPUT_KEY": "room-output-" + secrets.token_hex(24),
+            "TEST_ATTENTION_KEY": "attention-" + secrets.token_hex(24),
+        }
+        completed = subprocess.run(
+            [*prefix, sys.executable, "-c", _PRIVATE_RUNTIME, 'sandbox_mode = "danger-full-access"'],
+            env=environment,
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        self.assertEqual(0, completed.returncode, completed.stderr[-2000:])
+        result = json.loads(completed.stdout.strip().splitlines()[-1])
+        self.assertEqual("private", result["private"])
+        self.assertEqual({"type": "dangerFullAccess"}, result["sandbox"])
+        self.assertTrue(result["warned"])
+        # The agent's command sees every process, yet reads no key out of the runtime.
+        self.assertEqual({"found": [], "environ": "PermissionError", "mem": "PermissionError"}, result["probe"])
+        # And Codex works normally under a private parent: the turn posts.
+        self.assertEqual(["Looking at it now."], result["posted"])
 
 
 if __name__ == "__main__":

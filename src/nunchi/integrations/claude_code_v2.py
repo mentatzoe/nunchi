@@ -41,14 +41,14 @@ from ..adapters.runtime import load_pinned_config
 from ..errors import NunchiError, ValidationError
 from ..participant import TransportResult
 from ..pipeline import DeliveryOutcome
-from ..room import Room, RoomSettings
+from ..private_process import keep_private, probe_facts
+from ..room import Room, RoomSettings, room_guard, withheld_env_names
 from .claude_code_gate import (
     SESSION_ENV,
     SOCKET_ENV,
     ClaudeCodeSession,
     GatedParticipant,
     GateServer,
-    SecretGuard,
     full_tool_name,
 )
 from .discord_room import DiscordRoomConnection, output_secret, transport_client
@@ -295,8 +295,16 @@ def _canonical_json(value: Any) -> str:
 
 
 
-def claude_code_version(executable: str) -> tuple[int, int, int] | None:
-    """Return the installed Claude Code version, or None when it cannot be read."""
+def claude_code_version(
+    executable: str, environment: Mapping[str, str] | None = None
+) -> tuple[int, int, int] | None:
+    """Return the installed Claude Code version, or None when it cannot be read.
+
+    ``environment`` is the one Claude Code runs with. The runtime passes the
+    user's own without Nunchi's secrets
+    (`ClaudeCodeRoomRuntime.user_environment`), never its own, which holds
+    Nunchi's keys.
+    """
 
     try:
         completed = subprocess.run(
@@ -305,6 +313,7 @@ def claude_code_version(executable: str) -> tuple[int, int, int] | None:
             text=True,
             timeout=20,
             check=False,
+            env=dict(environment) if environment is not None else None,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -388,21 +397,14 @@ class ClaudeCodeRoomRuntime:
         )
         transport = self.connection.transport
 
-        # Nunchi's own secrets never enter the session's environment, and the
-        # gate refuses room text that carries one.
-        withheld = {config["transport"]["output_key_env"], *self.settings["withhold_env"]}
-        model_config = settings.attention_model
-        if isinstance(model_config, Mapping):
-            withheld.update(
-                value
-                for key, value in model_config.items()
-                if key.endswith("_env") and isinstance(value, str) and value
-            )
-        self.withheld_env = frozenset(withheld)
-        guard = SecretGuard(
-            [os.environ[name] for name in self.withheld_env if name in os.environ]
-            + [self.output_secret.decode()]
-        )
+        # The variables the config names as secrets (the transport's output
+        # key, an attention route's key, ``withhold_env``) never enter the
+        # session's environment. One guard serves the agent's turns and the
+        # room: their values, the transport's key and its token shape. The
+        # gate server adds the session's launch secret, which the session
+        # must hold (`nunchi.turn_server.TurnServer`).
+        self.withheld_env = frozenset(withheld_env_names(settings))
+        guard = room_guard(settings, transport=transport)
 
         self.mod_directory = state / "claude-code-mod"
         self.socket_path = _runtime_directory() / "gate.sock"
@@ -436,6 +438,14 @@ class ClaudeCodeRoomRuntime:
         )
         session.on_turn_end = participant.turn_ended
         self.participant = participant
+        # The gate server adds the launch secret to the participant's guard.
+        # It is built before the room, which gets that guard, so the room's
+        # host refuses the launch secret too. `start` binds the socket later.
+        self.server = GateServer(
+            participant,
+            socket_path=self.socket_path,
+            session_secret=self.session_secret,
+        )
         # Claude Code adds no authorization semantics of its own: it supplies
         # the pinned policy and the exact native executors, and the shared
         # coordinator makes every decision (see `_executors`).
@@ -456,17 +466,13 @@ class ClaudeCodeRoomRuntime:
                 else None
             ),
             participant_timeout_seconds=self.settings["timeout_seconds"],
+            guard=participant.guard,
         )
         self.connection.attach(self.room)
         self.privileged = self.room.privileged
         self.pipeline = self.room.pipeline
         self.lane = self.room.lane
         self.client = client
-        self.server = GateServer(
-            participant,
-            socket_path=self.socket_path,
-            session_secret=self.session_secret,
-        )
 
     @staticmethod
     def _claude_code_settings(raw: Any, state: Path) -> dict[str, Any]:
@@ -542,18 +548,31 @@ class ClaudeCodeRoomRuntime:
             rules.extend((f"Read(/{state}/**)", f"Edit(/{state}/**)"))
         return tuple(dict.fromkeys(rules))
 
-    def session_environment(self) -> dict[str, str]:
-        environment = {
+    def user_environment(self) -> dict[str, str]:
+        """The user's own environment, without Nunchi's secrets or ``NUNCHI_*`` variables."""
+
+        return {
             name: value
             for name, value in os.environ.items()
             if name not in self.withheld_env and not name.startswith("NUNCHI_")
         }
+
+    def session_environment(self) -> dict[str, str]:
+        """The session's environment: the user's own, without Nunchi's secrets.
+
+        Two values are added back, which the mod needs to reach the gate: the
+        socket path and the launch secret. The agent can read both. The
+        launch secret is in the participant's guard, so a room action that
+        carries it is refused.
+        """
+
+        environment = self.user_environment()
         environment[SOCKET_ENV] = str(self.socket_path)
         environment[SESSION_ENV] = self.session_secret
         return environment
 
     def require_supported_claude_code(self) -> tuple[int, int, int]:
-        version = claude_code_version(self.executable())
+        version = claude_code_version(self.executable(), self.user_environment())
         if version is None or version < MINIMUM_CLAUDE_CODE:
             raise ValidationError(
                 "Claude Code "
@@ -713,7 +732,9 @@ class ClaudeCodeRoomRuntime:
             executable: str | None = self.executable()
         except ValidationError:
             executable = None
-        version = claude_code_version(executable) if executable else None
+        version = (
+            claude_code_version(executable, self.user_environment()) if executable else None
+        )
         return {
             "product": "nunchi",
             "product_version": __version__,
@@ -755,7 +776,16 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _process_facts(private: str) -> dict[str, Any]:
+    """This process's privacy, and the agent's OS user: the same as the runtime's."""
+
+    return {**probe_facts(private), "agent_os_user": "same"}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    # First, before any secret is read and before the session exists: the
+    # agent runs as this OS user, and must not read this process's keys.
+    private = keep_private()
     args = _parser().parse_args(argv)
     try:
         if not args.config:
@@ -770,6 +800,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             "configured": False,
                             "mod_version": mod_version(),
                             "v1_fallback": False,
+                            **_process_facts(private),
                         }
                     )
                 )
@@ -783,6 +814,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.probe:
             probe = runtime.probe()
             probe["configured"] = True
+            probe.update(_process_facts(private))
             print(_canonical_json(probe))
             return 0
         runtime.require_supported_claude_code()

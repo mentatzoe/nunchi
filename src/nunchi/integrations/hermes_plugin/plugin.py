@@ -47,7 +47,9 @@ import time
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from nunchi.adapters.telegram import TELEGRAM_TOKEN_PATTERNS
 from nunchi.attention import AttentionModelSelection, HostStructuredAttentionModel
+from nunchi.integrations.discord_participant_transport import DISCORD_TOKEN_PATTERNS
 from nunchi.participant import TransportResult
 from nunchi.reactions import UNAVAILABLE_REACTION_CAPABILITY, ReactionCapability
 from nunchi.turn import HarnessDelivery, SecretGuard, Turn, TurnParticipant
@@ -72,14 +74,17 @@ TOOL_NAMES = {
 _REACTION_PLATFORMS = frozenset({"telegram", "discord"})
 # The capability `ctx.platform_actions` checks on every call.
 PLATFORM_ACTIONS = "gateway.platform_actions"
-# Platform credentials Hermes holds that the agent must never post.
+# Platform credentials Hermes holds that the agent must never post, unless
+# the hermes section names its own (``withheld_env``).
 DEFAULT_WITHHELD_ENV = ("TELEGRAM_BOT_TOKEN", "DISCORD_BOT_TOKEN", "SLACK_BOT_TOKEN")
-TOKEN_PATTERNS = (
-    # Telegram bot token: numeric bot id, a colon, 35 url-safe characters.
-    re.compile(r"\b\d{6,12}:[A-Za-z0-9_-]{30,}\b"),
-    # Discord bot token: three dot-separated base64url parts.
-    re.compile(r"[A-Za-z\d_-]{23,28}\.[A-Za-z\d_-]{6}\.[A-Za-z\d_-]{27,}"),
+# Slack's bot and user tokens (``xoxb-``, ``xoxp-`` and kin) and app-level
+# tokens (``xapp-``).
+SLACK_TOKEN_PATTERNS = (
+    re.compile(r"\bxox[abeprs]-\d+-[A-Za-z0-9-]{10,}"),
+    re.compile(r"\bxapp-\d-[A-Za-z0-9]+-\d+-[A-Za-z0-9]+"),
 )
+# The shapes of the platform tokens Hermes may hold.
+TOKEN_PATTERNS = (*TELEGRAM_TOKEN_PATTERNS, *DISCORD_TOKEN_PATTERNS, *SLACK_TOKEN_PATTERNS)
 DEFAULT_START_TIMEOUT_SECONDS = 120.0
 _REACTION_TIMEOUT_SECONDS = 20.0
 # The library waits this long for the host's commit inside `finish`. Hermes
@@ -716,14 +721,18 @@ def build_plugin(config: Mapping[str, Any]) -> HermesRoomPlugin:
     """The plugin for one Nunchi config (`docs/harness-guide.md`, step 1)."""
 
     from nunchi.adapters.model_apis import ATTENTION_KINDS
-    from nunchi.room import Room, RoomSettings
+    from nunchi.room import Room, RoomSettings, room_guard
 
     settings = RoomSettings.from_config(config, label="Hermes plugin", sections=(SECTION,))
     host_model = _host_model_selection(settings.attention_model)
     section = settings.sections[SECTION]
     route = HermesRoute.from_section(section)
-    env_names = section.get("withheld_env", DEFAULT_WITHHELD_ENV)
-    guard = SecretGuard(withheld_values(env_names), patterns=TOKEN_PATTERNS)
+    # One guard for the agent's turns and the room: what the config names in
+    # its ``*_env`` keys (the hermes section's ``withheld_env``, an attention
+    # route's key), Hermes's platform tokens when the section names none, and
+    # their shapes.
+    defaults = () if "withheld_env" in section else DEFAULT_WITHHELD_ENV
+    guard = room_guard(settings, values=withheld_values(defaults), patterns=TOKEN_PATTERNS)
     roles = ["react", "context"]
     if settings.authorization is not None:
         roles += ["propose", "withdraw"]
@@ -747,6 +756,7 @@ def build_plugin(config: Mapping[str, Any]) -> HermesRoomPlugin:
             state_prefix="hermes-plugin-",
             attention_model=attention_model,
             attention_kinds=ATTENTION_KINDS,
+            guard=guard,
         )
 
     return HermesRoomPlugin(

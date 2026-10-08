@@ -25,6 +25,7 @@ from nunchi.integrations.codex_app_server.runner import CodexRoomRunner
 from nunchi.integrations.discord_room import NOTIFICATION_METHOD
 
 OUTPUT_KEY = "k" * 40
+ATTENTION_KEY = "the-room-attention-route-key"
 
 
 class _PassModel:
@@ -121,12 +122,20 @@ ATTESTATION = {
 
 
 class CodexRoomRunnerTest(unittest.TestCase):
-    def _runner(self, client=None):
+    def _runner(self, client=None, attention_key_env=None):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        environ = {"PATH": "/bin", "ROOM_OUTPUT_KEY": OUTPUT_KEY, "OPENAI_API_KEY": "the-agent-own-key"}
+        environ = {
+            "PATH": "/bin",
+            "ROOM_OUTPUT_KEY": OUTPUT_KEY,
+            "OPENAI_API_KEY": "the-agent-own-key",
+            "ROOM_ATTENTION_KEY": ATTENTION_KEY,
+        }
+        config = _config(Path(directory.name))
+        if attention_key_env is not None:
+            config["attention"]["model"]["api_key_env"] = attention_key_env
         with mock.patch("nunchi.room.attention_model_from_config", return_value=_PassModel()):
-            runner = CodexRoomRunner(_config(Path(directory.name)), client or _Client(), environ=environ)
+            runner = CodexRoomRunner(config, client or _Client(), environ=environ)
         self.addCleanup(runner.close)
         return runner
 
@@ -136,6 +145,19 @@ class CodexRoomRunnerTest(unittest.TestCase):
         self.assertEqual("the-agent-own-key", runner.integration.environment["OPENAI_API_KEY"])
         refusal = runner.integration.participant.guard.refusal({"kind": "message", "text": f"key {OUTPUT_KEY}"})
         self.assertIsNotNone(refusal)
+
+    def test_the_turns_and_the_room_refuse_the_transport_key_attention_key_and_token_shape(self):
+        runner = self._runner(attention_key_env="ROOM_ATTENTION_KEY")
+        self.assertNotIn("ROOM_ATTENTION_KEY", runner.integration.environment)
+        token = "MTA" + "x" * 21 + ".GaBcDe." + "y" * 30
+        # The room refuses no more than the agent's turn, so the agent learns of every refusal.
+        self.assertIs(runner.integration.participant.guard, runner.room.guard)
+        self.assertIs(runner.room.guard, runner.room.host.guard)
+        guard = runner.room.guard
+        for text in (OUTPUT_KEY, ATTENTION_KEY, f"the token is {token}", runner.integration._secret):
+            with self.subTest(text=text[:12]):
+                self.assertIsNotNone(guard.refusal({"kind": "message", "text": text}))
+        self.assertIsNone(guard.refusal({"kind": "message", "text": "On it."}))
 
     def test_a_room_message_reaches_the_room_through_the_shared_connection(self):
         runner = self._runner()
@@ -196,13 +218,33 @@ class CodexRoomRunnerTest(unittest.TestCase):
         self.assertEqual(("codex-app-server", True, "untrusted"), (probe["surface"], probe["configured"], probe["project_trust_level"]))
         self.assertEqual(["room_send", "room_react", "room_context"], probe["room_tools"])
 
+    def test_the_runner_reports_codex_s_sandbox_once_codex_ran(self):
+        runner = self._runner()
+        self.assertEqual({"codex_sandbox": None, "codex_sandbox_warning": None}, runner.status())
+        with self.assertLogs("nunchi.codex_app_server", "WARNING") as logs:
+            runner.integration._note_sandbox({"type": "dangerFullAccess"})
+        status = runner.status()
+        self.assertEqual({"type": "dangerFullAccess"}, status["codex_sandbox"])
+        self.assertIn("dangerFullAccess", status["codex_sandbox_warning"])
+        self.assertIn("dangerFullAccess", logs.output[0])
+        runner.integration._note_sandbox({"type": "workspaceWrite", "networkAccess": False, "writableRoots": []})
+        self.assertEqual(
+            {"codex_sandbox": {"type": "workspaceWrite", "networkAccess": False}, "codex_sandbox_warning": None},
+            runner.status(),
+        )
+
     def test_the_command_line_without_a_config(self):
         output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            self.assertEqual(0, codex_runner.main(["--probe"]))
-        self.assertFalse(json.loads(output.getvalue())["configured"])
-        with contextlib.redirect_stderr(io.StringIO()):
-            self.assertEqual(3, codex_runner.main([]))
+        with mock.patch.object(codex_runner, "keep_private", return_value="private"):
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(0, codex_runner.main(["--probe"]))
+            probe = json.loads(output.getvalue())
+            self.assertFalse(probe["configured"])
+            # The runner's process is private; Codex still runs as its user.
+            self.assertTrue(probe["process_private"])
+            self.assertEqual("same", probe["agent_os_user"])
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(3, codex_runner.main([]))
 
 
 if __name__ == "__main__":

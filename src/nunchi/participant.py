@@ -260,6 +260,20 @@ class Participant(Protocol):
 
 
 class Transport(Protocol):
+    """What posts the room actions the host commits.
+
+    Two optional methods tell the room's secret guard (`nunchi.room.room_guard`)
+    what this transport holds:
+
+    - ``withheld_values() -> Iterable[str]``: the secrets it holds, such as
+      its platform token or the key that authorizes its posts;
+    - ``credential_patterns() -> Iterable[re.Pattern[str]]``: the shapes of
+      its platform's credentials.
+
+    The room's host refuses an action that carries either, so it never
+    reaches ``dispatch``.
+    """
+
     def dispatch(
         self,
         *,
@@ -599,6 +613,7 @@ class ParticipantTurnHost:
         privileged: PrivilegedCoordinator | None = None,
         participant_timeout_seconds: float = 300.0,
         memory: ConversationMemory | None = None,
+        guard: Any = None,
     ) -> None:
         if (
             isinstance(participant_timeout_seconds, bool)
@@ -613,11 +628,20 @@ class ParticipantTurnHost:
         self.scheduler = scheduler
         self.receipts = receipts or observation.receipts
         self.privileged = privileged
+        # The last check before anything leaves: a room action, or a reason
+        # the participant's memory keeps, that carries a withheld secret. Any
+        # object with ``refusal(action) -> str | None``, such as
+        # `nunchi.turn.SecretGuard`.
+        self.guard = guard
         # The participant's own moves in this room; every turn carries them.
         self.memory = memory if memory is not None else ConversationMemory()
         self.participant_timeout_seconds = float(participant_timeout_seconds)
         self.host_timeout_seconds = self.participant_timeout_seconds
         self.invocation_count = 0
+
+    def _refused(self, action: Mapping[str, Any]) -> bool:
+        refusal = getattr(self.guard, "refusal", None)
+        return callable(refusal) and refusal(action) is not None
 
     def reaction_capability(self) -> ReactionCapability:
         provider = getattr(self.transport, "reaction_capability", None)
@@ -900,13 +924,15 @@ class ParticipantTurnHost:
             return None
         if _is_silence(raw_action):
             settle_host("silent")
+            why = raw_action.get("why") if raw_action is not None else None
+            if isinstance(why, str) and self._refused({"kind": "message", "text": why}):
+                # A reason reaches later turns and attention: one that holds
+                # a withheld secret is not kept.
+                why = None
             # A silence leaves no trace in the room; the participant's memory
             # keeps it, with the reason the participant gave, so a later turn
             # knows where it held back and why.
-            self.memory.record_silence(
-                about_event_id=wake["trigger_event_id"],
-                why=raw_action.get("why") if raw_action is not None else None,
-            )
+            self.memory.record_silence(about_event_id=wake["trigger_event_id"], why=why)
             return None
         try:
             action = _validate_action(raw_action)
@@ -914,7 +940,17 @@ class ParticipantTurnHost:
             settle_host("unknown")
             return TransportResult("failed", "participant returned an invalid action")
         # The reason is the participant's own memory; it never reaches the room.
+        # One that holds a withheld secret is dropped and the move kept, as for
+        # a silence: a reason reaches later turns and attention.
         why = action.pop("why", None)
+        if isinstance(why, str) and self._refused({"kind": "message", "text": why}):
+            why = None
+        if self._refused(action):
+            # Every harness gets this check, whatever its turn did.
+            settle_host("unknown")
+            return TransportResult(
+                "failed", "the action carried a withheld credential or secret; nothing was posted"
+            )
         if token.cancel_event.is_set() or not self.scheduler.is_current(token):
             settle_host("unknown")
             return None

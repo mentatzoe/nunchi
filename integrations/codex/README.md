@@ -18,6 +18,11 @@ dispatched with a short-lived exact HMAC through the shared MCP transport.
 There is no prompt hook, pre-tool hook, configuration app, or send-time social
 judgment.
 
+A reply that carries a secret is refused once and Codex answers again; the
+room's host refuses it too. The guard is the room's (`nunchi.room.room_guard`):
+the config's `*_env` values, the transport's output key, and the Discord token
+shape.
+
 Persistent mode binds the saved Codex task ID to the pinned profile, exact
 participant, native actor, room, continuity scope, model, sandbox, and disabled
 feature set. Corrupt or mismatched state fails safely. Fresh mode starts an

@@ -342,6 +342,58 @@ class HostModelAttentionTest(unittest.TestCase):
         self.assertIn("plugins.entries.nunchi-room.llm", str(raised.exception))
 
 
+class PluginGuardTest(unittest.TestCase):
+    """The plugin's one guard: the agent's turns and the room refuse the same secrets."""
+
+    def _room(self, environ, **hermes):
+        from unittest import mock
+
+        from nunchi.integrations.hermes_plugin import build_plugin
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        config = HostModelAttentionTest._config(self, Path(directory.name))
+        config["attention"] = {
+            "policy": {"preattention_enabled": False},
+            "model": {"model": "m", "base_url": "http://127.0.0.1:9/v1", "api_key_env": "HERMES_TEST_ATTENTION_KEY"},
+        }
+        config["hermes"].update(hermes)
+        with mock.patch.dict("os.environ", environ):
+            plugin = build_plugin(config)
+        plugin.register(_StubContext())
+        return plugin, plugin._ensure_room()
+
+    @staticmethod
+    def _refuses(guard, text):
+        return guard.refusal({"kind": "message", "text": text}) is not None
+
+    def test_the_turns_and_the_room_refuse_the_attention_key_platform_tokens_and_their_shapes(self):
+        plugin, room = self._room(
+            {"HERMES_TEST_ATTENTION_KEY": "a-hermes-attention-route-key", "TELEGRAM_BOT_TOKEN": "held-telegram-bot-token"}
+        )
+        self.assertIs(plugin.participant.guard, room.guard)
+        self.assertIs(room.guard, room.host.guard)
+        for text in (
+            "a-hermes-attention-route-key",
+            "held-telegram-bot-token",
+            "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawq",
+            "MTA" + "x" * 21 + ".GaBcDe." + "y" * 30,
+            # Built in parts so the fake token never appears whole in the source.
+            "xox" + "b-123456789012-1234567890123-" + "AbCdEfGhIjKlMnOpQrStUvWx",
+        ):
+            with self.subTest(text=text[:12]):
+                self.assertTrue(self._refuses(room.guard, text))
+        self.assertFalse(self._refuses(room.guard, "On it, xoxo"))
+
+    def test_the_sections_own_names_replace_the_default_platform_tokens(self):
+        _plugin, room = self._room(
+            {"TELEGRAM_BOT_TOKEN": "held-telegram-bot-token", "MY_HERMES_TOKEN": "my-own-withheld-value"},
+            withheld_env=["MY_HERMES_TOKEN"],
+        )
+        self.assertTrue(self._refuses(room.guard, "my-own-withheld-value"))
+        self.assertFalse(self._refuses(room.guard, "held-telegram-bot-token"))
+
+
 @unittest.skipUnless(hermes_available(), "requires an installed Hermes (hermes-agent)")
 class HermesGatewayTest(unittest.TestCase):
     """The plugin in a real Hermes gateway, with only the model scripted."""

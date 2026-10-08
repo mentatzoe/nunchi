@@ -15,6 +15,7 @@ from typing import Any
 
 from .errors import ValidationError
 from .operator import OperatorStore, ServiceManager, _atomic_write
+from .private_process import keep_private
 
 try:
     import fcntl
@@ -201,6 +202,9 @@ def _load_environment_file(path: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # First, before the environment file's credentials are loaded into this
+    # process. A service it starts is private only if it does the same.
+    keep_private()
     args = _parser().parse_args(argv)
     try:
         if args.environment_file is not None:

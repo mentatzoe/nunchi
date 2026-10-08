@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Iterable, Mapping, Sequence
+import copy
 from copy import deepcopy
 from dataclasses import dataclass
 import hmac
@@ -133,10 +134,13 @@ def _strings(value: Any) -> Iterable[str]:
 class SecretGuard:
     """Refuses a room action that carries a withheld secret.
 
-    The agent never receives Nunchi's secrets, but it may still read them some
-    other way, for example from a file. This is the last check before an action
-    reaches the room: exact withheld values, and the shapes of credentials the
-    integration names (a platform's bot token, say).
+    The agent may read a secret in its environment, a file or a tool's output;
+    some harnesses must also hand it one, such as the launch secret their room
+    tools call the library with. Either way the secret must never reach the
+    room. The guard checks each action before it does: exact withheld values,
+    and the shapes of credentials the integration names (a platform's bot
+    token, say). Values shorter than 12 characters are ignored. The check is an
+    exact match: a secret the agent encodes or splits gets past it.
     """
 
     def __init__(
@@ -146,6 +150,18 @@ class SecretGuard:
     ) -> None:
         self._values = tuple(sorted({value for value in values if len(value) >= 12}))
         self._patterns = tuple(patterns)
+
+    def including(self, values: Iterable[str]) -> "SecretGuard":
+        """A copy that also withholds ``values``; this guard is unchanged.
+
+        The copy keeps this guard's patterns, a subclass's included.
+        """
+
+        guard = copy.copy(self)
+        guard._values = tuple(
+            sorted({*self._values, *(value for value in values if len(value) >= 12)})
+        )
+        return guard
 
     def refusal(self, action: Mapping[str, Any]) -> str | None:
         texts = list(_strings(action))
@@ -589,6 +605,17 @@ class TurnParticipant:
         self._recent: deque[Turn] = deque(maxlen=4)
         self.attached = False
 
+    def withhold(self, values: Iterable[str]) -> None:
+        """Also refuse ``values`` in this participant's room actions.
+
+        Call it before the first turn: a turn keeps the guard it started
+        with. The guard the participant was given is not changed; it gets a
+        copy (`SecretGuard.including`).
+        """
+
+        with self._lock:
+            self.guard = self.guard.including(values)
+
     # -- what the integration registers ------------------------------------------
 
     def tool_specs(self) -> list[dict[str, Any]]:
@@ -614,6 +641,8 @@ class TurnParticipant:
     def run_protocol(self, *, wake, opportunity, expand, cancel):
         request = build_participant_turn_request(wake, opportunity)
         offered = participant_tool_roles(request)
+        with self._lock:
+            guard = self.guard
         turn = Turn(
             profile=self.profile,
             request=request,
@@ -622,7 +651,7 @@ class TurnParticipant:
             },
             expand=expand,
             cancel=cancel,
-            guard=self.guard,
+            guard=guard,
             result_wait_seconds=self.result_wait_seconds,
             silence_marker=self.silence_marker,
         )

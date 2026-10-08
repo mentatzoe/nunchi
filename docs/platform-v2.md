@@ -350,7 +350,9 @@ there is no send tool:
 A harness outside Python makes the same calls as versioned JSON over a
 private Unix socket (`nunchi.turn_server`, interface `I-040D
 LocalTurnProtocolV2@1`). Every request carries the per-launch session secret
-the integration was given:
+the integration was given. The harness holds that secret, so the server adds
+it to its participant's guard, and a room action that carries it is refused.
+A secret shorter than 16 characters is refused at start.
 
 | Route | Body | Answer |
 |---|---|---|
@@ -367,10 +369,14 @@ The Claude Code mod's route names, `/v1/turn-start`, `/v1/tool` and
 The Claude Code gate is the first integration on it. The one-reply envelope
 above drives the same `Turn`: `ParticipantTurnProtocol` keeps the reply's
 shape and the pages the model asked for, and hands each action to the turn's
-`look_again` and `take`. A one-reply participant may pass a `SecretGuard`
-too; a refused action is shown to the model once, and a second refusal fails
-the turn. `OpenAICompatibleParticipant` with a `silence_marker` drives the
-same `Turn` in final-answer posting: its plain reply is the post, through
+`look_again` and `take`. A one-reply participant gets the room's guard too
+(`nunchi.room.room_guard`, which the old Codex runner and the reference
+adapters pass); a refused action is shown to the model once, and a second
+refusal fails the turn. A reason (`why`) that holds a secret is dropped and
+the action checked without it. The room's host checks every action against
+the same guard before it leaves, whatever the participant did.
+`OpenAICompatibleParticipant` with a `silence_marker` drives the same `Turn`
+in final-answer posting: its plain reply is the post, through
 `Turn.decide`. The behavior eval uses it for `--agent-posting final-answer`.
 
 ## The participant's view of the room

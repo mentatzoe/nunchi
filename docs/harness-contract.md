@@ -71,6 +71,13 @@ Everything that decides behavior, once, for every harness:
   or reaction; steering updates while the agent works; a turn counts as
   silent only if it was bound to its wake; secret values are never posted;
   privileged actions go through authorization.
+- **The secret guard**: one per room (`nunchi.room.room_guard`), built from
+  the config's `*_env` keys and what the transport holds. The agent's turn
+  refuses a secret and tells the agent, so it can answer again; the room's
+  host refuses it again before anything leaves. A reason that holds a secret
+  is dropped and the move kept, since a reason is never posted. A harness's
+  launch secret, which its room tools call the library with, is withheld
+  too.
 - **The commit point and receipts**: whether a post may go out (the turn is
   still current, not cancelled, its action valid), and the record of what
   happened.
@@ -125,7 +132,8 @@ class Room:                                        # harness-hosted entry point
 - `call` does what the Claude Code gate does today, once, for everyone:
   - it refuses a call outside a bound, current turn;
   - it holds the first post when others posted meanwhile;
-  - it refuses secret values;
+  - it refuses secret values: the room's guard, plus the launch secret of
+    the socket it serves (`TurnServer`);
   - it waits for the commit and describes the result.
 - `finish` is the final-answer counterpart:
   - **deliver**: the integration posts the answer through the harness;
@@ -227,6 +235,7 @@ maintainers.
 | Own message in memory | transport id | transport id | the library records it in the room log with an id of its own (no delivery id; Hermes drops the bot's own messages before hooks) | transport id |
 | Attention routes | all | all | all, plus the host's model through `ctx.llm` | all |
 | Native tool approvals | user's rules; prompts declined | user's rules; approval requests declined | Hermes's own approvals | — |
+| Secret guard (the room's, from `room_guard`; the host checks every action again) | plus the launch secret, which the session's environment holds, so the agent can read it | plus the bridge's launch secret, which the room's MCP server holds; the agent can read it when Codex runs commands without a sandbox | plus Hermes's platform tokens (Telegram, Discord, Slack) when the config names none | the room's guard (old Codex runner, reference adapters) |
 | Runs without patching the harness | yes | yes | yes, also under `plugins.isolation: host` (a turn verified offline, `a50406d9`) | yes |
 | Operator setup needed | none | the project's trust level, used when the user's config has none (see gap 5); no MCP server named `nunchi_room` | `allow_gateway_injection`; the injected turns' identity among the platform's allowed users; per-user group sessions (Hermes's default); `interim_assistant_messages`, `tool_progress` and `long_running_notifications` off for the room's platform, or Hermes posts text the library never saw; `gateway.platform_actions` for reactions | none |
 
@@ -263,6 +272,7 @@ both):
 | steering: a message that arrives mid-turn is shown once after a tool call, and can be answered | pass | n/a | pass | n/a | pass |
 | one-action: one room action per turn | pass | n/a | pass | n/a | pass |
 | secret: a withheld secret never reaches the room | pass | n/a | pass | n/a | pass |
+| launch-secret: the launch secret the harness holds never reaches the room, and the agent can post without it | n/a | n/a | pass | n/a | pass |
 | cancel: a cancelled turn posts nothing | pass | n/a | pass | n/a | pass |
 | pause: after a pause the library starts a turn with no new message, which remembers why the agent waited | pass | n/a | pass | n/a | pass |
 | outcome: an approved action's outcome starts a turn, and the agent reports it | pass | n/a | pass | n/a | pass |
@@ -281,6 +291,13 @@ so the scripted agent cannot leave it unbound: the Codex column's
 `unbound-failure` runs with the throwaway user's own config disabling the room's
 MCP server, and the integration fails the turn because the room tools never
 reached the run.
+
+The `launch-secret` scenario needs a secret the harness itself holds: the
+per-launch secret its room tools call the library's socket with. The agent
+posts it, the post is refused, and its next post goes out. Claude Code holds
+one (the session's environment) and so does Codex (the room's MCP server).
+The reference turn and the Hermes plugin call the library in process and hold
+none, so the scenario is n/a for them.
 
 In the pause and outcome scenarios the second turn reaches the agent through
 the same `start` as the first, and the agent reads in its text that the turn
@@ -316,7 +333,7 @@ The plan for the kit, as accepted:
   - silence counts only when the turn was bound;
   - a cancelled turn posts nothing;
   - a pause turn starts, and so does an outcome turn;
-  - a secret value is refused.
+  - a secret value is refused, and so is the harness's launch secret.
 - **Clean installs**: each harness is installed clean and pinned in CI, as
   the stock-Hermes lanes already do; never anyone's own setup.
 - **Output**: the parity table, generated from the results.

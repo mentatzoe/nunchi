@@ -469,6 +469,8 @@ class CodexKitIntegration:
     def __init__(self) -> None:
         self.name = f"Codex app-server ({codex_version()})"
         self.harness: CodexHarness | None = None
+        # The bridge's launch secret, which the thread's room server holds.
+        self.launch_secret: str | None = None
 
     def participant(
         self, *, profile: ParticipantProfile, guard: SecretGuard, agent: ScriptedAgent, privileged: bool = False
@@ -490,6 +492,7 @@ class CodexKitIntegration:
                 agent.play_once(turn, lambda: CodexSurface(harness, turn))
 
         harness.model.on_request = first_request
+        self.launch_secret = harness.integration._secret
         return harness.integration.participant
 
     def close(self) -> None:
