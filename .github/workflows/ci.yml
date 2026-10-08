@@ -35,7 +35,9 @@ jobs:
   hermes-plugin:
     # The turn conformance kit and the plugin's tests inside a real Hermes
     # gateway, on a clean install of a pinned Hermes; only the model is
-    # scripted (docs/harness-guide.md, "Prove it").
+    # scripted (docs/harness-guide.md, "Prove it"). Both lanes run: Telegram,
+    # and Discord through Hermes's stock Discord adapter, whose discord.py
+    # comes with the [messaging] extra.
     name: Hermes plugin (Hermes main a50406d9)
     runs-on: ubuntu-latest
     steps:

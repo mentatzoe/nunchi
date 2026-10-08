@@ -13,6 +13,19 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- A Discord lane in the Hermes plugin's conformance kit: Hermes's stock
+  Discord adapter in the real gateway, fed fake discord.py channels, threads
+  and messages through its own ingress, as Hermes's tests do, recording what
+  it sends, the threads it opens, typing and reactions. It runs what
+  Hermes does at connect: on both lanes it installs Hermes's adapter
+  handlers, its busy handler among them, and on Discord it checks
+  `DISCORD_ALLOWED_USERS` against the guild's members. It takes Hermes's
+  session keys and text batching from the profile's `config.yaml` and
+  `.env`, and its people have the room's role. Every final-answer scenario
+  passes on it, as on the Telegram lane, and `ROOM_DISCORD`,
+  `ROOM_SESSIONS`, `ROOM_ENV` and `ALLOWED_ROLES` pin the README's Discord
+  setup. `nunchi.integrations.hermes_plugin_conformance` runs both lanes;
+  without discord.py it runs Telegram only and says so.
 - The Hermes plugin tells the room who a message mentions, which message it
   replies to, when it was sent, and whether its author is a bot (#135 gaps 9
   and C). Hermes's admission payload carries none of these, and on Discord
@@ -23,6 +36,9 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   author's bot flag), and a message the platform says was meant for the bot
   mentions the agent. Under `plugins.isolation: host` the platform's message
   does not cross, so mentions, the bot flag and the time stay unknown there.
+  A message Hermes admits without its dispatch hook, as it does for one it
+  rescues from its busy queue, keeps its time on Discord, read from its id,
+  and the plugin logs a warning (README, Known gaps).
 - The agent's own "mhm" in the turn conformance kit (#94 step 9d): the kit's
   room offers one reaction, and the `mhm` and `final-mhm` scenarios check it
   through each integration's react tool. The pause scenarios now also check
@@ -548,6 +564,63 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Fixed
 
+- A Hermes room on Discord hears every person Hermes allows in its channel
+  and in the threads under it, each under their own name, except what
+  Hermes drops before any hook (below), and nothing said there gets an
+  answer that bypasses Nunchi, except Hermes's replies to its built-in
+  commands (until the slash-command work) and its notices while it drains
+  for a restart or stop (README, Known gaps)
+  ([leak audit in #135](https://github.com/mentatzoe/nunchi/issues/135#issuecomment-6057394431), row 1).
+  Under Hermes's Discord defaults, a message that did not @mention the bot
+  never reached the plugin, and an @mention made Hermes open a thread the
+  plugin did not hold, so Hermes answered there itself, raw.
+  - The plugin holds the threads under its bound channel as part of the room
+    (`HermesRoute.holds` matches a source whose `parent_chat_id` is the bound
+    chat, when the binding names no thread). Their messages reach the room
+    with `thread_root_event_id` set to `discord:message:<thread id>`, and
+    the agent's reaction to one goes through its thread, also after a
+    restart: the room's log names the thread.
+  - A message in a Telegram forum topic carries its topic too
+    (`telegram:message:<topic id>`); General is the group's main chat.
+  - When Hermes has already opened a thread for a room message, the plugin
+    still takes the message in and logs an error naming the Discord keys.
+  - The README's Discord setup: `discord.free_response_channels` set to the
+    bound channel and `discord.free_response_auto_thread: false`, beside
+    `typing_indicator` and `reactions` off. That setting makes every thread
+    under the channel free-response, so it is only for this plugin or later.
+    Top-level `thread_sessions_per_user: true`, required: Hermes otherwise
+    shares a thread's session and merges two people's quick messages into
+    one under the first person's name. Top-level
+    `display.busy_input_mode: interrupt` (Hermes's default, pinned): with
+    `queue` Hermes merges a person's quick messages into one. In the
+    `.env`, the room's role in `DISCORD_ALLOWED_ROLES` with
+    `DISCORD_ALLOWED_USERS` empty, since Hermes drops anyone else before any
+    hook: Hermes then hears the role's members in the channel and its
+    threads and refuses their direct messages, unless
+    `discord.dm_role_auth_guild` is set. It costs Discord's Server Members
+    privileged intent, and everyone in the room needs the role. A user list
+    instead opens direct messages to those users, and `*` to anyone who
+    shares a server with the bot; Hermes answers those itself, outside
+    Nunchi. Also `turn_user_id` in `GATEWAY_ALLOWED_USERS`, since Hermes
+    drops it from `DISCORD_ALLOWED_USERS` at connect and then refuses every
+    turn; and `HERMES_DISCORD_TEXT_BATCH_DELAY_SECONDS=0`, so that Hermes
+    does not merge a person's quick messages.
+  - Not yet: the agent's answer to a thread message is posted in the main
+    chat, until the library can place an answer in a thread. Hermes drops,
+    before any plugin hook, a message that @mentions another bot (also a
+    Reply that pings one) and a message that is only an @mention of the
+    agent. When a person sends three or more messages a fraction of a
+    second apart, Hermes runs some of them without its dispatch hook, so
+    they reach the room with no mentions or reply target (on Discord with
+    their time). While Hermes drains for a restart or
+    stop, it answers each room message with its own notice, and the room
+    never hears the message. Peer agents' bots are heard only with
+    profile-wide settings, and Hermes's bot loop guard stops them for 10
+    minutes after 20 bot messages in 5 minutes (README, Known gaps).
+- The Hermes plugin gives the room every actor a message mentions, as the
+  platform describes them. A message that mentioned someone the room had
+  not seen yet, on Discord or as a Telegram text mention, was refused by the
+  room and lost, though the plugin still kept Hermes from answering it.
 - In final-answer posting, only words the agent's own model wrote can be its
   post ([leak audit in #135](https://github.com/mentatzoe/nunchi/issues/135#issuecomment-6057394431), row 5).
   A harness that put its own text in place of a missing answer, such as

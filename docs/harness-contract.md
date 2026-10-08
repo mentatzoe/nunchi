@@ -234,7 +234,7 @@ maintainers.
 | Behavior | Claude Code | Codex (app-server) | Hermes (plugin) | One-reply |
 |---|---|---|---|---|
 | Topology, posting | library-hosted, tools | library-hosted, tools | harness-hosted (consume and start), final answer | library-hosted, tools |
-| Gate before the agent runs | library | library | `post_gateway_admission` consumes every message (`handled`, no reply), with the reply target, time, mentions and bot flag noted at `pre_gateway_dispatch` (mentions and bot flag in-process only); the library starts turns with `inject_message` | library |
+| Gate before the agent runs | library | library | `post_gateway_admission` consumes every message Hermes admits in the bound chat and in the threads inside it (a Discord thread under the channel, a Telegram forum topic), each with its thread (`handled`, no reply), with the reply target, time, mentions and bot flag noted at `pre_gateway_dispatch` (mentions and bot flag in-process only); the library starts turns with `inject_message`. Hermes's own gates run first and need the operator setup below; what they drop regardless is in gap 12. A message Hermes rescues from its busy queue reaches `post_gateway_admission` without `pre_gateway_dispatch`, so without those facts (gap 13) | library |
 | Guide | session prompt | with every turn's text (`developerInstructions` would replace the user's own; the library gives one text per turn) | `register_system_prompt_section` | request |
 | Turn context | turn text | `turn/start` input | the injected turn text, plus `pre_llm_call` | request |
 | Room view | mod tool | per-thread MCP server in `thread/start` config (stable); client tools need an experimental opt-in | `register_tool` | room-view action |
@@ -251,7 +251,7 @@ maintainers.
 | Native tool approvals | user's rules; prompts declined | user's rules; approval requests declined | Hermes's own approvals, whose prompts reach the room (gap 8) | — |
 | Secret guard (the room's, from `room_guard`; the host checks every action again) | plus the launch secret, which the session's environment holds, so the agent can read it | plus the bridge's launch secret, which the room's MCP server holds; the agent can read it when Codex runs commands without a sandbox | plus Hermes's platform tokens (Telegram, Discord, Slack) when the config names none | the room's guard (old Codex runner, reference adapters) |
 | Runs without patching the harness | yes | yes | yes, also under `plugins.isolation: host` (a turn verified offline, `a50406d9`) | yes |
-| Operator setup needed | none | the project's trust level, used when the user's config has none (see gap 5); no MCP server named `nunchi_room` | `allow_gateway_injection`; the injected turns' identity among the platform's allowed users; per-user group sessions (Hermes's default); `gateway.platform_actions` for reactions. So that people see only what the agent chose: for the room's platform, `streaming`, `tool_progress`, `interim_assistant_messages`, `long_running_notifications`, `show_reasoning` and `runtime_footer` off and `suppress_warning_notifications` on; for the whole profile, `display.file_mutation_verifier`, `display.turn_completion_explainer` and `display.busy_ack_enabled` off and the `clarify` and `cronjob` toolsets disabled; for the whole bot, `typing_indicator` and `reactions` off. `agent.max_turns` and `HERMES_MAX_ITERATIONS` unset (gap 9), and the environment variables that override these keys unset. A dedicated profile and bot per room, with `group_allow_admin_from` set (gap 11). The kit runs with exactly these settings | none |
+| Operator setup needed | none | the project's trust level, used when the user's config has none (see gap 5); no MCP server named `nunchi_room` | `allow_gateway_injection`; the injected turns' identity allowed (on Telegram in `TELEGRAM_ALLOWED_USERS`; on Discord in `GATEWAY_ALLOWED_USERS`, because at each connect Hermes drops `DISCORD_ALLOWED_USERS` entries that name no guild member); every person the room should hear allowed, since Hermes drops anyone else before any hook, in the chat and its threads: on Telegram in `TELEGRAM_ALLOWED_USERS`, which also opens direct messages, where Hermes answers itself; on Discord the room's role in `DISCORD_ALLOWED_ROLES` with `DISCORD_ALLOWED_USERS` empty, which refuses the role members' direct messages unless `discord.dm_role_auth_guild` is set, at the cost of Discord's Server Members privileged intent and the role for everyone in the room (a user list opens direct messages to those users, `*` to anyone who shares a server with the bot); per-user group sessions (Hermes's default) and per-user thread sessions (top-level `thread_sessions_per_user: true`; Hermes's default shares a thread, and then merges different people's quick messages into one); `gateway.platform_actions` for reactions. So that people see only what the agent chose: for the room's platform, `streaming`, `tool_progress`, `interim_assistant_messages`, `long_running_notifications`, `show_reasoning` and `runtime_footer` off and `suppress_warning_notifications` on; for the whole profile, `display.file_mutation_verifier`, `display.turn_completion_explainer` and `display.busy_ack_enabled` off, `display.busy_input_mode` `interrupt` (with `queue` Hermes merges a person's quick messages; gap 13) and the `clarify` and `cronjob` toolsets disabled; for the whole bot, `typing_indicator` and `reactions` off. On Discord, so that the room hears the channel and Hermes opens no threads: `discord.free_response_channels` set to the bound channel and `discord.free_response_auto_thread` false, with the channel outside `ignored_channels` and inside `allowed_channels` when that is set; `DISCORD_ALLOWED_CHANNELS`, `DISCORD_IGNORED_CHANNELS`, `DISCORD_FREE_RESPONSE_AUTO_THREAD` and `DISCORD_REACTIONS` unset; `HERMES_DISCORD_TEXT_BATCH_DELAY_SECONDS=0`, so that Hermes does not merge a person's quick messages (gap 13). That setting makes every thread under the channel free-response, so it needs a plugin that holds those threads (this one or later). The agent's answer to a thread message is still posted in the main chat, until the library can place an answer in a thread. Peer bots are heard only with `discord.allow_bots: all` and `bots_require_inline_mention: false`, for the whole profile, and Hermes's bot loop guard then drops every bot message in a chat for 10 minutes once bots posted 20 there within 5 minutes (`gateway.bot_loop_guard`). `agent.max_turns` and `HERMES_MAX_ITERATIONS` unset (gap 9), and the environment variables that override these keys unset. A dedicated profile and bot per room, with `group_allow_admin_from` set (gap 11). The kit runs with exactly these settings, on Telegram and on Discord; it installs Hermes's adapter handlers, its busy handler among them, as Hermes does before it connects, and runs Hermes's connect-time Discord allowlist check | none |
 
 ## Conformance kit (step 9d)
 
@@ -270,38 +270,40 @@ does. CI runs the kit on a clean install.
 Today's table, generated by `nunchi-turn-conformance --integration reference
 --integration nunchi.integrations.claude_code_conformance --integration
 nunchi.integrations.hermes_plugin_conformance --integration
-nunchi.integrations.codex_app_server_conformance` (the Hermes column on Hermes
-main `a50406d9`, in a real gateway; the Codex column on Codex CLI 0.160.1, a
-real `codex app-server` from a clean npm install; only the model scripted in
-both):
+nunchi.integrations.codex_app_server_conformance` (the Hermes columns on
+Hermes main `a50406d9`, in a real gateway: on Telegram with a recording
+adapter, on Discord with Hermes's stock Discord adapter and fake discord.py
+channels and messages; the Codex column on Codex CLI 0.160.1, a real
+`codex app-server` from a clean npm install; only the model scripted in
+all):
 
-| Scenario | reference (tools) | reference (final-answer) | Claude Code gate | Hermes plugin | Codex app-server |
-|---|---|---|---|---|---|
-| post: one post goes to the room, and the tool call says so | pass | n/a | pass | n/a | pass |
-| bound-silence: a bound turn that ends without an action is silence, remembered | pass | n/a | pass | n/a | pass |
-| silence-reason: a silent turn's last words are its reason, remembered and never posted | pass | n/a | pass | n/a | pass |
-| mhm: the agent's own mhm is one reaction on the message, through its react tool | pass | n/a | pass | n/a | pass |
-| unbound-failure: a turn never bound to its wake is a failure, not silence | pass | n/a | pass | n/a | pass |
-| look-again: the first post is held once when someone posted meanwhile | pass | n/a | pass | n/a | pass |
-| steering: a message that arrives mid-turn is shown once after a tool call, and can be answered | pass | n/a | pass | n/a | pass |
-| one-action: one room action per turn | pass | n/a | pass | n/a | pass |
-| secret: a withheld secret never reaches the room | pass | n/a | pass | n/a | pass |
-| launch-secret: the launch secret the harness holds never reaches the room, and the agent can post without it | n/a | n/a | pass | n/a | pass |
-| cancel: a cancelled turn posts nothing | pass | n/a | pass | n/a | pass |
-| pause: after a pause the library starts a turn with no new message, which remembers why the agent waited | pass | n/a | pass | n/a | pass |
-| outcome: an approved action's outcome starts a turn, and the agent reports it | pass | n/a | pass | n/a | pass |
-| final-deliver: the final answer is the post, committed for the harness to deliver, and remembered | n/a | pass | n/a | pass | n/a |
-| final-silence: the silence marker is silence, and the agent's thinking is its reason | n/a | pass | n/a | pass | n/a |
-| final-mhm: the agent's own mhm is one reaction through its react tool, and the answer after it posts nothing | n/a | pass | n/a | pass | n/a |
-| final-look-again: the final answer is held once when someone posted meanwhile | n/a | pass | n/a | pass | n/a |
-| final-thinking: thinking is never posted | n/a | pass | n/a | pass | n/a |
-| final-secret: a withheld secret is refused once, and the agent answers again | n/a | pass | n/a | pass | n/a |
-| final-cancel: a cancelled turn's final answer is silent | n/a | pass | n/a | pass | n/a |
-| final-pause: after a pause the library starts a turn with no new message, which remembers why the agent waited | n/a | pass | n/a | pass | n/a |
-| final-outcome: an approved action's outcome starts a turn, and the agent's answer reports it | n/a | pass | n/a | pass | n/a |
-| final-not-own-words: text the harness puts in place of the agent's answer is never posted or remembered, and the turn fails | n/a | pass | n/a | pass | n/a |
-| final-no-answer: a run whose model wrote nothing, with the harness's text as its answer, posts nothing and fails | n/a | pass | n/a | pass | n/a |
-| final-silence-forms: a wrapped marker or the harness's other silence word is silence, remembered with its reason; a post that only looks like one goes out | n/a | pass | n/a | pass | n/a |
+| Scenario | reference (tools) | reference (final-answer) | Claude Code gate | Hermes plugin (Telegram) | Hermes plugin (Discord) | Codex app-server |
+|---|---|---|---|---|---|---|
+| post: one post goes to the room, and the tool call says so | pass | n/a | pass | n/a | n/a | pass |
+| bound-silence: a bound turn that ends without an action is silence, remembered | pass | n/a | pass | n/a | n/a | pass |
+| silence-reason: a silent turn's last words are its reason, remembered and never posted | pass | n/a | pass | n/a | n/a | pass |
+| mhm: the agent's own mhm is one reaction on the message, through its react tool | pass | n/a | pass | n/a | n/a | pass |
+| unbound-failure: a turn never bound to its wake is a failure, not silence | pass | n/a | pass | n/a | n/a | pass |
+| look-again: the first post is held once when someone posted meanwhile | pass | n/a | pass | n/a | n/a | pass |
+| steering: a message that arrives mid-turn is shown once after a tool call, and can be answered | pass | n/a | pass | n/a | n/a | pass |
+| one-action: one room action per turn | pass | n/a | pass | n/a | n/a | pass |
+| secret: a withheld secret never reaches the room | pass | n/a | pass | n/a | n/a | pass |
+| launch-secret: the launch secret the harness holds never reaches the room, and the agent can post without it | n/a | n/a | pass | n/a | n/a | pass |
+| cancel: a cancelled turn posts nothing | pass | n/a | pass | n/a | n/a | pass |
+| pause: after a pause the library starts a turn with no new message, which remembers why the agent waited | pass | n/a | pass | n/a | n/a | pass |
+| outcome: an approved action's outcome starts a turn, and the agent reports it | pass | n/a | pass | n/a | n/a | pass |
+| final-deliver: the final answer is the post, committed for the harness to deliver, and remembered | n/a | pass | n/a | pass | pass | n/a |
+| final-silence: the silence marker is silence, and the agent's thinking is its reason | n/a | pass | n/a | pass | pass | n/a |
+| final-mhm: the agent's own mhm is one reaction through its react tool, and the answer after it posts nothing | n/a | pass | n/a | pass | pass | n/a |
+| final-look-again: the final answer is held once when someone posted meanwhile | n/a | pass | n/a | pass | pass | n/a |
+| final-thinking: thinking is never posted | n/a | pass | n/a | pass | pass | n/a |
+| final-secret: a withheld secret is refused once, and the agent answers again | n/a | pass | n/a | pass | pass | n/a |
+| final-cancel: a cancelled turn's final answer is silent | n/a | pass | n/a | pass | pass | n/a |
+| final-pause: after a pause the library starts a turn with no new message, which remembers why the agent waited | n/a | pass | n/a | pass | pass | n/a |
+| final-outcome: an approved action's outcome starts a turn, and the agent's answer reports it | n/a | pass | n/a | pass | pass | n/a |
+| final-not-own-words: text the harness puts in place of the agent's answer is never posted or remembered, and the turn fails | n/a | pass | n/a | pass | pass | n/a |
+| final-no-answer: a run whose model wrote nothing, with the harness's text as its answer, posts nothing and fails | n/a | pass | n/a | pass | pass | n/a |
+| final-silence-forms: a wrapped marker or the harness's other silence word is silence, remembered with its reason; a post that only looks like one goes out | n/a | pass | n/a | pass | pass | n/a |
 
 Through Codex the integration binds a run itself, from `turn/start`'s answer,
 so the scripted agent cannot leave it unbound: the Codex column's
@@ -458,6 +460,54 @@ None goes to a harness's maintainers without Zoe's decision.
     `group_allow_admin_from` limits who can; a denied command still gets a
     reply. Dropping or rewriting built-in commands in the bound chat is
     decision D4.
+12. **Hermes, Discord messages dropped before any hook.** Hermes's Discord
+    adapter drops, before `pre_gateway_dispatch` and whatever the settings: a
+    message that @mentions another bot and not this one, which includes a
+    Reply to a peer agent's message with Discord's default reply ping; and a
+    message that is only an @mention of the bot, once Hermes has taken the
+    mention out, unless its history fetch adds context (it never does for a
+    plain message in a free-response channel). The room never hears people
+    answer a peer agent by Reply, or call the agent by name alone. Tests pin
+    both.
+    - Alternatives: asking Hermes for a hook, or a setting, that lets a
+      plugin see messages its Discord admission drops in a free-response
+      channel; a raw listener (`register_platform_handler`), in-process
+      only and without a stability guarantee.
+13. **Hermes, a person's quick messages.** Hermes's text batching merges
+    a person's messages sent close together into the first, with its id,
+    mentions and reply target (`HERMES_DISCORD_TEXT_BATCH_DELAY_SECONDS`,
+    which the room setup turns off on Discord; on Telegram at least
+    0.08 s). A message that arrives while Hermes still handles the sender's
+    previous one goes to Hermes's busy queue, each on its own under
+    `display.busy_input_mode: interrupt` (with `queue` Hermes merges them
+    into one, under the last one's id). Hermes moves that queue up only
+    after an agent run (`_run_agent_drain_pending`), and a message the
+    plugin consumes at `post_gateway_admission` runs none. So the third and
+    later messages wait until the sender's next message starts, and Hermes
+    then runs the oldest in its place (`_hm_rescue_orphaned_fifo`), after
+    `pre_gateway_dispatch` ran for the new one only. The rescued message
+    reaches the room with no mentions (the agent's own too), no reply
+    target, no time and no bot flag. The admission payload carries none of
+    them and no other public surface does, so the plugin cannot recover
+    them; on Discord it reads the time from the message id (a snowflake),
+    which keeps the room's order. A test pins it on Discord.
+    - Alternatives: asking Hermes to run `pre_gateway_dispatch` for a
+      rescued message, to put the reply target, time, mentions and bot flag
+      in the `post_gateway_admission` payload, or to move its busy queue up
+      after a message a plugin handled; a faster admission hook, which
+      narrows the window but cannot close it.
+14. **Hermes, its notices while it restarts or stops.** While Hermes drains
+    for a restart or a stop (`_draining`), it answers each message in the
+    room itself, before any plugin hook: the idle path's "not accepting new
+    work" (`_hm_dispatch_quick_and_plugin_commands`), and the busy path's
+    "not accepting another turn" (`_send_busy_drain_notice`). The room never
+    hears those messages, and no setting stops the notices. A restart
+    drains until the runs in flight end, up to
+    `agent.restart_after_turn_timeout` (30 minutes by default). A test pins
+    it on Discord; Telegram takes the same path.
+    - Alternatives: asking Hermes to let a plugin that consumes a chat's
+      messages see them during a drain, or to skip the notice for such a
+      chat.
 
 Resolved during 9b:
 
