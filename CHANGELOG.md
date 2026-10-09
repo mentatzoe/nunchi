@@ -13,6 +13,21 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- The Discord stand-in for the rehearsals (step 9f, PR 3a;
+  [docs/rehearsal.md](docs/rehearsal.md)): **implemented, unverified** in
+  CI, and nothing runs on it yet. `evals/rehearsal/fake_discord/` answers
+  as Discord's REST API and gateway, on its own thread in the caller's
+  process, with TLS at Discord's names for the launcher to come (PR 3b) or
+  plain loopback for tests. It models the social facts the room is read
+  from (each channel's clock and its ids, mentions and `@everyone` only with
+  permission, replies, authors and nonces, one permission function behind
+  fan-out and the 403s, and the limits on the agent's own moves) and serves
+  only the routes something has been shown to call; anything else, and any
+  payload missing a key discord.py 2.7.1 requires, is answered 599 or
+  recorded as unknown and fails its verdict. Run here, offline, through
+  Nunchi's transport clients and through real discord.py 2.7.1 on Python
+  3.12 and 3.14; CI gains a `discord-standin` job and a step in the
+  `hermes-plugin` job.
 - Claude Code's scripted rehearsal lane, and the settled spend reading (step
   9f, PR 2; [docs/rehearsal.md](docs/rehearsal.md)): **implemented,
   unverified** in CI; run here offline against the pinned Claude Code

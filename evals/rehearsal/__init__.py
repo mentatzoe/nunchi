@@ -14,6 +14,8 @@ against scripted model endpoints, for CI.
 - `scan.py`: the key and canary scan over every output file.
 - `spend.py`: the spend watchdog on the OpenRouter key.
 - `checks.py`: the hard checks, and what is reported but not judged.
+- `fake_discord/`: a Discord stand-in for the production Discord clients
+  (PR 3a; nothing runs on it yet).
 
 See `docs/rehearsal.md`.
 """
