@@ -47,19 +47,22 @@ under ``DIR/<harness>/`` (`record.py`), then every output is scanned for the
 key and the canary (`scan.enforce`: a hit deletes them all and fails the
 run), and the key's spend is read between moments (`spend.py`).
 
-``--scripted`` runs the same probe offline: the agent's model is the
-conformance kit's scripted endpoint, attention is a scripted endpoint that
-wakes only for the direct question, and nothing needs a key. Each moment's
-outcome is then known, so it is a hard check too (`checks.scripted_outcomes`).
-It is available for Codex and Hermes; Claude Code's needs a scripted
-Anthropic Messages endpoint, which is PR 2.
+``--scripted`` runs the same probe offline: the agent's model is a scripted
+endpoint (the conformance kit's for Codex and Hermes; for Claude Code an
+Anthropic Messages endpoint, `standin.ScriptedClaudeAgent`, with every other
+request Claude Code makes through its proxy settings refused and recorded by
+`standin.RefusingProxy`), attention is a scripted endpoint that wakes only
+for the direct question, and nothing needs a key. Each moment's outcome is
+then known, so it is a hard check too (`checks.scripted_outcomes`), and for
+Codex and Claude Code so is the room tool call. ``--no-sandbox`` runs Claude
+Code without its README's Bash sandbox, for a machine where bubblewrap cannot
+run; the run records the sandbox as off. CI never passes it.
 
 Exit status: 0 every hard check held; 1 a hard check failed, the probe
 raised an error, or the scan found a secret; 2 bad arguments (among them a
 Claude Code agent model with no row in `routes.CLAUDE_CODE_MODELS`); 3 the
 probe could not run (a harness or a key is missing); 4 it stopped at the
-budget before a moment, every hard check holding; 5 ``--scripted`` is not available
-for this harness yet.
+budget before a moment, every hard check holding.
 """
 
 from __future__ import annotations
@@ -85,6 +88,7 @@ import traceback
 from types import SimpleNamespace
 from typing import Any
 from unittest import mock
+import urllib.request
 
 from evals.behavior.scene import SCENES as BEHAVIOR_SCENES, Scene, load_participants, load_scene, parse_offset
 
@@ -137,7 +141,9 @@ from .scan import delete_outputs, enforce
 from .spend import SpendWatch
 from .standin import (
     JsonLines,
+    RefusingProxy,
     ScriptedAttention,
+    ScriptedClaudeAgent,
     ScriptedCodexAgent,
     ScriptedHermesAgent,
     StandInRoomClient,
@@ -150,13 +156,6 @@ EXIT_FAILED = 1
 EXIT_USAGE = 2
 EXIT_COULD_NOT_RUN = 3
 EXIT_BUDGET = 4
-EXIT_NOT_YET = 5
-
-NOT_YET = (
-    "claude-code --scripted is not available yet: running the real claude CLI offline needs a scripted "
-    "Anthropic Messages endpoint (step 9f, PR 2). Until then tests/v2/test_rehearsal.py covers the Claude "
-    "Code leg with a faked claude process."
-)
 
 ROOT = Path(__file__).resolve().parents[2]
 SCENES = Path(__file__).resolve().parent / "scenes"
@@ -169,6 +168,10 @@ BOT_ID = "9900"
 FIRST_PERSON_ID = 4201
 # What the scripted agent posts, and the phrase scripted attention wakes for.
 SCRIPTED_ANSWER = "Ten seconds is a sensible default, with a retry and backoff if the receiver is slow."
+# Where Claude Code 2.1.289 reads a credential from, whatever HOME and CLAUDE_CONFIG_DIR say: a
+# Claude Code cloud container's own (`claude_code_fixed_credentials`). The probe never reads them.
+CLAUDE_CODE_FIXED_CREDENTIALS = Path("/home/claude/.claude/remote")
+CLAUDE_CODE_FIXED_CREDENTIAL_FILES = (".oauth_token", ".api_key", ".session_ingress_token")
 
 
 @dataclass(frozen=True)
@@ -202,6 +205,8 @@ class Options:
     attention_model: str = DEFAULT_ATTENTION_MODEL
     # The agent's scripted model endpoint, scripted attention, no key, no spend reading.
     scripted: bool = False
+    # Claude Code only: False runs it without its README's Bash sandbox, where bubblewrap cannot run.
+    sandbox: bool = True
     wheel: Path | None = None
     claude_bin: str | None = None
     codex_bin: str | None = None
@@ -297,6 +302,9 @@ class Leg:
         self.sandbox: dict[str, Any] = {}
         # Where the harness showed it did not run as the probe configured it (pins-and-isolation).
         self.not_as_configured: list[str] = []
+        # Each turn the harness itself ended in error, in its own words, even one that posted
+        # first (turns-bound-and-ended): Claude Code's error results, Codex's failed turns.
+        self.harness_failures: list[str] = []
         self.tool_names: list[str] = []
         # What the integration declares its harness shows by itself (`turn_conformance.KnownGap`).
         self.known_gaps: list[Any] = []
@@ -593,6 +601,10 @@ class ClaudeCodeLeg(SharedTransportLeg):
         self.model: ClaudeModel | None = None
         self.transcript = JsonLines(ctx.out / "transcript" / "claude-stream.jsonl")
         self.launched: list[dict[str, Any]] = []
+        self.agent: ScriptedClaudeAgent | None = None
+        self.proxy: RefusingProxy | None = None
+        # What only Claude Code's own processes get on top of the runtime's environment (`go_offline`).
+        self.claude_env: dict[str, str] = {}
 
     def executable(self) -> str:
         found = (
@@ -612,8 +624,11 @@ class ClaudeCodeLeg(SharedTransportLeg):
             self.model = claude_code_model(self.ctx.route.model)
         except ValueError as exc:
             raise CouldNotRun(str(exc)) from exc
+        if self.ctx.options.scripted:
+            self.go_offline(full_tool_name("send"))
         # The README's settings, and the slug mapped to the id Claude Code knows the model by.
-        self.settings = {**CLAUDE_SETTINGS, "modelOverrides": {self.model.anthropic_id: self.ctx.route.model}}
+        sandbox = CLAUDE_SETTINGS["sandbox"] if self.ctx.options.sandbox else {"enabled": False}
+        self.settings = {**CLAUDE_SETTINGS, "sandbox": sandbox, "modelOverrides": {self.model.anthropic_id: self.ctx.route.model}}
         settings = Path(self.ctx.homes["CLAUDE_CONFIG_DIR"]) / "settings.json"
         settings.write_text(json.dumps(self.settings, indent=2), encoding="utf-8")
         self.configs.append(("claude code user settings", settings))
@@ -632,12 +647,12 @@ class ClaudeCodeLeg(SharedTransportLeg):
             }
         )
         (self.ctx.out / "transcript").mkdir(parents=True, exist_ok=True)
-        session_class = recording_claude_session(self.transcript, self.launched)
+        session_class = recording_claude_session(self.transcript, self.launched, self.claude_env)
         with mock.patch.object(claude_code_v2, "ClaudeCodeSession", session_class):
             runtime = claude_code_v2.ClaudeCodeRoomRuntime(config, self.client)
         self.runtime = runtime
         self.install = {
-            "version": self.version([executable, "--version"], runtime.user_environment()),
+            "version": self.version([executable, "--version"], {**runtime.user_environment(), **self.claude_env}),
             "expected": self.ctx.options.expect_version or PINS["claude-code"],
             "executable": executable,
             "mod_version": claude_code_v2.mod_version(),
@@ -657,6 +672,32 @@ class ClaudeCodeLeg(SharedTransportLeg):
         runtime.start()
         runtime.register_transport()
 
+    def go_offline(self, room_tool: str) -> None:
+        """Point Claude Code at the scripted Messages endpoint, and everything else at a proxy that refuses it.
+
+        Claude Code reads both from its environment. The runtime takes it
+        from this process's (the clean user's, restored when the run ends),
+        so ``ANTHROPIC_BASE_URL`` goes there before the runtime is built. The
+        proxy settings go only to Claude Code's own processes (the session,
+        `recording_claude_session`, and the version read for the record),
+        never to this process: Python's ``urlopen`` keeps the proxy settings
+        it saw at its first call for every later one, which then go to the
+        closed proxy wherever ``NO_PROXY`` is unset. ``NO_PROXY`` names only
+        this machine: the scripted endpoint is reached directly, and every
+        other request Claude Code sends through its proxy settings is refused
+        and named in the report (``network``).
+        """
+
+        self.agent = ScriptedClaudeAgent(SCRIPTED_ANSWER, room_tool)
+        self.proxy = RefusingProxy()
+        self.claude_env = self.proxy.environment()
+        os.environ["ANTHROPIC_BASE_URL"] = self.agent.base_url
+        self.ctx.route = replace(
+            self.ctx.route,
+            env={**self.ctx.route.env, "ANTHROPIC_BASE_URL": self.agent.base_url, **self.claude_env},
+            base_url=self.agent.base_url,
+        )
+
     def collect(self) -> None:
         self.copy_state()
         if self.runtime is not None:
@@ -670,15 +711,39 @@ class ClaudeCodeLeg(SharedTransportLeg):
                 diagnostics=list(getattr(self.runtime.session, "diagnostics", ())),
                 sandbox_settings=self.settings.get("sandbox") or {},
                 permission_mode=self.model.permission_mode if self.model is not None else None,
+                room_tools=self.tool_names,
             )
+            report["fixed_credentials"] = claude_code_fixed_credentials()
             self.sandbox = report["sandbox"]
             self.not_as_configured = list(report["not_as_configured"])
+            self.harness_failures = list(report["failures"])
             self.reports["claude_code"] = report
 
     def close(self) -> None:
         if self.runtime is not None:
             with contextlib.suppress(Exception):
                 self.runtime.close()
+        try:
+            # Only once Claude Code has exited: it still tries to reach Anthropic as it shuts down.
+            self.record_offline()
+        finally:
+            for server in (self.agent, self.proxy):
+                if server is not None:
+                    server.close()
+
+    def record_offline(self) -> None:
+        """A scripted run's model requests, and where else Claude Code tried to reach, into its report."""
+
+        report = self.reports.get("claude_code")
+        if report is None or self.agent is None or self.proxy is None:
+            return
+        requests = self.agent.requests()
+        write_json(self.ctx.out / "transcript" / "scripted-model-requests.json", requests)
+        report["scripted_model"] = {
+            "agent_requests": sum(1 for entry in requests if entry["kind"].startswith("agent")),
+            "other_requests": sum(1 for entry in requests if not entry["kind"].startswith("agent")),
+        }
+        report["network"] = claude_code_network(self.proxy.tried(), endpoint=self.agent.base_url)
 
 
 def claude_code_report(
@@ -690,12 +755,16 @@ def claude_code_report(
     diagnostics: Sequence[str] = (),
     sandbox_settings: Mapping[str, Any] | None = None,
     permission_mode: str | None = None,
+    room_tools: Sequence[str] = (),
 ) -> dict[str, Any]:
     """What Claude Code's own stream-json says: whether the mod loaded, which models ran, how each turn ended.
 
     ``verdict`` says it in one line, first what failed: the mod never
     attached, no turn was bound, or a turn ended in error with Claude Code's
-    own words for it (a result's ``errors``). ``not_as_configured`` lists
+    own words for it (a result's ``errors``). ``failures`` lists every result
+    that is an error or not a success, in those words, a turn that posted
+    first included: each fails the run (`checks.turns_bound_and_ended`).
+    ``not_as_configured`` lists
     where Claude Code showed it did not run as the probe set it up: it did
     not recognize the model (``[claude-code:unrecognized_model]`` on its
     stderr), or a session started in another permission mode than
@@ -704,6 +773,8 @@ def claude_code_report(
     Claude Code's sandbox: its stream-json does not say, but with
     ``failIfUnavailable`` Claude Code refuses to start a session whose
     sandbox cannot run, so a session that started (its ``init``) had it.
+    ``room_tool_called`` says whether the model called one of ``room_tools``
+    (a ``tool_use`` in an assistant message).
     """
 
     messages = [entry["message"] for entry in entries if entry.get("direction") == "from-claude" and isinstance(entry.get("message"), Mapping)]
@@ -716,8 +787,15 @@ def claude_code_report(
     models: list[str] = []
     # The models the responses name: an assistant message came back from the model (not one Claude Code made up).
     answered: list[str] = []
+    tool_calls: list[str] = []
     for message in messages:
         inner = message.get("message")
+        if message.get("type") == "assistant" and isinstance(inner, Mapping) and isinstance(inner.get("content"), list):
+            tool_calls.extend(
+                str(block.get("name"))
+                for block in inner["content"]
+                if isinstance(block, Mapping) and block.get("type") == "tool_use"
+            )
         if message.get("type") == "assistant" and isinstance(inner, Mapping) and isinstance(inner.get("model"), str):
             models.append(inner["model"])
             if inner["model"] != "<synthetic>":
@@ -752,10 +830,16 @@ def claude_code_report(
             f"Claude Code started in permission mode {', '.join(map(repr, modes))}, not {permission_mode!r} as the pinned "
             "version does for this model"
         )
-    failed = next((result for result in results if result["is_error"] or result["subtype"] != "success"), None)
+    # A result that is an error, or ends otherwise than in success, even after the turn posted.
+    failures = [
+        f"Claude Code ended a turn with an error result (subtype {result['subtype']}, is_error {json.dumps(result['is_error'])}): "
+        + ("; ".join(result["errors"]) or result["result"] or "no detail")
+        for result in results
+        if result["is_error"] or result["subtype"] != "success"
+    ]
     why = ""
-    if failed is not None:
-        why = f"; Claude Code ended a turn as {failed['subtype']}: " + ("; ".join(failed["errors"]) or failed["result"] or "no detail")
+    if failures:
+        why = f"; {failures[0]}"
     elif not messages and stderr:
         why = f"; its stderr ends: {stderr[-1][:300]}"
     if not invocations:
@@ -764,7 +848,7 @@ def claude_code_report(
         verdict = "the mod never attached" + (f" (plugin errors: {init.get('plugin_errors')})" if init.get("plugin_errors") else "") + why
     elif not turn_bound:
         verdict = "the mod attached, but no turn was bound to its wake" + why
-    elif failed is not None:
+    elif failures:
         verdict = "the mod attached and bound the turn" + why
     elif accepted:
         verdict = f"the mod attached and bound the turn, and the model answered as {', '.join(answered)}"
@@ -792,6 +876,8 @@ def claude_code_report(
             "init_plugin_errors": init.get("plugin_errors"),
         },
         "turn_bound": turn_bound,
+        "tool_calls": tool_calls,
+        "room_tool_called": any(name in room_tools for name in tool_calls),
         "model": {
             "requested": requested_model,
             "init_model": init.get("model"),
@@ -802,8 +888,48 @@ def claude_code_report(
         "permission_mode": init.get("permissionMode"),
         "api_key_source": init.get("apiKeySource"),
         "results": results,
+        "failures": failures,
         "stderr_tail": stderr[-10:],
     }
+
+
+def claude_code_network(tried: Sequence[Mapping[str, Any]], *, endpoint: str) -> dict[str, Any]:
+    """What else a scripted Claude Code tried to reach, with Anthropic's servers out of reach.
+
+    ``tried`` is what the refusing proxy saw (`standin.RefusingProxy.tried`)
+    by the time Claude Code had exited. A connection that ignores the proxy
+    settings is not seen, and ``detail`` says so.
+    """
+
+    places = ", ".join(f"{entry['target']} ({entry['method']} x{entry['count']})" for entry in tried)
+    detail = (
+        f"its model at the scripted endpoint {endpoint}; through its proxy settings it tried to reach "
+        + (f"{places}, each refused" if tried else "nothing else")
+        + " (a connection that ignores the proxy settings is not seen)"
+    )
+    return {"detail": detail, "tried_to_reach": list(tried)}
+
+
+def claude_code_fixed_credentials(directory: Path | None = None) -> dict[str, Any]:
+    """Which credential files Claude Code would read whatever HOME says: their paths only, never read here.
+
+    Claude Code 2.1.289 reads ``.oauth_token`` and its siblings from
+    `CLAUDE_CODE_FIXED_CREDENTIALS`, a Claude Code cloud container's own
+    credential, whatever ``HOME`` and ``CLAUDE_CONFIG_DIR`` say, and tries
+    Anthropic's bootstrap calls with it. Where one is readable, the run's
+    Claude Code held a credential besides its route's key; the probe records
+    that, and its proxy refuses those calls in a scripted run.
+    """
+
+    directory = directory or CLAUDE_CODE_FIXED_CREDENTIALS
+    readable = [str(directory / name) for name in CLAUDE_CODE_FIXED_CREDENTIAL_FILES if os.access(directory / name, os.R_OK)]
+    detail = (
+        f"{', '.join(readable)} readable here, which Claude Code reads whatever HOME says (a Claude Code cloud "
+        "container's credential), so it held a credential besides ANTHROPIC_AUTH_TOKEN"
+        if readable
+        else "none readable"
+    )
+    return {"readable": readable, "detail": detail}
 
 
 class CodexLeg(SharedTransportLeg):
@@ -836,6 +962,7 @@ class CodexLeg(SharedTransportLeg):
         if self.ctx.options.scripted:
             self.agent = ScriptedCodexAgent(SCRIPTED_ANSWER)
             base_url = self.agent.base_url
+            self.ctx.route = replace(self.ctx.route, base_url=base_url)
         codex_home = Path(self.ctx.homes["CODEX_HOME"])
         toml = codex_home / "config.toml"
         toml.write_text(codex_config(self.ctx.route.model, base_url=base_url, scripted=self.ctx.options.scripted), encoding="utf-8")
@@ -927,6 +1054,7 @@ class CodexLeg(SharedTransportLeg):
             offered = any(ScriptedModel.is_agent(request) for request in requests) if requests and not code_mode else None
             write_json(self.ctx.out / "transcript" / "scripted-model-requests.json", requests)
         verdict = codex_verdict(room_calls=len(room_calls), turns=turns, wakes=len(self.invocations), tools_offered=offered)
+        self.harness_failures = codex_failures(turns)
         self.sandbox = codex_sandbox(self.runner.status(), list(integration.warnings), uncontained=UNCONTAINED_SANDBOXES)
         report = {
             "verdict": verdict,
@@ -955,6 +1083,16 @@ class CodexLeg(SharedTransportLeg):
             self._patch = None
         if self.agent is not None:
             self.agent.close()
+
+
+def codex_failures(turns: Sequence[Mapping[str, Any]]) -> list[str]:
+    """Each turn Codex ended in error, in its words: it fails the run, even one that posted first."""
+
+    return [
+        f"Codex ended a turn as {turn.get('status')}: {turn.get('error') or 'no detail'}"
+        for turn in turns
+        if turn.get("error") or turn.get("status") == "failed"
+    ]
 
 
 def codex_verdict(*, room_calls: int, turns: Sequence[Mapping[str, Any]], wakes: int, tools_offered: bool | None = None) -> str:
@@ -1078,6 +1216,7 @@ class HermesLeg(Leg):
             self.agent = ScriptedHermesAgent(SCRIPTED_ANSWER)
             model: Any = self.agent.model
             model_config = hermes_model_config(self.ctx.route.model, aux_tasks, scripted_base_url=self.agent.base_url)
+            self.ctx.route = replace(self.ctx.route, base_url=self.agent.base_url)
         else:
             # The kit's gateway reads only ``base_url`` of its model; the route replaces the whole block.
             model = SimpleNamespace(base_url=OPENROUTER)
@@ -1468,6 +1607,7 @@ def run_probe(options: Options) -> int:
     nunchi_env: dict[str, str] = {}
     homes: dict[str, str] = {}
     could_not_run = False
+    ctx: Context | None = None
     leg: Leg | None = None
     spend: SpendWatch | None = None
     scripted_attention: ScriptedAttention | None = None
@@ -1525,7 +1665,6 @@ def run_probe(options: Options) -> int:
             if index and not spend.may_continue(spec.name):
                 break
             moments.append(play_moment(leg, spec, settle_seconds=settle))
-        spend.read("after the last moment")
     except CouldNotRun as exc:
         could_not_run = True
         errors.append(str(exc))
@@ -1538,12 +1677,24 @@ def run_probe(options: Options) -> int:
                 leg.collect()
             except Exception as exc:
                 errors.append(f"collecting the record failed: {type(exc).__name__}: {exc}")
-            leg.close()
+            try:
+                leg.close()
+            except Exception as exc:
+                errors.append(f"closing the harness failed: {type(exc).__name__}: {exc}")
+        if spend is not None and not could_not_run:
+            # OpenRouter's usage figure lags: the last reading reads it up to a
+            # bound and keeps each read, after a failed run too.
+            try:
+                spend.settle("after the last moment")
+            except Exception as exc:
+                errors.append(f"the last spend reading failed: {type(exc).__name__}: {exc}")
         if scripted_attention is not None:
             scripted_attention.close()
         os.environ.clear()
         os.environ.update(original_env)
         tempfile.tempdir = original_tempdir
+        # urlopen keeps the proxy settings it saw at its first call: the next call builds anew.
+        urllib.request.install_opener(None)
     after = [home_snapshot(path) for path in user_homes]
     if leg is not None:
         try:
@@ -1555,7 +1706,8 @@ def run_probe(options: Options) -> int:
     document = _record(
         options=options,
         leg=leg,
-        route=route,
+        # The route as the leg set it up: a scripted run's points at its scripted endpoint.
+        route=ctx.route if ctx is not None else route,
         base=base,
         homes=homes,
         nunchi_env=nunchi_env,
@@ -1717,7 +1869,7 @@ def _checks(
             not_as_configured=leg.not_as_configured,
         ),
         checks_module.record_complete(document, require_wheel=bool(document["nunchi"].get("wheel"))),
-        checks_module.turns_bound_and_ended(leg.invocations, host_receipts, leg.committed),
+        checks_module.turns_bound_and_ended(leg.invocations, host_receipts, leg.committed, harness_failures=leg.harness_failures),
         checks_module.turns_on_others_messages(
             leg.invocations,
             [delivery.get("event_id") for moment in document["moments"] for delivery in moment.get("deliveries", ())],
@@ -1727,9 +1879,10 @@ def _checks(
         checks_module.no_leaks(leg.committed, leg.room_effects(), ids, known_gaps=leg.known_gaps),
     ]
     if scripted:
-        codex = leg.reports.get("codex") or {}
+        # Codex and Claude Code post through a room tool; Hermes posts its final answer itself.
+        report = leg.reports.get("codex") or leg.reports.get("claude_code") or {}
         checks.append(
-            checks_module.scripted_outcomes(document["moments"], SCRIPTED_ANSWER, room_tool_called=codex.get("room_tool_called"))
+            checks_module.scripted_outcomes(document["moments"], SCRIPTED_ANSWER, room_tool_called=report.get("room_tool_called"))
         )
     return checks
 
@@ -1780,6 +1933,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--agent-model", default=DEFAULT_AGENT_MODEL)
     parser.add_argument("--attention-model", default=DEFAULT_ATTENTION_MODEL, help="an OpenRouter id, optionally @effort")
     parser.add_argument("--scripted", action="store_true", help="offline: scripted model endpoints, no key, no network")
+    parser.add_argument(
+        "--no-sandbox",
+        action="store_true",
+        help="claude-code only: run without its README's Bash sandbox, where bubblewrap cannot run (recorded as off; CI never passes it)",
+    )
     parser.add_argument("--wheel", help="the Nunchi wheel installed for this run, to record its sha256")
     parser.add_argument("--claude-bin", help="the pinned claude executable (else NUNCHI_CLAUDE_BIN, else claude on PATH)")
     parser.add_argument("--codex-bin", help="the pinned codex executable (else NUNCHI_CODEX_BIN, else codex on PATH)")
@@ -1793,9 +1951,9 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     args = _parser().parse_args(arguments)
-    if args.harness == "claude-code" and args.scripted:
-        print(NOT_YET, file=sys.stderr)
-        return EXIT_NOT_YET
+    if args.no_sandbox and args.harness != "claude-code":
+        print("--no-sandbox is for claude-code only: Codex and Hermes start without bubblewrap and record their sandbox", file=sys.stderr)
+        return EXIT_USAGE
     if args.budget_usd <= 0:
         print("--budget-usd must be positive", file=sys.stderr)
         return EXIT_USAGE
@@ -1813,6 +1971,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         agent_model=args.agent_model,
         attention_model=args.attention_model,
         scripted=args.scripted,
+        sandbox=not args.no_sandbox,
         wheel=Path(args.wheel).absolute() if args.wheel else None,
         claude_bin=args.claude_bin,
         codex_bin=args.codex_bin,

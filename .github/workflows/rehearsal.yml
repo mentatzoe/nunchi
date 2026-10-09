@@ -14,8 +14,11 @@ name: rehearsal
 # every output for the key and for a planted canary, and a hit deletes the
 # outputs and fails the job. The summary and the upload run only after a
 # clean scan, so an unscanned output is never uploaded. The spend watchdog
-# reads the key's usage between moments and stops a probe run at budget_usd;
-# it is a soft limit (docs/rehearsal.md, Cost).
+# reads the key's usage between moments and stops a probe run at budget_usd,
+# and after the last moment reads the lagging usage figure for about 75 s,
+# keeping each read and the last figure as the settled one. It is a record and
+# a soft limit between moments, never a limit inside one (docs/rehearsal.md,
+# Cost).
 #
 # The Codex job also runs the labelled OpenAI-model arm (design choice 5,
 # docs/rehearsal.md, R3) after its main run, whether that passed or failed:

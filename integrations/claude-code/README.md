@@ -231,3 +231,15 @@ claude plugin test src/nunchi/integrations/claude_code_mod
 ```
 
 CI runs all three; the last two run against the pinned Claude Code version.
+
+The rehearsal probe ([docs/rehearsal.md](../../docs/rehearsal.md)) runs the
+real `claude -p` with this mod through a room turn, with the user settings
+from "Keep Bash in Claude Code's sandbox". Offline (`--scripted`), its model
+is a scripted Anthropic Messages endpoint and nothing needs a key; CI's
+`claude-code-mod` job runs it on every push, sandbox on, after the two
+commands above. Its first live run, on 2026-10-09, put a live model through
+the mod in a stand-in room and passed; that is not a real room.
+
+```sh
+NUNCHI_CLAUDE_BIN=/path/to/claude python3 -m evals.rehearsal.probe --harness claude-code --scripted --out rehearsal-out
+```

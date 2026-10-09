@@ -9,8 +9,9 @@ command, and complete result. The probe writes, under ``<out>/<harness>/``:
   configs name variables, never their values), every command the probe and
   the integrations ran with the names of its environment's variables, the
   variable names of the harness's other processes (Hermes's own, and what
-  its builders give the agent's commands), the spend before and after
-  against the budget, each moment, and the checks;
+  its builders give the agent's commands), the spend readings against the
+  budget (the last one reads the lagging usage figure up to a bound and keeps
+  each read), each moment, and the checks;
 - ``checks.json`` and ``summary.md`` (written even when the run fails), and
   ``scan.json``, the key and canary scan over all of it (`scan.enforce`);
 - the participant's receipts, the stand-in's wire log, and the harness's own
@@ -251,19 +252,26 @@ def recording_app_server(transcript: JsonLines, launched: list[dict[str, Any]]) 
     return RecordingAppServer
 
 
-def recording_claude_session(transcript: JsonLines, launched: list[list[str]]) -> type:
+def recording_claude_session(
+    transcript: JsonLines, launched: list[dict[str, Any]], environment: Mapping[str, str] | None = None
+) -> type:
     """`ClaudeCodeSession`, also writing its stream-json both ways and its stderr to ``transcript``.
 
+    ``environment`` is merged into the session's own before each launch: a
+    scripted run's proxy settings, which only Claude Code's processes get.
     ``launched`` gets each process the session starts: argv, cwd and
     environment (kept in memory; the record keeps only the variable names).
     """
 
     from nunchi.integrations.claude_code_gate import ClaudeCodeSession
 
+    extra = dict(environment or {})
+
     class RecordingClaudeSession(ClaudeCodeSession):
         _starting = False
 
         def start(self) -> None:
+            self.environment.update(extra)
             self._starting = True
             try:
                 super().start()
@@ -438,6 +446,16 @@ def summary_markdown(run: Mapping[str, Any]) -> str:
         if isinstance(sandbox, Mapping) and "on" in sandbox:
             state = {True: "on", False: "off"}.get(sandbox["on"], "not known")
             lines.append(f"- {key} sandbox: {state} ({sandbox.get('detail')})")
+    for key, value in reports.items():
+        # Where a scripted harness reached, and what else it tried to (Claude Code's refusing proxy).
+        network = value.get("network") if isinstance(value, Mapping) else None
+        if isinstance(network, Mapping) and network.get("detail"):
+            lines.append(f"- {key} network: {network['detail']}")
+    for key, value in reports.items():
+        # A credential the harness reads from a fixed path, whatever HOME says (Claude Code in a cloud container).
+        credentials = value.get("fixed_credentials") if isinstance(value, Mapping) else None
+        if isinstance(credentials, Mapping) and credentials.get("readable"):
+            lines.append(f"- {key} credential files: {credentials.get('detail')}")
     lines.append("")
     moments = run.get("moments", ())
     if moments:
@@ -489,9 +507,22 @@ def summary_markdown(run: Mapping[str, Any]) -> str:
         lines += [
             "## Spend",
             "",
-            f"- Budget: ${spend.get('budget_usd')} ({spend.get('limit')})",
+            f"- Budget: ${spend.get('budget_usd')} per probe run ({spend.get('limit')})",
             f"- Spent according to the key's usage: {spend.get('spent_usd')}",
         ]
+        readings = spend.get("readings") or ()
+        last = readings[-1] if readings and isinstance(readings[-1], Mapping) else {}
+        if "series" in last:
+            # The last reading read the lagging figure up to its bound; the last figure is the settled one.
+            settled = last.get("usage")
+            lines += [
+                f"- Last reading, after the last moment: {len(last['series'])} read(s) over {last.get('waited_seconds')} s, "
+                f"up to the bound of {last.get('wait_bound_seconds')} s; the settled figure is the last one read "
+                f"({settled if settled is not None else 'none: no read gave a figure'}), "
+                "and charges posted after the bound are missed",
+                "- Each read, as seconds after the last moment: usage (the lag shows here): "
+                + "; ".join(f"{at}: {'not read' if usage is None else usage}" for at, usage in last["series"]),
+            ]
         if spend.get("stopped_before"):
             lines.append(f"- Stopped before: {spend['stopped_before']}")
         if not spend.get("read"):

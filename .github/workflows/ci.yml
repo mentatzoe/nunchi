@@ -173,10 +173,22 @@ jobs:
           echo "packaging smoke OK"
 
   claude-code-mod:
+    # The mod validated and tested against the pinned Claude Code, then the
+    # rehearsal probe through the real `claude -p` and the mod on a clean
+    # install of the same version, offline: a scripted Anthropic Messages
+    # endpoint as the model (ANTHROPIC_BASE_URL), scripted attention, no key,
+    # and a proxy that refuses, and records, whatever else Claude Code sends
+    # through its proxy settings (docs/rehearsal.md). Each moment's outcome
+    # and the room tool call are hard checks, so the mod's first real turn is
+    # checked on every push. Bash runs in Claude Code's sandbox, as the
+    # README's user settings say, so bubblewrap and socat are installed as in
+    # the rehearsal workflow. The probe's tests run here, where Claude Code is
+    # installed, so the scripted probe's own test runs too.
     name: Claude Code mod
     runs-on: ubuntu-latest
     env:
       # The mod needs the mods API; keep this at or above MINIMUM_CLAUDE_CODE.
+      # The rehearsal probe checks it against its pin (evals/rehearsal/routes.py, PINS).
       CLAUDE_CODE_VERSION: "2.1.289"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -184,3 +196,39 @@ jobs:
         run: npx --yes "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" plugin validate --strict src/nunchi/integrations/claude_code_mod
       - name: Run the mod's tests against the pinned Claude Code
         run: npx --yes "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" plugin test src/nunchi/integrations/claude_code_mod
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install Nunchi's wheel and the pinned Claude Code in clean locations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip wheel --no-deps . --wheel-dir "$RUNNER_TEMP/nunchi-wheels"
+          python -m venv "$RUNNER_TEMP/claude-env"
+          "$RUNNER_TEMP/claude-env/bin/python" -m pip install --no-deps "$RUNNER_TEMP"/nunchi-wheels/*.whl
+          mkdir -p "$RUNNER_TEMP/claude"
+          npm install --prefix "$RUNNER_TEMP/claude" --no-audit --no-fund "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+          echo "NUNCHI_CLAUDE_BIN=$RUNNER_TEMP/claude/node_modules/.bin/claude" >> "$GITHUB_ENV"
+      - name: Install bubblewrap for Claude Code's sandbox
+        # As in the rehearsal workflow: Claude Code's Bash sandbox needs
+        # bubblewrap and socat, and Ubuntu 24.04 restricts unprivileged user
+        # namespaces through AppArmor. With the README's failIfUnavailable,
+        # no session starts without them, and the probe fails.
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y -q bubblewrap socat
+          if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = "1" ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --ro-bind / / true || { echo "::error::bubblewrap cannot run here, so Claude Code's sandbox in its README's user settings cannot start"; exit 1; }
+      - name: The rehearsal probe through claude -p, scripted (docs/rehearsal.md)
+        # With the README's sandbox on: this step never passes --no-sandbox.
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/claude-env/bin/python" -m unittest tests.v2.test_rehearsal -v
+          "$RUNNER_TEMP/claude-env/bin/python" -m evals.rehearsal.probe --harness claude-code --scripted \
+            --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-out"
