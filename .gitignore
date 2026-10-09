@@ -45,3 +45,6 @@ src/nunchi/integrations/claude_code_mod/.claude-plugin/types/
 
 # Behavior evaluation output (evals/behavior/run.py)
 behavior-eval-out/
+
+# Rehearsal output (evals/rehearsal/probe.py): transcripts stay out of git until scanned and accepted
+rehearsal-out/

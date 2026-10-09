@@ -1,0 +1,257 @@
+name: rehearsal
+
+# MANUAL ONLY. The step 9f probe (docs/rehearsal.md): each real harness, on a
+# clean, pinned install, with a live model through OpenRouter, takes part in
+# two moments of a room through Nunchi. It costs money (estimated under $1 for
+# all three harnesses), so it never runs on push or pull_request. A job passes
+# only when the harness reached its model and took part in the room through
+# Nunchi, with attention judging (docs/rehearsal.md, What a pass means);
+# whether a moment got a post is reported, not judged.
+#
+# The key comes from the NUNCHI_OPENROUTER repository secret, and only the
+# probe and scan steps see it. The scan is its own step and runs whatever
+# happened before it, a probe step's timeout or a cancel included: it reads
+# every output for the key and for a planted canary, and a hit deletes the
+# outputs and fails the job. The summary and the upload run only after a
+# clean scan, so an unscanned output is never uploaded. The spend watchdog
+# reads the key's usage between moments and stops a probe run at budget_usd;
+# it is a soft limit (docs/rehearsal.md, Cost).
+#
+# The Codex job also runs the labelled OpenAI-model arm (design choice 5,
+# docs/rehearsal.md, R3) after its main run, whether that passed or failed:
+# the same probe with codex_openai_model as the agent's model, recorded under
+# rehearsal-out/openai-arm/ and reported on its own, so that a refusal of
+# Codex's namespace tools on a Claude model can be told apart from a failure
+# of the route. An empty codex_openai_model skips it.
+on:
+  workflow_dispatch:
+    inputs:
+      harness:
+        description: Which harness to probe
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - claude-code
+          - codex
+          - hermes
+      agent_model:
+        description: The agent's model, an OpenRouter id (for Claude Code, a Claude slug in evals/rehearsal/routes.py CLAUDE_CODE_MODELS)
+        required: true
+        default: anthropic/claude-haiku-4.5
+      attention_model:
+        description: The attention model, an OpenRouter id, optionally @effort
+        required: true
+        default: openai/gpt-6-luna@low
+      budget_usd:
+        description: Stop before the next moment once the key has spent this much in a probe run (soft limit)
+        required: true
+        default: "2"
+      codex_openai_model:
+        description: The Codex job's labelled OpenAI-model arm (R3), run after its main run, an OpenRouter openai/ id; empty skips it
+        required: false
+        default: openai/gpt-6-luna
+
+permissions:
+  contents: read
+
+# One rehearsal at a time, so each job's spend reading is its own.
+concurrency:
+  group: rehearsal
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: probe (${{ matrix.harness }})
+    runs-on: ubuntu-latest
+    # Two probe runs of up to 30 minutes each in the Codex job.
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        harness: ${{ fromJSON(inputs.harness == 'all' && '["claude-code","codex","hermes"]' || format('["{0}"]', inputs.harness)) }}
+    env:
+      CLAUDE_CODE_VERSION: "2.1.289"
+      CODEX_VERSION: "0.160.1"
+    steps:
+      # Pinned as in the other workflows: v7.0.1 (the v7 tag), v6.3.0 (the v6 tag),
+      # and upload-artifact v7.0.1 (the v7 tag has since moved to v7.0.2, cf430e03).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The agent has a shell: leave it no GitHub token in .git/config.
+          persist-credentials: false
+      - name: Check out Hermes
+        if: matrix.harness == 'hermes'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: NousResearch/hermes-agent
+          ref: a50406d9b7474b060450d2dcaff8743c977d296a
+          path: hermes-agent
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          # Current Hermes gates its core dependencies on Python 3.14.
+          python-version: ${{ matrix.harness == 'hermes' && '3.14' || '3.12' }}
+      - name: Build Nunchi's wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip wheel --no-deps . --wheel-dir "$RUNNER_TEMP/nunchi-wheels"
+          sha256sum "$RUNNER_TEMP"/nunchi-wheels/*.whl
+          echo "NUNCHI_WHEEL=$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" >> "$GITHUB_ENV"
+      - name: Install the pinned Codex in a clean location
+        if: matrix.harness == 'codex'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/env"
+          "$RUNNER_TEMP/env/bin/python" -m pip install --no-deps "$NUNCHI_WHEEL"
+          mkdir -p "$RUNNER_TEMP/codex"
+          npm install --prefix "$RUNNER_TEMP/codex" --no-audit --no-fund "@openai/codex@${CODEX_VERSION}"
+          echo "NUNCHI_CODEX_BIN=$RUNNER_TEMP/codex/node_modules/.bin/codex" >> "$GITHUB_ENV"
+      - name: Install the pinned Claude Code in a clean location
+        if: matrix.harness == 'claude-code'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/env"
+          "$RUNNER_TEMP/env/bin/python" -m pip install --no-deps "$NUNCHI_WHEEL"
+          mkdir -p "$RUNNER_TEMP/claude"
+          npm install --prefix "$RUNNER_TEMP/claude" --no-audit --no-fund "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+          echo "NUNCHI_CLAUDE_BIN=$RUNNER_TEMP/claude/node_modules/.bin/claude" >> "$GITHUB_ENV"
+      - name: Install bubblewrap for the harness's sandbox
+        # Each README's user settings sandbox the agent's commands with
+        # bubblewrap: Claude Code's Bash sandbox (which also needs socat), and
+        # Codex's workspace-write sandbox, which on Linux needs a bwrap that can
+        # create user namespaces (codex-rs/linux-sandbox/README.md at 0.160.1;
+        # without one on PATH Codex falls back to its bundled copy and warns).
+        # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor.
+        if: matrix.harness == 'claude-code' || matrix.harness == 'codex'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y -q bubblewrap socat
+          if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = "1" ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --ro-bind / / true || { echo "::error::bubblewrap cannot run here, so the ${{ matrix.harness }} sandbox in its README's user settings cannot start"; exit 1; }
+      - name: Install untouched Hermes and Nunchi's wheel in a clean virtualenv
+        if: matrix.harness == 'hermes'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/env"
+          "$RUNNER_TEMP/env/bin/python" -m pip install --upgrade pip
+          git clone --no-local --no-checkout hermes-agent "$RUNNER_TEMP/stock-hermes"
+          git -C "$RUNNER_TEMP/stock-hermes" checkout --detach "$(git -C hermes-agent rev-parse HEAD)"
+          "$RUNNER_TEMP/env/bin/python" -m pip install -e "$RUNNER_TEMP/stock-hermes[messaging]"
+          "$RUNNER_TEMP/env/bin/python" -m pip install --no-deps "$NUNCHI_WHEEL"
+      - name: Make the canary
+        # A random value in the harness's environment that no *_env key names,
+        # so only the scan can catch it in an output. Made here, masked, and
+        # handed to the probe and the scan steps through the job's environment.
+        shell: bash
+        run: |
+          set -euo pipefail
+          canary="canary-$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
+          echo "::add-mask::$canary"
+          echo "REHEARSAL_CANARY=$canary" >> "$GITHUB_ENV"
+      - name: Probe
+        # The probe runs the harness as a clean user and records variable
+        # names, never values. It scans its own outputs when it ends; the scan
+        # step scans them again, whether or not this step ended.
+        timeout-minutes: 30
+        env:
+          NUNCHI_ATTENTION_API_KEY: ${{ secrets.NUNCHI_OPENROUTER }}
+          ANTHROPIC_AUTH_TOKEN: ${{ matrix.harness == 'claude-code' && secrets.NUNCHI_OPENROUTER || '' }}
+          OPENROUTER_API_KEY: ${{ matrix.harness != 'claude-code' && secrets.NUNCHI_OPENROUTER || '' }}
+          HARNESS: ${{ matrix.harness }}
+          AGENT_MODEL: ${{ inputs.agent_model }}
+          ATTENTION_MODEL: ${{ inputs.attention_model }}
+          BUDGET_USD: ${{ inputs.budget_usd }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          if [ -z "${NUNCHI_ATTENTION_API_KEY:-}" ]; then
+            echo "::error::The NUNCHI_OPENROUTER secret is not set."
+            exit 1
+          fi
+          "$RUNNER_TEMP/env/bin/python" -m evals.rehearsal.probe \
+            --harness "$HARNESS" \
+            --out rehearsal-out \
+            --budget-usd "$BUDGET_USD" \
+            --agent-model "$AGENT_MODEL" \
+            --attention-model "$ATTENTION_MODEL" \
+            --wheel "$NUNCHI_WHEEL"
+      - name: Probe Codex on an OpenAI model (the labelled R3 arm)
+        # After the main run, whether it passed or failed: the same route and
+        # attention, an OpenAI model as the agent's. Its record and summary
+        # are its own (rehearsal-out/openai-arm/codex/), and so is its exit.
+        if: ${{ !cancelled() && matrix.harness == 'codex' && inputs.codex_openai_model != '' }}
+        timeout-minutes: 30
+        env:
+          NUNCHI_ATTENTION_API_KEY: ${{ secrets.NUNCHI_OPENROUTER }}
+          OPENROUTER_API_KEY: ${{ secrets.NUNCHI_OPENROUTER }}
+          AGENT_MODEL: ${{ inputs.codex_openai_model }}
+          ATTENTION_MODEL: ${{ inputs.attention_model }}
+          BUDGET_USD: ${{ inputs.budget_usd }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          "$RUNNER_TEMP/env/bin/python" -m evals.rehearsal.probe \
+            --harness codex \
+            --arm "OpenAI-model arm for R3" \
+            --out rehearsal-out/openai-arm \
+            --budget-usd "$BUDGET_USD" \
+            --agent-model "$AGENT_MODEL" \
+            --attention-model "$ATTENTION_MODEL" \
+            --wheel "$NUNCHI_WHEEL"
+      - name: Scan every output for the key and the canary
+        # Runs after a failure, a timeout or a cancel of the probe step too.
+        # One secret goes in under every key variable, so its value and the
+        # canary's are all there is to look for. A hit deletes the outputs and
+        # fails this step; the leak notice (files and variables, never a
+        # value) goes to the job summary, and nothing is uploaded.
+        id: scan
+        if: always()
+        timeout-minutes: 5
+        env:
+          NUNCHI_ATTENTION_API_KEY: ${{ secrets.NUNCHI_OPENROUTER }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          status=0
+          "$RUNNER_TEMP/env/bin/python" -m evals.rehearsal.scan --out rehearsal-out \
+            --env NUNCHI_ATTENTION_API_KEY --env REHEARSAL_CANARY || status=$?
+          if [ "$status" -ne 0 ] && [ -f rehearsal-out/summary.md ]; then
+            cat rehearsal-out/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+      - name: Summary
+        if: always() && steps.scan.outcome == 'success'
+        env:
+          HARNESS: ${{ matrix.harness }}
+          ARM_MODEL: ${{ inputs.codex_openai_model }}
+        shell: bash
+        run: |
+          show() {
+            if [ -f "$1" ]; then cat "$1" >> "$GITHUB_STEP_SUMMARY"; else echo "$2" >> "$GITHUB_STEP_SUMMARY"; fi
+          }
+          show "rehearsal-out/$HARNESS/summary.md" "The probe wrote no summary: it did not end (see the probe step's log)."
+          if [ "$HARNESS" = codex ] && [ -n "$ARM_MODEL" ]; then
+            echo >> "$GITHUB_STEP_SUMMARY"
+            show rehearsal-out/openai-arm/codex/summary.md \
+              "The OpenAI-model arm wrote no summary: it did not run or did not end (see its step's log)."
+          fi
+      - name: Upload the record
+        if: always() && steps.scan.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rehearsal-${{ matrix.harness }}-${{ github.run_id }}
+          path: rehearsal-out/
+          if-no-files-found: ignore
