@@ -13,6 +13,64 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- The rehearsal probe, step 9f's first rehearsal (`evals/rehearsal/`,
+  [docs/rehearsal.md](docs/rehearsal.md)): **implemented, unverified**, run
+  offline only. `python -m evals.rehearsal.probe --harness
+  {claude-code,codex,hermes}` runs one harness on its pinned install, as a
+  clean user, with a live agent model and live attention through
+  OpenRouter, in two moments of an in-process stand-in room: a bot's status
+  report (no turn expected) and a direct question (one post expected).
+  A run passes only when the harness reached its model and took part in
+  the room through Nunchi, with attention judging. It fails, with every
+  reason at the top of `summary.md`, when no wake reached the harness; a
+  turn failed, was cancelled or outlived the host's deadline (the
+  participant-host receipt decides); attention never returned a judgment;
+  a turn made more than one room action, or one was not delivered (`sent`
+  through a stand-in that applies the shared transport's own `ToolExecutor`
+  checks, or, for Hermes, exactly what the room received); the room got
+  anything the library did not commit, a declared Hermes gap included, or
+  a committed post names Nunchi's machinery (the conformance kit's leak
+  count); a turn started on a message no one else posted; the pins, the clean user or the record did not hold, a process
+  got a key it should not have, or Claude Code showed it ran otherwise than
+  configured; the probe raised an error; or the key or a planted canary
+  (`REHEARSAL_CANARY`) is in an output. That scan reads each file as
+  written and normalized, for each value raw, in base64 and in hex, and a
+  hit deletes the outputs. In a live run, whether each moment went as
+  expected is reported, not judged; a moment whose graded message never
+  reached Nunchi reads `not delivered`, and a pass with no post delivered
+  says the room tools were not exercised. Claude Code runs on a slug the
+  probe maps to Claude Code's own model id (`modelOverrides` in the clean
+  user's settings), so Claude Code 2.1.289 sends Haiku 4.5 the request
+  shape that model takes; a slug with no mapping is refused. Hermes runs
+  with its README's peer-agent settings (`discord.allow_bots: all`), so it
+  hears the bot's status report. Nunchi's own keys stay in Nunchi's
+  process: beside Hermes, which runs the plugin in its own process,
+  attention reads Hermes's `OPENROUTER_API_KEY`, which Hermes strips from
+  the agent's terminal. A spend watchdog reads the key's usage between
+  moments and stops at `budget_usd` (a soft limit). Each run writes
+  `run.json` (commit, wheel sha256, versions, binding, models and served
+  providers, every config with its sha256, every command and process with
+  the names of its variables, each harness's report and sandbox state,
+  spend, moments, checks), `checks.json`, `summary.md`, `scan.json` and the
+  harness's own transcript (for Hermes, its sessions from `state.db`).
+  `summary.md` leads with each harness's verdict in full: for Codex whether
+  a room tool was called, naming the namespace-tool block (R3) only on
+  evidence; for Claude Code whether the mod attached and bound the turn
+  and the model answered, or its first error; for Hermes whether the plugin
+  loaded and its model calls. The manual `rehearsal` workflow runs it per
+  harness, with the `NUNCHI_OPENROUTER` secret in the probe and scan steps
+  only. The scan is its own step, run even after the probe step times out
+  or is cancelled, and the record is shown and uploaded only after a clean
+  scan. The Claude Code and Codex jobs install bubblewrap for their
+  sandboxes. The Codex job also runs the labelled OpenAI-model arm for R3
+  after its main run (`codex_openai_model`, default `openai/gpt-6-luna`;
+  empty skips it), recorded and reported on its own. `--scripted` runs the
+  probe offline for Codex and Hermes on scripted model endpoints, where
+  each moment's outcome is a hard check; it and the probe's tests are steps
+  in their CI lanes. Claude Code's scripted lane waits for a scripted
+  Anthropic Messages endpoint (PR 2); its leg is tested with a faked
+  `claude`, failures included, and was run by hand with the pinned Claude
+  Code against a local Messages endpoint.
 - The leak count in the turn conformance kit
   ([leak audit in #135](https://github.com/mentatzoe/nunchi/issues/135#issuecomment-6057394431),
   rows 2 and 7). After every scenario the kit checks that the room received

@@ -115,6 +115,12 @@ plus a `hermes` section:
   tokens live in Hermes's own process: the plugin runs there and cannot
   keep them out. The guard keeps their values out of the room. Prefer the
   `hermes-host` attention model, which needs no key of Nunchi's own.
+  Otherwise, name Hermes's own variable for that provider as `api_key_env`
+  (`OPENROUTER_API_KEY` for OpenRouter): Hermes strips its provider keys
+  from the environment of the agent's terminal and code tools, but passes a
+  name it does not know, such as `NUNCHI_ATTENTION_API_KEY`, to the agent's
+  shell (checked against Hermes `a50406d9`'s `_make_run_env` and
+  `_sanitize_subprocess_env`).
 
 ## Hermes setup the room needs
 

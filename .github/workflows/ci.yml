@@ -74,6 +74,18 @@ jobs:
       - name: Plugin tests inside the gateway
         run: |
           "$RUNNER_TEMP/hermes-env/bin/python" -m unittest tests.v2.test_hermes_plugin -v
+      - name: The rehearsal probe through Hermes, scripted (docs/rehearsal.md)
+        # The same probe the manual rehearsal workflow runs live, offline: the
+        # kit's scripted model endpoint, scripted attention, no key. With both
+        # scripted, each moment's outcome is a hard check, so the probe fails
+        # when the scripted turn does not happen. Its tests run here, where
+        # Hermes is installed, so the scripted probe's own test runs too.
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/hermes-env/bin/python" -m unittest tests.v2.test_rehearsal -v
+          "$RUNNER_TEMP/hermes-env/bin/python" -m evals.rehearsal.probe --harness hermes --scripted \
+            --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-out"
 
   codex-app-server:
     # The turn conformance kit and the integration's tests through a real
@@ -109,6 +121,19 @@ jobs:
       - name: Integration tests through codex app-server
         run: |
           "$RUNNER_TEMP/codex-env/bin/python" -m unittest tests.v2.test_codex_app_server -v
+      - name: The rehearsal probe through codex app-server, scripted (docs/rehearsal.md)
+        # The same probe the manual rehearsal workflow runs live, offline: the
+        # kit's scripted Responses endpoint, scripted attention, no key. With
+        # both scripted, each moment's outcome and the room tool call are hard
+        # checks, so the probe fails when the scripted turn does not happen.
+        # Its tests run here, where Codex is installed, so the scripted probe's
+        # own test runs too.
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/codex-env/bin/python" -m unittest tests.v2.test_rehearsal -v
+          "$RUNNER_TEMP/codex-env/bin/python" -m evals.rehearsal.probe --harness codex --scripted \
+            --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-out"
 
   package:
     name: clean-install packaging

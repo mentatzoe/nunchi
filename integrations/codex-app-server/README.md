@@ -74,8 +74,11 @@ plus a `codex` section:
   `DISCORD_BOT_TOKEN`). Every other variable the config names in a `*_env`
   key, such as the transport's `output_key_env` or an attention route's
   `api_key_env`, is withheld the same way. Every `NUNCHI_*` variable is kept
-  out of Codex's environment. The rest of the environment, including the
-  agent's own model credentials, is the user's.
+  out of Codex's environment. The room's MCP server, which Codex starts from
+  the thread's config, gets two of its own: `NUNCHI_CODEX_TURN_SOCKET` (the
+  socket path) and `NUNCHI_CODEX_TURN_SESSION` (the room tools' per-launch
+  secret). The rest of the environment, including the agent's own model
+  credentials, is the user's.
 - A room action that carries a withheld value, the room tools' launch secret
   or a Discord bot token's shape is refused; Codex sees a tool error and can
   act again without it.
