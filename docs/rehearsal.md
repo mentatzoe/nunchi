@@ -83,7 +83,8 @@ It does not prove:
   probe's process, on the conformance kit's Discord world, with the shipped
   plugin directory loaded from a Nunchi config written as its README says.
   `nunchi-mcp-discord`, discord.py's wire and the `hermes gateway` process
-  come with the Discord stand-in (PR 3).
+  come with PR 3: its Discord stand-in is built (below), and no process
+  runs on it yet.
 - **How well the agent reads the room.** Two moments, once each. The scenes,
   grading and a reference column come in PR 4.
 - **Hermes's own model as attention** (`hermes-host`). Attention is the same
@@ -173,6 +174,70 @@ sandbox on. `--no-sandbox` runs Claude Code without its Bash sandbox
 (`sandbox.enabled: false` in the clean user's settings) for a machine where
 bubblewrap cannot run; the run records the sandbox as off. It is for Claude
 Code only, and CI never passes it.
+
+## The Discord stand-in (PR 3a)
+
+**Status: implemented, unverified in CI; nothing runs on it yet.**
+`evals/rehearsal/fake_discord/` answers as Discord's REST API and gateway,
+so that the production Discord processes (`hermes gateway`,
+`nunchi-mcp-discord` with both runners, `nunchi-discord`) can later run on
+it unmodified: PR 3b brings Nunchi's own processes and the launcher that
+maps Discord's names to it, PR 3c `hermes gateway`. Here, offline, it has
+run against Nunchi's transport clients and against real discord.py 2.7.1 on
+Python 3.12 and 3.14.
+
+It is a library, `FakeDiscord`, on its own thread in the caller's process.
+It behaves like Discord wherever a column reads the room from:
+
+- **time**: each channel has a clock that only moves forward, and a thread
+  keeps its parent's. A message the director posts, as a person or a
+  scripted bot, takes its scene time, raised (and recorded) when that would
+  put its id before the clock's last; a bot's own post through REST is
+  stamped when it arrives, which brings the clock to the wall. Ids come
+  from the clock and only increase;
+- **who is addressed**: user and role mentions, `@everyone` and `@here`
+  only with MENTION_EVERYONE, a bot's `allowed_mentions`, and reply pings
+  (a world setting: Discord's default is unverified);
+- **what replies to what**: type 19, `message_reference` and
+  `referenced_message`, `fail_if_not_exists`, and the reference echoed in
+  the create response, which the transport's acknowledgement check needs;
+- **who wrote it**: people without `bot`; bots with `bot: true`, their
+  `nonce` echoed and `enforce_nonce` honored;
+- **who may see, post or react**: one permission function, Discord's
+  algorithm, behind fan-out, the 403s and the GETs the transport's reaction
+  capability reads;
+- **the agent's own limits**: 2000 characters, no empty message, 20
+  distinct reactions, and an approximate emoji check that refuses a word or
+  two emoji sent as one reaction.
+
+It serves only the routes something has been shown to call: login, posts,
+reactions, and the channel, member and roles reads. Any other route or host
+gets 599, as does a request field or body it does not model (a file's
+multipart, say) and a request it fails on. discord.py does not retry a 599;
+Nunchi's transport retries a GET three times (about 14 s), and each attempt
+is recorded. Each of those, an unknown gateway op (closed with 4001), a
+gateway URL other than v10 JSON, a TLS name not Discord's, and a payload it
+sends without a key discord.py 2.7.1 requires (the shape pin,
+`discord_types.json`, read from `discord.types` by AST) is recorded as
+`unknown`, which fails the stand-in's verdict: Hermes swallows many REST
+errors, so the stand-in's own record decides. The director (PR 4) posts
+as a person or as a scripted bot that belongs to no harness, never as a
+harness's bot (every bot is a harness's, with a token, unless the world
+says `"harness": false`); creates threads; reconnects, invalidates, closes
+or drops a bot's gateway session; injects faults (a 429 with `Via` and a
+JSON body, as discord.py needs); moves a channel's clock; and waits on the
+wire.
+
+With an output directory it writes `world.json` (ids, roles, permissions and
+intents: what configs read, and the checklist for a real guild; never a
+token), `discord-wire.jsonl` (every TLS hello and completed handshake,
+exchange, frame and control call, each token replaced by `<bot:name>`) and
+`discord-standin.json` (what each bot did, every unknown and raised time,
+and the `fidelity` list of what is not modelled). Its tests are `tests/v2/test_fake_discord.py`
+(standard library, in the `test` job) and
+`tests/v2/test_fake_discord_discordpy.py` (in the `discord-standin` job on
+Python 3.12 and the `hermes-plugin` job on 3.14, each after `python -m
+evals.rehearsal.fake_discord.shapes --check`).
 
 ## What a pass means
 

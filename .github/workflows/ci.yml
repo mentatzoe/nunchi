@@ -32,6 +32,27 @@ jobs:
       - name: Verdict-suite CLI loads the corpus (smoke)
         run: python3 -m evals.verdict_suite.runner --list
 
+  discord-standin:
+    # The rehearsals' Discord stand-in (docs/rehearsal.md) through real
+    # discord.py, pinned as Hermes pins it; the test job drives it through
+    # Nunchi's own Discord clients. On Python 3.12 discord.py asks for
+    # zlib-stream; the hermes-plugin job runs the same checks on 3.14
+    # (zstd-stream). The pin check runs first, so a missing or other
+    # discord.py fails the job instead of skipping its tests.
+    name: Discord stand-in (discord.py 2.7.1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install the pinned discord.py
+        run: python -m pip install 'discord.py==2.7.1' 'aiohttp==3.14.3'
+      - name: The vendored shape pin matches discord.py 2.7.1
+        run: python -m evals.rehearsal.fake_discord.shapes --check
+      - name: The stand-in through discord.py
+        run: python -m unittest tests.v2.test_fake_discord_discordpy -v
+
   hermes-plugin:
     # The turn conformance kit and the plugin's tests inside a real Hermes
     # gateway, on a clean install of a pinned Hermes; only the model is
@@ -74,6 +95,12 @@ jobs:
       - name: Plugin tests inside the gateway
         run: |
           "$RUNNER_TEMP/hermes-env/bin/python" -m unittest tests.v2.test_hermes_plugin -v
+      - name: The Discord stand-in through Hermes's discord.py on Python 3.14 (docs/rehearsal.md)
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/hermes-env/bin/python" -m evals.rehearsal.fake_discord.shapes --check
+          "$RUNNER_TEMP/hermes-env/bin/python" -m unittest tests.v2.test_fake_discord_discordpy -v
       - name: The rehearsal probe through Hermes, scripted (docs/rehearsal.md)
         # The same probe the manual rehearsal workflow runs live, offline: the
         # kit's scripted model endpoint, scripted attention, no key. With both
