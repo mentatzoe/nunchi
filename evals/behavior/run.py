@@ -29,7 +29,6 @@ import json
 import os
 from pathlib import Path
 import platform
-import re
 import statistics
 import subprocess
 import sys
@@ -59,7 +58,7 @@ from nunchi.participant import (
 )
 from nunchi.participant_model import OpenAICompatibleParticipant
 from nunchi.pipeline import NunchiV2Pipeline
-from nunchi.turn import machinery_in
+from nunchi.turn import is_silence, machinery_in, without_taught_thinking
 from nunchi.receipts import ReceiptJournal
 
 from .scene import SCENES, Moment, Scene, load_scenes, parse_offset, profile_sha256
@@ -626,9 +625,10 @@ RAW_REPLY_MAX_CHARS = 4000
 # The leak count (2026-10-08): the room receives only what the library
 # committed, and nothing that names Nunchi's machinery. The core's
 # `machinery_in` is the one definition, shared with the conformance kit.
-# The <thinking> block final-answer posting teaches is the agent's private
-# place: what the model writes there is never counted as written for the room.
-_TAUGHT_THINKING = re.compile(r"<thinking\s*>.*?</thinking\s*>", re.S | re.I)
+# What counts as written for the room is a reply meant as a post: in
+# final-answer posting, a reply the library reads as silence is not one
+# (`nunchi.turn.is_silence`), and the <thinking> block the turn teaches is
+# the agent's private place (`nunchi.turn.without_taught_thinking`).
 
 
 def envelope_text(reply: Any) -> str | None:
@@ -651,17 +651,38 @@ def envelope_text(reply: Any) -> str | None:
 
 
 def written_machinery(
-    texts: Any, *, ids: tuple[str, ...] = (), final_answer: bool = False
+    texts: Any, *, ids: tuple[str, ...] = (), silence_marker: str | None = None
 ) -> list[str]:
-    """What the model wrote for the room that names Nunchi's machinery, before the library's commit."""
+    """What the model wrote for the room that names Nunchi's machinery, before the library's commit.
+
+    Each text is one reply: an envelope's message text, or with
+    ``silence_marker`` (final-answer posting) a plain reply. Only text meant
+    as a post counts: a final answer the library reads as silence posts
+    nothing, so its taught marker is not machinery written for the room, and
+    the taught ``<thinking>`` block is private.
+    """
 
     found: list[str] = []
     for text in texts or ():
-        if isinstance(text, str):
-            if final_answer:
-                text = _TAUGHT_THINKING.sub(" ", text)
-            found += machinery_in(text, ids=ids)
+        if not isinstance(text, str):
+            continue
+        if silence_marker is not None:
+            if is_silence(text, silence_marker):
+                continue
+            text = without_taught_thinking(text)
+        found += machinery_in(text, ids=ids)
     return list(dict.fromkeys(found))
+
+
+def turn_tool_names(agent: Any) -> tuple[str, ...]:
+    """The names the agent's turn gave its room tools, which a post must not name.
+
+    The eval's two arms offer none today: an envelope names action kinds,
+    and a final answer is the post itself.
+    """
+
+    names = getattr(getattr(agent, "inner", None), "tool_names", None)
+    return tuple(name for name in (names or {}).values() if isinstance(name, str)) if isinstance(names, Mapping) else ()
 
 
 def posted_machinery(action: Any, *, ids: tuple[str, ...] = ()) -> list[str]:
@@ -1117,9 +1138,9 @@ def judge_moment(
                 else reply
                 for reply in agent.replies
             ]
-        ids = (request["request_id"],)
-        final_answer = getattr(getattr(agent, "inner", None), "silence_marker", None) is not None
-        written = written_machinery(agent.written, ids=ids, final_answer=final_answer)
+        ids = (request["request_id"], *turn_tool_names(agent))
+        silence_marker = getattr(getattr(agent, "inner", None), "silence_marker", None)
+        written = written_machinery(agent.written, ids=ids, silence_marker=silence_marker)
         if written:
             record["agent"]["machinery_written"] = written
         posted = posted_machinery(agent.action, ids=ids)
@@ -1302,9 +1323,13 @@ def _agent_turn_sections(records: list[dict[str, Any]], *, paired: bool) -> list
             f"Leaks: in {wrote} of {len(turns)} turns the agent's model wrote Nunchi's "
             f"machinery for the room, and {leaked} of {len(posts)} posts carried it into the "
             "room (`nunchi.turn.machinery_in`: wake markers, the turn's tag, Nunchi tool names, "
-            "thinking tags, the silence marker, the turn's field names, its request id). The "
-            "library takes thinking and wake markers out of a post, and a marker after a "
-            "sentence is silence; the rest is posted as written.",
+            "thinking tags, the silence marker, the turn's field names, its request id). A "
+            "reply the library reads as silence is not counted as written. The library takes "
+            "wake markers out of a post (in final-answer posting also the taught <thinking> "
+            "block), and there a bare marker after a finished sentence is silence; in the "
+            "envelope arm such a marker is posted as written, and so is the rest, other "
+            "thinking tags included. Counts from runs before 2026-10-08 used another detector "
+            "and are not comparable.",
         ]
     looked = [record for record in turns if record["agent"].get("looked_again")]
     if looked:

@@ -975,8 +975,12 @@ class HermesRoomPlugin:
             return SILENCE_MARKER  # nothing posts without the library's commit
         answer = response_text or ""
         raw = run.raw_answer
-        if raw and raw != answer and split_private(raw)[0] == split_private(answer)[0]:
-            # Hermes took the agent's thinking out of the same answer; the
+        if (
+            raw
+            and raw != answer
+            and split_private(raw, final_answer=True)[0] == split_private(answer, final_answer=True)[0]
+        ):
+            # Hermes took the agent's <thinking> out of the same answer; the
             # library keeps it as the move's reason, and posts neither.
             answer = raw
         decision = self.participant.finish(turn_id=run.turn_id, answer=answer)

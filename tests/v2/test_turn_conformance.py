@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import unittest
 from unittest import mock
 
@@ -257,7 +258,7 @@ class LeakCountTests(unittest.TestCase):
                 self.assertEqual(("pass", 0, []), (result["status"], result["leak_count"], result["failures"]))
 
     def test_the_leak_scenarios_fail_when_the_library_posts_what_is_private(self):
-        def nothing_private(text):
+        def nothing_private(text, *, final_answer=False):
             return (text or "").strip(), ""
 
         with mock.patch.object(turn, "split_private", nothing_private):
@@ -268,12 +269,12 @@ class LeakCountTests(unittest.TestCase):
         # The leak count names the machinery the library committed.
         leaked = " ".join(results["leak"]["failures"])
         self.assertIn("a committed post names Nunchi's machinery", leaked)
-        self.assertIn("<think>", leaked)
         self.assertIn("<nunchi_wake", leaked)
         self.assertEqual(1, results["leak"]["leak_count"])
+        self.assertIn("<thinking>", " ".join(results["final-leak"]["failures"]))
 
     def test_the_trailing_marker_scenario_fails_when_it_is_not_silence(self):
-        with mock.patch.object(turn, "_ends_with_silence", lambda text, taught: False):
+        with mock.patch.object(turn, "_ends_with_silence", lambda text, marker: None):
             result = kit.run_scenario("final-trailing-silence", _reference("final-trailing-silence"))
         self.assertEqual("fail", result["status"])
         self.assertIn("expected silence", result["failures"][0])
@@ -281,7 +282,7 @@ class LeakCountTests(unittest.TestCase):
         self.assertTrue(any("[SILENT]" in failure for failure in result["failures"]), result["failures"])
 
     def test_the_detector_is_what_counts_committed_machinery(self):
-        def nothing_private(text):
+        def nothing_private(text, *, final_answer=False):
             return (text or "").strip(), ""
 
         with mock.patch.object(turn, "split_private", nothing_private), mock.patch.object(
@@ -348,13 +349,129 @@ class LeakCountTests(unittest.TestCase):
         self.assertEqual(("fail", 1), (result["status"], result["leak_count"]))
         self.assertIn("the room got a message: 'On it.', which the library never committed", result["failures"])
 
-    def test_without_visible_the_leak_count_is_not_applicable(self):
+    def test_without_visible_committed_posts_are_still_counted(self):
         class Unseen(kit.ReferenceIntegration):
             visible = None
 
         results = [kit.run_scenario(name, Unseen("tools")) for name in ("post", "leak")]
-        self.assertEqual([("pass", "n/a"), ("pass", "n/a")], [(r["status"], r["leak_count"]) for r in results])
-        self.assertTrue(kit.parity_table(results).endswith("| n/a |"))
+        self.assertEqual([("pass", 0, False)] * 2, [(r["status"], r["leak_count"], r["harness_counted"]) for r in results])
+        self.assertTrue(
+            kit.parity_table(results).endswith("| 0; committed posts only, what the harness showed is n/a |"),
+            kit.parity_table(results),
+        )
+        # A committed post that names machinery still fails (step 5 review #13).
+        names = kit.Scenario(
+            "tools",
+            "a post that names a field",
+            (("bind",), ("call", "send", {"text": "Per memory.own_moves I owe this."}), ("end", True)),
+            lambda played: [],
+        )
+        with mock.patch.dict(kit.SCENARIOS, {"names-a-field": names}):
+            for integration in (Unseen("tools"), kit.ReferenceIntegration("tools")):
+                with self.subTest(integration.name):
+                    result = kit.run_scenario("names-a-field", integration)
+                    self.assertEqual(("fail", 1), (result["status"], result["leak_count"]))
+                    self.assertIn("['memory.own_moves']", result["failures"][0])
+
+    def test_the_tools_the_agent_saw_are_internal_names(self):
+        class Named(kit.TurnParticipant):
+            def __init__(self, **kwargs):
+                kwargs["tool_names"] = {role: f"room_{role}" for role in kwargs["tool_names"]}
+                super().__init__(**kwargs)
+
+        bare = kit.Scenario(
+            "tools",
+            "a post that names a room tool",
+            (("bind",), ("call", "send", {"text": "I'll call room_context on it."}), ("end", True)),
+            lambda played: [],
+        )
+        with mock.patch.dict(kit.SCENARIOS, {"names-a-tool": bare}):
+            with mock.patch.object(kit, "TurnParticipant", Named):
+                named = kit.run_scenario("names-a-tool", kit.ReferenceIntegration("tools"))
+            # The reference's own names are plain words, which a post may use.
+            plain = kit.run_scenario("names-a-tool", kit.ReferenceIntegration("tools"))
+        self.assertEqual(("fail", 1), (named["status"], named["leak_count"]))
+        self.assertIn("['room_context']", " ".join(named["failures"]))
+        self.assertEqual("pass", plain["status"])
+
+    def test_real_posts_reach_the_room_as_written_and_are_not_counted_as_leaks(self):
+        for name in ("real-post", "final-real-post"):
+            with self.subTest(name):
+                result = kit.run_scenario(name, _reference(name))
+                self.assertEqual(("pass", 0, []), (result["status"], result["leak_count"], result["failures"]))
+
+    def test_the_real_post_scenarios_fail_when_the_library_changes_a_post(self):
+        # The commit check before the step 5 review: an unclosed <thinking>
+        # from anywhere, and closed pairs anywhere, code included.
+        def eager(text, *, final_answer=False):
+            text = re.sub(r"<(think|thinking|reasoning|thought)>.*?</\1>", "", text or "", flags=re.S | re.I)
+            text = re.sub(r"<thinking>.*\Z", "", text, flags=re.S | re.I)
+            return text.strip(), ""
+
+        # A wake marker read without its line: "<nunchi_wake" named in prose
+        # runs on to the next ">" (the step 5 check).
+        def greedy(text, *, final_answer=False):
+            return re.sub(r"</?nunchi_wake\b[^<>]*>", "", text or "", flags=re.I).strip(), ""
+
+        for split in (eager, greedy):
+            with self.subTest(split.__name__), mock.patch.object(turn, "split_private", split):
+                results = {name: kit.run_scenario(name, _reference(name)) for name in ("real-post", "final-real-post")}
+                for name, result in results.items():
+                    self.assertEqual("fail", result["status"], name)
+                self.assertIn("expected the post as written", " ".join(results["real-post"]["failures"]))
+        with mock.patch.object(turn, "split_private", eager):
+            self.assertIn("思考は", " ".join(kit.run_scenario("real-post", _reference("real-post"))["failures"]))
+
+    @staticmethod
+    def _harness_changes(change):
+        """A reference surface whose harness applies ``change`` to the answer before the library reads it."""
+
+        def finish(self, turn_id, answer):
+            self.participant.model_wrote(turn_id=turn_id, text=answer)
+            decision = self.participant.finish(turn_id=turn_id, answer=change(answer))
+            return self._posts(decision.kind, decision.text)
+
+        return mock.patch.object(kit._DirectSurface, "finish", finish)
+
+    def test_a_harness_that_changes_the_post_reads_gap_when_it_declares_it(self):
+        strips = lambda text: text.replace("<think>\n", "")  # noqa: E731
+
+        class Changes(kit.ReferenceIntegration):
+            known_gaps = (
+                kit.KnownGap("the harness strips tags (documented)", ("final-real-post",), "post", transform=strips),
+            )
+
+        with self._harness_changes(strips):
+            result = kit.run_scenario("final-real-post", Changes("final-answer"))
+            other = kit.run_scenario("final-real-post", kit.ReferenceIntegration("final-answer"))
+        self.assertEqual(("gap", 0), (result["status"], result["leak_count"]))
+        self.assertTrue(all("the harness strips tags (documented)" in gap for gap in result["gaps"]), result["gaps"])
+        self.assertEqual("fail", other["status"])
+
+    def test_a_declared_post_gap_still_fails_on_a_change_it_does_not_explain(self):
+        # The step 5 check: a declared gap must not hide a library or plugin regression.
+        strips = lambda text: text.replace("<think>\n", "")  # noqa: E731
+
+        class Declares(kit.ReferenceIntegration):
+            known_gaps = (
+                kit.KnownGap("the harness strips tags (documented)", ("final-real-post",), "post", transform=strips),
+            )
+
+        def eager(text, *, final_answer=False):
+            # A library regression: every tag pair cut, code included.
+            text = re.sub(r"<(think|thinking|reasoning|thought)>.*?</\1>", "", text or "", flags=re.S | re.I)
+            text = re.sub(r"<(think|thinking|reasoning|thought)>.*\Z", "", text, flags=re.S | re.I)
+            return text.strip(), ""
+
+        with mock.patch.object(turn, "split_private", eager):
+            regression = kit.run_scenario("final-real-post", Declares("final-answer"))
+        with self._harness_changes(lambda text: text.replace("<think>", "<t>")):
+            other_change = kit.run_scenario("final-real-post", Declares("final-answer"))
+        for result in (regression, other_change):
+            self.assertEqual("fail", result["status"], result)
+            self.assertFalse(result["gaps"], result)
+        with self.assertRaises(ValueError):
+            kit.KnownGap("no transform", ("final-real-post",), "post")
 
     def test_the_failure_scenarios_need_a_surface_that_can_fail_the_model(self):
         class NoFailure(kit.ReferenceIntegration):

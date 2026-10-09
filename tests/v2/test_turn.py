@@ -13,7 +13,7 @@ import threading
 import unittest
 
 from nunchi.participant import TransportResult
-from nunchi.turn import PRIVATE_ONLY_REFUSAL, WAKE_MARKER, SecretGuard, TurnError, TurnParticipant
+from nunchi.turn import MARKER_ONLY_REFUSAL, WAKE_MARKER, SecretGuard, TurnError, TurnParticipant
 from tests.v2.test_claude_code import OPPORTUNITY, PROFILE, test_wake
 
 NAMES = {
@@ -23,6 +23,68 @@ NAMES = {
     "withdraw": "take_back",
     "context": "look",
 }
+
+# Real posts that name or quote tags or the wake marker (the step 5 reviews'
+# probes): the agent meant each for the room, and every posting style posts it
+# as written. The core reads no tag in a tool or one-reply post, and in a
+# final answer only the <thinking> the turn teaches, which these do not hold:
+# native reasoning in other tags is the harness's job (Zoe).
+REAL_FINAL_ANSWERS = (
+    "DeepSeek R1 wraps its reasoning in `<think>...</think>` before the answer.",
+    "Hermes strips `<think>...</think>` blocks before posting.",
+    "Wrap the panel in the component:\n```jsx\n<Reasoning>{text}</Reasoning>\n```",
+    "Render <Reasoning>{steps}</Reasoning> above the answer.",
+    "The schema:\n```xml\n<thought>check inputs</thought>\n```",
+    "Here's what R1 returned:\n```\n<think>\nThe user wants a haiku.\n```\nThen it answers.",
+    "Here's what R1 returned:\n~~~\n<think>\nThe user wants a haiku.",
+    "<reasoning> tags are what the model hides from you.",
+    "<think> tags are what R1 emits.\nSo strip them.",
+    "Models write <think>...</think> before answering.",
+    "<think>plan</think> is how R1 marks its plan.",
+    "<think> starts R1's reasoning and </think> ends it.",
+    # The wake marker named in prose: no whole marker on one line.
+    "Does Hermes still show the <nunchi_wake marker? It should be hidden.\n\nAlso, 5 > 3.",
+    "Quick update: the plugin still prefixes <nunchi_wake ids to the turn text.\n"
+    "Next steps:\n- fix the parser\n- ship -> staging",
+    "I grep for <nunchi_wake in the logs.\n\n> Zoe: thanks!\nAgreed.",
+)
+REAL_POSTS = (
+    *REAL_FINAL_ANSWERS,
+    "Use `<thinking>` to delimit reasoning, then answer outside it.",
+    "Try this:\n```python\ntext = text.replace('<thinking>', '')\n```\nThat drops the tag.",
+    "Older Claude prompts asked for <thinking> tags; you can strip them with a regex.",
+    "Claude Code shows its extended thinking in a <thinking> block, and Hermes strips it before posting.",
+    "What does <thinking> do?",
+    "<thinking> is the tag Nunchi teaches.",
+    "思考は<thinking>タグの中に書きます。答えは外です。",
+    "<thinking> opens and </thinking> closes Claude's old scratchpad.",
+    "    indented code\n    more code\n",  # whitespace stays as written
+)
+# A post that leads with a thinking block, code in it or not (the step 5
+# check's texts): in a tool or one-reply post it is native reasoning, which is
+# the harness's to strip, so the core posts it as written. In a final answer
+# the taught <thinking> block is removed and kept as the reason.
+THINKING_WITH_CODE = (
+    ("{open}\nI'll format it as:\n```\nprint(1)\n{close}\n\nHere's the fix: call print once.",
+     "Here's the fix: call print once.", "I'll format it as: ``` print(1)"),
+    ("{open}Use the ` key{close}Press `x` twice.", "Press `x` twice.", "Use the ` key"),
+    ("{open}\nMaybe strike it:\n~~~\n{close}\nOn it.", "On it.", "Maybe strike it: ~~~"),
+    ("{open}The user wants `ls{close}Run `ls -la`.", "Run `ls -la`.", "The user wants `ls"),
+)
+
+
+# Thinking that quotes its own closing tag (the step 5 check's first-close
+# texts): native reasoning, posted as written in every posting style.
+QUOTES_ITS_CLOSE = (
+    "<think>I end with `</think>` later.</think>Answer.",
+    "<think>\n\n```\n</think>\n```\n\n</think>\n\nRun:\n```sh\nls -la\n```",
+)
+
+
+def _thinking_with_code(tags=("thinking", "think", "reasoning", "thought")):
+    for tag in tags:
+        for text, posted, why in THINKING_WITH_CODE:
+            yield text.format(open=f"<{tag}>", close=f"</{tag}>"), posted, why
 
 
 class RecordingDriver:
@@ -255,24 +317,34 @@ class TurnTests(unittest.TestCase):
         ok, text = self.participant.call_tool(turn_id="t1", tool="say", arguments={"text": "again"})
         self.assertFalse(ok)
 
-    def test_a_tool_post_loses_its_thinking_and_wake_markers_and_keeps_the_thinking_as_its_reason(self):
-        # Leak audit row 7: what the agent echoes from its turn never reaches the room.
+    def test_a_tool_post_loses_an_echoed_wake_marker_and_the_agent_is_told(self):
+        # Leak audit row 7: the marker the agent echoes from its turn never reaches the room.
         self.participant.bind_turn(turn_id="t1", wake_id=self.turn.wake_id)
         echoed = WAKE_MARKER.format(self.turn.wake_id)
-        thread, answer = self.act("say", {"text": f"<think>Castor is busy.</think>\n{echoed}\nOn it."})
+        thread, answer = self.act("say", {"text": f"{echoed}\nOn it."})
         self.thread.join(5)
         action = self.box["action"]
-        self.assertEqual(("On it.", "Castor is busy."), (action["text"], action["why"]))
+        self.assertEqual("On it.", action["text"])
+        self.assertNotIn("why", action)
         self.participant.settle(self.turn.request_id, TransportResult("sent", "ok"))
         thread.join(5)
-        self.assertEqual((True, "Done: the room accepted this action."), answer["value"])
+        # The agent is told what reached the room.
+        self.assertEqual(
+            (
+                True,
+                "Done: the room accepted this action. Nunchi's wake marker was left out of "
+                'your post; the room got: "On it."',
+            ),
+            answer["value"],
+        )
 
-    def test_a_tool_post_of_only_thinking_is_refused_and_the_agent_may_post_again(self):
+    def test_a_tool_post_of_only_a_wake_marker_is_refused_and_the_agent_may_post_again(self):
         self.participant.bind_turn(turn_id="t1", wake_id=self.turn.wake_id)
-        for text in ("<thinking>Should I answer?</thinking>", WAKE_MARKER.format(self.turn.wake_id)):
+        echoed = WAKE_MARKER.format(self.turn.wake_id)
+        for text in (echoed, f"  {echoed}\t\n", f"{echoed}\n{echoed}\n"):
             with self.subTest(text=text):
                 self.assertEqual(
-                    (False, PRIVATE_ONLY_REFUSAL),
+                    (False, MARKER_ONLY_REFUSAL),
                     self.participant.call_tool(turn_id="t1", tool="say", arguments={"text": text}),
                 )
         self.assertFalse(self.turn.action_ready.is_set())
@@ -482,30 +554,38 @@ class OneReplyTurnTests(unittest.TestCase):
             protocol.consume(self.reply(protocol, leak), expand=None)
 
 
-    def test_a_reply_loses_its_thinking_and_wake_markers_and_a_given_reason_wins(self):
+    def test_a_reply_loses_an_echoed_wake_marker_and_keeps_a_given_reason(self):
         protocol = self.protocol()
         say = {
             "kind": "message",
             "origin_event_id": "e1",
-            "text": f"<reasoning>Zoe asked me.</reasoning> {WAKE_MARKER.format('an-echoed-wake-id')}On it.",
+            "text": f"{WAKE_MARKER.format('an-echoed-wake-id')}\nOn it.",
         }
         done, action = protocol.consume(self.reply(protocol, say), expand=None)
         self.assertTrue(done)
-        self.assertEqual(("On it.", "Zoe asked me."), (action["text"], action["why"]))
+        self.assertEqual("On it.", action["text"])
+        self.assertNotIn("why", action)
         given = self.protocol()
         done, action = given.consume(self.reply(given, {**say, "why": "Zoe asked me directly."}), expand=None)
         self.assertEqual(("On it.", "Zoe asked me directly."), (action["text"], action["why"]))
 
-    def test_a_reply_of_only_thinking_is_refused_once_then_fails_the_turn(self):
-        from nunchi.participant_model import ParticipantModelError
-
+    def test_a_reply_of_only_a_wake_marker_is_refused_once_then_is_silence(self):
         protocol = self.protocol()
-        only = {"kind": "message", "origin_event_id": "e1", "text": "<think>Nothing to add.</think>"}
+        only = {"kind": "message", "origin_event_id": "e1", "text": WAKE_MARKER.format("an-echoed-wake-id")}
         self.assertEqual((False, None), protocol.consume(self.reply(protocol, only), expand=None))
-        self.assertEqual(PRIVATE_ONLY_REFUSAL, protocol.pages[-1]["note"])
+        self.assertEqual(MARKER_ONLY_REFUSAL, protocol.pages[-1]["note"])
         self.assertIsNone(protocol.turn.action)
-        with self.assertRaises(ParticipantModelError):
-            protocol.consume(self.reply(protocol, only), expand=None)
+        # Nothing for the room again: the agent wrote nothing to post, so it is silent.
+        self.assertEqual((True, None), protocol.consume(self.reply(protocol, only), expand=None))
+        self.assertIsNone(protocol.turn.action)
+        # The same after a refused secret; a reason the agent gave is kept.
+        guarded = self.protocol(guard=SecretGuard(["a-withheld-secret-value"]))
+        leak = {"kind": "message", "origin_event_id": "e1", "text": "a-withheld-secret-value"}
+        self.assertEqual((False, None), guarded.consume(self.reply(guarded, leak), expand=None))
+        self.assertEqual(
+            (True, {"kind": "silence", "why": "Castor has it."}),
+            guarded.consume(self.reply(guarded, {**only, "why": "Castor has it."}), expand=None),
+        )
 
 
 class FinalAnswerTurnTests(unittest.TestCase):
@@ -552,18 +632,39 @@ class FinalAnswerTurnTests(unittest.TestCase):
         self.assertEqual("silent", unclosed.decide("<thinking>I could say that the build").kind)
         self.assertIsNone(unclosed.action)
 
-    def test_any_thinking_tag_and_a_wake_marker_never_reach_the_room(self):
+    def test_the_taught_thinking_and_a_wake_marker_never_reach_the_room(self):
         turn = self.turn()
         echoed = WAKE_MARKER.format("an-echoed-wake-id")
-        decision = turn.decide(f"<think>My plan: check the logs.</think>\n{echoed}\nChecking now.")
+        decision = turn.decide(f"<thinking>My plan: check the logs.</thinking>\n{echoed}\nChecking now.")
         self.assertEqual(("deliver", "Checking now."), (decision.kind, decision.text))
         self.assertEqual(("Checking now.", "My plan: check the logs."), (turn.action["text"], turn.action["why"]))
+        # Nothing left: silence, with the thinking as its reason, as before.
         quiet = self.turn()
-        self.assertEqual("silent", quiet.decide("<think>Castor has it.</think>").kind)
+        self.assertEqual("silent", quiet.decide(f"<thinking>Castor has it.</thinking>\n{echoed}").kind)
         self.assertEqual("Castor has it.", quiet.note)
         marker_only = self.turn()
         self.assertEqual("silent", marker_only.decide(echoed).kind)
         self.assertIsNone(marker_only.action)
+
+    def test_native_reasoning_in_another_tag_is_the_harnesss_and_is_posted_as_written(self):
+        # Zoe: native reasoning is the harness's job; the core reads only the taught tag.
+        for answer in ("<think>Castor has it.</think>", "<reasoning>plan</reasoning>\nOn it.", *QUOTES_ITS_CLOSE):
+            with self.subTest(answer=answer):
+                turn = self.turn()
+                decision = turn.decide(answer)
+                self.assertEqual(("deliver", answer), (decision.kind, decision.text))
+                self.assertNotIn("why", turn.action)
+
+    def test_decide_splits_the_answer_once(self):
+        # prepare gets the split answer; splitting again could change it.
+        from unittest import mock
+
+        from nunchi import turn as module
+
+        with mock.patch.object(module, "split_private", wraps=module.split_private) as split:
+            decision = self.turn().decide(f"<thinking>plan</thinking>\n{WAKE_MARKER.format('a')}\nOn it.")
+        self.assertEqual(("deliver", "On it."), (decision.kind, decision.text))
+        self.assertEqual(1, split.call_count)
 
     def test_an_answer_quoting_the_turns_tag_is_still_posted(self):
         # Whether the library refuses it is open (D6).
@@ -573,11 +674,30 @@ class FinalAnswerTurnTests(unittest.TestCase):
     def test_the_marker_after_a_sentence_is_silence_and_the_words_are_its_reason(self):
         for answer, why in (
             ("I'll leave this to Castor. [SILENT]", "I'll leave this to Castor."),
-            ("Castor has it! **[SILENT]**", "Castor has it!"),
             ('<thinking>Bob asked Castor.</thinking>\nShe said "wait." [silent]', 'Bob asked Castor. She said "wait."'),
+            ("(Castor has it.) [SILENT]", "(Castor has it.)"),
+            ("Done. See the log for details.[SILENT]  ", "Done. See the log for details."),
+            ("Castorに任せます。[SILENT]", "Castorに任せます。"),
+            ("Castor 已经回答了！[SILENT]", "Castor 已经回答了！"),
+            ("Already handled． [SILENT]", "Already handled．"),
+            ("ok｡ [SILENT]", "ok｡"),
+            ("لقد أجاب أحدهم بالفعل؟ [SILENT]", "لقد أجاب أحدهم بالفعل؟"),
+            ("کسی نے جواب دے دیا ہے۔ [SILENT]", "کسی نے جواب دے دیا ہے۔"),
+            ("कोई जवाब दे चुका है। [SILENT]", "कोई जवाब दे चुका है।"),
+            ("उत्तर मिल गया॥ [SILENT]", "उत्तर मिल गया॥"),
+            ("መልስ ተሰጥቷል። [SILENT]", "መልስ ተሰጥቷል።"),
+            ("Wait for Castor… [SILENT]", "Wait for Castor…"),
+            # No phrase list: what a sentence says before the marker does not matter.
+            ("Nothing to write. [SILENT]", "Nothing to write."),
+            ("Better not to pile on like this. [SILENT]", "Better not to pile on like this."),
+            ("比如下午再说吧。[SILENT]", "比如下午再说吧。"),
+            ("To stay quiet, reply with this, for example. [SILENT]", "To stay quiet, reply with this, for example."),
+            # The marker at the start or on a line of its own, as before.
             ("Zoe asked Castor, who has not answered.\nCastor should take it.\n\n[SILENT]",
              "Zoe asked Castor, who has not answered. Castor should take it."),
             ("**[SILENT]** Castor has this one.", "Castor has this one."),
+            # Markdown emphasis may close around the sentence's end.
+            ("**Done.** [SILENT]", "**Done.**"),
         ):
             with self.subTest(answer=answer):
                 turn = self.turn()
@@ -585,12 +705,24 @@ class FinalAnswerTurnTests(unittest.TestCase):
                 self.assertIsNone(turn.action)
                 self.assertEqual(why, turn.note)
 
-    def test_a_marker_named_inside_a_sentence_is_posted(self):
+    def test_a_marker_that_is_not_bare_after_a_finished_sentence_is_posted(self):
         for answer in (
+            # No sentence ends before it.
             "Hermes stays quiet when the answer is exactly [SILENT], nothing else.",
-            "Hermes stays quiet on [SILENT].",
             "The marker Hermes reads is [SILENT]",
+            "To stay quiet, reply with [SILENT]",
+            "For example: [SILENT]",
             "To stay quiet, answer: [SILENT]",
+            # Not the last thing.
+            "Hermes stays quiet on [SILENT].",
+            "Castor has it! **[SILENT]**",
+            "To stay quiet in Hermes, the agent answers with the marker alone. `[SILENT]`",
+            'Nunchi teaches a different word from NO_REPLY. "[SILENT]"',
+            "Hermes reads one word. 「[SILENT]」",
+            # Quoted: a backtick or a quote character right before it.
+            "Done. `[SILENT]",
+            "Hermes reads this word. '[SILENT]",
+            "Hermes reads this word. «[SILENT]",
         ):
             with self.subTest(answer=answer):
                 decision = self.turn().decide(answer)
@@ -684,6 +816,14 @@ class FinalAnswerTurnTests(unittest.TestCase):
 
 class SilenceFormTests(unittest.TestCase):
     """The agent's silence is silence in whatever form it wrote it (leak audit row 6)."""
+
+    def test_a_marker_that_starts_with_formatting_still_leaves_the_words_as_the_reason(self):
+        # A harness may choose a marker such as _silent_ (the second step 5 check).
+        from nunchi.turn import _around_silence
+
+        self.assertEqual("Castor has it.", _around_silence("_silent_\nCastor has it.", "_silent_"))
+        self.assertEqual("Castor has it.", _around_silence("**`NO_REPLY`** Castor has it.", "`NO_REPLY`"))
+        self.assertEqual("Castor has it.", _around_silence("**[SILENT]**. Castor has it.", "[SILENT]"))
 
     def turn(self, also_silent=("NO_REPLY", "SILENT")):
         from nunchi.participant_model import build_participant_turn_request
@@ -840,6 +980,26 @@ class ModelTextTests(unittest.TestCase):
         self.thread.join(5)
         self.assertEqual("On it, checking the logs now.", self.box["ok"]["text"])
         self.assertIsNone(turn.unattributed)
+
+    def test_a_short_answer_that_quotes_a_wake_marker_is_still_the_models(self):
+        # The step 5 check: whose words they are is read before the marker goes.
+        marker = WAKE_MARKER.format("abc123def456ghi7")
+        for answer, kind, posted in (
+            (f"Use `{marker}`.", "deliver", "Use ``."),
+            (f"On it{marker}!", "deliver", "On it!"),
+            (f"[SILENT]{marker}?", "silent", None),
+            # A marker that would close the taught block posts no more than
+            # was attributed (the second step 5 check).
+            (f"On it. <thinking>x</thin{marker}king> Error: the provider returned 429.", "deliver", "On it."),
+        ):
+            with self.subTest(answer=answer):
+                self.fresh()
+                turn = self.open_turn()
+                self.participant.model_wrote(turn_id="t1", text=answer)
+                decision = self.finish_and_commit(turn, answer)
+                self.assertEqual((kind, posted), (decision.kind, decision.text if kind == "deliver" else None))
+                self.assertIsNone(turn.unattributed)
+                self.end()
 
     def test_the_harnesss_text_is_never_posted_and_fails_the_turn_even_when_the_run_ended_ok(self):
         held = "no reported model response holds this text"
@@ -1433,48 +1593,220 @@ class LocalTurnProtocolTests(unittest.TestCase):
                 TurnServer(participant, socket_path=self.socket_path, session_secret=short)
 
 
+class RealPostsTests(unittest.TestCase):
+    """A real post reaches the room as written, in every posting style: the core reads no tag in it."""
+
+    def tool_turn(self):
+        from nunchi.participant_model import build_participant_turn_request
+        from nunchi.turn import Turn
+
+        return Turn(
+            profile=PROFILE,
+            request=build_participant_turn_request(test_wake(), deepcopy(OPPORTUNITY)),
+            tool_names=NAMES,
+            expand=Room().expand,
+            result_wait_seconds=5,
+        )
+
+    def tool_post(self, text):
+        turn = self.tool_turn()
+        answer = {}
+        thread = threading.Thread(
+            target=lambda: answer.setdefault("value", turn.call("send", {"text": text})), daemon=True
+        )
+        thread.start()
+        self.assertTrue(turn.action_ready.wait(5), answer)
+        action = dict(turn.action)
+        turn.settle(TransportResult("sent", "ok"))
+        thread.join(5)
+        return action, answer["value"]
+
+    def reply(self, text):
+        from nunchi.participant_model import ParticipantTurnProtocol
+
+        protocol = ParticipantTurnProtocol(profile=PROFILE, wake=test_wake(), opportunity=deepcopy(OPPORTUNITY))
+        reply = {
+            "protocol": protocol.request["protocol"],
+            "binding": {"request_id": protocol.request_id},
+            "action": {"kind": "message", "origin_event_id": "e1", "text": text},
+        }
+        done, action = protocol.consume(reply, expand=None)
+        self.assertTrue(done)
+        return action
+
+    def tool_and_one_reply_posts(self):
+        # Real posts, and posts that lead with native reasoning: the harness's
+        # to strip (Zoe), so the core posts them as written.
+        return (*REAL_POSTS, *QUOTES_ITS_CLOSE, *(text for text, _, _ in _thinking_with_code()),
+                "<thinking>Should I answer?</thinking>")
+
+    def test_the_room_tool_posts_it_as_written_and_says_only_done(self):
+        for text in self.tool_and_one_reply_posts():
+            with self.subTest(text=text):
+                action, answer = self.tool_post(text)
+                self.assertEqual(text, action["text"])
+                self.assertNotIn("why", action)
+                self.assertEqual((True, "Done: the room accepted this action."), answer)
+
+    def test_a_reply_posts_it_as_written(self):
+        for text in self.tool_and_one_reply_posts():
+            with self.subTest(text=text):
+                action = self.reply(text)
+                self.assertEqual(text, action["text"])
+                self.assertNotIn("why", action)
+
+    def test_a_final_answer_posts_it_as_written(self):
+        for text in (*REAL_FINAL_ANSWERS, *QUOTES_ITS_CLOSE):
+            with self.subTest(text=text):
+                turn = FinalAnswerTurnTests.turn(self)
+                decision = turn.decide(text)
+                self.assertEqual(("deliver", text), (decision.kind, decision.text))
+                self.assertNotIn("why", turn.action)
+
+    def test_a_final_answer_loses_only_the_taught_thinking_code_in_it_or_not(self):
+        # As before: every <thinking> block to its first close, or to the end.
+        for text, posted, why in _thinking_with_code(("thinking",)):
+            with self.subTest(text=text):
+                turn = FinalAnswerTurnTests.turn(self)
+                decision = turn.decide(text)
+                self.assertEqual(("deliver", posted), (decision.kind, decision.text))
+                self.assertEqual(why, turn.action["why"])
+        for text, _, _ in _thinking_with_code(("think", "reasoning", "thought")):
+            with self.subTest(text=text):
+                decision = FinalAnswerTurnTests.turn(self).decide(text)
+                self.assertEqual(("deliver", text), (decision.kind, decision.text))
+
+
 class PrivateTextTests(unittest.TestCase):
     """What the room never reads of the agent's text (leak audit row 7)."""
 
-    def split(self, text):
+    marker = WAKE_MARKER.format("an-echoed-wake-id")
+
+    def split(self, text, **kwargs):
         from nunchi.turn import split_private
 
-        return split_private(text)
+        return split_private(text, **kwargs)
 
-    def test_thinking_in_any_tag_is_taken_out_and_kept(self):
-        for text, expected in (
-            ("<think>Plan.</think>On it.", ("On it.", "Plan.")),
-            ("<THINKING>\n  Zoe asked me.\n</thinking>\n\nOn it.", ("On it.", "Zoe asked me.")),
-            ("<reasoning>a</reasoning> On it. <thought>b</thought>", ("On it.", "a b")),
-            ("<thinking>a <think>b</think> c</thinking>Done.", ("Done.", "a b c")),
-            ("<think>\n\n</think>\n\nOn it.", ("On it.", "")),
-            ("<thinking>Only this.</thinking>", ("", "Only this.")),
-        ):
-            with self.subTest(text=text):
-                self.assertEqual(expected, self.split(text))
-
-    def test_an_unclosed_block_runs_to_the_end(self):
-        # <thinking>, the tag the turn teaches, from anywhere; the others from a line's start.
-        self.assertEqual(("On it.", "I could say"), self.split("On it. <thinking>I could say"))
-        self.assertEqual(("On it.", "half a thought"), self.split("On it.\n<think>half a thought"))
-        self.assertEqual(("Use <think> tags.", ""), self.split("Use <think> tags."))
-        self.assertEqual(("Hi\nOn it.", ""), self.split("Hi\n</think>\nOn it."))
-
-    def test_a_wake_marker_is_removed_wherever_it_is(self):
-        marker = WAKE_MARKER.format("an-echoed-wake-id")
-        self.assertEqual(("On it.", ""), self.split(f"{marker}\nOn it."))
-        self.assertEqual(("On it, checking.", ""), self.split(f"On it, {marker}checking."))
-        self.assertEqual(("", ""), self.split(marker))
-
-    def test_nothing_else_changes(self):
+    def test_tool_and_one_reply_posting_read_no_tag(self):
         for text in (
-            "Has anyone tried the Nunchi plugin yet?",
-            "Per <nunchi_participant_turn_v1> I already answered.",  # D6: open
-            "Use `[SILENT]` when nothing changed.",
-            "The <b>build</b> is green.",
+            "<think>Plan.</think>On it.",
+            "<thinking>\n  Zoe asked me.\n</thinking>\n\nOn it.",
+            "<thinking>Only this.</thinking>",
+            "On it. <thinking>I could say",
+            "<THINKING>x</THINKING> On it.",
+            "<think>\nhalf a thought",
         ):
             with self.subTest(text=text):
                 self.assertEqual((text, ""), self.split(text))
+
+    def test_final_answer_posting_takes_out_every_taught_block_as_before(self):
+        # Main's rule, unchanged: <thinking>(.*?)(?:</thinking>|\Z), any case, code or not.
+        taught = re.compile(r"<thinking>(.*?)(?:</thinking>|\Z)", re.S | re.I)
+        for text, expected in (
+            ("<thinking>\n  Zoe asked me.\n</thinking>\n\nOn it.", ("On it.", "Zoe asked me.")),
+            ("On it. <thinking>I could say", ("On it.", "I could say")),
+            ("On it. <thinking>a</thinking> Done.", ("On it.  Done.", "a")),
+            ("<THINKING>x</THINKING> On it.", ("On it.", "x")),
+            ("<thinking>a</thinking>B<thinking>c</thinking>", ("B", "a c")),
+            ("思考は<thinking>タグの中に書きます。答えは外です。", ("思考は", "タグの中に書きます。答えは外です。")),
+            ("Use `<thinking>` to delimit it.", ("Use `", "` to delimit it.")),
+            ("<thinking>Only this.</thinking>", ("", "Only this.")),
+            ("<think>x</think> <reasoning>y</reasoning> On it.", ("<think>x</think> <reasoning>y</reasoning> On it.", "")),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(expected, self.split(text, final_answer=True))
+                self.assertEqual(taught.sub("", text).strip(), expected[0])
+
+    def test_a_marker_alone_on_its_line_goes_with_its_line(self):
+        marker = self.marker
+        for text, expected in (
+            (f"{marker}\nOn it.", "On it."),
+            (f"On it.\n{marker}", "On it."),
+            (f"A\n  {marker}\t\nB", "A\nB"),
+            (f"A\n{marker}\n{marker}\nB", "A\nB"),
+            (f"A\n{marker} {marker}\nB", "A\nB"),
+            (f"A\r\n{marker}\r\nB", "A\r\nB"),
+            (f"A\n{marker}\n", "A\n"),
+            (marker, ""),
+            ("</nunchi_wake>\nOn it.", "On it."),
+            ('<NUNCHI_WAKE id="x">\nOn it.', "On it."),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual((expected, ""), self.split(text))
+
+    def test_a_marker_inside_a_line_goes_with_the_space_beside_it_and_lines_stay_apart(self):
+        marker = self.marker
+        for text, expected in (
+            (f"Line one {marker}\nLine two", "Line one\nLine two"),
+            (f"See below{marker}\n```python\nprint(1)\n```", "See below\n```python\nprint(1)\n```"),
+            (f"On it, {marker} checking.", "On it, checking."),
+            (f"On it, {marker} {marker} checking.", "On it, checking."),
+            (f"On it, {marker}checking.", "On it, checking."),
+            (f"On it,  {marker}  checking.", "On it, checking."),
+            (f"On it,{marker}checking.", "On it,checking."),
+            # The step 5 check: an echo at the start or end of a line leaves no space.
+            (f"{marker} Sure, on it.", "Sure, on it."),
+            (f"\t{marker}\tHi", "\tHi"),
+            # A line keeps its indentation (the second step 5 check).
+            (f"```python\ndef f():\n    {marker}return 1\n```", "```python\ndef f():\n    return 1\n```"),
+            (f"- item\n  {marker} continued", "- item\n  continued"),
+            (f"Sure, on it. {marker}", "Sure, on it."),
+            (f"Sure. {marker}\r\nNext", "Sure.\r\nNext"),
+            # Code is not special: a whole marker in it goes too.
+            (f"The plugin prepends `{marker}` to each turn.", "The plugin prepends `` to each turn."),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual((expected, ""), self.split(text))
+
+    def test_a_marker_wrapped_in_formatting_on_its_own_line_goes_with_it(self):
+        marker = self.marker
+        for text, expected in (
+            (f"**{marker}**", ""),
+            (f"`{marker}`", ""),
+            (f"> {marker}", ""),
+            (f'"{marker}"', ""),
+            (f"Sure.\n**{marker}**", "Sure."),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual((expected, ""), self.split(text))
+                self.assertEqual((expected, ""), self.split(text, final_answer=True))
+
+    def test_the_taught_block_is_read_as_written_then_markers_go_in_one_pass(self):
+        # What is posted is what decide attributes to the model, without its
+        # markers. Text a removed marker would make look like a tag is
+        # crafted, and is posted as written, as before; so is a marker that
+        # forms only once another is removed.
+        marker = self.marker
+        self.assertEqual(("Hi", "a b"), self.split(f"<thinking>a {marker} b</thinking>Hi", final_answer=True))
+        self.assertEqual(
+            ("<thinking>secret</thinking>Hi", ""), self.split(f"<thin{marker}king>secret</thinking>Hi", final_answer=True)
+        )
+        self.assertEqual("On it.", self.split(f"On it. <thinking>x</thin{marker}king> Error: 429", final_answer=True)[0])
+        self.assertEqual(("<nunchi_wake/>", ""), self.split("<nunchi_<nunchi_wake/>wake/>"))
+
+    def test_the_marker_named_in_prose_is_not_a_marker(self):
+        # The step 5 check: no whole marker on one line, so nothing is removed.
+        for text in (
+            "Does Hermes still show the <nunchi_wake marker? It should be hidden.\n\nAlso, 5 > 3.",
+            "Quick update: the plugin still prefixes <nunchi_wake ids to the turn text.\n"
+            "Next steps:\n- fix the parser\n- ship -> staging",
+            "I grep for <nunchi_wake in the logs.\n\n> Zoe: thanks!\nAgreed.",
+            "The <nunchi_wakeup> tag is someone else's.",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual((text, ""), self.split(text))
+                self.assertEqual((text, ""), self.split(text, final_answer=True))
+
+    def test_nothing_else_changes(self):
+        for text in (*REAL_POSTS, *QUOTES_ITS_CLOSE, "Has anyone tried the Nunchi plugin yet?",
+                     "Per <nunchi_participant_turn_v1> I already answered.",  # D6: open
+                     "Use `[SILENT]` when nothing changed.", "The <b>build</b> is green.", "Hi\n</think>\nOn it.",
+                     "  spaced  \n"):
+            with self.subTest(text=text):
+                self.assertEqual((text, ""), self.split(text))
+        for text in REAL_FINAL_ANSWERS:
+            with self.subTest(text=text):
+                self.assertEqual((text.strip(), ""), self.split(text, final_answer=True))
 
     def test_the_marker_is_the_cores_and_every_integration_uses_it(self):
         from nunchi.integrations import claude_code_gate
@@ -1483,6 +1815,33 @@ class PrivateTextTests(unittest.TestCase):
         self.assertIs(WAKE_MARKER, claude_code_gate.WAKE_MARKER)
         self.assertIs(WAKE_MARKER, plugin.WAKE_MARKER)
         self.assertEqual("abc-_1", plugin._WAKE.search(WAKE_MARKER.format("abc-_1")).group(1))
+
+    def test_a_large_adversarial_answer_is_decided_in_bounded_time(self):
+        # The step 5 check found a cubic case; the rules now are single regexes.
+        import time
+
+        size = 50_000
+        for name, answer in (
+            ("ticks and taught blocks", ("`\n\n<thinking>t</thinking>\n" * (size // 26)) + "Answer."),
+            ("lone ticks", ("`\n\n" * (size // 3)) + "Answer."),
+            ("unclosed taught tags", "<thinking>" * (size // 10)),
+            ("open markers", "<nunchi_wake " * (size // 13)),
+            ("marker lines", (f"{self.marker} a\n" * (size // 40)) + "Answer."),
+            ("markers then a sentence", ("[SILENT] " * (size // 9)) + "Done. [SILENT]"),
+            ("brackets", "[" * size),
+            # The step 5 check: a long run of formatting after an own-line marker.
+            *((f"own-line marker, then {mark * 3}", "Castor has it.\n[SILENT]\n" + mark * size) for mark in "~_*`'\""),
+            ("marker words", f"Hi {self.marker} " * (size // 40)),
+            ("spaces before a marker", " " * size + f"x {self.marker}"),
+            ("tabs and spaces before a marker", "\t " * (size // 2) + f"x{self.marker}"),
+            ("fences", "".join("`" * width + "\n" for width in range(300, 2, -1))),
+        ):
+            with self.subTest(name):
+                self.assertGreaterEqual(len(answer), 40_000)
+                turn = FinalAnswerTurnTests.turn(self)
+                started = time.perf_counter()
+                turn.decide(answer)
+                self.assertLess(time.perf_counter() - started, 1.0)
 
 
 def _schema_names(name):
@@ -1523,6 +1882,27 @@ def _schema_names(name):
     return names
 
 
+def _object_names(owner):
+    """The property names of one object in the wake schema (``None``: the wake itself)."""
+
+    import json
+    from pathlib import Path
+
+    schemas = {}
+    for path in (Path(__file__).resolve().parents[2] / "schemas" / "v2").glob("*.schema.json"):
+        schema = json.loads(path.read_text(encoding="utf-8"))
+        schemas[schema["$id"]] = schema
+    wake = next(schema for url, schema in schemas.items() if url.endswith("/participant-wake.schema.json"))
+    node, document = (wake, wake) if owner is None else (wake["properties"][owner], wake)
+    while "$ref" in node:
+        url, _, pointer = node["$ref"].partition("#")
+        document = schemas[url] if url else document
+        node = document
+        for part in pointer.strip("/").split("/"):
+            node = node[part] if part else node
+    return set(node.get("properties") or {})
+
+
 class MachineryTests(unittest.TestCase):
     """What names Nunchi's machinery in a post: the leak count's one definition."""
 
@@ -1543,8 +1923,18 @@ class MachineryTests(unittest.TestCase):
             ("Per attention.advice I wait.", ["attention.advice"]),
             ("The trigger_event_id is the question.", ["trigger_event_id"]),
             ("judged_through_event_id and evidence_event_ids", ["judged_through_event_id", "evidence_event_ids"]),
-            ("request_id, reply_to_event_id, origin_event_id", ["request_id", "reply_to_event_id", "origin_event_id"]),
+            ("request_id, reply_to_event_id, origin_event_id", ["reply_to_event_id", "origin_event_id"]),
             ("nunchi.participant-turn v1", ["nunchi.participant-turn"]),
+            ("Per binding.request_id and wake.request_id, done.", ["binding.request_id", "wake.request_id"]),
+            ("context_pages.has_next_page is false", ["context_pages.has_next_page"]),
+            ("<thinking>plan</thinking> and `<think>` in code", ["<thinking>", "</thinking>"]),
+            # A thinking tag as thinking: a pair, or a tag on a line of its own.
+            ("<think>\nhalf a plan", ["<think>"]),
+            ("On it.\n</thinking>\nmore", ["</thinking>"]),
+            ("Done. <reasoning>why</reasoning>", ["<reasoning>", "</reasoning>"]),
+            ("<think>\nI'll format it as:\n```\n</think>\nOn it. `<think>` is quoted.", ["<think>", "</think>"]),
+            # Outside a balanced fence and inline code.
+            ("```\n<think>x</think>\n```\n<thought>y</thought>", ["<thought>", "</thought>"]),
         ):
             with self.subTest(text=text):
                 self.assertEqual(expected, self.found(text))
@@ -1563,6 +1953,46 @@ class MachineryTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual([], self.found(text))
 
+    def test_generic_api_names_and_dotted_words_that_are_not_nunchis_are_not_machinery(self):
+        # Step 5 review #10: ordinary dev-room posts.
+        for text in (
+            "Check event_id and room_id in the payload.",
+            "The display_name field is empty for webhook users, so use author_id.",
+            "See request_id in the logs.",
+            "Set expires_at to an hour out.",
+            "We store memory.text in Redis.",
+            "The pace.at site is down.",
+            "The API returns has_next_page and max_bytes.",
+            "Use `<think>` tags, as in:\n```\n<thinking>\n```",
+            "Use `<think>` tags, as in:\n~~~\n<think>plan</think>\n~~~",
+            "Render <Reasoning>{steps}</Reasoning> in JSX.",
+            "Done. <REASONING>why</REASONING>",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual([], self.found(text))
+
+    def test_a_thinking_tag_named_in_prose_is_not_machinery(self):
+        # The step 5 check: real dev-room posts the library posts as meant.
+        for text in (
+            "Claude Code shows its extended thinking in a <thinking> block, and Hermes strips it before posting.",
+            "<think> tags are what R1 emits.\nSo strip them.",
+            "<think> tags are what R1 emits.",
+            "Older Claude prompts asked for <thinking> tags; you can strip them with a regex.",
+            "What does <thinking> do?",
+            "<thinking> is the tag Nunchi teaches.",
+            "<reasoning> tags are what the model hides from you.",
+            "思考は<thinking>タグの中に書きます。答えは外です。",
+            "A stray </think> in the output means the stream was cut.",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual([], self.found(text))
+
+    def test_the_integrations_tool_names_count_when_the_caller_passes_them(self):
+        # Step 5 review #9: Codex and Hermes name the tools room_send, room_react, ...
+        self.assertEqual([], self.found("I'll call room_react on it."))
+        self.assertEqual(["room_react"], self.found("I'll call room_react on it.", ids=["room_react", "room_context"]))
+        self.assertEqual([], self.found("The room_reactions table.", ids=["room_react"]))
+
     def test_internal_ids_count_only_as_whole_tokens(self):
         self.assertEqual(["req-0001"], self.found("Answering req-0001 now.", ids=["req-0001", ""]))
         self.assertEqual([], self.found("Answering req-00012 now.", ids=["req-0001"]))
@@ -1575,14 +2005,55 @@ class MachineryTests(unittest.TestCase):
         binding = set(PARTICIPANT_ACTION_SCHEMA["properties"]["binding"]["properties"])
         tools = {name for spec in PARTICIPANT_TOOL_SPECS.values() for name in spec["input_schema"]["properties"]}
         self.assertLessEqual(binding | tools, TURN_FIELDS)
-        # Every underscore name is found on its own.
+        # Every underscore name only Nunchi uses is found on its own; a generic
+        # one only in a path to an object's own field.
+        from nunchi.turn import FIELD_PATHS, GENERIC_FIELDS
+
+        self.assertLessEqual(GENERIC_FIELDS, TURN_FIELDS)
         for name in sorted(name for name in TURN_FIELDS if "_" in name):
             with self.subTest(name=name):
-                self.assertEqual([name], self.found(f"see {name} here"))
+                if name in GENERIC_FIELDS:
+                    self.assertEqual([], self.found(f"see {name} here"))
+                    for owner in (owner for owner, fields in FIELD_PATHS.items() if name in fields):
+                        self.assertEqual([f"{owner}.{name}"], self.found(f"see {owner}.{name} here"))
+                else:
+                    self.assertEqual([name], self.found(f"see {name} here"))
+
+    def test_each_objects_fields_are_in_step_with_the_schema_and_the_request(self):
+        from nunchi.participant_model import build_participant_turn_request
+        from nunchi.turn import FIELD_PATHS
+
+        for owner in ("attention", "memory", "pace", "coverage", "continuation"):
+            with self.subTest(owner=owner):
+                self.assertEqual(_object_names(owner), set(FIELD_PATHS[owner]))
+        self.assertEqual(_object_names(None), set(FIELD_PATHS["wake"]))
+        request = build_participant_turn_request(test_wake(), deepcopy(OPPORTUNITY))
+        self.assertEqual(set(request), set(FIELD_PATHS["participant_turn"]))
+        self.assertEqual(set(request["permissions"]), set(FIELD_PATHS["permissions"]))
+        self.assertEqual(set(request["binding"]), set(FIELD_PATHS["binding"]))
 
     def test_what_a_post_may_still_carry_is_counted(self):
-        # The library removes only thinking and wake markers; the rest is measured (D6 open).
+        # The library removes only wake markers (and in a final answer the
+        # taught <thinking>); the rest is measured (D6 open).
         from nunchi.turn import split_private
 
-        posted, _ = split_private("<think>x</think>Per <nunchi_participant_turn_v1> and own_moves, done. [SILENT] is a marker.")
-        self.assertEqual(["<nunchi_participant_turn_v1>", "own_moves", "[SILENT]"], self.found(posted))
+        posted, _ = split_private(
+            f"{WAKE_MARKER.format('a')}\n<think>x</think>Per <nunchi_participant_turn_v1> and own_moves, "
+            "done. [SILENT] is a marker."
+        )
+        self.assertEqual(
+            ["<think>", "</think>", "<nunchi_participant_turn_v1>", "own_moves", "[SILENT]"], self.found(posted)
+        )
+
+    def test_it_is_linear_on_a_large_text(self):
+        import time
+
+        for text in (
+            "".join("`" * width + "\n" for width in range(300, 2, -1)),
+            "<think>" * 7_000,
+            "```a\n" * 10_000,
+            "`\n\n<thinking>t</thinking>\n" * 2_000,
+        ):
+            started = time.perf_counter()
+            self.found(text)
+            self.assertLess(time.perf_counter() - started, 1.0)

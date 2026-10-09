@@ -794,16 +794,19 @@ class ParticipantTurnProtocol:
         if action["kind"] != "expand":
             # The reason is never posted. One that holds a secret is dropped
             # and the move kept, as on every other path; only the move itself
-            # is refused. The turn's commit check takes the agent's thinking
-            # and any wake marker out of a post, and refuses a post with
-            # nothing else in it (`Turn.prepare`).
+            # is refused. The turn's commit check takes a wake marker out of a
+            # post, and refuses a post with nothing else in it (`Turn.prepare`).
             why = action.pop("why", None)
             if why is not None and self.turn.guard.refusal({"kind": "message", "text": why}) is not None:
                 why = None
             action, refusal = self.turn.prepare(action)
             if refusal is not None:
+                if self.refused and self.turn.marker_only:
+                    # Nothing for the room again, after a refusal: the agent
+                    # wrote nothing to post, so its turn is silence.
+                    return True, {"kind": "silence", "why": why} if why else None
                 if self.refused:
-                    raise ParticipantModelError("participant action was refused again")
+                    raise ParticipantModelError("participant action carried a secret again")
                 self.refused = True
                 self.pages.append({"events": [], "note": refusal})
                 return False, None

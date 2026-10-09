@@ -17,8 +17,10 @@ integration without one reports it as not applicable.
 Two final-answer scenarios need a harness that can end a run with its own
 text in place of the model's answer (``final-not-own-words``,
 ``final-no-answer``). An integration whose harness never does that reports
-them as not applicable. One scenario plays once per answer in its ``forms``
-(``final-silence-forms``).
+them as not applicable. A scenario with ``forms`` plays once per form
+(``final-silence-forms``, and ``real-post`` and ``final-real-post``, which
+post real texts that name or quote tags or the wake marker and must reach the
+room as written).
 
 Two scenarios need a harness whose surface can fail the agent's model call
 (``harness-failure``, ``final-harness-failure``); without it they are not
@@ -32,14 +34,17 @@ socket, its hooks). The kit owns the room, attention, the host, and the checks.
 **The leak count.** In every scenario the room must receive only what the
 library committed, and nothing that names Nunchi's machinery (the wake marker,
 the turn's tag, its field names, the silence marker, thinking tags, internal
-ids). After each scenario the kit takes what reached the room: what the
-library's own transport sent, and everything the harness itself showed the
-room (`KitIntegration.visible`: messages, reactions, typing, threads it
-opened). Each item that does not match a committed action is a leak, and so
-is each committed post that `nunchi.turn.machinery_in` says names machinery.
-A leak fails the scenario, unless the integration declares it as a known gap
-(`KnownGap`): the scenario then reads ``gap``, never ``pass``. An integration
-without ``visible`` reports the leak count as not applicable.
+ids such as the turn's request id and the names of its tools). After each
+scenario the kit takes what reached the room: what the library's own
+transport sent, and everything the harness itself showed the room
+(`KitIntegration.visible`: messages, reactions, typing, threads it opened).
+Each item that does not match a committed action is a leak, and so is each
+committed post that `nunchi.turn.machinery_in` says names machinery, except
+a real post a scenario says the agent meant as written. A leak fails the
+scenario, unless the integration declares it as a known gap (`KnownGap`):
+the scenario then reads ``gap``, never ``pass``. An integration without
+``visible`` still has its committed posts counted; only what its harness
+showed by itself is not applicable, and its leak count says so.
 """
 
 from __future__ import annotations
@@ -108,9 +113,30 @@ LOOKED_AGAIN = "Still stuck? I can take a look."
 REPORTED = "Done: the runbook is in the README."
 OPERATOR = "operator:conformance"
 # What an agent echoes from its own turn: a wake marker from its history, and
-# its thinking in the tags models write it in.
+# in final-answer posting its thinking in the <thinking> tag the turn teaches.
 ECHOED_MARKER = WAKE_MARKER.format("conformance-echoed-wake")
 THOUGHT = "My plan: check the logs."
+# Real posts that name or quote tags or the wake marker (the step 5 reviews'
+# probes): the agent meant each for the room, and the room gets it as
+# written. The library reads no tag in a tool or one-reply post; in a final
+# answer it reads only the <thinking> the turn teaches, which these do not
+# hold. Native reasoning in other tags is the harness's job (Zoe).
+REAL_FINAL_ANSWERS = (
+    "Here's what R1 returned:\n```\n<think>\nThe user wants a haiku.\n```",
+    "Wrap the panel in it:\n```jsx\n<Reasoning>{text}</Reasoning>\n```",
+    "The schema:\n```xml\n<thought>check inputs</thought>\n```",
+    "<reasoning> tags are what the model hides from you.",
+    "<think>plan</think> is how R1 marks its plan.",
+    "Does the plugin still show the <nunchi_wake marker? It should be hidden.\n\nAlso, 5 > 3.",
+)
+REAL_POSTS = (
+    *REAL_FINAL_ANSWERS,
+    "Use `<thinking>` to delimit reasoning, then answer outside it.",
+    "Try this:\n```python\ntext = text.replace('<thinking>', '')\n```",
+    "Older prompts asked for <thinking> tags; you can strip them with a regex.",
+    "思考は<thinking>タグの中に書きます。答えは外です。",
+    "I grep for <nunchi_wake in the logs.\n\n> Zoe: thanks!\nAgreed.",
+)
 # What the provider says when it refuses the agent's model call.
 MODEL_REFUSED = "conformance: the provider refused the request"
 # The privileged action the outcome scenarios propose, and the policy that
@@ -157,6 +183,10 @@ class Scenario:
 
     ``model_failure``: the scenario fails the agent's model call (a ``fail``
     step), and is not applicable to an integration whose surface cannot.
+
+    ``meant``: the agent's post in each play is its form, a real post that
+    names machinery on purpose (it discusses it). The check requires it
+    committed exactly as written, so what it names is not counted as a leak.
     """
 
     posting: str
@@ -169,6 +199,7 @@ class Scenario:
     harness_text: bool = False
     forms: tuple[str, ...] = ()
     model_failure: bool = False
+    meant: bool = False
 
 
 @dataclass
@@ -193,8 +224,11 @@ class Played:
     # What the harness itself showed the room (`KitIntegration.visible`), or
     # None when the integration cannot say.
     shown: list[dict[str, Any]] | None = None
-    # Internal ids a post must not name: each turn's request id.
+    # Internal ids a post must not name: each turn's request id, and the
+    # names of the tools its turn offered the agent.
     ids: set[str] = field(default_factory=set)
+    # Posts the agent meant as written, which name machinery on purpose.
+    meant: set[str] = field(default_factory=set)
     error: str | None = None
 
     def answer(self, index: int) -> Any:
@@ -231,12 +265,25 @@ class KnownGap:
     (``message``, ``reaction``, ``typing`` or ``thread``); ``text``, for a
     message, is part of its text. ``reason`` says why nothing stops it and
     where it is documented.
+
+    ``kind="post"`` is a harness that changes the agent's post before the
+    library reads it. It carries ``transform``, the harness's own change: the
+    text it makes of an answer the agent wrote. When the scenario's checks
+    fail and what the library committed, and what the harness showed, are
+    exactly that transform of the agent's one answer (nothing, when it
+    leaves nothing), the scenario reads ``gap`` with those failures as the
+    gap. Any other change still fails.
     """
 
     reason: str
     scenarios: tuple[str, ...]
     kind: str
     text: str | None = None
+    transform: Callable[[str], str] | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind == "post" and self.transform is None:
+            raise ValueError("a post gap carries the harness's transform: the text it makes of the agent's answer")
 
     def covers(self, scenario: str, shown: Mapping[str, Any]) -> bool:
         return (
@@ -244,6 +291,26 @@ class KnownGap:
             and shown.get("kind") == self.kind
             and (self.text is None or self.text in str(shown.get("text", "")))
         )
+
+    def explains(self, played: "Played") -> bool:
+        """Whether this post gap's transform is the only change: the room got exactly what it makes of the answer."""
+
+        written = [step[1] for step, _ in played.answers if step[0] == "finish"]
+        if self.transform is None or len(written) != 1 or not isinstance(written[0], str):
+            return False
+        expected = self.transform(written[0]).strip()
+        wanted = [expected] if expected else []
+        committed = [
+            str(action.get("text", "")).strip()
+            for action in played.dispatched
+            if action.get("kind") in ("message", "reply")
+        ]
+        if committed != wanted:
+            return False
+        if played.shown is None:
+            return True
+        shown = [str(item.get("text", "")).strip() for item in played.shown if item.get("kind") == "message"]
+        return shown == wanted
 
 
 class KitIntegration(Protocol):
@@ -812,8 +879,10 @@ def _check_silence_form(played: Played) -> list[str]:
 
 def _check_leak(played: Played) -> list[str]:
     failures: list[str] = []
-    _expect(played.answer(1)[0] is True, f"the post was refused: {played.answer(1)}", failures)
-    # The kit's room never shows a tool post back, so its memory is not checked here.
+    answer = played.answer(1)
+    _expect(answer[0] is True, f"the post was refused: {answer}", failures)
+    # The agent reads that the marker was left out, and what the room got.
+    _expect("left out" in str(answer[1]) and "On it." in str(answer[1]), f"the agent was not told: {answer}", failures)
     _expect(_texts(played) == ["On it."], f"expected only the agent's words posted, saw {_texts(played)}", failures)
     return failures
 
@@ -822,8 +891,8 @@ def _check_leak_markup(played: Played) -> list[str]:
     failures: list[str] = []
     refused = played.answer(1)
     _expect(
-        refused[0] is False and "private thinking" in refused[1],
-        f"a post of only private text was not refused: {refused}",
+        refused[0] is False and "only Nunchi's wake marker" in refused[1],
+        f"a post of only a wake marker was not refused: {refused}",
         failures,
     )
     _expect(played.answer(2)[0] is True, f"the post after it failed: {played.answer(2)}", failures)
@@ -845,6 +914,30 @@ def _check_model_failure(played: Played) -> list[str]:
     )
     moves = [(move.get("kind"), move.get("text") or move.get("why")) for move in played.own_moves]
     _expect(not moves, f"the agent's memory holds a move it never made: {moves}", failures)
+    return failures
+
+
+def _check_real_post(played: Played) -> list[str]:
+    failures: list[str] = []
+    answer = played.answer(1)
+    _expect(
+        answer[0] is True and "left out" not in str(answer[1]),
+        f"the post was refused or changed: {answer}",
+        failures,
+    )
+    _expect(_texts(played) == [played.form], f"expected the post as written, saw {_texts(played)}", failures)
+    return failures
+
+
+def _check_final_real_post(played: Played) -> list[str]:
+    failures: list[str] = []
+    kind, text = played.answer(1)
+    _expect(
+        (kind, text) == ("deliver", played.form),
+        f"the answer was not delivered as written: {kind} {str(text)[:160]!r}",
+        failures,
+    )
+    _expect(_texts(played) == [played.form], f"expected the post as written, saw {_texts(played)}", failures)
     return failures
 
 
@@ -973,20 +1066,28 @@ SCENARIOS: dict[str, Scenario] = {
     ),
     "leak": Scenario(
         "tools",
-        "a post loses the agent's thinking, kept as its reason, and an echoed wake marker",
-        (("bind",), ("call", "send", {"text": f"<think>{THOUGHT}</think>\n{ECHOED_MARKER}\nOn it."}), ("end", True)),
+        "a post loses an echoed wake marker, and the agent is told",
+        (("bind",), ("call", "send", {"text": f"{ECHOED_MARKER}\nOn it."}), ("end", True)),
         _check_leak,
     ),
     "leak-markup": Scenario(
         "tools",
-        "a post of only thinking and a wake marker is refused, and the agent writes again",
+        "a post of only a wake marker is refused, and the agent writes again",
         (
             ("bind",),
-            ("call", "send", {"text": f"<thinking>{WAITED}</thinking>\n{ECHOED_MARKER}"}),
+            ("call", "send", {"text": ECHOED_MARKER}),
             ("call", "send", {"text": "On it."}),
             ("end", True),
         ),
         _check_leak_markup,
+    ),
+    "real-post": Scenario(
+        "tools",
+        "a real post that names or quotes tags in prose or code, or names the wake marker, is posted as written",
+        (("bind",), ("call", "send", {"text": "@form"}), ("end", True)),
+        _check_real_post,
+        forms=REAL_POSTS,
+        meant=True,
     ),
     "harness-failure": Scenario(
         "tools",
@@ -1092,15 +1193,23 @@ SCENARIOS: dict[str, Scenario] = {
     ),
     "final-leak": Scenario(
         "final-answer",
-        "an answer loses the agent's thinking, kept as its reason, and an echoed wake marker",
-        (("bind",), ("finish", f"<think>{THOUGHT}</think>\n{ECHOED_MARKER}\nChecking now."), ("end", True)),
+        "an answer loses the agent's <thinking>, kept as its reason, and an echoed wake marker",
+        (("bind",), ("finish", f"<thinking>{THOUGHT}</thinking>\n{ECHOED_MARKER}\nChecking now."), ("end", True)),
         _check_final_leak,
     ),
     "final-leak-markup": Scenario(
         "final-answer",
-        "an answer of only thinking and a wake marker is silence, and the thinking is its reason",
-        (("bind",), ("finish", f"<reasoning>{WAITED}</reasoning>\n{ECHOED_MARKER}"), ("end", True)),
+        "an answer of only <thinking> and a wake marker is silence, and the thinking is its reason",
+        (("bind",), ("finish", f"<thinking>{WAITED}</thinking>\n{ECHOED_MARKER}"), ("end", True)),
         _check_final_silence,
+    ),
+    "final-real-post": Scenario(
+        "final-answer",
+        "a real answer that names or quotes another tag in prose or code, or names the wake marker, is posted as written",
+        (("bind",), ("finish", "@form"), ("end", True)),
+        _check_final_real_post,
+        forms=REAL_FINAL_ANSWERS,
+        meant=True,
     ),
     "final-trailing-silence": Scenario(
         "final-answer",
@@ -1226,17 +1335,26 @@ def _start_next_turn(room: Room, occasion: str) -> str | None:
 
 
 def _with_form(step: Step, form: str) -> Step:
-    return tuple(part.replace("@form", form) if isinstance(part, str) else part for part in step)
+    def put(part: Any) -> Any:
+        if isinstance(part, str):
+            return part.replace("@form", form)
+        if isinstance(part, Mapping):
+            return {key: put(value) for key, value in part.items()}
+        return part
+
+    return tuple(put(part) for part in step)
 
 
 def run_scenario(name: str, integration: KitIntegration, *, timeout: float = 15.0) -> dict[str, Any]:
     """Play one scenario through ``integration`` and check it, with its leak count.
 
     The result's ``status`` is ``pass``, ``fail``, ``gap`` (it passed but for
-    leaks the integration declares as known gaps), ``n/a`` or ``skipped``.
+    what the integration declares as known gaps), ``n/a`` or ``skipped``.
     ``failures`` holds each failed check and each undeclared leak (`leaks`);
-    ``gaps`` the declared ones; ``leak_count`` counts both, or is ``n/a`` for
-    an integration without ``visible``.
+    ``gaps`` the declared ones. ``leak_count`` counts the leaks, undeclared
+    and declared (``leak_gaps``). For an integration without ``visible``,
+    ``harness_counted`` is false: committed posts are still counted, and
+    what the harness showed by itself is not.
     """
 
     scenario = SCENARIOS[name]
@@ -1251,7 +1369,9 @@ def run_scenario(name: str, integration: KitIntegration, *, timeout: float = 15.
     failures: list[str] = []
     skipped: list[str] = []
     gaps: list[str] = []
-    counts: list[Any] = []
+    counts: list[int] = []
+    leak_gaps = 0
+    counted = True
     for form in scenario.forms:
         steps = tuple(_with_form(step, form) for step in scenario.steps)
         result = _play(name, scenario, integration, steps=steps, form=form, timeout=timeout)
@@ -1263,14 +1383,18 @@ def run_scenario(name: str, integration: KitIntegration, *, timeout: float = 15.
         form = result.get("form", form)
         failures += [f"{form!r}: {failure}" for failure in result.get("failures", ())]
         gaps += [f"{form!r}: {gap}" for gap in result.get("gaps", ())]
-        counts.append(result.get("leak_count", "n/a"))
+        counts.append(result.get("leak_count", 0))
+        leak_gaps += result.get("leak_gaps", 0)
+        counted = counted and result.get("harness_counted", True)
     return {
         "scenario": name,
         "integration": integration.name,
         "status": _status(failures, gaps),
         "failures": failures,
         "gaps": gaps,
-        "leak_count": sum(counts) if counts and "n/a" not in counts else "n/a",
+        "leak_count": sum(counts),
+        "leak_gaps": leak_gaps,
+        "harness_counted": counted,
         **({"skipped": skipped} if skipped else {}),
     }
 
@@ -1309,7 +1433,10 @@ def leaks(name: str, played: Played, known_gaps: Sequence[KnownGap] = ()) -> tup
     committed, and what the harness showed (``played.shown``). Each thing the
     harness showed that matches no committed action left for it to deliver
     is a leak, and so is each committed post that names Nunchi's machinery
-    (`nunchi.turn.machinery_in`), the turn's request ids included.
+    (`nunchi.turn.machinery_in`), the turn's request ids and tool names
+    included, unless the scenario says the agent meant it as written
+    (``played.meant``). Without what the harness showed (``shown`` is None),
+    only committed posts are counted.
     """
 
     found: list[str] = []
@@ -1329,7 +1456,7 @@ def leaks(name: str, played: Played, known_gaps: Sequence[KnownGap] = ()) -> tup
         else:
             found.append(f"the room got {_describe(item)}, which the library never committed")
     for action in played.dispatched:
-        if action.get("kind") not in ("message", "reply"):
+        if action.get("kind") not in ("message", "reply") or action.get("text") in played.meant:
             continue
         machinery = machinery_in(str(action.get("text", "")), ids=played.ids)
         if machinery:
@@ -1493,7 +1620,15 @@ def _play(
         # In final-answer posting the library sends only what is not a message itself.
         sent = transport.native if isinstance(transport, HarnessDelivery) else transport
         played.library_sent = list(sent.actions)
-        played.ids = set(transport.ids)
+        # The names the agent saw its room tools under are internal too, when
+        # they are identifiers (room_send), not plain words a post may use.
+        played.ids = set(transport.ids) | {
+            name
+            for name in (getattr(participant, "tool_names", None) or {}).values()
+            if isinstance(name, str) and "_" in name
+        }
+        if scenario.meant and played.form is not None:
+            played.meant = {played.form}
         facts = host.memory_facts(TRIGGER) or {}
         played.own_moves = list(facts.get("own_moves", ()))
         if agent.error is not None and played.error is None:
@@ -1504,17 +1639,25 @@ def _play(
             failures = scenario.check(played)
     except (IndexError, TypeError, KeyError) as exc:
         failures = [f"the turn did not play out: {type(exc).__name__}: {exc}"]
-    found, declared = leaks(name, played, getattr(integration, "known_gaps", ()))
-    if played.shown is None:
-        # Without what the harness showed, the room cannot be counted.
-        found, declared = [], []
+    known_gaps = getattr(integration, "known_gaps", ())
+    found, declared = leaks(name, played, known_gaps)
+    # A harness that changes the agent's post before the library reads it,
+    # declared and documented: the checks that fail for it are the gap, when
+    # the room got exactly the harness's change and nothing else.
+    changed = next((gap for gap in known_gaps if gap.kind == "post" and name in gap.scenarios), None)
+    changes: list[str] = []
+    if changed is not None and failures and played.error is None and changed.explains(played):
+        changes, failures = [f"{failure}: {changed.reason}" for failure in failures], []
     return {
         "scenario": name,
         "integration": integration.name,
-        "status": _status([*failures, *found], declared),
+        "status": _status([*failures, *found], [*declared, *changes]),
         "failures": [*failures, *found],
-        "gaps": declared,
-        "leak_count": "n/a" if played.shown is None else len(found) + len(declared),
+        "gaps": [*declared, *changes],
+        # Without what the harness showed, only committed posts are counted.
+        "leak_count": len(found) + len(declared),
+        "leak_gaps": len(declared),
+        "harness_counted": played.shown is not None,
         **({"form": played.form} if played.form is not None else {}),
     }
 
@@ -1524,8 +1667,9 @@ def parity_table(results: Sequence[Mapping[str, Any]]) -> str:
 
     A cell is ``pass``, ``fail``, ``gap`` (it passed but for a known gap the
     integration declares) or ``n/a``. The last row counts the leaks in every
-    scenario that ran, with how many are declared gaps, or ``n/a`` for an
-    integration that cannot say what its harness showed.
+    scenario that ran, with how many are declared gaps; for an integration
+    that cannot say what its harness showed, it counts committed posts only
+    and says so.
     """
 
     integrations = list(dict.fromkeys(result["integration"] for result in results))
@@ -1547,12 +1691,16 @@ def parity_table(results: Sequence[Mapping[str, Any]]) -> str:
 
 
 def _leak_cell(results: Sequence[Mapping[str, Any]]) -> str:
-    counts = [result["leak_count"] for result in results if "leak_count" in result]
-    if not counts or "n/a" in counts:
+    counted = [result for result in results if "leak_count" in result]
+    if not counted:
         return "n/a"
-    total = sum(counts)
-    declared = sum(len(result.get("gaps", ())) for result in results)
-    return f"{total} ({declared} known gap{'s' if declared != 1 else ''})" if declared else str(total)
+    total = sum(result["leak_count"] for result in counted)
+    declared = sum(result.get("leak_gaps", 0) for result in counted)
+    cell = f"{total} ({declared} known gap{'s' if declared != 1 else ''})" if declared else str(total)
+    if not all(result.get("harness_counted", True) for result in counted):
+        # Committed posts are counted; what the harness showed by itself cannot be.
+        cell += "; committed posts only, what the harness showed is n/a"
+    return cell
 
 
 def _load(spec: str) -> list[KitIntegration]:
