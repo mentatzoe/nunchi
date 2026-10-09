@@ -13,11 +13,38 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- The Discord room for the rehearsals (step 9f, PR 3b;
+  [docs/rehearsal.md](docs/rehearsal.md)): **implemented, unverified** in
+  CI, run here offline for Claude Code, Codex and the reference. The probe's
+  `--room discord` (scripted only) runs Nunchi's own Discord processes
+  unmodified on the stand-in at Discord's real names: a `nunchi-mcp-discord`
+  each for Claude Code and Codex, whose runners stay in the probe's process,
+  and `nunchi-discord` (`--harness reference`) with a scripted plain-call
+  participant. It runs inside a launcher, `evals/rehearsal/discord_net.py`
+  (`sudo -E`), that makes a per-run CA limited to Discord's domains, maps
+  Discord's names to 127.0.0.1 and trusts the CA only inside a private mount
+  namespace (with `--offline`, a private network namespace too), lets the
+  stand-in bind port 443, refuses proxy variables and checks bubblewrap,
+  then runs the probe as the invoking user. Before each process starts,
+  `evals/rehearsal/preflight.py` checks in that process's environment that
+  the names reach this run's stand-in over TLS on the default context; the
+  stand-in gains a `GET /api/v10/_preflight/{nonce}` route of its own for
+  it. The moments add a reply, a reaction across a gateway reconnect, and a
+  thread message, with six `discord-*` hard checks. CI runs one lane per
+  column, inside the launcher with `--offline`: Claude Code in
+  `claude-code-mod`, Codex in `codex-app-server`, both with the
+  `mcp-discord` extra pinned as `mcp==1.28.1`, and the reference in
+  `discord-standin`. It pins two gaps of the shared transport as `not
+  delivered` (a message in a thread, and the first message after it
+  starts), and found a third: a notification sent before the runner's
+  stream is open is lost while the transport's journal says it was
+  delivered. All three are documented in
+  `integrations/mcp-discord/README.md`.
 - The Discord stand-in for the rehearsals (step 9f, PR 3a;
   [docs/rehearsal.md](docs/rehearsal.md)): **implemented, unverified** in
-  CI, and nothing runs on it yet. `evals/rehearsal/fake_discord/` answers
+  CI; the Discord room (PR 3b) runs on it. `evals/rehearsal/fake_discord/` answers
   as Discord's REST API and gateway, on its own thread in the caller's
-  process, with TLS at Discord's names for the launcher to come (PR 3b) or
+  process, with TLS at Discord's names for the launcher (PR 3b) or
   plain loopback for tests. It models the social facts the room is read
   from (each channel's clock and its ids, mentions and `@everyone` only with
   permission, replies, authors and nonces, one permission function behind

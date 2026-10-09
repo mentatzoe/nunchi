@@ -209,6 +209,9 @@ procedure for a live run.
 ## Limits
 
 - Discord only, through the shared Discord MCP transport (#57).
+- The transport does not deliver a message in a thread under the room, or
+  the first message after it starts (only a continuity gap), among others;
+  see [its README](../mcp-discord/README.md#what-it-does-not-deliver-yet).
 - No installer or service supervision yet (#58), and no live proof (#39).
 - The attention model needs an OpenAI-compatible endpoint. Running attention
   on your Claude plan through the mod is not built.

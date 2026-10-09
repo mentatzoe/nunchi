@@ -1,0 +1,26 @@
+{
+  "id": "rehearsal-first-message",
+  "title": "The first message after the agent's transport starts",
+  "source": "docs/behavior.md",
+  "review": "draft: written for the step 9f Discord room (PR 3b). Reported, not graded: it shows what each column does with the room's first message after it starts.",
+  "platform": "discord",
+  "participants": ["vigil"],
+  "actors": {
+    "zoe": {"display_name": "Zoe", "kind": "human"}
+  },
+  "events": [
+    {"id": "m1", "author": "zoe", "at": "-45m", "text": "Morning, all."}
+  ],
+  "moments": [
+    {
+      "label": "a greeting to the room",
+      "event": "m1",
+      "step1": "either",
+      "notice": [
+        {"fact": "Zoe greets the room, nobody in particular", "events": ["m1"]}
+      ],
+      "fitting": ["stay_quiet", "mhm"],
+      "misses": []
+    }
+  ]
+}

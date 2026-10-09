@@ -11,6 +11,11 @@ stand-in does not model, and any request a handler fails on, gets 599 and an
 ``unknown`` record that fails the run. discord.py does not retry a 599;
 Nunchi's transport retries a GET three times (about 14 s), and each attempt
 is recorded.
+
+One route is the stand-in's own, not Discord's: ``GET /_preflight/{nonce}``
+takes no token and answers the run's nonce, so a process can prove before it
+starts that Discord's names lead it here (`evals/rehearsal/preflight.py`).
+Any other nonce gets 404 and an ``unknown`` record.
 """
 
 from __future__ import annotations
@@ -106,6 +111,13 @@ def _roles(fd: Any, bot: Any, params: dict[str, str], body: Any) -> tuple[int, A
     return 200, [payloads.role(r) for r in fd.world.roles.values()], "role"
 
 
+def _preflight(fd: Any, bot: Any, params: dict[str, str], body: Any) -> tuple[int, Any, str | None]:
+    if params["nonce"] != fd.preflight_nonce:  # another run's check, or a guess: this is not its stand-in
+        fd.wire.write("unknown", what="preflight nonce", nonce=params["nonce"])
+        raise DiscordError(404, 0, "404: Not Found")
+    return 200, {"nonce": fd.preflight_nonce}, None
+
+
 ROUTES = {
     ("GET", "/users/@me"): _me,
     ("GET", "/oauth2/applications/@me"): _application,
@@ -115,7 +127,10 @@ ROUTES = {
     ("GET", "/channels/{channel}"): _channel,
     ("GET", "/guilds/{guild}/members/{user}"): _member,
     ("GET", "/guilds/{guild}/roles"): _roles,
+    ("GET", "/_preflight/{nonce}"): _preflight,
 }
+# The routes that take no token: only the stand-in's own preflight.
+OPEN_ROUTES = {"/_preflight/{nonce}"}
 
 
 def match(method: str, path: str) -> tuple[str, dict[str, str]] | None:
@@ -197,7 +212,7 @@ def handle(fd: Any, request: Request) -> tuple[int, dict[str, str], bytes]:
         fault = _fault(fd, request.method, template, path[len(API):])
         if fault is not None:
             (status, payload, headers), record["fault"] = fault, True
-        elif bot is None:
+        elif bot is None and template not in OPEN_ROUTES:
             status, payload, headers = 401, {"message": "401: Unauthorized", "code": 0}, ratelimit(template)
         else:
             headers = ratelimit(template)

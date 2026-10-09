@@ -391,6 +391,46 @@ def _facts(value: Mapping[str, Any], prefix: str = "") -> Iterable[tuple[str, An
             yield f"{prefix}{key}", item
 
 
+def _discord_lines(discord: Mapping[str, Any]) -> list[str]:
+    """The Discord room in a few lines: the launcher, each process, the stand-in's verdict, continuity."""
+
+    launcher = discord.get("launcher") or {}
+    bwrap = launcher.get("bwrap") or {}
+    column = discord.get("column") or {}
+    standin = discord.get("standin") or {}
+    lines = [
+        f"- Column: #{column.get('channel')} ({column.get('channel_id')}), bot {column.get('bot')} ({column.get('bot_id')})",
+        f"- Launcher: {'offline' if launcher.get('offline') else 'online'}, bubblewrap check "
+        + ("skipped (" + str(bwrap.get("skipped")) + ")" if bwrap.get("skipped") else "ran"),
+    ]
+    for process in discord.get("processes", ()):
+        preflight = process.get("preflight") or {}
+        installed = process.get("installed") or {}
+        on = ", ".join(f"{name} {version}" for name, version in installed.items() if name not in ("nunchi_from", "error"))
+        lines.append(
+            f"- {process.get('name')} ({on or installed.get('error') or 'versions not read'}): "
+            f"preflight {'passed' if preflight.get('ok') else 'failed'}, keys "
+            f"{', '.join(process.get('secrets', ())) or 'none'}, stopped by {process.get('stopped_by')} (exit {process.get('exit')})"
+        )
+    unknown = standin.get("unknown") or ()
+    lines.append(
+        f"- Stand-in: {'clean' if standin.get('clean') else f'{len(unknown)} unknown record(s)'}; "
+        + ", ".join(f"`{name}`" for name in standin.get("outputs", ()))
+    )
+    start = discord.get("start_gap") or {}
+    lines.append(f"- Start: {start.get('detail') or 'no start gap recorded'}" + ("" if start.get("gap") else " (the participant never saw it)"))
+    for item in discord.get("reconnects", ()):
+        gaps = [*item.get("transport_gaps", ()), *item.get("participant_gaps", ())]
+        lines.append(
+            f"- Op 7 to {item.get('bot')} before {item.get('moment')}: "
+            + ("resumed" if item.get("resumed") else "did not resume")
+            + (", identified again" if item.get("identified_again") else "")
+            + (", the message posted meanwhile reached Nunchi" if item.get("message_reached") else ", the message posted meanwhile never reached Nunchi")
+            + (f"; gaps marked: {', '.join(map(str, gaps))}" if gaps else "; no gap marked")
+        )
+    return lines
+
+
 def summary_markdown(run: Mapping[str, Any]) -> str:
     """The run in a page: first the outcome and every reason for it, then what each check and moment found."""
 
@@ -480,7 +520,17 @@ def summary_markdown(run: Mapping[str, Any]) -> str:
             for post in moment.get("posts", ()):
                 text = str(post.get("text", "")).replace("\n", " ")
                 lines.append(f"- {moment.get('name')} post ({post.get('delivery')}): {text[:300]}")
+            # The Discord room's other moves: a reaction is not a post.
+            for action in moment.get("actions", ()):
+                if action.get("kind") == "reaction":
+                    lines.append(f"- {moment.get('name')} reaction ({action.get('delivery')}): {action.get('reaction')} on {action.get('target_event_id')}")
+            for delivery in moment.get("deliveries", ()) if run.get("discord") else ():
+                if delivery.get("note"):
+                    lines.append(f"- {moment.get('name')}, {delivery.get('scene_event')}: {delivery['note']}")
         lines.append("")
+    discord = run.get("discord")
+    if isinstance(discord, Mapping):
+        lines += ["## The Discord room", "", *_discord_lines(discord), ""]
     if checks:
         lines += ["## Hard checks", "", "| Check | Result | Detail |", "|---|---|---|"]
         for check in checks:

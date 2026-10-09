@@ -1,0 +1,29 @@
+{
+  "id": "rehearsal-reply",
+  "title": "A person replies to the agent's post with a follow-up",
+  "source": "docs/behavior.md",
+  "review": "draft: written for the step 9f Discord room (PR 3b). The probe posts r1 as a Discord reply to the agent's answer to the direct question.",
+  "platform": "discord",
+  "participants": ["vigil"],
+  "actors": {
+    "zoe": {"display_name": "Zoe", "kind": "human"}
+  },
+  "events": [
+    {"id": "r1", "author": "zoe", "at": "0s",
+     "text": "Thanks. Should the retries back off exponentially, or wait a fixed interval?"}
+  ],
+  "moments": [
+    {
+      "label": "a follow-up in reply to the agent",
+      "event": "r1",
+      "step1": "pass",
+      "notice": [
+        {"fact": "Zoe replied to Vigil's answer with a follow-up question", "events": ["r1"]}
+      ],
+      "fitting": ["speak"],
+      "misses": [
+        {"move": "stay_quiet", "why": "Zoe asked Vigil a follow-up in reply to its own answer"}
+      ]
+    }
+  ]
+}

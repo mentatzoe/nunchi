@@ -10,7 +10,8 @@ below). PR 2 adds Claude Code's scripted lane and the settled spend reading:
 here, offline, against the pinned Claude Code 2.1.289, with its sandbox on
 and off; CI's `claude-code-mod` job runs it with the sandbox on and has not
 run yet. The settled spend reading has not met
-OpenRouter yet.
+OpenRouter yet. PR 3b's Discord room, where Nunchi's own Discord processes
+run on the Discord stand-in (below), is **implemented, unverified** in CI.
 
 ## The first live run (2026-10-09)
 
@@ -82,9 +83,10 @@ It does not prove:
   shared Discord transport. Hermes runs its real `GatewayRunner` in the
   probe's process, on the conformance kit's Discord world, with the shipped
   plugin directory loaded from a Nunchi config written as its README says.
-  `nunchi-mcp-discord`, discord.py's wire and the `hermes gateway` process
-  come with PR 3: its Discord stand-in is built (below), and no process
-  runs on it yet.
+  With `--room discord` (PR 3b, below), Nunchi's own Discord processes run
+  on a Discord stand-in at Discord's real names, scripted only;
+  `hermes gateway` joins in PR 3c, and the live probe keeps the in-process
+  room until PR 4.
 - **How well the agent reads the room.** Two moments, once each. The scenes,
   grading and a reference column come in PR 4.
 - **Hermes's own model as attention** (`hermes-host`). Attention is the same
@@ -177,7 +179,8 @@ Code only, and CI never passes it.
 
 ## The Discord stand-in (PR 3a)
 
-**Status: implemented, unverified in CI; nothing runs on it yet.**
+**Status: implemented, unverified in CI; Nunchi's own Discord processes
+run on it in the Discord room (PR 3b, below).**
 `evals/rehearsal/fake_discord/` answers as Discord's REST API and gateway,
 so that the production Discord processes (`hermes gateway`,
 `nunchi-mcp-discord` with both runners, `nunchi-discord`) can later run on
@@ -238,6 +241,204 @@ and the `fidelity` list of what is not modelled). Its tests are `tests/v2/test_f
 `tests/v2/test_fake_discord_discordpy.py` (in the `discord-standin` job on
 Python 3.12 and the `hermes-plugin` job on 3.14, each after `python -m
 evals.rehearsal.fake_discord.shapes --check`).
+
+## The launcher (PR 3b)
+
+**Status: implemented, unverified in CI; run here offline. The probe's
+Discord room (below) runs inside it, in three CI jobs.**
+`evals/rehearsal/discord_net.py` makes Discord's names lead to the stand-in
+for one run, so that Nunchi's own Discord processes can run against it
+unmodified, at Discord's real names and over TLS:
+
+```sh
+sudo -E "$PY" -m evals.rehearsal.discord_net --offline -- "$PY" -m evals.rehearsal.probe ...
+```
+
+Run it from the repository's root. `sudo -E` keeps the environment but
+resets `PATH` and drops `PYTHONPATH`, so name each Python by its full path,
+with Nunchi installed in it. In order, the launcher:
+
+1. makes a per-run CA, limited by name constraints to `discord.com`,
+   `discord.gg`, `discordapp.com` and `discordapp.net`, and one leaf for the
+   five names the stand-in answers; the CA's key is deleted at once;
+2. enters a private mount namespace (`unshare --mount --propagation
+   private`, plus `--net` with `--offline`, which leaves only loopback) and
+   mounts there a copy of `/etc/hosts` that maps the names to 127.0.0.1
+   alone, and a copy of `/etc/ssl/certs` with the CA in the bundle and the
+   hashed directory, so each Python trusts it with its default context;
+3. sets `net.ipv4.ip_unprivileged_port_start=443`, so the stand-in binds
+   443 as you. The setting belongs to the network namespace. Without
+   `--offline` it would change this machine's, so the launcher refuses that
+   unless `CI=true`, and restores it afterwards;
+4. checks that no proxy variable is set (`HTTP_PROXY`, `HTTPS_PROXY`,
+   `ALL_PROXY`, `WS_PROXY`, `WSS_PROXY` or `DISCORD_PROXY`, in any case: the
+   transport's REST calls and Hermes's discord.py follow one past the
+   mapping), that each name resolves to 127.0.0.1 alone, and, as you, that
+   `bwrap --ro-bind / / true` runs, so a sandbox that needs bubblewrap fails
+   before any harness starts. `--no-bwrap-check` skips that on a machine
+   without bubblewrap; the run records the skip, and the launcher refuses
+   it when `CI=true`;
+5. runs the command as you (`SUDO_UID`, `SUDO_GID` and your groups), with
+   `NUNCHI_DISCORD_NET` naming `net.json`: the names, the stand-in's
+   certificate and key, and what the launcher did. When the command ends,
+   the run's files, the key included, are removed. The exit status is the
+   command's, or 2 for a refusal and 3 for a failed setup or check.
+
+The stand-in has one route of its own for this, `GET
+/api/v10/_preflight/{nonce}`: it needs no token and answers the run's nonce
+(`FakeDiscord.preflight_nonce`); any other nonce gets 404 and an unknown.
+`python -m evals.rehearsal.preflight --nonce N`, run in a Discord process's
+own environment once the stand-in is up, repeats the proxy and name checks,
+GETs that route on the default SSL context, and opens TLS to each other name,
+which must show the same certificate. A proxy, a name that leads elsewhere,
+an untrusted certificate or another run's stand-in fails it.
+
+Proxy variables alone could not do this: the transport's gateway client and
+`nunchi-discord` ignore them and would reach the real Discord. Every Discord
+client here resolves names through glibc and trusts OpenSSL's default paths,
+which is what the launcher changes. Run here offline (2026-10-09), with the
+stand-in at port 443: the preflight, the transport's REST client and its
+gateway client reached it by name on Python 3.11, 3.12 and 3.14, as root and
+as an unprivileged user, and this machine's `/etc/hosts`, trust store and
+port setting stayed unchanged. Not run yet: without `--offline` (that needs
+`CI=true`), and the bubblewrap check itself, since bubblewrap is not
+installed here. CI passes `--offline` too, so the port setting stays in the
+run's namespace on a runner as well, and never passes `--no-bwrap-check`.
+Its tests are `tests/v2/test_discord_net.py`; the one that runs the
+launcher needs root, so it skips in the `test` job.
+
+## The Discord room (PR 3b)
+
+**Status: implemented, unverified in CI. Run here offline, inside the
+launcher, for Claude Code (2.1.289, with `--no-sandbox`), Codex (0.160.1)
+and the reference: every hard check held in each.** `--room discord` plays
+the probe's moments on the Discord stand-in at Discord's real names, with
+Nunchi's own Discord processes unmodified (`evals/rehearsal/discord_room.py`):
+
+```sh
+sudo -E "$PY" -m evals.rehearsal.discord_net --offline -- \
+  /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness codex --scripted --room discord --out rehearsal-out
+```
+
+`--room standin` stays the default. The Discord room is scripted only (a
+live run keeps the in-process room until PR 4) and runs only inside the
+launcher: without its `NUNCHI_DISCORD_NET` the probe could not run (exit 3)
+and starts nothing. `sudo` resets `PATH`, hence `env PATH="$PATH"` for the
+harnesses that need Node.
+
+- **Claude Code and Codex** each get a `nunchi-mcp-discord` process of their
+  own, with its own bot, port, routes, output key and state directory. The
+  runner (`ClaudeCodeRoomRuntime`, `CodexRoomRunner`) stays in the probe's
+  process, built with the same calls as its CLI's `main`
+  (`load_pinned_config`, `transport_client`), and serves the room over real
+  MCP (`DiscordRoomConnection.serve`, given a stop the probe sets at the
+  end). The probe watches it as it watches the in-process room.
+- **The reference**, `--harness reference`, is `nunchi-discord` on
+  discord.py in its own process, with a scripted plain-call participant: an
+  OpenAI-compatible endpoint that answers each turn in the participant-turn
+  protocol (`standin.ScriptedParticipant`). `--discord-python` names a
+  Python with discord.py. Its evidence comes from outside it: its receipts
+  and delivery audits, what the scripted endpoints were asked and answered,
+  and the wire.
+
+Each Discord process starts as its console script does (`main` from the
+same module), with the path, locale and certificate settings, a fresh
+`HOME` and `TMPDIR`, and its own keys alone: no proxy variable, no key of
+the harness's, no canary. Before it starts, `python -m
+evals.rehearsal.preflight --nonce` runs in exactly that environment and
+Python, and must reach this run's stand-in with the launcher's certificate;
+otherwise the process is never started (exit 3). Attention is the scripted
+endpoint. The moments play in one channel, named after the column:
+
+| Moment | What happens | Checked |
+|---|---|---|
+| first-message | a person greets the room | reported; on the shared transport, pinned `not delivered` (below) |
+| bot-status-report | a scripted bot posts a build report | no turn |
+| direct-question | a person asks the agent | one post: the scripted answer |
+| reply | the person replies to the agent's post | one reply, to that message |
+| reaction | op 7 goes to every bot, then at once the person asks for a thumbs up, so the message crosses the reconnect | one 👍 on that message |
+| thread | the person opens a thread under the room and posts in it | reported; on the shared transport, pinned `not delivered` |
+
+Beside the probe's hard checks, a run in the Discord room holds six more:
+
+- `discord-preflight`: each process's preflight passed and showed the
+  launcher's certificate;
+- `discord-processes`: each process got only its own keys, ran through the
+  moments, and stopped on SIGINT or SIGTERM;
+- `discord-standin-clean`: the stand-in's verdict has no unknown record;
+- `discord-clients-complete`: each bot identified, got READY (and a member
+  chunk where its client asks for one), and made its column's calls;
+- `discord-writes-reconciled`: each committed action that reads `sent` is
+  exactly one write the bot made, with the same content and target, and
+  every write the bot made is a committed action;
+- `discord-continuity`: the gap a fresh process declares reached the
+  participant; after op 7 each bot resumed, did not identify again, and the
+  message posted meanwhile reached Nunchi; on the shared transport no gap
+  was marked. The reference marks a stream gap on any disconnect
+  (`on_disconnect`): recorded, not failed.
+
+With `--scripted`, each graded moment is checked against the script, and
+each pin holds. What the runs here showed (2026-10-09):
+
+- **A reconnect loses nothing.** The message posted right after op 7 went
+  out on the old connection behind the op 7 frame, so no client read it
+  there. The transport and discord.py both resumed, and the stand-in
+  replayed it. The transport marked no gap.
+- **The shared transport has two gaps**, pinned `not delivered` and
+  documented in `integrations/mcp-discord/README.md`: it drops a message in
+  a thread under a routed channel, and it replaces the first routed event
+  after it starts with a continuity gap, so a person's first message after
+  a start never reaches the agent. Closing either is library work.
+- **The reference refuses thread messages too.** Its delivery audit reads
+  `route-rejected`: a thread's id is not the bound channel.
+- **A notification sent before the runner's stream is open is lost**, and
+  the transport's journal says it was delivered (found reading the MCP SDK,
+  then reproduced inside the launcher; `integrations/mcp-discord/README.md`).
+  The lanes wait for the stream before the first moment, so they do not
+  show it.
+
+It writes `world.json`, `discord-wire.jsonl` and `discord-standin.json` (the
+stand-in's), `discord/<process>.log`, and a `discord` section in `run.json`:
+the launcher's record, each process with its command, variable names,
+preflight and exit, the stand-in's verdict, the start gap, each reconnect,
+and the bot's writes. Each process also records what it ran on
+(`installed`: Python, Nunchi, and mcp, or discord.py and aiohttp), read in
+its own Python and environment. The scan covers them all, and looks for
+each bot's per-run token too. Its tests are
+`tests/v2/test_rehearsal_discord_room.py` (no root).
+
+**In CI**, one lane per column runs as a step of its own: the launcher with
+`--offline` around `--room discord --scripted`, with a fresh `HOME` and
+`TMPDIR`, and the step's `PATH` passed on to the probe, since `sudo` resets
+it.
+
+| Job | Column | Python | The Discord process runs on |
+|---|---|---|---|
+| `claude-code-mod` | Claude Code 2.1.289, with the README's sandbox on | 3.12 | Nunchi's wheel and the `mcp-discord` extra as `mcp==1.28.1` (`MCP_VERSION`) |
+| `codex-app-server` | Codex 0.160.1 | 3.12 | the same |
+| `discord-standin` | the reference | 3.12 | Nunchi's wheel, `discord.py==2.7.1` and `aiohttp==3.14.3`, in a clean virtualenv |
+
+The two transport lanes come after their job's in-process probe, and the
+`mcp` install comes just before the lane, so the in-process steps run as
+before. Each step prints `pip freeze`. The launcher's bubblewrap check needs
+bubblewrap, so the Codex and reference steps install it and lift Ubuntu's
+AppArmor limit on user namespaces, as `claude-code-mod` already does for
+Claude Code's sandbox. These steps have not run in CI yet. Here
+(2026-10-09), each job's steps ran from `ci.yml`'s own text on Python 3.12,
+with these local changes: no bubblewrap here, so the launcher got
+`--no-bwrap-check` and Claude Code `--no-sandbox`; no `apt-get` or `sysctl`;
+the pinned harnesses already on disk instead of `npm install`; and `pip`
+reaching PyPI through this machine's settings, which the `sudo` line
+unsets. All three lanes passed with every hard check, as root and dropping
+to an unprivileged user.
+
+Expected on `ubuntu-latest`, not checked: passwordless `sudo -E`, no proxy
+variables, bubblewrap running in the launcher's namespace after the drop to
+the runner user, Claude Code's sandbox inside that namespace, and
+setup-python's Python trusting `/etc/ssl/certs`. The launcher refuses a
+proxy variable, its bubblewrap check fails before any harness starts, and
+the preflight fails on an untrusted certificate, so none of these can pass
+quietly.
 
 ## What a pass means
 
@@ -308,6 +509,9 @@ NUNCHI_CODEX_BIN=/path/to/codex python -m evals.rehearsal.probe --harness codex 
 NUNCHI_CLAUDE_BIN=/path/to/claude python -m evals.rehearsal.probe --harness claude-code --scripted --out rehearsal-out
 # live: costs money
 NUNCHI_ATTENTION_API_KEY=... python -m evals.rehearsal.probe --harness hermes --out rehearsal-out --budget-usd 2
+# the Discord room, offline, as root (The Discord room, above)
+sudo -E "$PY" -m evals.rehearsal.discord_net --offline -- /usr/bin/env PATH="$PATH" \
+  "$PY" -m evals.rehearsal.probe --harness reference --scripted --room discord --discord-python /path/to/python-with-discord.py --out rehearsal-out
 ```
 
 The live probe needs the key in `NUNCHI_ATTENTION_API_KEY`. It hands the
@@ -322,6 +526,8 @@ at the budget with every hard check holding. With two
 moments, a stop can only come before the direct question, and a run that
 stops there usually has no wake, so it reads as a failure (exit 1); the
 first lines of `summary.md` name the stop either way.
+`--room discord` is scripted only, needs the launcher, and is not for
+Hermes yet (exit 2 otherwise); `--harness reference` runs in it alone.
 `--attention-model` takes the behavior eval's label (`id` or `id@effort`);
 a label for another route (`messages:`, `responses:`) is refused, since the
 probe builds the chat route only. `--arm LABEL` names a run that is one arm
@@ -329,7 +535,9 @@ of a comparison, in `run.json` and in the title of `summary.md`.
 
 CI runs `--scripted`, and this probe's tests (`tests/v2/test_rehearsal.py`,
 the scripted probe's own test included), in the Claude Code (`claude-code-mod`),
-Codex and Hermes lanes of `ci.yml`, with no secret.
+Codex and Hermes lanes of `ci.yml`, with no secret. It runs `--room discord
+--scripted` inside the launcher for Claude Code, Codex and the reference
+(The Discord room, above).
 
 ## Model routes and keys
 
@@ -530,8 +738,9 @@ Only a key with a credit limit is a hard one.
   alternative is a rehearsal key with a credit limit, the only hard limit.
 - **R2, the room.** Default: the Discord stand-in, which answers at
   Discord's hostnames so `nunchi-mcp-discord`, discord.py and
-  `hermes gateway` run unmodified, comes in PR 3. Until then the probe uses
-  the in-process stand-ins above.
+  `hermes gateway` run unmodified. Nunchi's own processes run on it in
+  the scripted Discord room (PR 3b), `hermes gateway` in PR 3c. Until PR 4
+  the live probe uses the in-process stand-ins above.
 - **R3, Codex's namespace tools.** Outcome of the first live run
   (2026-10-09): OpenRouter passed Codex's namespace tools through, and the
   Codex run on `anthropic/claude-haiku-4.5` passed. What follows is how the
