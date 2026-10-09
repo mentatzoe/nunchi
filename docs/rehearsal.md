@@ -1,11 +1,39 @@
 # Rehearsals: a live model in each real harness (step 9f)
 
-**Status: implemented, unverified.** The probe, step 9f's first rehearsal,
-has run offline only: scripted for Codex and Hermes against their pinned
-installs; for Claude Code, in unit tests with a faked `claude`, and by hand
-with the pinned Claude Code against a local Messages endpoint. No live model
-has run through a real harness with Nunchi yet. The first dispatch of the
-`rehearsal` workflow settles that.
+**Status: the probe ran live once and passed in all three harnesses.** On
+2026-10-09 the first dispatch of the `rehearsal` workflow
+([run 37912807549](https://github.com/mentatzoe/nunchi/actions/runs/37912807549))
+ran a live model through Claude Code, Codex and Hermes, each on its pinned
+install, with Nunchi and live attention, and every job passed (findings
+below). PR 2 adds Claude Code's scripted lane and the settled spend reading:
+**implemented, unverified** in CI. The scripted Claude Code probe has run
+here, offline, against the pinned Claude Code 2.1.289, with its sandbox on
+and off; CI's `claude-code-mod` job runs it with the sandbox on and has not
+run yet. The settled spend reading has not met
+OpenRouter yet.
+
+## The first live run (2026-10-09)
+
+Every job passed: each harness reached its model through OpenRouter and
+took part in the room through Nunchi, with attention judging. What it
+showed besides:
+
+- **Claude Code loads three plugins built into its binary** besides the mod:
+  `cc-plugin-agents-md`, `cc-plugin-telemetry` and
+  `cc-plugin-plugin-authoring` (its `init` names them with `path: builtin`).
+  They come with the stock install; the probe records them
+  (`mod_loaded.init_plugins`) and does not fail on them.
+- **Codex has no model metadata for the slug** (`anthropic/claude-haiku-4.5`)
+  and falls back to its defaults for an unknown model. The turn still ran.
+- **Hermes's terminal is unsandboxed by default**: its `local` backend runs
+  the agent's commands as the user. The run records it (`sandbox: off`), as
+  designed.
+- **R3: OpenRouter passed Codex's namespace tools through.** The Codex run
+  on `anthropic/claude-haiku-4.5` passed, so R3 did not block it (below).
+- **The spend watchdog read $0 in every job.** OpenRouter's usage figure for
+  the key lags behind the calls, so no reading between moments, or right
+  after the last, had moved. The reading after the last moment now reads it
+  up to a bound and keeps each read (Cost, below).
 
 ## What the probe proves, and what it does not
 
@@ -36,7 +64,7 @@ or fail**: the model decides. A moment whose graded message never reached
 Nunchi reads `not delivered`, and a graded turn that attention's error
 fallback woke is marked as not attention's judgment. With `--scripted` the
 model and attention are scripted, so each moment's outcome is known and is a
-hard check, and for Codex so is the room tool call.
+hard check, and for Codex and Claude Code so is the room tool call.
 
 Hermes drops other bots' messages before any plugin hook by default
 (`discord.allow_bots: none`). The probe gives Hermes the README's peer-agent
@@ -58,10 +86,93 @@ It does not prove:
   come with the Discord stand-in (PR 3).
 - **How well the agent reads the room.** Two moments, once each. The scenes,
   grading and a reference column come in PR 4.
-- **Claude Code offline in CI.** Its scripted lane needs a scripted Anthropic
-  Messages endpoint (PR 2). `--scripted` for Claude Code exits 5 until then.
 - **Hermes's own model as attention** (`hermes-host`). Attention is the same
   OpenRouter chat route in every harness here.
+- **That Claude Code sends nothing past its proxy settings in CI.** Its
+  scripted lane sees only what Claude Code sends through `HTTPS_PROXY` (below);
+  a connection that ignored the proxy settings would not be seen there.
+
+## Claude Code offline (`--scripted`)
+
+The scripted lane runs the real `claude -p` and the Nunchi mod, through the
+same `ClaudeCodeRoomRuntime` as a live run, with no provider and no key, at
+$0 (a Claude Code cloud container's own credential is the exception, below):
+
+- **The model** is a scripted Anthropic Messages endpoint on localhost
+  (`standin.ScriptedClaudeAgent`), set as `ANTHROPIC_BASE_URL`. It answers
+  only a streamed `POST /v1/messages`, in the event shape Claude Code
+  2.1.289 reads (`message_start`, each content block's start, delta and
+  stop, `message_delta`, `message_stop`). A call that offers the mod's
+  `mcp__nunchi__room_send` gets a `tool_use` of it with the scripted answer;
+  the call that carries its result gets a short text, which ends the turn;
+  a streamed call without the room tools gets a short text. Anything else,
+  a call without `stream` included, gets a 404: when Claude Code cannot read
+  a stream it retries the call without one, and that fallback must fail the
+  turn, never pass it. Its requests are recorded
+  (`transcript/scripted-model-requests.json`, and the counts in the report's
+  `scripted_model`), without the key's value.
+- **Everything else** Claude Code sends through its proxy settings goes to a
+  local proxy that refuses it (HTTP 403) and names it
+  (`standin.RefusingProxy`): the probe sets `HTTPS_PROXY`, `HTTP_PROXY` and
+  their lowercase forms to it, with `NO_PROXY=127.0.0.1,localhost`, in
+  Claude Code's session and the version read for the record, never the
+  probe's own process (Python's `urlopen` keeps the
+  proxy settings it first saw for the whole process). The
+  report's `network` lists each `host:port` and how often, read after
+  Claude Code has exited, since it still tries to reach Anthropic as it
+  shuts down; its detail is among the first lines of `summary.md`.
+- **Attention** is the scripted chat endpoint the other lanes use: it wakes
+  for the direct question and lets the bot's report pass.
+
+So the scripted model calls the mod's room tool to post the scripted answer
+on the direct question, and the bot's report gets no turn; both are hard
+checks (`scripted-outcomes`), with the room tool call read from Claude
+Code's own stream-json. A Claude Code result that is an error fails the run
+too, even after the post (What a pass means, below).
+
+**With Anthropic's servers out of reach, the mod loads.** Run here on
+2026-10-09 with the pinned 2.1.289, inside a network namespace with only
+loopback and with every `connect` of Claude Code's process tree traced
+(`strace -f`), Claude Code made no connection outside loopback and no DNS
+lookup: its connections were the scripted endpoint, the proxy, the mod's own
+MCP server inside the process, and the gate's socket. Everything it tried
+past them was a `CONNECT api.anthropic.com:443` through the proxy, refused.
+A review that put a TLS-terminating stand-in in the proxy's place, logging
+paths, header names and lengths but no value, saw what they were:
+
+- `GET /mcp-registry/v0/servers` (the MCP registry) and `POST
+  /api/event_logging/v2/batch` (a telemetry batch of about 300 KB, sent as
+  Claude Code exits), both without a credential;
+- `GET /api/claude_cli/bootstrap` and `GET /api/claude_code_penguin_mode`,
+  each with `Authorization: Bearer` and a credential Claude Code read from
+  a file, not the route's `ANTHROPIC_AUTH_TOKEN`.
+
+That file is a Claude Code cloud container's own credential. The pinned
+2.1.289 reads `/home/claude/.claude/remote/.oauth_token` (and its siblings
+`.api_key` and `.session_ingress_token`) from that fixed path, whatever
+`HOME`, `CLAUDE_CONFIG_DIR` or a clean environment say. This container has
+it, so here Claude Code tried all four requests (`CONNECT x4` in the
+record); with that directory hidden in a private mount namespace it tried
+only the registry and the telemetry batch (`CONNECT x2`), and the run still
+passed. "No key" therefore holds only where that directory is absent, as on
+a CI runner. The proxy refused the bootstrap calls, so the credential did
+not leave the machine; the report records which of those files Claude Code
+could read (`fixed_credentials`, paths only, never their contents), and
+`summary.md` says so among its first lines when one is readable. A live run
+from such a container would send them as the container's account, so run
+live probes from CI. The mod loaded (its `init` lists `nunchi` beside the
+three built-in plugins), attached, bound the turn, and posted through the
+room tool in every one of these runs, with Claude Code's sandbox on and
+with it off (`--no-sandbox`); CI runs it on.
+
+CI runs this lane in the `claude-code-mod` job of `ci.yml`, after the mod's
+validation and tests, on the same pinned version: the pinned Claude Code
+from npm, bubblewrap and socat installed and checked as the rehearsal
+workflow does, the probe's tests, then the scripted probe with the README's
+sandbox on. `--no-sandbox` runs Claude Code without its Bash sandbox
+(`sandbox.enabled: false` in the clean user's settings) for a machine where
+bubblewrap cannot run; the run records the sandbox as off. It is for Claude
+Code only, and CI never passes it.
 
 ## What a pass means
 
@@ -72,7 +183,10 @@ and `summary.md` opens with every reason (`evals/rehearsal/checks.py`):
 - no wake reached the harness, so nothing showed it reaching its model;
 - a turn ended as a named failure: the mod never attached, the harness could
   not take the turn, or the model call failed (Claude Code's error result,
-  Codex's failed turn, Hermes's provider failure);
+  Codex's failed turn, Hermes's provider failure). Claude Code's error
+  result and Codex's failed turn fail the run even when the turn had
+  already posted: the post settles the turn's outcome for the library, so a
+  later call that fails shows only in the harness's own result;
 - the participant-host receipt, which wins over what the probe recorded,
   says a turn's outcome is `unknown` with nothing handed to the room: the
   turn was cancelled, outlived the host's deadline, or failed;
@@ -87,7 +201,8 @@ and `summary.md` opens with every reason (`evals/rehearsal/checks.py`):
   Hermes gap included, or a committed post names Nunchi's machinery;
 - a turn started on a message no one else posted, such as the agent's own
   post coming back from the room;
-- with `--scripted`, a moment did not go as scripted;
+- with `--scripted`, a moment did not go as scripted, or, for Codex and
+  Claude Code, the post did not go through a room tool;
 - the pins, the isolation or the record did not hold: among them, a
   recorded process got a key other than its harness's own (Nunchi's keys
   stay in Nunchi's process), or, where Hermes's own builders show it, the
@@ -125,6 +240,7 @@ Locally, from a checkout, with the pinned harness installed:
 ```sh
 # offline, no key
 NUNCHI_CODEX_BIN=/path/to/codex python -m evals.rehearsal.probe --harness codex --scripted --out rehearsal-out
+NUNCHI_CLAUDE_BIN=/path/to/claude python -m evals.rehearsal.probe --harness claude-code --scripted --out rehearsal-out
 # live: costs money
 NUNCHI_ATTENTION_API_KEY=... python -m evals.rehearsal.probe --harness hermes --out rehearsal-out --budget-usd 2
 ```
@@ -135,9 +251,9 @@ same key, under the name the harness reads (below). Run it with a Python
 that can import Nunchi (CI installs the wheel). Exit status: 0 every hard
 check held; 1 a hard check failed, the probe raised an error, or the scan
 found a secret; 2 bad arguments, a Claude Code `--agent-model` the probe has
-no row for among them (below); 3 it could not run (a harness or the key is
-missing, for example); 4 it stopped at the budget with every hard check
-holding; 5 `--scripted` is not available for that harness yet. With two
+no row for or `--no-sandbox` for another harness among them (below); 3 it
+could not run (a harness or the key is missing, for example); 4 it stopped
+at the budget with every hard check holding. With two
 moments, a stop can only come before the direct question, and a run that
 stops there usually has no wake, so it reads as a failure (exit 1); the
 first lines of `summary.md` name the stop either way.
@@ -147,8 +263,8 @@ probe builds the chat route only. `--arm LABEL` names a run that is one arm
 of a comparison, in `run.json` and in the title of `summary.md`.
 
 CI runs `--scripted`, and this probe's tests (`tests/v2/test_rehearsal.py`,
-the scripted probe's own test included), in the Codex and Hermes lanes of
-`ci.yml`, with no secret.
+the scripted probe's own test included), in the Claude Code (`claude-code-mod`),
+Codex and Hermes lanes of `ci.yml`, with no secret.
 
 ## Model routes and keys
 
@@ -232,14 +348,17 @@ transcripts: they open only a socket that closes with the run.
 The user settings follow each integration's README: Claude Code's Bash
 sandbox, and Codex's `workspace-write` sandbox without network. Both run the
 agent's commands in bubblewrap, so the workflow installs it (and socat, for
-Claude Code) in both jobs, lifts Ubuntu's AppArmor limit on unprivileged
-user namespaces, and checks that `bwrap` runs. Hermes runs the agent's
+Claude Code) in both jobs, and in CI's scripted Claude Code lane, lifts
+Ubuntu's AppArmor limit on unprivileged user namespaces, and checks that
+`bwrap` runs. Hermes runs the agent's
 commands with its default `local` terminal backend, unsandboxed. Each run
 records whether the harness's sandbox was on, in its report and in the
 first lines of `summary.md`: for Claude Code from its settings (with
 `failIfUnavailable`, a session that starts has its sandbox); for Codex from
 the sandbox policy it reports and its bubblewrap warnings; for Hermes from
 its terminal backend. A sandbox that is off is recorded, not failed.
+`--no-sandbox` turns Claude Code's off, for a machine where bubblewrap
+cannot run (Claude Code offline, above).
 
 ## What a run records
 
@@ -275,7 +394,8 @@ Under `rehearsal-out/<harness>/` (`evals/rehearsal/record.py`):
   app-server JSON-RPC and its session files; Hermes's sessions, messages,
   system prompts and model usage from its `state.db` (`hermes-state.json`),
   with its session index and logs. A scripted run adds the requests the
-  scripted model received.
+  scripted model received, and for Claude Code where else it tried to reach
+  (the report's `network`).
 
 `summary.md` opens with the outcome and every reason for it (each failed
 check, any error the probe raised, a stop at the budget), then attention's
@@ -293,28 +413,52 @@ from the model's requests. Any other turn error is given in Codex's own
 words. For Claude Code the verdict says whether the mod attached and bound
 the turn and which model the response names, or Claude Code's own words for
 the first error (a result's `errors`), and then anything that shows it ran
-otherwise than configured. For Hermes it says whether the plugin loaded and
-how many model calls its session records.
+otherwise than configured; its report also lists the tools the model called
+(`tool_calls`, `room_tool_called`), every error result (`failures`), and
+which credential files Claude Code reads from a fixed path whatever `HOME`
+says were readable (`fixed_credentials`). For Hermes it says whether the plugin
+loaded and how many model calls its session records.
 
 ## Cost
 
 Estimated under $1 for a dispatch of all three harnesses: per harness, two
 moments, about one agent turn (a few cents on Haiku 4.5) and three attention
-calls; the Codex job's OpenAI-model arm is one more such run. This is not
-measured yet; the first runs measure it.
+calls; the Codex job's OpenAI-model arm is one more such run. Not measured
+yet: in the first live run the key's usage figure had not moved by any
+reading (below). The scripted lanes cost nothing.
 
 Claude Code and Hermes give client-side cost estimates (`total_cost_usd`,
 and `estimated_cost_usd` in Hermes's `state.db`; both are recorded), and
 Codex's session files give token counts only. None of them is what the key
 was charged, so the spend watchdog reads the key's usage
-(`GET https://openrouter.ai/api/v1/key`) before, between and after the
+(`GET https://openrouter.ai/api/v1/key`) before the first moment and between
 moments, and stops before the next moment once the probe run has spent
-`budget_usd` (the Codex job has two runs, each with its own). It is a
-**soft limit**: the usage figure can lag, a moment under way runs to its
-end, and other runs on the same key count in the same figure. Job and step
-timeouts are a second limit. Only a key with a credit limit is a hard one.
+`budget_usd` (the Codex job has two runs, each with its own).
 
-## Zoe's open choices, and the defaults this PR takes
+OpenRouter's usage figure lags behind the calls: in the first live run every
+reading, between moments and right after the last, read $0 spent, in every
+job. So the last reading, after the last moment (or after a run that
+failed partway), reads the figure at once
+and then every 5 s, up to 75 s after the last moment: no read starts past
+the bound, and each read's timeout is cut to the time left. Since the
+reading is a record, not a limit, it never stops early, so a live probe run
+takes about 75 s longer. It keeps each read and takes the last figure read
+as the settled one: `spend.spent_usd`, and the last entry of
+`spend.readings`, whose `series` lists each read as [seconds after the last
+moment, usage] (null for a failed read). Charges posted after the bound are
+missed, and the series shows the lag: when the figure moved, and whether it
+was still moving at the bound. The Spend section of `summary.md` says the
+same. Whether 75 s covers OpenRouter's lag has not been measured: no live
+run has used this wait yet. A scripted run reads nothing and waits for
+nothing.
+
+The spend reading is **a record, and a soft limit between moments, never a
+limit inside one**, and `run.json` and `summary.md` say so: a moment under
+way runs to its end, the figure it stops on can lag, and other runs on the
+same key count in the same figure. Job and step timeouts are a second limit.
+Only a key with a credit limit is a hard one.
+
+## Zoe's open choices, and the defaults the probe takes
 
 - **R1, the key.** Default: the existing `NUNCHI_OPENROUTER` with the soft
   watchdog, and no behavior eval dispatched while a rehearsal runs. The
@@ -323,7 +467,11 @@ timeouts are a second limit. Only a key with a credit limit is a hard one.
   Discord's hostnames so `nunchi-mcp-discord`, discord.py and
   `hermes gateway` run unmodified, comes in PR 3. Until then the probe uses
   the in-process stand-ins above.
-- **R3, Codex's namespace tools.** If OpenRouter rejects the room tools
+- **R3, Codex's namespace tools.** Outcome of the first live run
+  (2026-10-09): OpenRouter passed Codex's namespace tools through, and the
+  Codex run on `anthropic/claude-haiku-4.5` passed. What follows is how the
+  probe tells the cases apart, kept for later runs and other models. If
+  OpenRouter rejects the room tools
   Codex sends as a `namespace` tool, Codex's turn fails, and so does its
   run, with the provider's error as the reason; the verdict reads "blocked
   on a model route (R3)" when that error names the namespace. The other two

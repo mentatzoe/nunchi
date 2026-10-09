@@ -21,7 +21,9 @@ summary.md:
    harness's own result. The participant-host receipt is authoritative: a
    turn the host recorded as ``unknown`` with nothing handed to the room was
    cancelled, timed out or failed. A named failure fails too: the harness
-   did not take the turn, which is never read as silence.
+   did not take the turn, which is never read as silence. So does a turn
+   the harness itself ended in error, even after its post (Claude Code's
+   error result, Codex's failed turn), in the harness's own words.
 4. **attention-judged**: attention returned at least one judgment. Failed
    calls, and the wakes their error fallback caused, are counted and listed.
 5. **one-room-action-per-turn**: no turn made more than one room action,
@@ -173,13 +175,18 @@ def turns_bound_and_ended(
     invocations: Sequence[Mapping[str, Any]],
     host_receipts: Sequence[Mapping[str, Any]],
     committed: Sequence[Mapping[str, Any]],
+    *,
+    harness_failures: Sequence[str] = (),
 ) -> Check:
     """At least one turn ran, and each was bound to its wake and ended with the harness's own result.
 
     The participant-host receipt says how each turn ended: ``silent``, or
     ``unknown``, which is an action handed to the room when one was, and
     otherwise a turn that was cancelled, outlived the host's deadline or
-    failed. It wins over what the probe recorded.
+    failed. It wins over what the probe recorded. ``harness_failures`` are
+    the turns the harness itself ended in error, in its own words: the
+    library has its outcome once the turn posts, so a call that fails after
+    the post shows only there, and it fails the check too.
     """
 
     problems: list[str] = []
@@ -213,6 +220,7 @@ def turns_bound_and_ended(
     for request_id in host:
         if request_id not in seen:
             problems.append(f"the host invoked the harness for {request_id} and the probe saw no turn")
+    problems += harness_failures
     if not invocations:
         problems.append("no wake reached the harness, so the run did not show it reaching its model")
     if problems:
@@ -350,8 +358,8 @@ def scripted_outcomes(moments: Sequence[Mapping[str, Any]], answer: str, *, room
 
     Scripted attention wakes only for the direct question, and the scripted
     agent posts ``answer`` once. So each moment fits, no other message starts
-    a turn, the one post is ``answer``, and, for Codex, it went through a
-    room tool (``room_tool_called``).
+    a turn, the one post is ``answer``, and, for Codex and Claude Code, it
+    went through a room tool (``room_tool_called``).
     """
 
     problems: list[str] = []

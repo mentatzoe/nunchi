@@ -3,14 +3,18 @@
 Claude Code and Hermes give client-side cost estimates (``total_cost_usd``,
 ``estimated_cost_usd``), and Codex token counts only; none of them is what
 the key was charged. So the probe reads the key's usage from OpenRouter
-(``GET /api/v1/key``) before the first moment, between moments and after
-the last, and stops before the next moment once the run has spent
-``budget_usd``.
+(``GET /api/v1/key``) before the first moment and between moments, and
+stops before the next moment once the run has spent ``budget_usd``. After
+the last moment it reads the figure every few seconds up to a bound
+(`SpendWatch.settle`), keeps each read, and takes the last figure as the
+settled one; charges posted after the bound are missed.
 
-This is a soft limit, and the record says so. OpenRouter's usage figure can
-lag behind the calls, a moment already under way runs to its end, and other
-runs on the same key (a behavior eval, say) count in the same figure. Only a
-key with a credit limit is a hard limit.
+The reading is a record, and a soft limit between moments, never a limit
+inside one; the record says so. OpenRouter's usage figure lags behind the
+calls: in the first live run (2026-10-09) every reading between moments
+read $0 spent, in every job. A moment already under way runs to its end,
+and other runs on the same key (a behavior eval, say) count in the same
+figure. Only a key with a credit limit is a hard limit.
 
 Only the numbers are kept from OpenRouter's answer, never its ``label``,
 which can show part of the key.
@@ -30,9 +34,16 @@ from .routes import KEY_URL
 # The numeric fields of OpenRouter's key document worth keeping.
 _FIELDS = ("usage", "usage_daily", "usage_weekly", "usage_monthly", "limit", "limit_remaining")
 SOFT_LIMIT_NOTE = (
-    "soft limit: OpenRouter's usage figure can lag, a moment under way runs to its end, "
-    "and other runs on the same key count in the same figure; only a key with a credit limit is a hard limit"
+    "a record, and a soft limit between moments, never a limit inside one: OpenRouter's usage figure lags "
+    "(the last reading reads it up to a bound and keeps the last figure; charges posted after the bound are "
+    "missed), a moment under way runs to its end, and other runs on the same key count in the same figure; "
+    "only a key with a credit limit is a hard limit"
 )
+# How long the reading after the last moment reads the usage figure, and how often.
+SETTLE_SECONDS = 75.0
+SETTLE_INTERVAL_SECONDS = 5.0
+# One read's own timeout; the last moment's reading cuts it to the time left.
+READ_TIMEOUT_SECONDS = 20.0
 
 NOT_READ = "no key: a scripted run reads no spend"
 
@@ -65,14 +76,58 @@ class SpendWatch:
     def read(self, when: str) -> dict[str, Any]:
         """One reading of the key's usage, named for when it was taken (``before <moment>``)."""
 
+        entry = self._fetch(when)
+        self.readings.append(entry)
+        return entry
+
+    def settle(
+        self, when: str, *, wait_seconds: float = SETTLE_SECONDS, interval_seconds: float = SETTLE_INTERVAL_SECONDS
+    ) -> dict[str, Any]:
+        """The last reading: read the lagging usage figure up to a bound, and keep each read.
+
+        OpenRouter's figure lags behind the calls, so a reading right after the
+        last moment can still show nothing of it. This reads at once and then
+        every ``interval_seconds`` until the next read would start past
+        ``wait_seconds``; each read's timeout is cut to the time left. The
+        reading is a record, not a limit, so it never stops early. It keeps
+        one entry, the last read that gave a figure (the settled one; the
+        last read when none did), with
+        ``series``, each read as [seconds after the last moment, usage]
+        (None for a failed read), ``waited_seconds`` and
+        ``wait_bound_seconds``. Charges posted after the bound are missed;
+        the series shows how the figure lagged. With no key (a scripted run)
+        nothing is read and nothing waits.
+        """
+
+        if not self.api_key:
+            return self.read(when)
+        started = time.monotonic()
+        deadline = started + wait_seconds
+        kept: dict[str, Any] = {}
+        series: list[list[float | None]] = []
+        while True:
+            at = round(time.monotonic() - started, 1)
+            entry = self._fetch(when, timeout=min(READ_TIMEOUT_SECONDS, max(1.0, deadline - time.monotonic())))
+            series.append([at, entry.get("usage")])
+            if "usage" in entry or "usage" not in kept:
+                kept = entry
+            if time.monotonic() + interval_seconds > deadline:
+                break
+            time.sleep(interval_seconds)
+        kept.update(
+            {"series": series, "waited_seconds": round(time.monotonic() - started, 1), "wait_bound_seconds": wait_seconds}
+        )
+        self.readings.append(kept)
+        return kept
+
+    def _fetch(self, when: str, *, timeout: float = READ_TIMEOUT_SECONDS) -> dict[str, Any]:
         entry: dict[str, Any] = {"when": when, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
         if not self.api_key:
             entry["error"] = f"not read: {NOT_READ}"
-            self.readings.append(entry)
             return entry
         request = urllib.request.Request(KEY_URL, headers={"Authorization": f"Bearer {self.api_key}"}, method="GET")
         try:
-            with self.opener(request, timeout=20) as response:
+            with self.opener(request, timeout=timeout) as response:
                 payload = json.load(response)
         except urllib.error.HTTPError as exc:
             entry["error"] = f"HTTP {exc.code}"
@@ -89,7 +144,6 @@ class SpendWatch:
                         entry[name] = value
                 if "usage" not in entry:
                     entry["error"] = "the answer has no usage"
-        self.readings.append(entry)
         return entry
 
     def _first_usage(self) -> float | None:

@@ -13,9 +13,61 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- Claude Code's scripted rehearsal lane, and the settled spend reading (step
+  9f, PR 2; [docs/rehearsal.md](docs/rehearsal.md)): **implemented,
+  unverified** in CI; run here offline against the pinned Claude Code
+  2.1.289, with its sandbox on and off. `--scripted` now runs
+  the real `claude -p` and the Nunchi mod with no provider and no key, at
+  $0: `ANTHROPIC_BASE_URL` points at a scripted Anthropic Messages endpoint
+  on localhost (`ScriptedClaudeAgent`, which answers only the streamed calls
+  Claude Code makes, so a fallback from a stream it cannot read fails the
+  turn), whose scripted model calls the mod's room tool to post the
+  scripted answer on the direct question, while the bot's status report
+  gets no turn. Each moment's outcome and the room tool call are hard
+  checks. Claude Code's proxy variables point at a local proxy that refuses
+  every request and names where it was going (`RefusingProxy`, the report's
+  `network`, read once Claude Code has exited, and a first line of
+  `summary.md`). With Anthropic's servers out of reach (here, in a network
+  namespace with only loopback, every `connect` traced), Claude Code made
+  no connection off the machine; through the proxy it tried
+  `api.anthropic.com:443` for the MCP registry and a telemetry batch, both
+  without a credential, and the mod loaded, attached, bound the turn and
+  posted. In a Claude Code cloud container, as here, it also read the
+  container's own credential from `/home/claude/.claude/remote`, whatever
+  `HOME` says, and tried Anthropic's bootstrap calls with it; the proxy
+  refused them, and the report records which of those files were readable
+  (`fixed_credentials`, paths only). "No key" holds where that directory is
+  absent, as on CI. The probe's tests and the scripted probe, with the
+  README's sandbox on, are now steps of CI's `claude-code-mod` job, on its
+  one pinned Claude Code with bubblewrap and socat installed as the
+  rehearsal workflow does, so the mod's first real turn is checked on every
+  push. `--no-sandbox` runs Claude Code without its Bash sandbox where
+  bubblewrap cannot run, recorded as off; CI never passes it. No harness's
+  `--scripted` exits 5 any more. A Claude Code error result, or a failed
+  Codex turn, now fails the run even when the turn had already posted
+  (`failures` in the report; turns-bound-and-ended): before, a model call
+  that failed after the post passed. The Claude Code report lists the
+  tools the model called (`tool_calls`, `room_tool_called`), and a scripted
+  run's `run.json` names the scripted endpoint as the agent's route. After
+  the last moment, the spend watchdog now reads `GET /api/v1/key` every 5 s
+  up to 75 s after the last moment, keeps each read as [seconds after the
+  last moment, usage] (`series`, in the last entry of `spend.readings`),
+  and takes the last figure as the settled one: in the first live run every
+  reading read $0, since the figure lags. Charges posted after the bound are
+  missed, and the series shows the lag. No live run has used the wait yet.
+  `run.json`, `summary.md` and the docs say plainly that the reading is a
+  record and a soft limit between moments, never a limit inside one.
+  docs/rehearsal.md
+  records the first live run (2026-10-09,
+  [run 37912807549](https://github.com/mentatzoe/nunchi/actions/runs/37912807549),
+  every job passed): Claude Code loads three plugins built into its binary
+  besides the mod (`cc-plugin-agents-md`, `cc-plugin-telemetry`,
+  `cc-plugin-plugin-authoring`); Codex has no model metadata for the slug
+  and falls back; Hermes's terminal is unsandboxed by default; and R3's
+  outcome, OpenRouter passed Codex's namespace tools through.
 - The rehearsal probe, step 9f's first rehearsal (`evals/rehearsal/`,
-  [docs/rehearsal.md](docs/rehearsal.md)): **implemented, unverified**, run
-  offline only. `python -m evals.rehearsal.probe --harness
+  [docs/rehearsal.md](docs/rehearsal.md)): ran live once, on 2026-10-09,
+  and passed in all three harnesses (above). `python -m evals.rehearsal.probe --harness
   {claude-code,codex,hermes}` runs one harness on its pinned install, as a
   clean user, with a live agent model and live attention through
   OpenRouter, in two moments of an in-process stand-in room: a bot's status
@@ -67,10 +119,8 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   empty skips it), recorded and reported on its own. `--scripted` runs the
   probe offline for Codex and Hermes on scripted model endpoints, where
   each moment's outcome is a hard check; it and the probe's tests are steps
-  in their CI lanes. Claude Code's scripted lane waits for a scripted
-  Anthropic Messages endpoint (PR 2); its leg is tested with a faked
-  `claude`, failures included, and was run by hand with the pinned Claude
-  Code against a local Messages endpoint.
+  in their CI lanes. Claude Code's leg is tested with a faked `claude`,
+  failures included; its scripted lane came in PR 2 (above).
 - The leak count in the turn conformance kit
   ([leak audit in #135](https://github.com/mentatzoe/nunchi/issues/135#issuecomment-6057394431),
   rows 2 and 7). After every scenario the kit checks that the room received
