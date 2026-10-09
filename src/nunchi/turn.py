@@ -14,7 +14,23 @@ do inside its turn, once, so every integration gets the same behavior
   a failure;
 - in final-answer posting, only words the agent's own model wrote can be its
   post; text the harness puts in their place makes the turn a failure;
+- a post never carries a wake marker (`split_private`); in final-answer
+  posting, whose turn teaches ``<thinking>``, the agent's ``<thinking>``
+  blocks are never posted either and become the move's reason. Nothing else
+  in a post changes: native reasoning in other tags is the harness's job
+  (Zoe), so the core reads no other tag and no code. A tool or one-reply
+  post with nothing left is refused, never posted empty; a final answer
+  with nothing left is silence;
 - secret values never reach the room.
+
+The room tool (`Turn.call`) and the one-reply style
+(`ParticipantTurnProtocol.consume`) apply the last two rules through
+`Turn.prepare`; the final answer (`Turn.decide`) splits the answer once and
+hands `prepare` what is left. The room tool's result tells the agent when a
+marker was left out, and what the room got. A post that quotes the turn's own tag,
+such as ``<nunchi_participant_turn_v1>``, is still posted: whether the
+library refuses it is open (D6). `machinery_in` says whether a text names
+Nunchi's machinery; it measures leaks and never refuses a post.
 
 `Turn` is passive: whichever side runs the agent drives it. `TurnParticipant`
 is the participant the shared turn host invokes when the library hosts the
@@ -43,7 +59,9 @@ from .errors import NunchiError
 from .participant import HARNESS_DELIVERS, TransportResult
 from .reactions import UNAVAILABLE_REACTION_CAPABILITY
 from .participant_model import (
+    PARTICIPANT_ACTION_SCHEMA,
     PARTICIPANT_TOOL_SPECS,
+    PARTICIPANT_TURN_PROTOCOL,
     PARTICIPANT_TURN_PROTOCOL_VERSION,
     ParticipantModelError,
     build_participant_turn_request,
@@ -69,9 +87,309 @@ class TurnError(NunchiError):
     """The agent's turn ended in a way that is neither an action nor silence."""
 
 
-# In final-answer posting, the agent's own thinking: never posted, and kept as
-# its reason. An unclosed block runs to the end of the answer.
+# -- what the room never reads: wake markers, and the thinking the turn teaches -----
+
+# The marker an integration puts at the start of the turn's text when its
+# harness binds a model run by the text the run starts with
+# (`docs/harness-guide.md`). The agent reads it; the room never does.
+WAKE_MARKER = '<nunchi_wake id="{}"/>'
+# A whole wake marker on one line: this turn's, or an older one the agent
+# echoes from its history. "<nunchi_wake" named in prose, with no ">" after it
+# on its line, is not one.
+_MARKER = r"</?nunchi_wake\b[^<>\n]*/?>"
+_WAKE_MARKERS = re.compile(_MARKER, re.I)
+# A marker inside a line (or several in a row), with the spaces and tabs on
+# each side of it. A match starts only where a run of them starts, and takes
+# the run whole, so a long run costs one pass.
+_MARKER_IN_LINE = re.compile(rf"(?<![ \t])[ \t]*+{_MARKER}(?:[ \t]*{_MARKER})*[ \t]*", re.I)
+# What may wrap a marker on a line of its own: a line of only these and
+# markers goes too (``**<marker>**``, ``> <marker>``).
+_AROUND_MARKER = " \t\r*_~`\"'>"
+# In final-answer posting, the agent's own thinking in the tag the turn
+# teaches: never posted, and kept as its reason. An unclosed block runs to the
+# end of the answer. No other tag, and no code, is read: native reasoning is
+# the harness's job (Zoe).
 _NOTE = re.compile(r"<thinking>(.*?)(?:</thinking>|\Z)", re.S | re.I)
+MARKER_ONLY_REFUSAL = (
+    "Refused: this post held only Nunchi's wake marker, which the room never "
+    "reads. Nothing was posted. Write what the room should read, or stay silent."
+)
+
+
+def _without_wake_markers(text: str) -> str:
+    """``text`` without its wake markers.
+
+    A line that holds nothing but markers, spaces, tabs and the formatting
+    around them (``*``, ``_``, ``~``, backticks, quotes, ``>``) goes with
+    its line break. A marker inside a line goes with the spaces and tabs
+    beside it; a space stays where there was one between words, and a line
+    keeps its indentation. The lines around it stay apart. One pass: this removes the markers an agent echoes, and is not a
+    filter for crafted text, so a marker that forms only once another is
+    removed (``<nunchi_<nunchi_wake/>wake/>``) is posted, as before.
+    """
+
+    if _WAKE_MARKERS.search(text) is None:
+        return text
+    kept = []
+    for line in text.split("\n"):
+        if _WAKE_MARKERS.search(line) is None:
+            kept.append(line)
+        elif _WAKE_MARKERS.sub("", line).strip(_AROUND_MARKER):
+            kept.append(_MARKER_IN_LINE.sub(_joined, line))
+    return "\n".join(kept)
+
+
+def _joined(found: re.Match[str]) -> str:
+    # One space between the words on each side of a marker, when there was
+    # space beside it; at the start of a line, its indentation; nothing at
+    # the end of a line.
+    line, start, end, matched = found.string, found.start(), found.end(), found.group(0)
+    if start == 0:
+        return matched[: len(matched) - len(matched.lstrip(" \t"))]
+    spaced = matched[:1] in " \t" or matched[-1:] in " \t"
+    return " " if spaced and line[end:].strip("\r") else ""
+
+
+def without_taught_thinking(text: str | None) -> str:
+    """``text`` without the ``<thinking>`` blocks final-answer posting teaches, as `split_private` reads them.
+
+    For measuring what a model wrote for the room in final-answer posting:
+    the taught block is its private place. Nothing else is removed.
+    """
+
+    return _NOTE.sub("", text or "")
+
+
+def split_private(text: str | None, *, final_answer: bool = False) -> tuple[str, str]:
+    """Split the agent's text into what the room may read and its private thinking.
+
+    Every posting style: a wake marker is removed, since it belongs to the
+    integration (`_without_wake_markers`). Code is not special.
+
+    With ``final_answer`` (final-answer posting, whose turn teaches
+    ``<thinking>``), first every ``<thinking>`` block of the text as
+    written, in any case, to its closing tag or to the end of the text, as
+    before; its words are the thinking. The markers then go from both, and
+    the answer is trimmed. What is posted is what `Turn.decide` attributes
+    to the model, without its markers.
+
+    Nothing else changes. Thinking in other tags (``<think>``,
+    ``<reasoning>``) is native reasoning, and handling it is the harness's
+    job (Zoe), so a post that names or quotes any tag, in prose or code, is
+    posted as written; so is the turn's own tag (D6, open).
+
+    Returns the text for the room and the thinking; either may be empty.
+    """
+
+    text = text or ""
+    thinking = ""
+    if final_answer:
+        thinking = " ".join(part.strip() for part in _NOTE.findall(text) if part.strip())
+        text = _NOTE.sub("", text)
+        thinking = " ".join(_without_wake_markers(thinking).split())
+    text = _without_wake_markers(text)
+    return (text.strip() if final_answer else text), thinking
+
+
+# -- what names Nunchi's machinery, for measuring leaks ------------------------------
+
+# Every field name in the wake, the turn's facts, as
+# schemas/v2/participant-wake.schema.json defines it (with what it takes from
+# the attention request and decision schemas). tests/v2/test_turn.py keeps
+# this list in step with the schema.
+WAKE_FIELDS = frozenset(
+    {
+        "about_author_id", "about_event_id", "about_text", "actor_id", "actors",
+        "addressed_to", "advice", "at", "attention", "author_id",
+        "author_run_messages", "author_run_seconds", "bound_to", "can_fetch_after",
+        "can_fetch_around_event", "can_fetch_before", "capability",
+        "caused_by_actor_id", "change", "continuation", "continuity",
+        "continuity_scope_id", "coverage", "description", "display_name",
+        "event_id", "event_visibility", "events", "evidence_event_ids",
+        "expires_at", "handle_id", "has_gaps", "has_more_after", "has_more_before",
+        "has_restart_gap", "id", "judged_seconds_ago", "judged_through_event_id",
+        "kind", "max_age_seconds", "max_bytes", "max_bytes_per_fetch", "max_events",
+        "max_events_per_fetch", "memory", "mentioned_actor_ids", "mentions_room",
+        "name", "names", "note", "now", "occasion", "operation",
+        "own_last_seconds_ago", "own_messages", "own_moves", "pace",
+        "participant_id", "platform", "proposal_id", "quiet_before_seconds",
+        "reaction", "reply_to_event_id", "request_id", "responses", "role", "room",
+        "room_id", "scope", "self", "source", "status", "subject_actor_id",
+        "target_event_id", "text", "thread_root_event_id", "threads", "timestamp",
+        "trigger_event_id", "truncated_by", "type", "unattended_event_ids", "why",
+        "window_messages",
+    }
+)
+
+
+def _schema_fields(node: Any) -> Iterable[str]:
+    """Every property name in a JSON schema."""
+
+    if isinstance(node, Mapping):
+        for name, item in (node.get("properties") or {}).items():
+            yield name
+            yield from _schema_fields(item)
+        for key, item in node.items():
+            if key != "properties":
+                yield from _schema_fields(item)
+    elif isinstance(node, (list, tuple)):
+        for item in node:
+            yield from _schema_fields(item)
+
+
+# The turn's field names: the wake's; the request around it, as the turn
+# shows it (`participant_turn_input`); the action and its binding; the room
+# tools' arguments; and the fields of a page of room the agent asks for.
+TURN_FIELDS = frozenset(
+    {
+        *WAKE_FIELDS,
+        "participant_turn", "context_pages", "protocol", "binding", "permissions",
+        "wake", "revision", "ordinary_actions", "privileged_proposals", "has_next_page",
+        *_schema_fields(PARTICIPANT_ACTION_SCHEMA),
+        *(name for spec in PARTICIPANT_TOOL_SPECS.values() for name in _schema_fields(spec["input_schema"])),
+    }
+)
+# Each object in the turn's facts and its own fields, named in a dotted path
+# such as attention.advice. tests/v2/test_turn.py keeps the wake's objects in
+# step with the schema, and the others with the turn's request.
+FIELD_PATHS: Mapping[str, frozenset[str]] = {
+    "attention": frozenset({"advice", "evidence_event_ids", "judged_through_event_id", "source"}),
+    "memory": frozenset({"own_moves", "threads"}),
+    "pace": frozenset(
+        {
+            "author_run_messages", "author_run_seconds", "judged_seconds_ago", "now",
+            "own_last_seconds_ago", "own_messages", "quiet_before_seconds", "window_messages",
+        }
+    ),
+    "coverage": frozenset(
+        {
+            "continuity", "event_visibility", "has_gaps", "has_more_after", "has_more_before",
+            "has_restart_gap", "max_age_seconds", "max_bytes", "max_events", "truncated_by",
+        }
+    ),
+    "continuation": frozenset(
+        {
+            "bound_to", "can_fetch_after", "can_fetch_around_event", "can_fetch_before", "expires_at",
+            "handle_id", "max_bytes_per_fetch", "max_events_per_fetch",
+        }
+    ),
+    "wake": frozenset(
+        {
+            "request_id", "self", "room", "actors", "events", "trigger_event_id", "coverage",
+            "continuation", "attention", "memory", "pace", "occasion", "unattended_event_ids",
+        }
+    ),
+    "binding": frozenset(PARTICIPANT_ACTION_SCHEMA["properties"]["binding"]["properties"]),
+    "permissions": frozenset({"revision", "ordinary_actions", "privileged_proposals"}),
+    "participant_turn": frozenset({"protocol", "binding", "permissions", "wake"}),
+    "context_pages": frozenset(
+        {
+            "request_id", "room_id", "direction", "actors", "events", "has_next_page", "coverage",
+            "anchor_event_id", "note",
+        }
+    ),
+}
+# Field names other APIs use too (event_id, room_id, request_id): they count
+# only in a dotted path under one of the turn's objects (binding.request_id),
+# never on their own.
+GENERIC_FIELDS = frozenset(
+    {
+        "actor_id", "author_id", "bound_to", "deadline_id", "display_name", "event_id", "expires_at",
+        "handle_id", "has_gaps", "has_more_after", "has_more_before", "has_next_page", "lifecycle_id",
+        "max_age_seconds", "max_bytes", "max_events", "participant_id", "proposal_id", "request_id",
+        "room_id",
+    }
+)
+
+
+def _either(names: Iterable[str]) -> str:
+    return "|".join(re.escape(name) for name in sorted(set(names), key=lambda name: (-len(name), name)))
+
+
+_MACHINERY = re.compile(
+    "|".join(
+        (
+            r"(?i:</?nunchi_wake\b[^<>\n]*>?)",  # a wake marker
+            r"(?i:(?:</?)?\bnunchi_participant_turn\w*>?)",  # the turn's tag
+            rf"(?i:\b{re.escape(PARTICIPANT_TURN_PROTOCOL)}\b)",
+            r"(?i:\bmcp__nunchi\w*)",  # a Nunchi tool's name in a harness
+            r"(?i:\[silent\])",
+            rf"\b(?:{_either(f'{name}.{field}' for name, fields in FIELD_PATHS.items() for field in fields)})\b",
+            # A field name with an underscore that only Nunchi uses: no one
+            # writes own_moves in prose.
+            rf"\b(?:{_either(name for name in TURN_FIELDS if '_' in name and name not in GENERIC_FIELDS)})\b",
+        )
+    )
+)
+# Thinking tags, as models write them (lowercase: a JSX <Reasoning> is code).
+# For measuring only: the commit check reads none of them but the taught
+# <thinking>. Code is blanked first, at the same length, so a tag in code is
+# not counted: a fenced block (``` or ~~~ to the next line that starts with
+# the same fence) and an inline `code` span.
+THINKING_TAGS = ("think", "thinking", "reasoning", "thought")
+_FENCED = re.compile(r"^[ \t]*(```|~~~).*?^[ \t]*\1[^\n]*", re.M | re.S)
+_INLINE_CODE = re.compile(r"`[^`\n]*`")
+_THINKING_TAG = re.compile(rf"<(/?)({'|'.join(THINKING_TAGS)})\s*>")
+_LONE_THINKING_TAG = re.compile(rf"^[ \t]*(</?(?:{'|'.join(THINKING_TAGS)})\s*>)[ \t\r]*$", re.M)
+
+
+def _blank(found: re.Match[str]) -> str:
+    return re.sub(r"[^\n]", " ", found.group())
+
+
+def _thinking_tags(text: str) -> list[tuple[int, str]]:
+    """The thinking tags outside code that mark thinking, with where each is.
+
+    An opening tag with a closing tag of its name after it counts, both of
+    them, and so does a tag alone on its line. A tag named in a sentence
+    (``<think> tags are what R1 emits.``) is prose.
+    """
+
+    seen = _INLINE_CODE.sub(_blank, _FENCED.sub(_blank, text))
+    found = [(match.start(1), match.group(1)) for match in _LONE_THINKING_TAG.finditer(seen)]
+    opened: dict[str, tuple[int, str]] = {}
+    for tag in _THINKING_TAG.finditer(seen):
+        if not tag.group(1):
+            opened.setdefault(tag.group(2), (tag.start(), tag.group(0)))
+        elif tag.group(2) in opened:
+            found += [opened[tag.group(2)], (tag.start(), tag.group(0))]
+    return found
+
+
+def machinery_in(text: str | None, *, ids: Iterable[str] = ()) -> list[str]:
+    """What in ``text`` names Nunchi's machinery, in order; empty when nothing does.
+
+    Machinery is what belongs to Nunchi and never to the room: a wake marker,
+    the turn's tag (``<nunchi_participant_turn_v1>``), a Nunchi tool's name
+    (``mcp__nunchi…``), thinking tags outside code that mark thinking (an
+    opening tag with its closing tag after it, or a tag alone on its line;
+    ``<think>``, ``<thinking>``, ``<reasoning>``, ``<thought>``, in
+    lowercase as models write them), the ``[SILENT]`` marker, and the turn's
+    field names: one with an underscore that only Nunchi uses
+    (``own_moves``, ``trigger_event_id``), or a dotted path to an object's
+    own field (``attention.advice``, ``binding.request_id``). ``ids`` are
+    internal names the caller knows, such as the turn's request id and the
+    names its integration gave the room tools (``room_send``); each counts
+    where it stands as a whole token. These are not machinery: prose about
+    Nunchi (``Has anyone tried the Nunchi plugin yet?``), field names other
+    APIs use on their own (``request_id``, ``event_id``), dotted words that
+    are no object's field (``memory.text``, ``pace.at``), a thinking tag
+    in code (`` `<think>` ``, or in a fenced block), one named in a sentence
+    (``What does <thinking> do?``), and a JSX ``<Reasoning>``.
+
+    It measures leaks, for the conformance kit and the behavior eval. It never
+    refuses a post: the commit points remove only wake markers, and in
+    final-answer posting the taught ``<thinking>`` (`split_private`).
+    """
+
+    text = text or ""
+    found = [(match.start(), match.group(0)) for match in _MACHINERY.finditer(text)]
+    found += _thinking_tags(text)
+    known = [value for value in ids if isinstance(value, str) and value.strip()]
+    if known:
+        pattern = re.compile(rf"(?<![\w-])(?:{_either(known)})(?![\w-])")
+        found += [(match.start(), match.group(0)) for match in pattern.finditer(text)]
+    return list(dict.fromkeys(piece for _, piece in sorted(found)))
 
 
 # -- the agent's silence, in whatever form it wrote it ----------------------------
@@ -108,6 +426,81 @@ def _silence_form(text: str) -> str:
     while end > 0 and _silence_edge(lead[end - 1]):
         end -= 1
     return lead[:end].strip()
+
+
+# What ends a sentence before a trailing marker, what may close around that
+# end ("wait.", (wait.) or **wait.**), and what quotes a marker instead of
+# using it.
+_SENTENCE_END = ".!?…。！？．｡؟۔।॥።"
+_AFTER_SENTENCE = "\"'”’»)]}）」』】*_"
+_QUOTES = "`\"'“”‘’«»「」『』"
+
+
+def _ends_with_silence(text: str, marker: str) -> str | None:
+    """The words before the marker when ``text`` ends with it bare after a finished sentence; otherwise None.
+
+    ``I'll leave this to Castor. [SILENT]`` and ``Castorに任せます。[silent]``
+    end with the marker (in any case) after a sentence. These do not, and
+    are posted:
+    ``Reply with [SILENT]`` and ``For example: [SILENT]`` (no sentence ends
+    before it), ``Done. `[SILENT]`` (quoted), ``Done. **[SILENT]**`` (the
+    marker is not the last thing).
+    """
+
+    words = r"\s+".join(re.escape(word) for word in marker.split())
+    body = text.rstrip()
+    found = re.search(rf"(?:{words})\Z", body, re.I)
+    if found is None or found.start() == 0 or body[found.start() - 1] in _QUOTES:
+        return None
+    before = body[: found.start()].rstrip()
+    sentence = before.rstrip(_AFTER_SENTENCE)
+    if not sentence or sentence[-1] not in _SENTENCE_END:
+        return None
+    return before
+
+
+def _silence(text: str, marker: str, forms: frozenset[str]) -> tuple[bool, str]:
+    """Whether the posted part ``text`` of a final answer is silence, and the agent's words beside the marker.
+
+    Models vary the marker's case and formatting, and some reason in text
+    before or after it; the marker wins, and those words are the agent's
+    reason. The harness's other silent answers (``forms``) count only as the
+    whole answer, as a harness reads them.
+    """
+
+    if not text or _silence_form(text) in forms:
+        return True, ""
+    taught = _silence_form(marker)
+    if _silence_lead(text).startswith(taught) or any(_silence_form(line) == taught for line in text.splitlines()):
+        return True, _around_silence(text, marker)
+    before = _ends_with_silence(text, marker)
+    if before is not None:
+        return True, " ".join(before.split())
+    return False, ""
+
+
+def is_silence(answer: str | None, silence_marker: str, *, also_silent: Sequence[str] = ()) -> bool:
+    """Whether a final answer is silence, as `Turn.decide` reads it: nothing of it would be posted.
+
+    For measuring, such as the behavior eval's leak count: a taught silence
+    is not text written for the room.
+    """
+
+    text, _ = split_private(answer, final_answer=True)
+    return _silence(text, silence_marker, _silent_forms(silence_marker, also_silent, False))[0]
+
+
+def _around_silence(text: str, marker: str) -> str:
+    """The agent's words in a silent answer, without the marker and the formatting around it."""
+
+    words = r"\s+".join(re.escape(word) for word in marker.split())
+    # A match starts only where a run of formatting starts, and the run after
+    # the marker is taken whole, so a long run costs one pass. The run before
+    # it may give back a character a marker such as _silent_ starts with.
+    said = " ".join(
+        re.sub(rf"(?<![*_~`\"'])[*_~`\"']*{words}[*_~`\"']*+[.!]?", " ", text, flags=re.I).split()
+    )
+    return said if any(character.isalnum() for character in said) else ""
 
 
 # -- whether the agent's own model wrote an answer ---------------------------------
@@ -512,6 +905,10 @@ class Turn:
         # Why the final answer was not the model's own words; the turn then fails.
         self.unattributed: str | None = None
         self.refused = False
+        # What the last `prepare` found: whether it took a wake marker out of
+        # a post, and whether the post held nothing else.
+        self.removed_marker = False
+        self.marker_only = False
         # The agent's own thinking from its final answer, kept as its reason.
         self.note: str | None = None
         self.roles = frozenset(self.tool_names)
@@ -539,6 +936,39 @@ class Turn:
         return participant_tool_turn_text(
             self.profile, self.request, tools=self.tool_names, silence_marker=self.silence_marker
         )
+
+    def prepare(self, action: Mapping[str, Any], *, split: bool = True) -> tuple[dict[str, Any], str | None]:
+        """The action as the room may read it, and why it may not go (None when it may).
+
+        Every commit point calls it last: the room tool (`call`), the final
+        answer (`decide`), and the one-reply style
+        (`ParticipantTurnProtocol.consume`). A post loses its wake markers
+        (`split_private`); nothing else in it changes. With ``split=False``
+        the post was split already: `decide` splits the answer once, keeps
+        its thinking as the reason, and builds the action from what is left.
+        A post with nothing left is refused, never posted empty
+        (`marker_only`). Then the secret guard. `removed_marker` says
+        whether a marker was taken out, so the agent can be told what
+        reached the room.
+        """
+
+        action = dict(action)
+        self.removed_marker = False
+        self.marker_only = False
+        if split and action.get("kind") in ("message", "reply") and isinstance(action.get("text"), str):
+            written = action["text"]
+            text, _ = split_private(written)
+            if not text.strip():
+                self.marker_only = True
+                return action, MARKER_ONLY_REFUSAL
+            action["text"] = text
+            self.removed_marker = text != written
+        return action, self.guard.refusal(action)
+
+    def _may_keep(self, words: str) -> bool:
+        """Whether the agent's own words may be kept as its reason: they hold no withheld secret."""
+
+        return self.guard.refusal({"kind": "message", "text": words}) is None
 
     # -- binding -------------------------------------------------------------
 
@@ -602,9 +1032,10 @@ class Turn:
                 )
             except ParticipantModelError as exc:
                 return False, f"Refused: {exc}. Nothing was posted."
-            refusal = self.guard.refusal(action)
+            action, refusal = self.prepare(action)
             if refusal is not None:
                 return False, refusal
+            removed = self.removed_marker
             page = self.look_again(action)
             if page is not None:
                 return True, (
@@ -615,8 +1046,17 @@ class Turn:
                 )
             self.take(action)
         if not self.outcome_ready.wait(self.result_wait_seconds):
-            return True, "The room has not confirmed this action yet. Do not repeat it."
-        return describe_result(self.outcome)
+            answer = (True, "The room has not confirmed this action yet. Do not repeat it.")
+        else:
+            answer = describe_result(self.outcome)
+        if removed and answer[0]:
+            # The agent learns what reached the room, so it can tell.
+            answer = (
+                True,
+                f"{answer[1]} Nunchi's wake marker was left out of your post; "
+                "the room got: " + json.dumps(action["text"], ensure_ascii=False),
+            )
+        return answer
 
     def after_tool_call(self) -> str | None:
         """What others posted since the agent last looked, or None (steering).
@@ -719,15 +1159,23 @@ class Turn:
             return f"{quoted}: no reported model response holds this text (each was empty)"
         return f"{quoted}: no reported model response holds this text"
 
+    def _silence(self, text: str) -> tuple[bool, str]:
+        """Whether the posted part ``text`` is silence, and the agent's words around the marker."""
+
+        return _silence(text, self.silence_marker, self._silent_forms)
+
     def decide(self, answer: str | None) -> Finish:
         """What becomes of the agent's final answer, before the host commits it.
 
         ``deliver`` makes the answer this turn's one room action. ``continue``
         comes at most once for a refused answer and once for looking again.
-        Thinking inside ``<thinking>`` tags is the agent's own: it is never
-        posted, and it becomes the move's reason (``note``). A turn that
-        already took a room action, such as a reaction, or that has ended,
-        posts nothing more.
+        The agent's thinking in the ``<thinking>`` tag the turn teaches is
+        its own: every such block, closed or running to the end, is never
+        posted, and it becomes the move's reason (``note``); a wake marker
+        is never posted either (`split_private`, once: `prepare` gets what is
+        left). Nothing else changes, and the answer is posted
+        without the whitespace around it. A turn that already took a room
+        action, such as a reaction, or that has ended, posts nothing more.
 
         With ``model_text``, a posted part that is not the model's own words
         marks the turn ``unattributed`` and is silent here; the turn then
@@ -737,34 +1185,32 @@ class Turn:
         Silence is the empty answer, or an answer whose posted part, ignoring
         case, whitespace and the punctuation or markdown around it, starts
         with the silence marker, holds it on a line of its own, or is wholly
-        the marker or one of ``also_silent``. Whatever else a silent answer
-        says is the agent's own and is never posted.
+        the marker or one of ``also_silent``; and an answer whose posted part
+        ends with the bare marker after a finished sentence (``I'll leave
+        this to Castor. [SILENT]``, not quoted, nothing after it). Whatever
+        else a silent answer says is the agent's own: it is never posted,
+        and with the thinking it is the silence's reason.
         """
 
         marker = self.silence_marker
         if marker is None:
             raise TurnError("this turn posts through tools, not a final answer")
-        raw = answer or ""
-        self.keep_note(" ".join(part.strip() for part in _NOTE.findall(raw) if part.strip()))
-        text = _NOTE.sub("", raw).strip()
+        text, thinking = split_private(answer, final_answer=True)
+        self.keep_note(thinking)
         with self.lock:
             if not self.open() or self.action is not None or self.unattributed is not None:
                 return Finish("silent")
             if self.model_text and text:
-                self.unattributed = self._not_the_models(text)
+                # Whose words they are is read on the answer as the model
+                # wrote it, wake markers and all: a reported response holds
+                # them in the same form.
+                self.unattributed = self._not_the_models(_NOTE.sub("", answer or "").strip())
                 if self.unattributed is not None:
                     return Finish("silent")
-            # Models vary the marker's case and formatting, and some reason in
-            # text before deciding on silence; the marker wins, and the
-            # reasoning stays. The harness's other silent answers count only
-            # as the whole answer, as a harness reads them.
-            taught = _silence_form(marker)
-            if (
-                not text
-                or _silence_lead(text).startswith(taught)
-                or any(_silence_form(line) == taught for line in text.splitlines())
-                or _silence_form(text) in self._silent_forms
-            ):
+            silent, said = self._silence(text)
+            if silent:
+                if said:
+                    self.keep_note(f"{thinking} {said}")
                 return Finish("silent")
             try:
                 action = participant_tool_action(
@@ -775,7 +1221,7 @@ class Turn:
                 )
             except ParticipantModelError:
                 return Finish("silent")
-            refusal = self.guard.refusal(action)
+            action, refusal = self.prepare(action, split=False)
             if refusal is not None:
                 if self.refused:
                     return Finish("silent")
@@ -796,7 +1242,7 @@ class Turn:
                 # The reason goes to the agent's memory; the host strips it.
                 action["why"] = self.note
             self.take(action)
-        return Finish("deliver", text)
+        return Finish("deliver", action["text"])
 
     def finish(self, answer: str | None) -> Finish:
         """`decide`, then wait for the host's commit before the harness posts.
@@ -848,7 +1294,7 @@ class Turn:
         """
 
         words = " ".join((text or "").split())
-        if not words or self.guard.refusal({"kind": "message", "text": words}) is not None:
+        if not words or not self._may_keep(words):
             return
         self.note = words
 

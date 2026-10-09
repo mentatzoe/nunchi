@@ -137,17 +137,54 @@ agent's side of the room:
   (Hermes), instead of one JSON envelope per reply (`envelope`, the
   default). The core `Turn` decides each reply: it is posted, it is silence
   (the `[SILENT]` marker in any case or formatting, such as `**[SILENT]**`,
-  at the start of the reply or on a line of its own), or the agent replies
-  again after looking again. This style has no tools, so the agent cannot react or ask
+  at the start of the reply or on a line of its own, or bare after a
+  finished sentence at its end), or the agent replies again after looking
+  again. This style has no tools, so the agent cannot react or ask
   for more of the room; compare it with the envelope arm on the same
   attention route. In the workflow, the `agent_posting` input sets it, and
   `agent_model: none` grades attention alone. Each record keeps the agent's
   plain replies (`agent.replies`), so a silence can be read too.
 
-The grade covers the move, not its words. The summary also counts posts that
-name Nunchi's machinery (the attention model, the silence marker, thinking
-tags, the turn's field names), and each such record has
-`agent.mentions_internals`. A post should hold only words for the room.
+The grade covers the move, not its words. The summary also counts leaks: the
+room should receive only what the library committed, and nothing that names
+Nunchi's machinery. The core's `nunchi.turn.machinery_in` decides what does,
+the same check the conformance kit uses: a wake marker, the turn's tag
+(`<nunchi_participant_turn_v1>`), a Nunchi tool's name (`mcp__nunchi…`, and
+the names the turn gave its tools, none in the eval's arms), thinking tags
+(`<think>`, `<thinking>`, `<reasoning>`, `<thought>`, in lowercase) outside
+code that mark thinking (an opening tag with its closing tag, or a tag alone
+on its line; balanced ``` or ~~~ fences and inline `code` are removed
+first, with a simple regex; "What does <thinking> do?" in prose is not
+counted), the `[SILENT]` marker, the turn's field names that only
+Nunchi uses (`own_moves`, `trigger_event_id`) or a path to an object's own
+field (`attention.advice`, `binding.request_id`), and the turn's request
+id. Prose about Nunchi, the words "attention model", field names other APIs
+use on their own (`request_id`, `event_id`) and dotted words that are no
+object's field (`memory.text`) are not counted. It counts two things apart:
+
+- `agent.machinery_written`: what the model wrote for the room in the turn,
+  before the library's commit: each envelope's message text, or each plain
+  reply meant as a post. In final-answer posting a reply the library reads
+  as silence is not counted, since nothing of it would be posted (a taught
+  `[SILENT]` is not a leak), and the `<thinking>` block the turn teaches is
+  the agent's private place, read as the turn reads it
+  (`<thinking>(.*?)(?:</thinking>|\Z)`, any case).
+- `agent.machinery_posted`: what the committed post carried into the room.
+
+The library takes each wake marker out of a post, and in final-answer
+posting also the taught `<thinking>` block, so these count as written and
+not posted. In final-answer posting a bare marker after a finished sentence
+is silence. In the envelope arm a marker after a sentence ("On it.
+[SILENT]") is posted as written, and counts as both. The rest is posted as
+written: another thinking tag such as `<think>` (the model's native
+reasoning is the harness's to strip, Zoe's decision, and the eval has no
+harness), a field name, or the turn's tag (whether the library refuses a
+post that quotes it is still open, D6).
+
+Leak counts from runs before 2026-10-08 (for example run 58's "18 of 111
+posts") are not comparable with these: they used another pattern, counted
+posts and not turns, and had no written/posted split. To compare, re-score
+the stored posts with `posted_machinery` from `evals/behavior/run.py`.
 
 A pause moment, such as "five minutes later, nobody has answered", plays
 the scene through the message before the pause as it happened live: that

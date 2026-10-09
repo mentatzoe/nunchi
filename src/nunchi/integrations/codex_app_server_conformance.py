@@ -15,7 +15,13 @@ So the script reaches its turn as a model would:
   ``mcp__nunchi_room`` namespace; what the agent is told comes back in Codex's
   next model request, and whether it succeeded in Codex's ``item/completed``;
 - ``after_tool`` is the room's news that came with that result;
-- ``end`` is the model's final answer, after which Codex ends the turn.
+- ``end`` is the model's final answer, after which Codex ends the turn;
+- ``fail`` is the model's API refusing the call (HTTP 400), after which Codex
+  ends the turn as failed.
+
+Codex reaches the room only through the room tools, which the library's
+transport carries, so the harness shows the room nothing of its own
+(``visible`` is empty).
 
 An unbound run, through Codex, is a run that never had the room tools: the
 integration only binds a run when the thread's room server is ready. A script
@@ -41,7 +47,7 @@ from typing import Any
 
 from ..attention import ParticipantProfile
 from ..turn import SecretGuard
-from ..turn_conformance import ScriptedAgent
+from ..turn_conformance import MODEL_REFUSED, KnownGap, ScriptedAgent
 from .codex_app_server.integration import (
     MCP_SERVER_NAME,
     TOOL_NAMES,
@@ -126,7 +132,9 @@ class ScriptedModel:
     scripted; anything else Codex asks gets a short fixed answer. Codex makes
     one model call at a time per thread, so a reply goes to the newest call:
     an older one still open belongs to a run Codex abandoned (interrupted, or a
-    process that died) and gets an empty answer.
+    process that died) and gets an empty answer. A reply is ``{"text": ...}``,
+    ``{"tool": name, "arguments": {...}, "call_id": ...}``, or
+    ``{"status": 400, "error": message}``: the API refuses the call.
     """
 
     def __init__(self) -> None:
@@ -255,6 +263,11 @@ supports_websockets = false
                     self._send(404, "application/json", b"{}")
                     return
                 reply = model._answer(request)
+                if "status" in reply:
+                    # The API refuses the call, as a Responses endpoint reports it.
+                    error = {"message": str(reply.get("error", "refused")), "type": "invalid_request_error"}
+                    self._send(int(reply["status"]), "application/json", json.dumps({"error": error}).encode())
+                    return
                 response_id = f"resp-{secrets.token_hex(4)}"
                 if "tool" in reply:
                     item: dict[str, Any] = {
@@ -449,10 +462,18 @@ class CodexSurface:
     def finish(self, turn_id: str, answer: str) -> tuple[str, str]:
         raise NotImplementedError("Codex posts through room tools")
 
+    def fail(self, turn_id: str) -> None:
+        # The model's API refuses the call; Codex ends the turn as failed.
+        self.harness.model.reply({"status": 400, "error": MODEL_REFUSED})
+        self._wait_for_end()
+
     def end(self, turn_id: str, ok: bool, note: str | None = None) -> None:
         if not self._ended():
             # The model's final message: the agent's last words.
             self.harness.model.reply({"text": note or _FINAL})
+        self._wait_for_end()
+
+    def _wait_for_end(self) -> None:
         deadline = time.monotonic() + _STEP_SECONDS
         while time.monotonic() < deadline:
             if self._ended() and self.harness.integration.participant.active is not self.turn:
@@ -465,6 +486,8 @@ class CodexSurface:
 
 class CodexKitIntegration:
     posting = "tools"
+    model_failure = True
+    known_gaps: tuple[KnownGap, ...] = ()
 
     def __init__(self) -> None:
         self.name = f"Codex app-server ({codex_version()})"
@@ -494,6 +517,11 @@ class CodexKitIntegration:
         harness.model.on_request = first_request
         self.launch_secret = harness.integration._secret
         return harness.integration.participant
+
+    def visible(self) -> list[dict[str, Any]]:
+        """Nothing: Codex reaches the room only through the library's transport."""
+
+        return []
 
     def close(self) -> None:
         if self.harness is not None:

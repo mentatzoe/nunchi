@@ -37,7 +37,7 @@ import uuid
 
 from ..attention import ParticipantProfile
 from ..participant_model import PARTICIPANT_TOOL_SPECS
-from ..turn import TURN_ROLES, SecretGuard as CoreSecretGuard, Turn, TurnError, TurnParticipant
+from ..turn import TURN_ROLES, WAKE_MARKER, SecretGuard as CoreSecretGuard, Turn, TurnError, TurnParticipant
 from ..turn_server import TurnServer
 from .discord_participant_transport import DISCORD_TOKEN_PATTERNS
 
@@ -51,7 +51,6 @@ TOOL_NAMES = {
     "withdraw": "room_withdraw",
     "context": "room_context",
 }
-WAKE_MARKER = '<nunchi_wake id="{}"/>'
 
 _RESULT_WAIT_SECONDS = 25.0
 _INTERRUPT_GRACE_SECONDS = 10.0
@@ -168,6 +167,25 @@ class GatedParticipant(TurnParticipant):
             )
         except TurnError as exc:
             raise ClaudeCodeGateError(str(exc)) from exc
+
+
+def turn_ending(message: Mapping[str, Any]) -> dict[str, Any] | None:
+    """How one stream-json message from the session ends its turn, or None when it does not.
+
+    Only a ``result`` ends a turn. It is ok only when it succeeded without an
+    error: a failed model call ends the turn as a failure. Its text is the
+    session's final message, the agent's last words, kept as its reason if
+    the turn ends in silence.
+    """
+
+    if message.get("type") != "result":
+        return None
+    result = message.get("result")
+    return {
+        "ok": message.get("subtype") == "success" and message.get("is_error") is False,
+        "detail": str(message.get("subtype", "unknown")),
+        "note": result if isinstance(result, str) else None,
+    }
 
 
 class ClaudeCodeSession:
@@ -451,18 +469,10 @@ class ClaudeCodeSession:
                     self._store_session(str(uuid.UUID(session_id)))
                 except (ValueError, OSError):
                     pass
-            if message.get("type") == "result":
+            ending = turn_ending(message)
+            if ending is not None:
                 self._answered = True
-                ok = message.get("subtype") == "success" and message.get("is_error") is False
-                # The session's final message: the agent's last words, kept as
-                # its reason if the turn ends in silence.
-                result = message.get("result")
-                self._turn_ended(
-                    process,
-                    ok=ok,
-                    detail=str(message.get("subtype", "unknown")),
-                    note=result if isinstance(result, str) else None,
-                )
+                self._turn_ended(process, **ending)
         process.wait()
         for stream in (process.stdin, process.stdout):
             try:

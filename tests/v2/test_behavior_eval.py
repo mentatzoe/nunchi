@@ -824,13 +824,98 @@ class RunTests(unittest.TestCase):
         self.assertEqual("speak", record["result"])
         self.assertEqual("Here is what I found.", record["agent"]["action"]["text"])
         self.assertEqual(["Here is what I found."], record["agent"]["replies"])
-        self.assertNotIn("mentions_internals", record["agent"])
+        self.assertNotIn("machinery_written", record["agent"])
+        self.assertNotIn("machinery_posted", record["agent"])
 
-    def test_a_post_that_names_nunchis_machinery_is_counted(self):
-        self.assertTrue(run.mentions_internals({"kind": "message", "text": "The attention model suggests I speak."}))
-        self.assertTrue(run.mentions_internals({"kind": "reply", "text": "Done.\n\n[SILENT]"}))
-        self.assertFalse(run.mentions_internals({"kind": "message", "text": "The build is green."}))
-        self.assertFalse(run.mentions_internals({"kind": "reaction", "reaction": "nunchi"}))
+    def _final_answer_record(self, reply):
+        payload = json.dumps({"choices": [{"message": {"content": reply}}]}).encode()
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        scene = scene_by_id("story-across-messages")
+        job = run.Job(scene, 2, scene.participants[0], "fixture/model", 0)
+        agents = run.openai_compatible_agent_factory(
+            api_key="k", base_url=run.DEFAULT_BASE_URL, model="fixture/agent", posting="final-answer"
+        )
+        with mock.patch("urllib.request.urlopen", lambda request, timeout: Response(payload)):
+            return run.judge_moment(job, lambda _: FixedModel("WAKE"), timeout_seconds=5, agent_factory=agents)
+
+    def test_what_the_model_wrote_and_what_the_room_received_are_counted_apart(self):
+        # The library takes the echoed wake marker out of the post; the turn's
+        # field name is posted as written, and counted both times.
+        record = self._final_answer_record(
+            '<thinking>Per memory.own_moves I owe Zoe this.</thinking>\n'
+            '<nunchi_wake id="an-echoed-wake-id"/>\nPer own_moves, here is what I found.'
+        )
+        agent = record["agent"]
+        self.assertEqual("Per own_moves, here is what I found.", agent["action"]["text"])
+        self.assertEqual(['<nunchi_wake id="an-echoed-wake-id"/>', "own_moves"], agent["machinery_written"])
+        self.assertEqual(["own_moves"], agent["machinery_posted"])
+        # A marker after a sentence is silence: nothing of it is written for
+        # the room, and nothing is posted.
+        quiet = self._final_answer_record("I'll leave this to Castor. [SILENT]")["agent"]
+        self.assertNotIn("machinery_written", quiet)
+        self.assertNotIn("machinery_posted", quiet)
+        self.assertEqual("I'll leave this to Castor.", quiet["action"]["why"])
+
+    def test_a_taught_silence_is_not_machinery_written_for_the_room(self):
+        # Step 5 review #5-#7: the marker the turn teaches, in a silence.
+        for reply in (
+            "[SILENT]",
+            "**[SILENT]**",
+            "<thinking>Castor was asked.</thinking>\n[SILENT]",
+            "[SILENT] (nothing to add)",
+            "<thinking>I could say own_moves",
+        ):
+            with self.subTest(reply=reply):
+                agent = self._final_answer_record(reply)["agent"]
+                self.assertNotIn("machinery_written", agent)
+                self.assertNotIn("machinery_posted", agent)
+        self.assertEqual([], run.written_machinery(["[SILENT]"], silence_marker="[SILENT]"))
+        self.assertEqual([], run.written_machinery(["<thinking>own_moves"], silence_marker="[SILENT]"))
+        # The same marker in an envelope's message is written for the room, and posted.
+        self.assertEqual(["[SILENT]"], run.written_machinery(["On it. [SILENT]"]))
+
+    def test_the_eval_counts_with_the_cores_detector(self):
+        self.assertEqual(["[SILENT]"], run.posted_machinery({"kind": "reply", "text": "Done.\n\n[SILENT]"}))
+        self.assertEqual(["attention.advice"], run.posted_machinery({"kind": "message", "text": "Per attention.advice, I wait."}))
+        self.assertEqual(["req-1"], run.posted_machinery({"kind": "message", "text": "re req-1"}, ids=("req-1",)))
+        for action in (
+            {"kind": "message", "text": "The build is green."},
+            {"kind": "message", "text": "Has anyone tried the Nunchi plugin yet?"},
+            {"kind": "reaction", "reaction": "nunchi"},
+        ):
+            with self.subTest(action=action):
+                self.assertEqual([], run.posted_machinery(action))
+        # The <thinking> block final-answer posting teaches is private; other thinking tags count.
+        self.assertEqual(
+            [], run.written_machinery(["<thinking>own_moves</thinking>On it."], silence_marker="[SILENT]")
+        )
+        self.assertEqual(["<thinking>", "own_moves", "</thinking>"],
+                         run.written_machinery(["<thinking>own_moves</thinking>On it."]))
+        self.assertEqual(
+            ["<think>", "</think>"], run.written_machinery(["<think>x</think>On it."], silence_marker="[SILENT]")
+        )
+        # The taught block as the turn reads it (main's rule): any case, to its
+        # close or to the end, code or not.
+        for reply in ("<THINKING>own_moves</THINKING>On it.", "On it. <thinking>own_moves", "`<thinking>` own_moves"):
+            with self.subTest(reply=reply):
+                self.assertEqual([], run.written_machinery([reply], silence_marker="[SILENT]"))
+        # The tools the agent's turn offered count by name; the eval's arms offer none.
+        self.assertEqual(["room_react"], run.posted_machinery({"kind": "message", "text": "Use room_react."}, ids=("room_react",)))
+        self.assertEqual((), run.turn_tool_names(object()))
+
+    def test_an_envelopes_room_text_is_what_it_wrote(self):
+        envelope = {"protocol": {}, "binding": {}, "action": {"kind": "message", "text": "On it. [SILENT]"}}
+        self.assertEqual("On it. [SILENT]", run.envelope_text(json.dumps(envelope)))
+        self.assertEqual("On it. [SILENT]", run.envelope_text("```json\n" + json.dumps(envelope) + "\n```\nI spoke."))
+        self.assertIsNone(run.envelope_text(json.dumps({"action": {"kind": "silence", "why": "own_moves"}})))
+        self.assertIsNone(run.envelope_text("not json"))
 
     def test_a_live_run_needs_the_key(self):
         with mock.patch.dict(os.environ, {}, clear=True), mock.patch("sys.stderr"):

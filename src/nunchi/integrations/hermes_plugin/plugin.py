@@ -72,7 +72,7 @@ from nunchi.attention import AttentionModelSelection, HostStructuredAttentionMod
 from nunchi.integrations.discord_participant_transport import DISCORD_TOKEN_PATTERNS
 from nunchi.participant import TransportResult
 from nunchi.reactions import UNAVAILABLE_REACTION_CAPABILITY, ReactionCapability
-from nunchi.turn import HarnessDelivery, SecretGuard, Turn, TurnParticipant
+from nunchi.turn import WAKE_MARKER, HarnessDelivery, SecretGuard, Turn, TurnParticipant, split_private
 
 logger = logging.getLogger("nunchi.hermes_plugin")
 
@@ -86,8 +86,8 @@ SILENCE_MARKER = "[SILENT]"
 # in gateway/response_filters.py at Hermes a50406d9, without the taught marker.
 # Hermes sends nothing for them, so the library must remember silence too.
 HERMES_SILENT_ANSWERS = ("SILENT", "NO_REPLY", "NO REPLY", "[静默]", "静默", "[沉默]", "沉默")
-WAKE_MARKER = '<nunchi_wake id="{}"/>'
-_WAKE = re.compile(r'<nunchi_wake id="([A-Za-z0-9_-]+)"/>')
+# The core's wake marker (WAKE_MARKER), read back for its wake id.
+_WAKE = re.compile(re.escape(WAKE_MARKER).replace(re.escape("{}"), "([A-Za-z0-9_-]+)"))
 TOOL_NAMES = {
     "react": "room_react",
     "context": "room_context",
@@ -136,7 +136,6 @@ HOST_MODEL_REFUSED = (
     "allow_model_override, allowed_providers, allowed_models), then restart "
     "Hermes. No other attention model was used."
 )
-_THINKING = re.compile(r"<thinking>.*?(?:</thinking>|\Z)", re.S | re.I)
 # Messages noted at dispatch whose admission has not come yet, and runs the
 # plugin closed itself that Hermes may still finish.
 _NOTED_MESSAGES = 256
@@ -976,8 +975,13 @@ class HermesRoomPlugin:
             return SILENCE_MARKER  # nothing posts without the library's commit
         answer = response_text or ""
         raw = run.raw_answer
-        if raw and _THINKING.search(raw) and _THINKING.sub("", raw).strip() == answer.strip():
-            # The same answer with the agent's thinking, which the library keeps as its reason.
+        if (
+            raw
+            and raw != answer
+            and split_private(raw, final_answer=True)[0] == split_private(answer, final_answer=True)[0]
+        ):
+            # Hermes took the agent's <thinking> out of the same answer; the
+            # library keeps it as the move's reason, and posts neither.
             answer = raw
         decision = self.participant.finish(turn_id=run.turn_id, answer=answer)
         if decision.kind == "deliver":

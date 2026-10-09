@@ -31,7 +31,7 @@ harness-hosted, consume-and-start shape with final-answer posting
 | Room view, reactions | `room_context`, `room_react` tools | Forwarded to the library. Reactions go through `ctx.platform_actions`. |
 | What the model wrote | `post_api_request`, `pre_api_request` | Each model response's text, and apart its reasoning, go to the library (`model_text`). When the length limit or a dropped stream cuts an answer, Hermes keeps the part it got and asks the model to go on; no `post_api_request` shows that part, so the plugin reports it from `pre_api_request`. Only the model's own words can be the agent's post. Text Hermes puts in place of a missing answer, such as `(empty)` or "I reached the iteration limit and couldn't generate a summary.", fails the turn: it is never posted or remembered, also when the model wrote the word "empty". The summary the model writes at Hermes's iteration limit reaches no hook, so it fails the turn too (Known gaps). |
 | Finish | `transform_llm_output` | The final answer goes to the library. Hermes delivers it, or `[SILENT]`. Hermes's other silent answers (`SILENT`, `NO_REPLY`, `NO REPLY` and the zh forms) and a marker in markdown are the agent's silence too, remembered as silence. When others posted meanwhile, the draft is silenced and a fresh run starts with it. If the hook fails, the turn fails and Hermes gets `[SILENT]`: Hermes posts the raw draft for a hook that raised. |
-| Thinking | `post_api_request` | Hermes strips `<thinking>` before the output hook; the plugin hands the library the model's raw answer, so the agent's thinking is kept as its reason and never posted. |
+| Thinking | `post_api_request` | Hermes strips the model's thinking tags before the output hook: native reasoning is the harness's job, and the library reads no tag but `<thinking>`, the one the turn teaches. When Hermes took out only that block, the plugin hands the library the model's raw answer, so the agent's `<thinking>` is kept as its reason and never posted. Hermes also strips tag names from a real answer that quotes them (Known gaps). |
 | End | `on_session_end` | The run's end is reported. |
 | Provider failure | `api_request_error`, `pre_api_request` | When Hermes gives up on a run it ends it without an end hook, so the plugin ends the turn as a failure once Hermes has stopped asking the model. If the provider refused (Hermes marks the error not retryable), Hermes moves to a fallback provider or a rotated credential at once, or gives up: the wait is 5 s. If a retryable error used up Hermes's retries, Hermes may still rebuild its client, or wait in its auto-recovery ladder (on by default: up to 5 cycles of 15 to 60 s, or the provider's Retry-After up to 120 s) and ask again: the wait is 130 s, so an answer after an outage is still posted. Each new model request cancels the wait. |
 
@@ -189,7 +189,7 @@ Hermes with these settings, and a test checks that this block matches them.
 | `suppress_warning_notifications: true` | Hermes posts its retry and iteration-budget status lines, and "❌ … rejected the request" when the provider refuses. |
 | `show_reasoning: false` | Hermes puts the model's reasoning before the answer. Off by default; pinned because a top-level `display.show_reasoning` would turn it on for every platform (from Hermes's source). A room member's `/reasoning show` still turns it on (Known gaps). |
 | `runtime_footer: {enabled: false}` | Hermes appends a footer with the model, context use and working directory to every post. Off by default; pinned because it outranks the top-level setting a room member's `/footer on` writes. |
-| `typing_indicator: false` | A typing bubble shows on each person's message and through every turn, even one that ends in silence, so people wait for an answer that never comes. For the whole bot. A look-again run still shows typing (Known gaps). |
+| `typing_indicator: false` | A typing bubble shows on each person's message and through every turn, even one that ends in silence, so people wait for an answer that never comes. For the whole bot. A fresh run after looking again or after a refused answer still shows typing (Known gaps). |
 | `reactions: false` | On Discord (on by default), every message the plugin takes in gets 👀 and then ✅, a nod on every message. Telegram's default is already off. For the whole bot. |
 | `agent.disabled_toolsets: [clarify, cronjob]` | `clarify` posts a numbered question form that nobody in the room is meant to answer; `cronjob` schedules a post into the room that arrives later without reading the room. For the whole profile. |
 
@@ -345,11 +345,26 @@ More setup on Discord:
   Likewise, when the length limit cuts the same answer four times, Hermes
   stops asking and keeps what it got: the last part reaches no hook, so the
   turn fails.
-- **Typing on a look-again run.** When others posted while the agent
-  composed, the fresh run the plugin starts runs as Hermes's queued
-  follow-up, which sends typing whatever `typing_indicator` says: one typing
-  action on Telegram, typing for the whole run on Discord. No setting stops
-  it.
+- **Typing on a fresh run.** When others posted while the agent composed,
+  or its answer was refused once (it held a secret), the fresh run the
+  plugin starts for it to answer again runs as Hermes's queued follow-up,
+  which sends typing whatever `typing_indicator` says: one typing action on
+  Telegram, typing for the whole run on Discord. No setting stops it. The
+  conformance kit counts it, with the failed-turn reply, as a known gap.
+- **Thinking-tag names in a real answer.** Before any plugin hook, Hermes
+  strips `<think>`, `<thinking>`, `<reasoning>` and `<thought>` from the
+  final answer, in any case and inside code too. An answer that names or
+  quotes one (a code block with R1's raw `<think>` output, a JSX
+  `<Reasoning>` component) is posted without it, and one that starts with
+  one ("<reasoning> tags are what the model hides") is stripped to nothing,
+  so nothing is posted. When Hermes removes a lone tag between Japanese or
+  Chinese words ("思考は<thinking>タグの中に書きます。"), the library cannot
+  match the changed text to the model's words, so nothing is posted and the
+  turn fails. The library posts an answer that names any tag but the taught
+  `<thinking>` as written; Hermes changes it first. The conformance kit
+  shows it as a known gap (`final-real-post`), and reads `gap` only when the
+  room got exactly what Hermes's own `strip_think_blocks` makes of the
+  answer.
 - **No interrupt.** Hermes gives plugins no way to stop a run. Nunchi closes
   a cancelled turn, so its answer is silenced; tools it already ran stay run.
 - **Reactions** are add-only (Hermes's `platform_actions`) and were checked up

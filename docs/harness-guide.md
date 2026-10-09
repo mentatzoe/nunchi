@@ -100,6 +100,9 @@ fails, end the turn as failed and return the harness's silence; some
 harnesses post the raw draft when a hook raises. Whatever no setting or hook
 can stop goes into the integration's known gaps. Hermes's list is in
 [`integrations/hermes-plugin/README.md`](../integrations/hermes-plugin/README.md).
+The conformance kit counts what the harness shows in the scenarios it
+plays (Prove it); what it shows on people's messages, its prompts and
+command replies belong in your own tests.
 
 **Whatever the harness drops or does before your ingress hook.** The room
 should hear the whole conversation, and a harness-hosted plugin hears only
@@ -321,9 +324,13 @@ participant.bind_turn(turn_id=harness_run_id, wake_id=turn.wake_id)
   - **Your driver starts the run and the harness answers with its id** (a
     protocol, such as Codex's `turn/start`): bind in `start` with that id,
     and leave the marker out, so the agent never sees the wake id.
-  - **A hook sees the run start:** put `<nunchi_wake id="…"/>` at the start
+  - **A hook sees the run start:** put the core's wake marker at the start
     of the turn's text and read it there, as the Claude Code mod and the
-    Hermes plugin do.
+    Hermes plugin do. Import it, do not copy it:
+    `from nunchi.turn import WAKE_MARKER`, then
+    `WAKE_MARKER.format(turn.wake_id) + "\n" + turn.text`. The library takes
+    any wake marker out of a post, so an agent that echoes one, even an old
+    one from its history, never shows it to the room.
 - Check that the start really started a new run. Codex's `turn/start`, for
   one, folds the text into a run already in progress.
 - Bind only when the harness also shows the room tools reached the run, for
@@ -368,11 +375,21 @@ The library applies the turn's rules inside `call_tool`:
 - one room action per turn;
 - the first post is held once if others posted meanwhile, and the agent
   decides again;
+- each wake marker that stands whole on one line is taken out of a post,
+  with the spaces beside it (a line of only markers and the formatting
+  around them goes with its line break); nothing else changes, so a post
+  that names or quotes any tag, `<thinking>` included, goes out whole; a
+  post of only a marker is refused;
 - the secret guard;
 - the wait for the commit.
 
-The text says what happened in words the agent can act on. Pass it through
+The text says what happened in words the agent can act on, including that
+a marker was left out of its post and what the room got. Pass it through
 unchanged.
+
+The library does not touch the model's native reasoning in any tag: your
+harness handles it (Zoe's decision). If your harness hands tool arguments
+or answers over with the model's reasoning in them, strip it there.
 
 You register the tools once, but each turn offers only some: `turn.tool_names`
 lists this turn's. A call to a tool the turn does not offer returns an error
@@ -388,15 +405,24 @@ decision = participant.finish(turn_id=harness_run_id, answer=final_answer)
 
 | `decision.kind` | Do this |
 |---|---|
-| `deliver` | Let the harness post `decision.text`. Thinking in `<thinking>` tags is already removed. |
+| `deliver` | Let the harness post `decision.text`. The agent's `<thinking>` blocks and any wake marker are already removed, and the answer is trimmed; nothing else was changed. |
 | `silent` | Replace the answer with the harness's silence marker, so nothing is posted. |
 | `continue` | Keep the agent going with `decision.text` as its next input. It looks again at new messages, or answers again after a refusal. |
 
 The library reads silence the way a harness does. The empty answer is
-silence. So is an answer that starts with the marker, holds it on a line of
-its own, or is wholly the marker or one of `also_silent`, ignoring case,
-whitespace, and the punctuation or `` ` `` and `~` around it:
-`**[SILENT]**`, `` `[SILENT]` `` and `[silent].` are all silence.
+silence, and so is an answer with nothing left once the `<thinking>` and
+any wake marker are out. So is an answer that starts with the marker, holds
+it on a line of its own, or is wholly the marker or one of `also_silent`,
+ignoring case, whitespace, and the punctuation or `` ` `` and `~` around
+it: `**[SILENT]**`, `` `[SILENT]` `` and `[silent].` are all silence. An
+answer that ends with the bare marker (in any case) after a finished
+sentence is silence too: `I'll leave this to Castor. [SILENT]`, `Castorに任せます。[SILENT]`. The
+marker must be the last thing, with no backtick or quote character right
+before it, and the text before it must end with `.`, `!`, `?`, `…`, `。`,
+`！`, `？`, `．`, `｡`, `؟`, `۔`, `।`, `॥` or `።` (closing quotes, brackets or
+`*` and `_` may follow). The words beside the marker are the silence's reason. A
+marker inside a sentence is a mention, and the answer is posted: `Reply
+with [SILENT]`, `For example: [SILENT]`, `Done. **[SILENT]**`.
 
 - **Report what the model wrote.** Many harnesses put their own text in
   place of an answer the model never gave: a notice that the run produced
@@ -428,11 +454,19 @@ whitespace, and the punctuation or `` ` `` and `~` around it:
   next `pre_api_request`, and the summary at its iteration limit in none
   (the plugin's README, Known gaps).
 
-- **Hand `finish` the answer as the model wrote it, thinking included.** The
-  library keeps `<thinking>` as the move's reason and never posts it. If your
-  harness strips thinking before your output hook, recover the raw text from
-  an earlier hook, or the reason is lost. The Hermes plugin reads it in
-  `post_api_request`.
+- **Hand `finish` the answer as the model wrote it, `<thinking>`
+  included.** The turn teaches the agent to think inside `<thinking>`; the
+  library takes every such block out (in any case, closed or running to
+  the end of the answer) and keeps it as the move's reason, as it always
+  has. It reads no other tag: the model's native reasoning (`<think>` and
+  the like) is your harness's to strip (Zoe's decision). If your harness
+  strips `<thinking>` before your output hook, recover the raw text from
+  an earlier hook, or the reason is lost. Hand over the raw text when
+  `split_private(raw, final_answer=True)[0] == split_private(answer,
+  final_answer=True)[0]`: it is the same post with the thinking in. The
+  Hermes plugin reads it in `post_api_request`. If your harness also strips
+  tags from words meant for the room (Hermes strips them in code too),
+  that is a known gap to document.
 - `finish` waits up to `result_wait_seconds` for the host's commit. Keep that
   below your harness's own hook timeout. Hermes abandons an output hook after
   30 s and posts the raw draft, so the plugin waits 20 s.
@@ -644,8 +678,8 @@ The Claude Code integration, in order (`nunchi.integrations.claude_code_v2`,
    a `Room` with the shared Discord transport and the participant's guard,
    and the gate serves the socket when it starts.
 3. The mod, at session start, calls `/v1/attach` and registers the room tools.
-4. For each turn, the driver submits `<nunchi_wake id="…"/>` and `turn.text`
-   to the session.
+4. For each turn, the driver submits the core's `WAKE_MARKER` with the
+   turn's wake id, then `turn.text`, to the session.
 5. The mod's `turn.start` hook reads the wake id and binds with the session's
    turn id (`/v1/turn-start`).
 6. The mod forwards room tool calls (`/v1/tool`). After every tool call it
@@ -691,7 +725,7 @@ table names the Hermes hooks for each step.
    notes them in `pre_gateway_dispatch`. A message whose mentions are missing
    reads as addressed to nobody.
 3. **Start.** The library calls `driver.start(turn)`. The driver asks the
-   harness to start a run with `<nunchi_wake id="…"/>` and `turn.text`, as
+   harness to start a run with the core's `WAKE_MARKER` and `turn.text`, as
    the plugin's own message.
 4. **Bind.** The first hook that sees the run, before the model call, reads
    the marker and binds the run if the id is the open turn's. It maps the
@@ -801,6 +835,42 @@ Every integration joins the turn conformance kit before it replaces anything.
      `final-no-answer` scenarios are not applicable.
    - `final-silence-forms` plays the first answer your participant lists in
      `also_silent`, and skips that play when it lists none.
+   - Give your `KitIntegration` a `visible()`: everything the harness itself
+     showed the room in the scenario just played, outside the library's
+     transport, the answers it posted for the library included. Return a
+     list of `{"kind": "message", "text": ...}`,
+     `{"kind": "reaction", "reaction": ...}`, `{"kind": "typing"}` and
+     `{"kind": "thread"}`, with `"where"` naming the chat if you like. The
+     kit calls it before `close()`. Record it where the harness would reach
+     the platform, as the Hermes kit's recording adapters do. If the harness
+     reaches the room only through the library's transport (your tools),
+     return `[]`, as the Claude Code and Codex kits do. The kit compares it
+     with what the library committed: anything else is a leak, and so is a
+     committed post that names Nunchi's machinery (`machinery_in`, with the
+     turn's request id and your room tools' names when they are
+     identifiers, such as `room_send`). A leak fails the scenario. Without
+     `visible()` committed posts are still counted, and the leak count says
+     what the harness showed is `n/a`.
+   - What the harness shows that nothing public can stop, declare in
+     `known_gaps`, a list of `nunchi.turn_conformance.KnownGap`: the
+     `reason` (why nothing stops it, and where you document it), the
+     `scenarios` it shows in, its `kind`, and for a message part of its
+     `text`. A declared leak makes the cell `gap`, never `pass`; anything
+     else the harness shows still fails. A harness that changes the agent's
+     post before your hook sees it declares a `KnownGap` of kind `post` for
+     the scenarios whose checks fail because of it, with the harness's own
+     change as its `transform` (for Hermes, its `strip_think_blocks`): the
+     cell reads `gap` only when the room got exactly that change of the
+     agent's answer, and any other change fails. Document each gap in your
+     README and in the contract's candidate gaps first. `HERMES_KNOWN_GAPS`
+     in `nunchi.integrations.hermes_plugin_conformance` is an example.
+   - Set `model_failure = True` and give your surface `fail(turn_id)`: the
+     agent's model call fails the way it does in your harness (HTTP 400
+     from your model stub, a failed result on the harness's own stream), and
+     the harness ends the run as it would. The kit checks that the turn ends
+     as a failure before the library's deadline and that nothing reaches the
+     room. Without it, `harness-failure` and `final-harness-failure` are not
+     applicable.
    - Library-hosted: run the harness for real when it speaks a protocol, and
      stub only its model, as `nunchi.integrations.codex_app_server_conformance`
      does; scripting the harness process would skip the protocol under test.
@@ -834,7 +904,7 @@ Every integration joins the turn conformance kit before it replaces anything.
 5. Put the generated table in [`harness-contract.md`](harness-contract.md),
    "Conformance kit". A failing cell is a gap in
    [#135](https://github.com/mentatzoe/nunchi/issues/135), not a reason to
-   skip the scenario.
+   skip the scenario. A `gap` cell is a known gap your integration declared.
 
 The kit owns the room, attention, the host and the checks, and builds them
 with the same `Room` your integration uses. What it does not cover, test
@@ -842,7 +912,8 @@ through your harness in your own tests, as `tests/v2/test_hermes_plugin.py`
 does:
 
 - its `arrive` step records a message in the room log directly, not through
-  your ingress;
+  your ingress, so its leak count never sees what your harness shows on a
+  person's message (processing reactions, typing, command replies);
 - its room takes reactions itself, so your harness's own reaction path goes
   untested there;
 - its final-answer scenarios use no room view and no steering.
@@ -870,7 +941,9 @@ Each is tracked in [#135](https://github.com/mentatzoe/nunchi/issues/135).
 - [ ] Public extension points only; nothing patched.
 - [ ] Everything the harness shows by itself besides the agent's own acts is
   off for the room, documented with the reason and tested; what nothing can
-  stop is in the integration's known gaps.
+  stop is in the integration's known gaps, and declared to the kit
+  (`known_gaps`). The kit's `visible()` reports everything the harness
+  showed in the scenarios the kit plays.
 - [ ] Everything the harness drops or does before your ingress hook is open
   or off for the room, tested through the harness's real ingress; threads
   and topics inside the room are consumed as the room's.

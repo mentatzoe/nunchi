@@ -352,7 +352,8 @@ harness's other silent answers (`also_silent`), and there is no send tool:
 - The agent may think first inside `<thinking></thinking>`. That text is never
   posted; it becomes the move's reason in the agent's memory, as `why` does in
   the envelope, so a later turn knows why it spoke or held back. An unclosed
-  block runs to the end of the answer.
+  block runs to the end of the answer. No other tag is read: the model's
+  native reasoning is the harness's to strip (`split_private`).
 - `Turn.finish(answer)` then waits for the host's commit. The integration's
   transport is `HarnessDelivery`: it commits a message by allowing it, with
   the receipt detail "the harness delivers it", and hands any other action,

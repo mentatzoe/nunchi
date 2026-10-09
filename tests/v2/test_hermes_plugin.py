@@ -761,8 +761,11 @@ class HermesGatewayTest(unittest.TestCase):
 
     def test_kit_final_answer_scenarios(self):
         from nunchi import turn_conformance as kit
-        from nunchi.integrations.hermes_plugin_conformance import HermesKitIntegration
+        from nunchi.integrations.hermes_plugin_conformance import HERMES_KNOWN_GAPS, HermesKitIntegration
 
+        # Hermes's known gaps show where declared, as 'gap' and never 'pass';
+        # once Hermes closes one, its scenario passes and the docs must change.
+        gapped = {name for gap in HERMES_KNOWN_GAPS for name in gap.scenarios}
         for platform in ("telegram", "discord"):
             integration = HermesKitIntegration(platform=platform)
             for name, scenario in kit.SCENARIOS.items():
@@ -772,7 +775,10 @@ class HermesGatewayTest(unittest.TestCase):
                     if platform == "discord" and not discord_available():
                         self.skipTest("the Discord lane needs discord.py (hermes-agent[messaging])")
                     result = kit.run_scenario(name, integration)
-                    self.assertEqual(result["status"], "pass", result.get("failures"))
+                    expected = "gap" if name in gapped else "pass"
+                    self.assertEqual(expected, result["status"], (result.get("failures"), result.get("gaps")))
+                    # Every leak is a declared one (a changed post is a gap, not a leak).
+                    self.assertEqual(result["leak_gaps"], result["leak_count"])
 
     def test_the_room_sees_hermess_reply_target_time_and_mentions(self):
         harness = self._harness()
@@ -881,6 +887,28 @@ class HermesGatewayTest(unittest.TestCase):
         self.assertEqual([(ROOM, post)], sent)
         self.assertIn(("reply", post), [(move.get("kind"), move.get("text")) for move in wake["memory"]["own_moves"]])
         self.assertEqual(1, wake["pace"]["own_messages"])
+
+    # -- the library's commit check, through the real gateway (leak audit row 7) ---------
+
+    def test_thinking_and_an_echoed_wake_marker_never_reach_the_room(self):
+        # Hermes strips <thinking> itself; the plugin hands the library the raw
+        # answer, which takes the echoed marker out and keeps the taught
+        # thinking as the reason. Native reasoning in another tag is Hermes's
+        # own to strip (Zoe), so the library keeps no reason for it.
+        echoed = WAKE_MARKER.format("an-old-wake-id-from-history")
+        for tag, why in (("thinking", "Plan: check the logs."), ("think", None)):
+            with self.subTest(tag=tag):
+                wake, sent = self._next_turn_after(f"<{tag}>Plan: check the logs.</{tag}>\n{echoed}\nChecking now.")
+                self.assertEqual([(ROOM, "Checking now.")], sent)
+                moves = [(move.get("kind"), move.get("text"), move.get("why")) for move in wake["memory"]["own_moves"]]
+                self.assertEqual([("reply", "Checking now.", why)], moves)
+
+    def test_the_marker_after_a_sentence_is_silence_and_the_sentence_is_its_reason(self):
+        wake, sent = self._next_turn_after(f"I'll leave this to Castor. {SILENCE_MARKER}")
+        self.assertEqual([], sent)
+        moves = [(move.get("kind"), move.get("about_event_id"), move.get("why"))
+                 for move in wake["memory"]["own_moves"]]
+        self.assertEqual([("silence", "telegram:message:100", "I'll leave this to Castor.")], moves)
 
     def _after_a_failed_file_edit(self, harness, answer):
         # The model's edit fails (the file does not exist), then it answers.
@@ -1395,6 +1423,25 @@ class HermesSilenceParityTest(unittest.TestCase):
                 with self.subTest(answer=answer):
                     self.assertEqual("silent", turn.decide(answer).kind)
         self.assertGreater(hidden, len(LIVE_GATEWAY_SILENT_MARKERS))
+
+
+@unittest.skipUnless(hermes_available(), "requires an installed Hermes (hermes-agent)")
+class HermesStripperParityTest(unittest.TestCase):
+    """The kit's gap 15 is the pinned Hermes's own change to an answer."""
+
+    def test_the_kits_post_gap_is_hermess_own_stripper(self):
+        # Gap 15 reads gap only when the room got exactly what Hermes makes of
+        # the answer; the fallback for a missing Hermes matches the pinned one.
+        from agent.agent_runtime_helpers import strip_think_blocks
+        from nunchi.integrations.hermes_plugin_conformance import _HERMES_STRIPPED, HERMES_KNOWN_GAPS, hermes_strips
+        from nunchi.turn_conformance import REAL_FINAL_ANSWERS
+
+        (post,) = [gap for gap in HERMES_KNOWN_GAPS if gap.kind == "post"]
+        self.assertIs(hermes_strips, post.transform)
+        for form in REAL_FINAL_ANSWERS:
+            with self.subTest(form=form):
+                self.assertEqual(strip_think_blocks(None, form), hermes_strips(form))
+                self.assertEqual(strip_think_blocks(None, form), _HERMES_STRIPPED.get(form, form))
 
 
 @unittest.skipUnless(hermes_available(), "requires an installed Hermes (hermes-agent)")

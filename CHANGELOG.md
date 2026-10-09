@@ -13,6 +13,84 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- The leak count in the turn conformance kit
+  ([leak audit in #135](https://github.com/mentatzoe/nunchi/issues/135#issuecomment-6057394431),
+  rows 2 and 7). After every scenario the kit checks that the room received
+  only what the library committed, and nothing that names Nunchi's
+  machinery. A `KitIntegration` reports what its harness itself showed the
+  room (`visible()`: messages, reactions, typing, threads it opened). Each
+  thing it showed that is not a committed action is a leak, and so is a
+  committed post that `machinery_in` flags, with the turn's request id and
+  the names the integration gave its room tools. A leak fails the scenario
+  unless the integration declares it as a known gap (`KnownGap`), which the
+  parity table shows as `gap`, never `pass`; a harness that changes the
+  agent's post before the library reads it can declare that too (kind
+  `post`, carrying the harness's own change as its `transform`: a play
+  reads `gap` only when the room got exactly that change of the agent's
+  answer, and any other change fails). The table's last row counts leaks per integration; without
+  `visible()` committed posts are still counted and the row says what the
+  harness showed is `n/a`. Reference (tools), the Claude Code gate and
+  Codex reach the room only through the library's transport, so only
+  their committed posts can leak, and they count 0; reference
+  (final-answer) posts what the library commits and reports it, and counts
+  0. The Hermes kit reports what Hermes's gateway hands its adapters (a
+  recording adapter on Telegram, the stock Discord adapter's send boundary
+  on Discord; formatting, chunking, edits and DMs are not recorded), and
+  declares three gaps: Hermes's failed-turn notice (contract gap 7), typing
+  on the plugin's fresh run (gap 10), and Hermes stripping thinking-tag
+  names from a real answer before any hook (gap 15, found by the new
+  `final-real-post`). The count found that typing also after a refused
+  answer (`final-secret`), not only after looking again; the README and
+  the contract now say so. Nine new scenarios: `leak`, `leak-markup`,
+  `final-leak`, `final-leak-markup` and `final-trailing-silence` check that
+  an echoed wake marker never reaches the room, that a post of only a
+  marker is refused (a tool post) or silence (a final answer), that the
+  taught `<thinking>` in a final answer is kept as the reason and never
+  posted, that the agent is told when a marker was left out of a tool
+  post, and that the trailing marker is silence; `real-post` and
+  `final-real-post` post real texts that name or quote tags or the wake
+  marker (prose, inline and fenced code, `<think>`, JSX `<Reasoning>`,
+  Japanese, a post that starts with "<reasoning> tags are",
+  "<nunchi_wake" named in prose; `<thinking>` in tool posts only) and
+  check that each reaches the room exactly as written;
+  `harness-failure` and `final-harness-failure` fail the agent's model call
+  (an exception in the reference, a failed stream-json `result` read by the
+  Claude Code gate's own reader, HTTP 400 from the Codex and Hermes model
+  stubs) and check that the turn ends as a failure before the library's
+  deadline with nothing committed. Every integration passes them, except
+  Hermes's declared gaps: its failed-turn notice in
+  `final-harness-failure`, and its tag stripping in `final-real-post`; its
+  typing gap turns `final-look-again` and `final-secret`, which already
+  existed, from pass to gap. The Claude Code gate's stream-json `result`
+  reading is now `turn_ending`, unchanged in behavior, so the kit uses it
+  too.
+- One definition of a leak, in the core: `nunchi.turn.machinery_in(text,
+  *, ids=())` lists what in a text names Nunchi's machinery: a wake marker,
+  the turn's tag, a Nunchi tool's name (`mcp__nunchi…`, and through `ids`
+  the names an integration gave its tools, such as `room_send`), thinking
+  tags in lowercase outside code that mark thinking (an opening tag with
+  its closing tag, or a tag alone on its line; balanced ``` or ~~~ fences
+  and inline `code` are removed first with a simple regex; a tag named in
+  a sentence is prose),
+  the `[SILENT]` marker, field names only Nunchi uses
+  (`own_moves`) or a path to an object's own field (`attention.advice`,
+  `binding.request_id`), and internal ids the caller names. Prose about
+  Nunchi is not counted, nor are field names other APIs use on their own
+  (`request_id`, `event_id`, `display_name`) or dotted words that are no
+  object's field (`memory.text`, `pace.at`). Its field names are the wake
+  schema's (`WAKE_FIELDS` and `FIELD_PATHS`, kept in step with
+  `schemas/v2/participant-wake.schema.json` by tests), the binding's, the
+  room tools' arguments and a context page's. It measures; it never refuses
+  a post. The behavior eval uses it in place of its own pattern, which
+  missed the wake marker, the turn's tag, tool names and `<think>`, and
+  counted "Has anyone tried the Nunchi plugin yet?". The eval now counts
+  what the model wrote for the room (`agent.machinery_written`, only
+  replies meant as posts: a final answer the library reads as silence, such
+  as a taught `[SILENT]`, is not counted) apart from what the room received
+  (`agent.machinery_posted`); it no longer counts the words "attention
+  model". Leak counts from earlier runs (run 58's "18 of 111 posts") are not
+  comparable: the detector, the unit (turns, not posts) and the split all
+  changed; re-score stored posts with `posted_machinery`.
 - A Discord lane in the Hermes plugin's conformance kit: Hermes's stock
   Discord adapter in the real gateway, fed fake discord.py channels, threads
   and messages through its own ingress, as Hermes's tests do, recording what
@@ -564,6 +642,61 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Fixed
 
+- The library never posts a wake marker, in any posting style, and
+  changes nothing else in a post
+  ([leak audit in #135](https://github.com/mentatzoe/nunchi/issues/135#issuecomment-6057394431), row 7).
+  One commit check in the core, `Turn.prepare`, now serves every commit
+  point: the room tool (`Turn.call`), the final answer (`Turn.decide`, which
+  splits the answer once and hands `prepare` what is left) and the
+  one-reply style (`ParticipantTurnProtocol.consume`). Its rules
+  (`split_private`):
+  - Every posting style: each wake marker that stands whole on one line
+    (`</?nunchi_wake\b[^<>\n]*/?>`, any case) is removed. A line that holds
+    only markers, spaces, tabs and the formatting around them (`*`, `_`,
+    `~`, backticks, quotes, `>`) goes with its line break; a marker inside
+    a line goes with the spaces and tabs beside it, one space stays between
+    the words around it if there was space, a line keeps its indentation,
+    and the lines around it stay apart. Code is not special. "<nunchi_wake" named in prose, with no `>`
+    after it on its line, is not a marker. Removal is one pass: it takes
+    out the markers an agent echoes, and a marker that forms only once
+    another is removed is crafted text, posted as before.
+  - Final-answer posting only: every `<thinking>` block, the tag the turn
+    teaches, is removed and kept as the move's reason, exactly as before
+    (`<thinking>(.*?)(?:</thinking>|\Z)`, any case, closed or running to
+    the end), read on the answer as written; the markers then go from the
+    answer and the reason, and the answer is posted trimmed, as before.
+  - Nothing else: the core reads no other tag and no code. Native
+    reasoning (`<think>`, `<reasoning>`, `<thought>`) is the harness's job
+    (Zoe's decision), so a post that names or quotes any tag, in prose or
+    code, is posted as written, and in tool and one-reply posting so is
+    `<thinking>`.
+
+  When a tool post lost a marker, the tool result says so and quotes what
+  the room got. A post of only a marker is never posted empty: the tool
+  call is refused with a note; a one-reply message is refused once, and a
+  second is silence; a final answer with nothing left is silence, as
+  before. Before, a tool post or a one-reply post went out verbatim, marker
+  included. In final-answer posting, an answer that ends with the bare
+  silence marker (in any case) after a finished sentence ("I'll leave this
+  to Castor. [SILENT]") is silence, and the text before the marker is its reason;
+  before, it was posted with the marker. The marker must be the last thing,
+  after trailing whitespace, with no backtick or quote character right
+  before it, and the text before it must end with `.`, `!`, `?`, `…`, `。`,
+  `！`, `？`, `．`, `｡`, `؟`, `۔`, `।`, `॥` or `።`, after optional closing
+  quotes, brackets or markdown emphasis (`*`, `_`). "Reply with [SILENT]"
+  and "For example: [SILENT]" are posted as written: no sentence ends
+  before the marker. The rule reads only the last character, so
+  "e.g. [SILENT]" and "1. [SILENT]" are silence too. The words beside a
+  leading marker or one on its own line are now the silence's reason too,
+  as a silent tool-posting turn keeps its last words (#150).
+  A post that quotes the turn's own tag (`<nunchi_participant_turn_v1>`) or
+  its field names is still posted: whether the library refuses the turn's
+  tag is open (D6). The wake marker is now the core's
+  `nunchi.turn.WAKE_MARKER`; the Hermes plugin and the Claude Code gate
+  import it, and the Hermes plugin recovers the agent's `<thinking>` with
+  the core's `split_private`. Hermes itself strips the model's thinking
+  tags, and also strips tag names from a real answer before the plugin sees
+  it (contract gap 15).
 - A Hermes room on Discord hears every person Hermes allows in its channel
   and in the threads under it, each under their own name, except what
   Hermes drops before any hook (below), and nothing said there gets an
