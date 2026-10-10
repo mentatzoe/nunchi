@@ -494,6 +494,155 @@ class PreflightRouteTest(StandIn, unittest.TestCase):
         self.assertNotEqual(FakeDiscord(WORLD).preflight_nonce, FakeDiscord(WORLD).preflight_nonce)
 
 
+class HermesRoutesTest(StandIn, unittest.TestCase):
+    """The routes `hermes gateway run` is shown to call that no other column does (docs/rehearsal.md, the Hermes column)."""
+
+    COMMAND = {"name": "status", "description": "Show the session", "type": 1, "options": [], "nsfw": False, "dm_permission": True,
+               "default_member_permissions": None, "contexts": None, "integration_types": None}
+
+    def setUp(self) -> None:
+        self.start()
+        self.room = self.channel("room")
+
+    def history(self, query: str = "", channel: str | None = None, bot: str = "vigil"):
+        return self.api("GET", f"/channels/{channel or self.room}/messages{query}", bot=bot)
+
+    def test_the_applications_flags_say_which_privileged_intents_are_enabled(self):
+        # An unverified bot in fewer than 100 servers has the "limited" bits only (1<<15 and 1<<19), as Discord sets them.
+        members, content = 1 << 15, 1 << 19
+        for bot, has_members, has_content in (("vigil", True, True), ("shy", True, False)):
+            with self.subTest(bot=bot):
+                status, _, application = self.api("GET", "/applications/@me", bot=bot)
+                self.assertEqual((status, bool(application["flags"] & members), bool(application["flags"] & content)), (200, has_members, has_content))
+                self.assertFalse(application["flags"] & ((1 << 14) | (1 << 18)), "the full bits are a verified bot's")
+                self.assertEqual(application, self.api("GET", "/oauth2/applications/@me", bot=bot)[2], "the object discord.py reads")
+                ready = payloads.ready(self.fd.world, self.fd.world.member(bot), "session", "ws://127.0.0.1:1")
+                self.assertEqual(application["flags"], ready["application"]["flags"], "READY says the same")
+                self.assertEqual(shapes.missing(payloads.SHAPES["application"], application), [])
+        self.assertEqual(self.api("GET", "/applications/@me", bot=None)[0], 401)
+        self.assertTrue(self.fd.verdict()["clean"])
+
+    def test_a_verified_world_sets_the_full_bits_instead(self):
+        self.start({**WORLD, "verified": True})
+        for bot, flags in (("vigil", (1 << 14) | (1 << 18)), ("shy", 1 << 14)):
+            with self.subTest(bot=bot):
+                self.assertEqual(self.api("GET", "/applications/@me", bot=bot)[2]["flags"], flags)
+        self.assertEqual(self.fd.world.describe()["verified"], True)
+        self.assertEqual(World(WORLD).describe()["verified"], False)
+
+    def test_a_slash_command_is_listed_created_and_overwritten_by_name(self):
+        base = f"/applications/{self.member('vigil')}/commands"
+        self.assertEqual(self.api("GET", base + "?with_localizations=true")[::2], (200, []))
+        status, headers, made = self.api("POST", base, self.COMMAND)
+        self.assertEqual((status, headers["content-type"]), (201, "application/json"))
+        self.assertEqual(shapes.missing(payloads.SHAPES["command"], made), [], "what discord.py parses")
+        self.assertEqual((made["application_id"], made["name"], made["type"], made["description"]), (self.member("vigil"), "status", 1, "Show the session"))
+        self.assertEqual((made["contexts"], made["integration_types"]), ([0, 1, 2], [0]), "unset by Hermes, defaulted as Discord does (unverified)")
+        status, _, again = self.api("POST", base, {**self.COMMAND, "description": "Show the session's state"})
+        self.assertEqual((status, again["id"], again["description"]), (200, made["id"], "Show the session's state"))
+        self.assertNotEqual(again["version"], made["version"])
+        self.assertEqual(self.api("GET", base)[2], [again])
+        self.assertIsNone(again["default_member_permissions"], "none set: null")
+        # Discord sends the permission set as a string, whatever number the client posted.
+        status, _, restricted = self.api("POST", base, {**self.COMMAND, "name": "admin", "default_member_permissions": 8})
+        self.assertEqual((status, restricted["default_member_permissions"]), (201, "8"))
+        self.assertEqual(self.api("POST", base, {**self.COMMAND, "name": "admin", "default_member_permissions": "8"})[2]["default_member_permissions"], "8")
+        self.assertEqual(self.api("GET", f"/applications/{self.member('boss')}/commands", bot="boss")[2], [], "each application has its own")
+        self.assertEqual(self.api("GET", f"/applications/{self.member('boss')}/commands")[::2], (404, {"message": "Unknown Application", "code": 10002}))
+        self.assertEqual(self.api("POST", f"/applications/{self.member('boss')}/commands", self.COMMAND)[0], 404, "a token reaches only its own application")
+        self.assertTrue(self.fd.verdict()["clean"])
+
+    def test_a_command_must_have_a_name_and_a_description_and_an_application_holds_a_hundred(self):
+        base = f"/applications/{self.member('vigil')}/commands"
+        for field, value, code in (
+            ("name", "Status", "APPLICATION_COMMAND_INVALID_NAME"), ("name", "", "APPLICATION_COMMAND_INVALID_NAME"),
+            ("name", "two words", "APPLICATION_COMMAND_INVALID_NAME"), ("name", "n" * 33, "APPLICATION_COMMAND_INVALID_NAME"),
+            ("description", "", "BASE_TYPE_BAD_LENGTH"), ("description", "d" * 101, "BASE_TYPE_BAD_LENGTH"),
+        ):
+            with self.subTest(field=field, value=value[:12]):
+                status, _, error = self.api("POST", base, {**self.COMMAND, field: value})
+                self.assertEqual((status, error["code"], error["errors"][field]["_errors"][0]["code"]), (400, 50035, code))
+        for number in range(100):
+            self.assertEqual(self.api("POST", base, {**self.COMMAND, "name": f"c{number}"})[0], 201)
+        status, _, error = self.api("POST", base, {**self.COMMAND, "name": "one-more"})
+        self.assertEqual((status, error["code"]), (400, 30032), "a hundred and one fails, as Hermes's own cap expects")
+        self.assertEqual(self.api("POST", base, {**self.COMMAND, "name": "c7", "description": "again"})[0], 200, "an overwrite adds none")
+        self.assertEqual(len(self.api("GET", base)[2]), 100)
+        self.assertTrue(self.fd.verdict()["clean"], "a refusal is Discord's answer, not an unknown")
+
+    def test_a_command_the_stand_in_does_not_model_is_unknown(self):
+        base = f"/applications/{self.member('vigil')}/commands"
+        for why, body in (("a context-menu command", {**self.COMMAND, "type": 2, "description": ""}), ("a field nobody foresaw", {**self.COMMAND, "voice": True})):
+            self.assertEqual(self.api("POST", base, body)[0], 599, why)
+        self.assertEqual(self.api("GET", base)[2], [])
+        for method, path in (("PUT", base), ("PATCH", base + "/1"), ("DELETE", base + "/1")):
+            self.assertEqual(self.api(method, path, {} if method != "DELETE" else None)[0], 599, f"{method}: no caller has been shown")
+        self.assertEqual(len(self.fd.verdict()["unknown"]), 5)
+
+    def test_history_is_newest_first_before_an_id_and_limited(self):
+        ids = [self.fd.post("zoe", "room", f"message {number}")["id"] for number in range(51)]
+        status, headers, found = self.history(f"?limit=3&before={ids[4]}")
+        self.assertEqual((status, headers["content-type"], [m["id"] for m in found]), (200, "application/json", [ids[3], ids[2], ids[1]]))
+        self.assertEqual([m["id"] for m in self.history()[2]], ids[:0:-1], "fifty of the fifty-one by default, newest first")
+        self.assertEqual(len(self.history("?limit=100")[2]), 51)
+        self.assertEqual([m["id"] for m in self.history(f"?before={ids[0]}")[2]], [])
+        for message in found:
+            self.assertEqual(shapes.missing(payloads.SHAPES["message"], message), [])
+            self.assertFalse({"guild_id", "member"} & set(message), "as a REST read is documented")
+        thread = self.fd.create_thread("zoe", "room", "side")
+        inside = self.fd.post("kim", "side", "in the thread")["id"]
+        self.assertEqual([m["id"] for m in self.history(channel=thread["id"])[2]], [inside], "a thread has its own messages")
+        self.assertEqual(self.history(f"?before={inside}", channel=thread["id"])[2], [])
+
+    def test_history_asks_only_for_what_hermes_asked(self):
+        self.fd.post("zoe", "room", "one")
+        for query in ("?limit=0", "?limit=101", "?limit=many", "?before=soon"):
+            with self.subTest(query=query):
+                status, _, error = self.history(query)
+                self.assertEqual((status, error["code"]), (400, 50035))
+        self.assertEqual(self.history("?after=1")[0], 599, "after and around have no caller yet")
+        self.assertEqual([u["what"] for u in self.fd.verdict()["unknown"]], ["request"])
+        quiet = self.channel("no-history")
+        self.fd.post("zoe", "no-history", "unseen")
+        self.assertEqual(self.history(channel=quiet)[::2], (200, []), "without READ_MESSAGE_HISTORY no message is returned")
+        hidden = self.channel("people-only")
+        self.fd.post("zoe", "people-only", "unseen")
+        status, _, error = self.history(channel=hidden)
+        self.assertEqual((status, error["code"]), (403, 50001))
+        self.assertEqual(self.history(channel="1")[0], 404)
+
+    def test_one_message_needs_read_message_history_and_belongs_to_its_channel(self):
+        posted = self.fd.post("zoe", "room", "hello")["id"]
+        status, _, message = self.api("GET", f"/channels/{self.room}/messages/{posted}")
+        self.assertEqual((status, message["content"], message["id"]), (200, "hello", posted))
+        self.assertEqual(message, self.history()[2][0])
+        self.assertEqual(self.api("GET", f"/channels/{self.channel('other')}/messages/{posted}")[::2], (404, {"message": "Unknown Message", "code": 10008}))
+        self.assertEqual(self.api("GET", f"/channels/{self.room}/messages/1")[0], 404, "a message Hermes made up, like its injected turn's")
+        self.fd.post("zoe", "no-history", "unseen")
+        unseen = next(iter(self.fd.world.messages))  # any message: the permission is checked first
+        status, _, error = self.api("GET", f"/channels/{self.channel('no-history')}/messages/{unseen}")
+        self.assertEqual((status, error["code"]), (403, 50013))
+        self.assertTrue(self.fd.verdict()["clean"])
+
+    def test_a_message_read_over_rest_carries_its_reactions_with_who_made_them(self):
+        from urllib.parse import quote
+
+        posted = self.fd.post("zoe", "room", "react to me")["id"]
+        thumbs = quote("👍", safe="")
+        for bot in ("vigil", "boss"):
+            self.assertEqual(self.api("PUT", f"/channels/{self.room}/messages/{posted}/reactions/{thumbs}/@me", bot=bot)[0], 204)
+        self.assertEqual(self.api("PUT", f"/channels/{self.room}/messages/{posted}/reactions/{quote('👀', safe='')}/@me", bot="boss")[0], 204)
+        seen = {bot: {r["emoji"]["name"]: (r["count"], r["me"]) for r in self.api("GET", f"/channels/{self.room}/messages/{posted}", bot=bot)[2]["reactions"]}
+                for bot in ("vigil", "boss", "shy")}
+        self.assertEqual(seen["vigil"], {"👍": (2, True), "👀": (1, False)})
+        self.assertEqual(seen["boss"], {"👍": (2, True), "👀": (1, True)})
+        self.assertEqual(seen["shy"], {"👍": (2, False), "👀": (1, False)})
+        reaction = self.api("GET", f"/channels/{self.room}/messages/{posted}")[2]["reactions"][0]
+        self.assertEqual(shapes.missing("message.Reaction", reaction), [])
+        plain = self.fd.post("zoe", "room", "no reactions")["id"]
+        self.assertNotIn("reactions", self.api("GET", f"/channels/{self.room}/messages/{plain}")[2])
+
+
 class ClockTest(StandIn, unittest.TestCase):
     def test_the_rooms_clock_only_moves_forward_and_a_bots_post_brings_it_to_the_wall(self):
         start = datetime(2026, 10, 9, 12, 0, tzinfo=timezone.utc).timestamp()
@@ -734,6 +883,7 @@ class ShapePinTest(unittest.TestCase):
         asked, _ = world.create_message(zoe.id, room.id, f"<@{vigil.id}> is the deploy done?")
         reply, _ = world.create_message(vigil.id, room.id, "yes", reference={"message_id": asked["id"]}, nonce="1", wall=True)
         thread = world.create_thread(zoe.id, room.id, "side")
+        command, _ = world.upsert_command(vigil.id, {"name": "status", "description": "Show the session", "type": 1})
         built = {
             "READY": payloads.ready(world, vigil, "session", "ws://127.0.0.1:1"),
             "GUILD_CREATE": payloads.guild_create(world, vigil, INTENTS["GUILDS"] | INTENTS["GUILD_PRESENCES"]),
@@ -744,6 +894,7 @@ class ShapePinTest(unittest.TestCase):
             "THREAD_CREATE": {**payloads.channel(world, thread), "newly_created": True},
             "user": payloads.user(vigil),
             "application": payloads.application(world, vigil),
+            "command": payloads.command(command),
             "message": payloads.message(world, reply),
             "text": payloads.channel(world, room),
             "thread": payloads.channel(world, thread),

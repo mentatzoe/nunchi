@@ -37,6 +37,19 @@ FIDELITY = [
     "whether a small guild lists everyone, which would mean no op 8, is unverified.",
     "Heartbeats are answered but never required: a connection that stops heartbeating is not closed.",
     "A client's close never ends its session; Discord ends it on 1000 or 1001.",
+    "Application commands (Hermes's slash-command sync): global chat-input commands only, kept in memory for the run; POST creates one "
+    "(201) or overwrites the one of that name (200), GET lists them, and an application holds at most 100 (error 30032). PUT (bulk), "
+    "PATCH, DELETE, guild commands, context-menu commands and localizations are not served. Discord's rules for a name and a description, "
+    "and their error codes, are approximated, and so are the contexts and integration_types a new command defaults to (all contexts, "
+    "guild install): unverified. Option and choice rules are not modelled: options are stored as sent, so a body Discord refuses for them "
+    "(more than 25 options or choices, a required option after an optional one, a badly named or unknown-type option) is accepted here.",
+    "Message history (GET messages) takes limit and before, newest first; after and around are not served. A user without "
+    "READ_MESSAGE_HISTORY gets an empty list from it and a 403 from GET message, as Discord's documentation says: unverified here. A "
+    "message read over REST carries the reactions it holds, with `me` for the reader; a message in a gateway event or in a post's "
+    "response never does.",
+    "Application flags (READY, GET /oauth2/applications/@me and GET /applications/@me) say which privileged intents are enabled for the bot "
+    "(GUILD_MEMBERS and MESSAGE_CONTENT), modelled as an unverified bot in fewer than 100 servers: the \"limited\" bits (1<<15 and 1<<19), "
+    "not the full ones (1<<14 and 1<<18) a verified bot has, unless the world sets verified; no other flag is ever set.",
     "Events sent: READY, RESUMED, GUILD_CREATE, GUILD_MEMBERS_CHUNK, MESSAGE_CREATE, MESSAGE_REACTION_ADD/REMOVE, THREAD_CREATE. "
     "No typing, edits, deletes, member joins or leaves, presences, or thread system messages (types 18 and 21).",
 ]

@@ -23,6 +23,7 @@ SHAPES = {
     "THREAD_CREATE": "gateway.ThreadCreateEvent",
     "user": "user.User",
     "application": "appinfo.AppInfo",
+    "command": "command._ChatInputApplicationCommand",
     "message": "message.Message",
     "text": "channel.TextChannel",
     "thread": "channel.ThreadChannel",
@@ -41,6 +42,11 @@ def member(m: Member, *, with_user: bool = True) -> dict[str, Any]:
     data = {"roles": list(m.roles), "joined_at": m.joined_at, "deaf": False, "mute": False, "flags": 0,
             "nick": None, "avatar": None, "premium_since": None, "pending": False}
     return {**data, "user": user(m)} if with_user else data
+
+
+def command(c: dict[str, Any]) -> dict[str, Any]:
+    """A global chat-input application command, as the world stores it."""
+    return dict(c)
 
 
 def role(r: Role) -> dict[str, Any]:
@@ -62,7 +68,8 @@ def channel(world: World, c: Channel) -> dict[str, Any]:
                                 "locked": False, "create_timestamp": created}}
 
 
-def message(world: World, record: dict[str, Any], *, gateway: bool = False, nested: bool = False) -> dict[str, Any]:
+def message(world: World, record: dict[str, Any], *, gateway: bool = False, nested: bool = False, viewer: str | None = None) -> dict[str, Any]:
+    """A message object. ``viewer`` (a REST read as that user) adds the reactions it holds, each with whether the viewer made it."""
     author = world.members[record["author_id"]]
 
     def mention(user_id: str) -> dict[str, Any]:
@@ -86,6 +93,12 @@ def message(world: World, record: dict[str, Any], *, gateway: bool = False, nest
     if gateway:
         data["guild_id"] = world.guild_id
         data["member"] = member(author, with_user=False)
+    if viewer is not None and not nested and record["reactions"]:
+        data["reactions"] = [
+            {"emoji": {"id": None, "name": emoji}, "count": len(users), "count_details": {"burst": 0, "normal": len(users)},
+             "me": viewer in users, "me_burst": False, "burst_colors": []}
+            for emoji, users in record["reactions"].items()
+        ]
     return data
 
 
@@ -99,7 +112,8 @@ def reaction(world: World, user_id: str, record: dict[str, Any], emoji: str, *, 
 
 def ready(world: World, bot: Member, session_id: str, resume_gateway_url: str) -> dict[str, Any]:
     return {"v": 10, "user": user(bot), "guilds": [{"id": world.guild_id, "unavailable": True}], "session_id": session_id,
-            "session_type": "normal", "resume_gateway_url": resume_gateway_url, "application": {"id": bot.id, "flags": 0}}
+            "session_type": "normal", "resume_gateway_url": resume_gateway_url,
+            "application": {"id": bot.id, "flags": world.application_flags(bot)}}
 
 
 def guild_create(world: World, bot: Member, intents: int) -> dict[str, Any]:
@@ -129,6 +143,6 @@ def members_chunk(world: World, members: list[Member], nonce: Any) -> dict[str, 
 
 
 def application(world: World, bot: Member) -> dict[str, Any]:
-    return {"id": bot.id, "name": bot.name, "icon": None, "description": "", "summary": "", "flags": 0,
+    return {"id": bot.id, "name": bot.name, "icon": None, "description": "", "summary": "", "flags": world.application_flags(bot),
             "verify_key": hashlib.sha256(bot.id.encode()).hexdigest(), "bot_public": False, "bot_require_code_grant": False,
             "owner": user(world.members[world.owner_id]), "interactions_endpoint_url": None}

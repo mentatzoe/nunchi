@@ -51,6 +51,49 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   maps a thread to its routed parent channel; `DiscordRestClient.get_channel`;
   `AuthenticatedSessionRegistry` knows which sessions have a stream open
   (`nunchi.mcp_discord._binding.track_streams`).
+- Hermes's own gateway in the Discord room (step 9f, PR 3c;
+  [docs/rehearsal.md](docs/rehearsal.md), "The Hermes column"):
+  **implemented, unverified** in CI; run here offline inside the launcher,
+  against Hermes `a50406d9` on Python 3.14, every hard check holding.
+  `--harness hermes --room discord` (scripted only) runs `hermes gateway run`,
+  unmodified, with the Nunchi plugin loaded from a fresh `HERMES_HOME` written
+  as the plugin's README says (its room settings and variables, the peer-agent
+  settings, a scripted model through `model.provider: custom`), on the stand-in
+  at Discord's real names. The plugin runs inside Hermes's process, so the
+  evidence comes from outside it: the participant's receipts, the library's
+  record of the message Hermes delivered (without one, a hard problem: the
+  scripted model's words are never put in its place), and the stand-in's wire,
+  which also gives a reaction's emoji and target, since the receipt names
+  neither and the library records no reaction. Hermes's `state.db` is copied
+  for reading and no check reads it. What it cannot show is whether a turn was
+  bound to its wake (inferred from the receipts, and said so in the record), or
+  a restart of Hermes, or the invoking of a registered command. The stand-in
+  gains the routes Hermes was shown to call, each with a test: the
+  application's flags (`GET /applications/@me`), the slash-command
+  sync (`GET` and `POST /applications/{id}/commands`), message history
+  (`GET /channels/{id}/messages` with `limit` and `before`) and `GET` of one
+  message; the application flags now say which privileged intents are enabled
+  for the bot, as an unverified bot in fewer than 100 servers has them (the
+  "limited" bits; a world option `verified` sets the full ones). Known Hermes
+  gaps, pinned and not fixed, so that a change in either direction fails the
+  lane until the pin and the docs follow: the answer to a question asked in a
+  thread lands in the main channel; Hermes posts its final answer as a plain
+  message, never a Discord reply (read from the wire); the plugin declares no
+  continuity gap when it starts, nor after a reconnect (the transport and the
+  reference declare one at the start); a person's reply to the agent's answer
+  has a reply target the room log does not hold, because the library files the
+  answer under an id of its own; and the agent's own reaction is not in its
+  memory on the next turn (Hermes gives plugins no reaction events). Every
+  other column holds the last two closed. `discord-addressing` now compares a
+  reply's own ping too. Hermes's typing on a fresh run and its roughly 70
+  registered slash commands are not pinned: typing is counted from the request
+  on the wire (it fails `discord-standin-clean`, since the stand-in serves no
+  typing route), and no scripted moment starts a fresh run or invokes a command.
+  Each of these is in the plugin README's Known gaps (new entries: Registered
+  slash commands, No continuity gap when it starts, The agent's own reaction is
+  not remembered; and the reply link under No delivered message id). CI runs it
+  as the last step of the `hermes-plugin` job, without bubblewrap (Hermes's
+  sandboxes use none).
 - The Discord room for the rehearsals (step 9f, PR 3b;
   [docs/rehearsal.md](docs/rehearsal.md)): **implemented, unverified** in
   CI, run here offline for Claude Code, Codex and the reference. The probe's

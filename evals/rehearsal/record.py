@@ -418,7 +418,8 @@ def _discord_lines(discord: Mapping[str, Any]) -> list[str]:
         + ", ".join(f"`{name}`" for name in standin.get("outputs", ()))
     )
     start = discord.get("start_gap") or {}
-    lines.append(f"- Start: {start.get('detail') or 'no start gap recorded'}" + ("" if start.get("gap") else " (the participant never saw it)"))
+    seen = start.get("gap") or start.get("declared") is False  # a process that declares no gap has none for the participant to see
+    lines.append(f"- Start: {start.get('detail') or 'no start gap recorded'}" + ("" if seen else " (the participant never saw it)"))
     for item in discord.get("reconnects", ()):
         gaps = [*item.get("transport_gaps", ()), *item.get("participant_gaps", ())]
         lines.append(

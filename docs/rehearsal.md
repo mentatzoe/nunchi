@@ -12,6 +12,8 @@ and off; CI's `claude-code-mod` job runs it with the sandbox on and has not
 run yet. The settled spend reading has not met
 OpenRouter yet. PR 3b's Discord room, where Nunchi's own Discord processes
 run on the Discord stand-in (below), is **implemented, unverified** in CI.
+PR 3c adds Hermes's own gateway process to it (The Hermes column, below):
+**implemented, unverified** in CI too.
 
 ## The first live run (2026-10-09)
 
@@ -83,10 +85,11 @@ It does not prove:
   shared Discord transport. Hermes runs its real `GatewayRunner` in the
   probe's process, on the conformance kit's Discord world, with the shipped
   plugin directory loaded from a Nunchi config written as its README says.
-  With `--room discord` (PR 3b, below), Nunchi's own Discord processes run
-  on a Discord stand-in at Discord's real names, scripted only;
-  `hermes gateway` joins in PR 3c, and the live probe keeps the in-process
-  room until PR 4.
+  With `--room discord` (PR 3b and 3c, below), the harnesses' own Discord
+  processes run on a Discord stand-in at Discord's real names, scripted only:
+  Nunchi's for Claude Code, Codex and the reference, and Hermes's own
+  gateway, `hermes gateway run`, with the plugin. The live probe keeps the
+  in-process room until PR 4.
 - **How well the agent reads the room.** Two moments, once each. The scenes,
   grading and a reference column come in PR 4.
 - **Hermes's own model as attention** (`hermes-host`). Attention is the same
@@ -182,10 +185,10 @@ Code only, and CI never passes it.
 **Status: implemented, unverified in CI; Nunchi's own Discord processes
 run on it in the Discord room (PR 3b, below).**
 `evals/rehearsal/fake_discord/` answers as Discord's REST API and gateway,
-so that the production Discord processes (`hermes gateway`,
-`nunchi-mcp-discord` with both runners, `nunchi-discord`) can later run on
-it unmodified: PR 3b brings Nunchi's own processes and the launcher that
-maps Discord's names to it, PR 3c `hermes gateway`. Here, offline, it has
+so that the production Discord processes (`hermes gateway run`,
+`nunchi-mcp-discord` with both runners, `nunchi-discord`) run on it
+unmodified: PR 3b brought Nunchi's own processes and the launcher that
+maps Discord's names to it, PR 3c `hermes gateway run`. Here, offline, it has
 run against Nunchi's transport clients and against real discord.py 2.7.1 on
 Python 3.12 and 3.14.
 
@@ -214,7 +217,8 @@ It behaves like Discord wherever a column reads the room from:
   two emoji sent as one reaction.
 
 It serves only the routes something has been shown to call: login, posts,
-reactions, and the channel, member and roles reads. Any other route or host
+reactions, and the channel, member and roles reads, and, since PR 3c, the
+ones Hermes calls (The Hermes column, below). Any other route or host
 gets 599, as does a request field or body it does not model (a file's
 multipart, say) and a request it fails on. discord.py does not retry a 599;
 Nunchi's transport retries a GET three times (about 14 s), and each attempt
@@ -320,7 +324,8 @@ port setting stayed unchanged. Not run yet: without `--offline` (that needs
 `CI=true`), and the bubblewrap check itself, since bubblewrap is not
 installed here. CI passes `--offline` too, so the port setting stays in the
 run's namespace on a runner as well, and passes `--require-bwrap` only for
-Claude Code and Codex.
+Claude Code and Codex (Hermes's terminal backends use no bubblewrap, and its
+default, `local`, runs the agent's commands unsandboxed).
 Its tests are `tests/v2/test_discord_net.py`; the one that runs the
 launcher needs root, so it skips in the `test` job.
 
@@ -391,9 +396,10 @@ Beside the probe's hard checks, a run in the Discord room holds seven more:
   exactly one write the bot made, with the same content and target, and
   every write the bot made is a committed action;
 - `discord-continuity`: the gap a fresh process declares reached the
-  participant; after op 7 each bot resumed, did not identify again, and the
-  message posted meanwhile reached Nunchi; on the shared transport no gap
-  was marked. The reference marks a stream gap on any disconnect
+  participant (Hermes's plugin declares none: pinned absent, below); after op
+  7 each bot resumed, did not identify again, and the message posted
+  meanwhile reached Nunchi; on the shared transport and in Hermes no gap was
+  marked. The reference marks a stream gap on any disconnect
   (`on_disconnect`): recorded, not failed;
 - `discord-addressing`: a graded message reached the agent as it was sent.
   The scene's pings, the message a reply answers and the thread a message was
@@ -401,12 +407,19 @@ Beside the probe's hard checks, a run in the Discord room holds seven more:
   trigger in the turn the scripted agent or participant was handed
   (`mentioned_actor_ids`, `reply_to_event_id`, `thread_root_event_id`): the
   direct question, the thumbs-up request and the question in the thread must
-  ping the agent and every ping must arrive, the reply must be sent to the
-  agent's own last post on the wire and arrive as a reply to it, and the
-  question must arrive as a message in the thread it was sent in. A transport
-  or reference that drops a mention, a reply reference or a thread fails
-  here. Scripted attention wakes on a phrase and the scripted agent answers
-  it, so no other check would notice.
+  ping the agent and every ping must arrive, the reply's own ping included
+  (Discord pings the author of the message a reply answers, and the stand-in
+  records that ping as sent), the reply must be sent to the agent's own last
+  post on the wire and arrive as a reply to it, and the question must arrive as
+  a message in the thread it was sent in. A transport or reference that drops
+  a mention, a reply reference or a thread fails here. Scripted attention
+  wakes on a phrase and the scripted agent answers it, so no other check would
+  notice. Two things the room log must give the agent are checked here too:
+  the reply's target must be the agent's own post in the participant's log
+  (`reply_resolves`), and the next turn after the agent's reaction must hold
+  it in `memory.own_moves`. Every column holds both except Hermes, whose two
+  gaps are pinned the other way (below): a fix fails the lane until the pins
+  and these docs are updated.
 
 With `--scripted`, each graded moment is checked against the script, and
 each pin holds: `TRANSPORT_PINS` for the shared transport, `REFERENCE_PINS`
@@ -451,13 +464,14 @@ each bot's per-run token too. Its tests are
 **In CI**, one lane per column runs as a step of its own: the launcher with
 `--offline` around `--room discord --scripted`, with a fresh `HOME` and
 `TMPDIR`, and the step's `PATH` passed on to the probe, since `sudo` resets
-it.
+it. (Hermes's lane, the fourth, is described in the next section.)
 
 | Job | Column | Python | The Discord process runs on |
 |---|---|---|---|
 | `claude-code-mod` | Claude Code 2.1.289, with the README's sandbox on | 3.12 | Nunchi's wheel and the `mcp-discord` extra as `mcp==1.28.1` (`MCP_VERSION`) |
 | `codex-app-server` | Codex 0.160.1 | 3.12 | the same |
 | `discord-standin` | the reference | 3.12 | Nunchi's wheel, `discord.py==2.7.1` and `aiohttp==3.14.3`, in a clean virtualenv |
+| `hermes-plugin` | Hermes `a50406d9`, `hermes gateway run` | 3.14 | Nunchi's wheel and Hermes with `[messaging]`, in the job's virtualenv; no `mcp` |
 
 The two transport lanes come after their job's in-process probe, and the
 `mcp` install comes just before the lane, so the in-process steps run as
@@ -467,7 +481,8 @@ drop of a notification) need the extra and skip without it. Each step prints `pi
 `--require-bwrap`, since both harnesses' sandboxes use bubblewrap (Codex's
 uses the one on `PATH` and falls back to a copy it bundles), so those jobs
 install it and lift Ubuntu's AppArmor limit on user namespaces; the
-reference has no sandbox, so its job installs nothing and passes no flag.
+reference has no sandbox, so its job installs nothing and passes no flag;
+Hermes's job does the same (the next section).
 When a lane fails, the job scans the lane's output for the canary it made
 (and for `NUNCHI_ATTENTION_API_KEY`, which these jobs do not have) with the
 scan the rehearsal workflow uses, and only if the scan passes uploads it as
@@ -488,6 +503,259 @@ setup-python's Python trusting `/etc/ssl/certs`. The launcher refuses a
 proxy variable, `--require-bwrap` fails before any harness starts where
 bubblewrap cannot run, and the preflight fails on an untrusted certificate, so none of these can pass
 quietly.
+
+## The Hermes column (PR 3c)
+
+**Status: implemented, unverified in CI. Run here offline, inside the launcher, against Hermes `a50406d9` on Python 3.14: every hard check held in each run of the final code (2026-10-10), from a virtualenv built as the `hermes-plugin` job builds it (the wheel, Hermes editable with `[messaging]`), as root and dropping to an unprivileged user.**
+`--harness hermes --room discord` runs Hermes's own gateway process,
+`hermes gateway run`, unmodified, with the Nunchi plugin loaded the way Hermes
+loads any plugin, on the stand-in at Discord's real names
+(`HermesGatewayLeg` in `evals/rehearsal/discord_room.py`):
+
+```sh
+sudo -E "$PY" -m evals.rehearsal.discord_net --offline -- /usr/bin/env PATH="$PATH" \
+  "$PY" -m evals.rehearsal.probe --harness hermes --scripted --room discord --out rehearsal-out
+```
+
+`$PY` is a Python with Nunchi and Hermes's `[messaging]` extra, as in the
+`hermes-plugin` job; `--discord-python` names another for Hermes. A bare
+`hermes gateway` only prints its help: `run` is the foreground gateway. The
+in-process room (`--room standin`) still runs the kit's `GatewayRunner` in the
+probe's process, as before. The moments, the launcher, the preflight and the
+seven `discord-*` checks are the Discord room's (above). A run takes about 40 s.
+Each pin and each piece of evidence is shown to fail the lane when it changes,
+in a copy of the tree with one change made (the end of this section).
+
+**What runs**
+
+- **Hermes** starts in a session of its own, as the console script beside the
+  Python does, with the path and locale, a fresh `HOME` and `TMPDIR`, a fresh
+  `HERMES_HOME` under the run's directory, no proxy variable, and three keys:
+  its bot's per-run token (`DISCORD_BOT_TOKEN`, in the environment only, so no
+  file the run records holds it), the run's placeholder `OPENROUTER_API_KEY`
+  (the variable the plugin's attention route names, and one Hermes strips from
+  its agent's terminal) and the canary. The preflight runs first, in that
+  environment. The probe waits for READY on the wire and for Hermes's own
+  `gateway_state.json` to say the gateway is running with Discord connected, and
+  stops it with SIGINT at the end. Hermes writes that state before its inbound
+  gate opens: the first message is queued and handled about a second later, which
+  the 8 s reach budget covers (the wait does not).
+- **Its profile** is the plugin README's ("Hermes setup the room needs", "On
+  Discord"), written from the kit's own room settings so that one test keeps
+  README and kit equal. `config.yaml` has the display keys under
+  `display.platforms.discord`, `thread_sessions_per_user`, the
+  `discord:` block (`typing_indicator: false`, `reactions: false`,
+  `free_response_channels: [<the column's channel>]`,
+  `free_response_auto_thread: false`) with the probe's peer-agent settings
+  (`allow_bots: all`, `bots_require_inline_mention: false`), the disabled
+  toolsets, the plugin's entry (`allow_gateway_injection`, and
+  `allow_platform_actions` for reactions) and `tools.tool_search.enabled: off`;
+  `.env` has `DISCORD_ALLOWED_ROLES=<the room's role id>`, an empty
+  `DISCORD_ALLOWED_USERS`, `GATEWAY_ALLOWED_USERS=nunchi-turns` and
+  `HERMES_DISCORD_TEXT_BATCH_DELAY_SECONDS=0`. Each name was found in Hermes
+  `a50406d9`'s code (`plugins/platforms/discord/adapter.py`: the role gate at
+  `_allowed_role_ids`, `_get_allow_bots`, `_discord_bots_require_inline_mention`,
+  `_discord_free_response_channels`, the batch delay; `gateway/authz_mixin.py`:
+  `GATEWAY_ALLOWED_USERS`). The scripted people hold the room's role, and the
+  scripted bot (`CI`) is heard through `allow_bots: all`. Changing either
+  shows it: with a role id nobody has, no person's message reached Nunchi (every
+  moment that starts with one read `not delivered`; the bot's report was still
+  heard); without the peer-agent settings, the bot's status report did not
+  reach Nunchi. The probe also stamps `_config_version`, as `hermes setup` does:
+  without it Hermes takes the file for a two-year-old config at boot and logs
+  that it skipped the migration.
+- **The plugin** is the shipped directory, copied to
+  `$HERMES_HOME/plugins/nunchi-room` (where `hermes plugins install` leaves
+  it, which needs GitHub) and enabled in that `config.yaml`; its Nunchi config
+  is the harness guide's with `binding.platform: discord`, the channel's id and
+  a `hermes` section (`turn_user_id: nunchi-turns`, `withheld_env` the token
+  and the key). It builds its room on the first message it admits.
+- **The model** is the scripted endpoint through `model.provider: custom` and
+  `base_url`, for the agent and every auxiliary task (what the in-process
+  room writes too), and it follows the same script as the other columns
+  (`RoomScript`): a final answer for a question, a reply or a thread question,
+  one `room_react` call and then the silence marker (`[SILENT]`) for the
+  thumbs-up request. **Attention** is `ScriptedAttention`.
+
+**How Hermes differs from the other columns**
+
+- **Hermes posts the agent's final answer itself**, as a plain message: it
+  makes no Discord reply. The `reply` moment therefore fits one plain message
+  from the turn that was about the graded message, not a reply to it
+  (`checks.discord_moment_outcome`, `posts_itself`). The committed action reads
+  `unknown` ("the harness delivers it") by design, and counts as delivered when
+  the wire shows exactly that text from the bot, once. That it is a plain
+  message is pinned from the wire: an answer whose request carries a
+  `message_reference` (`replied_to`) fails with "Hermes now replies: update the
+  plain-message pin and the docs", beside `discord-writes-reconciled`.
+- **A thread question is answered in the main channel.** Hermes posts where
+  its run started, and the plugin starts every run in the channel
+  (`integrations/hermes-plugin/README.md`, Known gaps). The `thread-question`
+  moment pins that: it fits only when the answer lands in the main channel,
+  read from the wire, so a fix makes the lane fail with a note to update the pin
+  and its docs (the note is shown only when that moment misses). Not fixed, and
+  no change to Hermes.
+- **The plugin declares no gap when it starts.** The transport and the reference
+  put a continuity gap ahead of their first message; the plugin's first
+  snapshot reports continuity `restart-safe` with no restart gap, and the
+  audit holds no gap, so after a Hermes restart the participant reports full
+  continuity although messages sent while Hermes was down are missing (README,
+  Known gaps). `discord-continuity` pins it absent (`start_required=None`): it
+  records what the plugin said (`discord.start_gap`) and fails, with a note to
+  update the pin and these docs, if the plugin starts declaring one. The lane
+  never restarts Hermes, so the "restart-safe" claim itself is not exercised.
+- **A person's reply to the agent's answer has a target the library does not
+  hold.** Hermes reports no id for its post and drops the bot's own messages
+  before any hook, so the library files the answer as
+  `nunchi:delivered:<request id>`. The reply arrives with the real Discord id
+  as `reply_to_event_id`, ping and all, but that id is in no event of the
+  participant's log: the library cannot link the reply to the agent's own
+  message (README, Known gaps, No delivered message id). `discord-addressing`
+  pins `reply_resolves` false for Hermes and true for every other column,
+  where the same reply resolves to the agent's post.
+- **The agent's own reaction is not remembered.** Hermes gives plugins no
+  reaction events and `platform_actions.add_reaction` returns only `ok`, so the
+  library records no event for the agent's thumbs-up. The next turn's
+  `memory.own_moves` holds the two answers and not the reaction, so the agent
+  could nod again at a message it has already acknowledged (README, Known
+  gaps). `discord-addressing` pins that for Hermes; the transport and the
+  reference record it, and their next turn holds it.
+- **Op 7**: Hermes (discord.py) resumed with no new IDENTIFY, the message posted
+  meanwhile reached Nunchi, and no gap was marked anywhere. The plugin marks
+  none after a reconnect either, so a gap marked after one fails the lane
+  (`gaps_fail`), where the reference's own stream gap is recorded, not failed.
+
+**Evidence from outside the process**
+
+The plugin and the library run inside Hermes's process, so the probe sees none
+of their objects. It reads:
+
+| From | What it gives |
+|---|---|
+| the participant's receipts (`hermes-plugin-receipts.jsonl`) | each request: the message it was about (`observation`), attention's judgment, the host's end of the turn (`invoked`, the wake's source, `silent` or an action handed over) and the transport's delivery |
+| the library's record of the message Hermes delivered (`nunchi:delivered:<request id>` in the observation log, which also holds the events the reply and memory checks look for) | the text the turn committed, and the message it was about. When the transport receipt says Hermes delivered and the library holds no such record, that is a hard problem (`turns-bound-and-ended`), and the scripted model's words are never put in its place |
+| the scripted model | what it was asked, and how often (`moves`, counted as the turn's calls; nothing committed is taken from it), and what Hermes showed the agent (`discord-addressing`) |
+| Hermes's `state.db` and logs, copied after it stops (`hermes-state.json`) | its sessions: each injected turn with the wake marker, the `room_react` call and its result, `[SILENT]`. Recorded for reading: no check reads it, and "the harness reached its model" rests on the scripted endpoint's own request log |
+| the stand-in's wire (`discord-wire.jsonl`) | every call Hermes made and every message and reaction that landed, and where; a reaction's emoji and target too, since neither the receipt nor the library names them (the library records no reaction) |
+
+**What the Hermes column can prove, and what it cannot**
+
+It can prove that Hermes, as installed, with the plugin and the README's
+settings, hears each moment (a bot's report it should stay out of, a direct
+question, a reply, a reaction request, a reconnect, a thread remark and a
+thread question: each reached the library and attention judged it); that a
+wake became a turn that ended in a delivery, a reaction or a silence through the
+plugin's hooks; that what landed in the room is exactly what the library
+committed, once, and nothing else (no extra post or notice, and no typing: the
+stand-in serves no typing route, so Hermes's indicator on a fresh run would fail
+`discord-standin-clean`); that the pings, reply reference and thread of a
+person's message reached the agent as sent; and where an answer lands. With a scripted answer, the text is known, so
+the content checks hold.
+
+It cannot show whether a turn was bound to its wake. The probe sees no hook; a
+turn counts as bound when the receipts show it ended in a delivery or a silence,
+which only a bound run can reach (`bound_evidence` says so in `turns.json`).
+It cannot read the library's decisions inside the process, only what the
+participant shows the scripted model of its memory; and with a live model it
+could read a committed message only from the library's record of it, and a
+reaction's emoji and target only from the wire. It does not show how well the
+agent reads the room (the model and attention are scripted), anything about a
+live Discord (the stand-in is our model of it, `fidelity` in
+`discord-standin.json`), a restart of Hermes (the lane never stops and starts
+it), or the slash-command sync to its end: the lane stops before it finishes.
+Invoking a registered command is never exercised either: the stand-in sends no
+`INTERACTION_CREATE`, so none of the 70 commands is run.
+
+**What Hermes calls on the stand-in**
+
+Besides the login (`GET /users/@me`, `GET /oauth2/applications/@me`), the
+gateway, the member chunk, the agent's post and its reaction, which every
+column makes, Hermes calls these routes; each was added to the stand-in on
+that evidence, with a test (`tests/v2/test_fake_discord.py`, `HermesRoutesTest`,
+and one through discord.py in `test_fake_discord_discordpy.py`), and
+`HERMES_CALLS` must all be made:
+
+| Route | Who calls it, and when |
+|---|---|
+| `GET /applications/@me` | Hermes's own Discord tool reads the application's `flags` for the privileged intents (`tools/discord_tool.py`), once, at start |
+| `GET /applications/{id}/commands`, `POST /applications/{id}/commands` | the slash-command sync (`DISCORD_COMMAND_SYNC_POLICY` `safe`, Hermes's default): a `GET`, then one `POST` per command, 4.5 s apart, in the background from about two seconds after READY. A fresh `HERMES_HOME` syncs all 70; the lane stops Hermes after the first six or seven, and nothing checks the number. Measured once, with the run held open for about 5.5 minutes (a copy of the lane with a sleep; the lane has no option for it): all 70 got a 201 from the stand-in, 310 s from first to last, with no unknown record. The stand-in does not model Discord's rules for options and choices, so that is its acceptance, not Discord's; the 70 bodies were also checked by hand against Discord's published limits (names, descriptions, at most 25 options and 25 choices, required options first) and met them |
+| `GET /channels/{id}/messages?limit&before` | the history Hermes backfills for a reply (`limit=50`, and `limit=10` around the message replied to) and for every message in a thread |
+| `GET /channels/{id}/messages/{id}` | `platform_actions.add_reaction` fetches the message before it reacts |
+
+The stand-in keeps the commands in memory for the run (create or overwrite by
+name: 201 or 200; at most 100: error 30032), answers history newest first with
+`before` and `limit` (an empty list without READ_MESSAGE_HISTORY), and returns the
+reactions a message holds when it is read over REST. `fidelity` lists what is
+approximated: Discord's rules and error codes for a command's name and
+description, its default `contexts` and `integration_types`, that option and
+choice rules are not modelled (options are stored as sent), the `after` and
+`around` of history, and that `PUT` (bulk sync), `PATCH` and `DELETE` of commands
+are not served (Hermes's `bulk` policy, or a second sync with changed commands,
+would be unknown and fail the run). The application's `flags` now say which
+privileged intents are enabled for the bot (READY and both application
+routes), as an unverified bot in fewer than 100 servers has them: the "limited"
+bits (`1<<15`, `1<<19`), not the full ones (`1<<14`, `1<<18`) of a verified bot;
+a world option `verified` sets the full ones. A command's
+`default_member_permissions` comes back as a string, as Discord sends it. A
+route Hermes calls that the stand-in does not serve is answered 599
+and recorded as unknown, which fails the run: Hermes swallows many REST errors,
+so the stand-in's own record decides. Typing is one: on a fresh run (others
+posted while the agent composed, or its answer was refused once; README, Known
+gaps) Hermes sends `POST /channels/{id}/typing`, which the stand-in does not
+serve. No scripted moment starts a fresh run, so the lane never makes the call;
+a scene that does fails `discord-standin-clean` naming that path, and
+`hermes.typing` in the summary counts the request from the wire. Serving the
+route (204, needing VIEW_CHANNEL and SEND_MESSAGES) would let a typing bubble
+pass silently, so it comes with a pin that allows it in a fresh-run turn only.
+
+**What the lane showed**
+
+- A Hermes answer carries `allowed_mentions: {parse: [users], replied_user:
+  true}` and no `message_reference`, in the channel, with a `nonce`.
+- Hermes registers 70 slash commands in the bot's name, one every 4.5 s from
+  its start. In a real room they appear in everyone's slash menu; the README
+  keeps Hermes's default (Known gaps, Registered slash commands, decision D4).
+- The agent's own message comes back to the library as a message of its own,
+  in reply to the one the turn was about; later turns' packets list it
+  (`delivered_event_ids`), so its memory and the room's pace see it. A
+  person's reply to it does not resolve to it, though, and the agent's own
+  reaction is not in its memory at all (above).
+- `hermes.typing` is 0 in every run: no scripted moment starts a fresh run.
+
+**What turns the lane red** (each shown offline on 2026-10-10, inside the
+launcher, in a copy of the tree with one change made; the copy was thrown away,
+so nothing was left changed): the plugin dropping the mentions of a reply
+(`discord-addressing`: the reply pings the agent, and Nunchi saw none); the
+plugin declaring a gap when it starts (`discord-continuity`); the library unable
+to record its own delivered post (`turns-bound-and-ended`, `discord-writes-reconciled`
+and others: the scripted model's words are not put in its place); a prototype of
+the repair that records the agent's reaction in the room log, and a simulated fix
+of the reply's target (`discord-addressing`, the two pins); the stand-in making
+Hermes's answers Discord replies (`scripted-outcomes`: "Hermes now replies", and
+`discord-writes-reconciled`); and one answer that the plugin must refuse, which
+starts a fresh run and so Hermes's typing (`discord-standin-clean` names the
+path, and `hermes.typing` reads 1).
+- Hermes's agent is offered 26 tools, `terminal`, `execute_code` and `browser_exec`
+  among them, with the `local` backend: unsandboxed, as the first live run
+  recorded (`sandbox: off`). Hermes's own builders, run in exactly its
+  environment, give the agent's terminal neither the bot's token nor the key,
+  only the canary, a name Hermes does not know (`pins-and-isolation`).
+- Run as root, as the local lane is, Hermes logs a security warning about it; a
+  CI runner is not root.
+
+**In CI** it is the last step of `hermes-plugin` (Python 3.14, Hermes `a50406d9`
+from a clean virtualenv with Nunchi's wheel): the launcher with `--offline`
+around the scripted probe with `--harness hermes --room discord`, then, as in
+the other three jobs, a canary made before it, a scan of the lane's record for
+the canary after a failure, and an upload as `rehearsal-discord-hermes-<run
+id>-<attempt>` only after a clean scan. The job's `tests.v2.test_rehearsal`
+step now also runs `tests.v2.test_rehearsal_discord_hermes`. No
+`--require-bwrap`, and no bubblewrap: Hermes's sandboxes (Docker, Singularity,
+Modal, Daytona, SSH, Vercel) use none, and its default is unsandboxed. Not run
+in CI yet, and expected rather than checked on `ubuntu-latest`: passwordless
+`sudo -E`, no proxy variables, setup-python's Python trusting `/etc/ssl/certs`,
+and Hermes starting as the runner user inside the launcher's namespace in about
+the time it took here.
 
 ## What a pass means
 
@@ -561,6 +829,9 @@ NUNCHI_ATTENTION_API_KEY=... python -m evals.rehearsal.probe --harness hermes --
 # the Discord room, offline, as root (The Discord room, above)
 sudo -E "$PY" -m evals.rehearsal.discord_net --offline -- /usr/bin/env PATH="$PATH" \
   "$PY" -m evals.rehearsal.probe --harness reference --scripted --room discord --discord-python /path/to/python-with-discord.py --out rehearsal-out
+# the same for Hermes: a Python with Nunchi and Hermes's [messaging] extra (The Hermes column)
+sudo -E "$PY" -m evals.rehearsal.discord_net --offline -- /usr/bin/env PATH="$PATH" \
+  "$PY" -m evals.rehearsal.probe --harness hermes --scripted --room discord --out rehearsal-out
 ```
 
 The live probe needs the key in `NUNCHI_ATTENTION_API_KEY`. It hands the
@@ -575,10 +846,10 @@ at the budget with every hard check holding. With two
 moments, a stop can only come before the direct question, and a run that
 stops there usually has no wake, so it reads as a failure (exit 1); the
 first lines of `summary.md` name the stop either way.
-`--room discord` is scripted only, needs the launcher, and is not for
-Hermes yet. It exits 2 for Hermes, a live run, or the reference outside the
-Discord room, and 3 (could not run) without the launcher; `--harness
-reference` runs in it alone.
+`--room discord` is scripted only and needs the launcher. It exits 2 for a
+live run or the reference outside the Discord room, and 3 (could not run)
+without the launcher, or, for Hermes, where Hermes with discord.py cannot be
+read in the Python that runs it; `--harness reference` runs in it alone.
 `--attention-model` takes the behavior eval's label (`id` or `id@effort`);
 a label for another route (`messages:`, `responses:`) is refused, since the
 probe builds the chat route only. `--arm LABEL` names a run that is one arm
@@ -587,8 +858,8 @@ of a comparison, in `run.json` and in the title of `summary.md`.
 CI runs `--scripted`, and this probe's tests (`tests/v2/test_rehearsal.py`,
 the scripted probe's own test included), in the Claude Code (`claude-code-mod`),
 Codex and Hermes lanes of `ci.yml`, with no secret. It runs `--room discord
---scripted` inside the launcher for Claude Code, Codex and the reference
-(The Discord room, above).
+--scripted` inside the launcher for Claude Code, Codex, the reference and
+Hermes (The Discord room and The Hermes column).
 
 ## Model routes and keys
 
@@ -789,8 +1060,8 @@ Only a key with a credit limit is a hard one.
   alternative is a rehearsal key with a credit limit, the only hard limit.
 - **R2, the room.** Default: the Discord stand-in, which answers at
   Discord's hostnames so `nunchi-mcp-discord`, discord.py and
-  `hermes gateway` run unmodified. Nunchi's own processes run on it in
-  the scripted Discord room (PR 3b), `hermes gateway` in PR 3c. Until PR 4
+  `hermes gateway run` run unmodified. Nunchi's own processes run on it in
+  the scripted Discord room (PR 3b), `hermes gateway run` in PR 3c. Until PR 4
   the live probe uses the in-process stand-ins above.
 - **R3, Codex's namespace tools.** Outcome of the first live run
   (2026-10-09): OpenRouter passed Codex's namespace tools through, and the

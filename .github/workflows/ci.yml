@@ -116,7 +116,9 @@ jobs:
     # gateway, on a clean install of a pinned Hermes; only the model is
     # scripted (docs/harness-guide.md, "Prove it"). Both lanes run: Telegram,
     # and Discord through Hermes's stock Discord adapter, whose discord.py
-    # comes with the [messaging] extra.
+    # comes with the [messaging] extra. The last step runs Hermes's own
+    # gateway process, `hermes gateway run`, with the plugin on the Discord
+    # stand-in at Discord's real names (docs/rehearsal.md, the Hermes column).
     name: Hermes plugin (Hermes main a50406d9)
     runs-on: ubuntu-latest
     steps:
@@ -164,13 +166,68 @@ jobs:
         # kit's scripted model endpoint, scripted attention, no key. With both
         # scripted, each moment's outcome is a hard check, so the probe fails
         # when the scripted turn does not happen. Its tests run here, where
-        # Hermes is installed, so the scripted probe's own test runs too.
+        # Hermes is installed, so the scripted probe's own test runs too, and
+        # so do the tests of the Hermes column of the Discord room (they need
+        # neither Hermes nor root; the lane itself is the last step).
         shell: bash
         run: |
           set -euo pipefail
-          "$RUNNER_TEMP/hermes-env/bin/python" -m unittest tests.v2.test_rehearsal -v
+          "$RUNNER_TEMP/hermes-env/bin/python" -m unittest tests.v2.test_rehearsal tests.v2.test_rehearsal_discord_hermes -v
           "$RUNNER_TEMP/hermes-env/bin/python" -m evals.rehearsal.probe --harness hermes --scripted \
             --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-out"
+      - name: Make the canary for the Discord room lane's scan
+        # A random value the probe puts in the harness's environment, where no
+        # key variable names it: only the scan can find it in an output.
+        shell: bash
+        run: |
+          set -euo pipefail
+          canary="canary-$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
+          echo "::add-mask::$canary"
+          echo "REHEARSAL_CANARY=$canary" >> "$GITHUB_ENV"
+      - name: The rehearsal probe in the Discord room, through hermes gateway run, scripted (docs/rehearsal.md)
+        # Hermes's own gateway process (`hermes gateway run`), unmodified,
+        # with the Nunchi plugin loaded from a fresh HERMES_HOME written as
+        # the plugin's README says, on the Discord stand-in at Discord's real
+        # names; the model and attention are scripted, no key. The launcher
+        # (root, hence sudo -E) maps the names to the stand-in in a private
+        # namespace with only loopback (--offline) and runs the probe as the
+        # runner user. Hermes's default terminal backend is `local`, which is
+        # unsandboxed, so there is no --require-bwrap and no bubblewrap here.
+        # The probe's Python is Hermes's: the Discord process is `hermes
+        # gateway run` from the same virtualenv. Each moment's outcome and the
+        # seven discord-* checks are hard checks.
+        id: discord_hermes_lane
+        shell: bash
+        run: |
+          set -euo pipefail
+          PY="$RUNNER_TEMP/hermes-env/bin/python"
+          "$PY" -m pip freeze
+          LANE_HOME="$(mktemp -d)"
+          LANE_TMP="$(mktemp -d)"
+          sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline -- \
+            /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness hermes --scripted --room discord \
+            --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-discord-out"
+      - name: Scan the failed Discord room lane's record for the key and the canary
+        # Only after a failure of the lane above, and as the rehearsal workflow
+        # does: this repository is public, so the record is uploaded only when
+        # the scan passes. The lane's keys are per-run placeholders the probe
+        # scans for itself; the canary is the value made above. A hit deletes
+        # the record and fails this step.
+        id: discord_hermes_scan
+        if: failure() && steps.discord_hermes_lane.outcome == 'failure'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -uo pipefail
+          python -m evals.rehearsal.scan --out "$RUNNER_TEMP/rehearsal-discord-out" \
+            --env NUNCHI_ATTENTION_API_KEY --env REHEARSAL_CANARY
+      - name: Keep the failed Discord room lane's record
+        if: failure() && steps.discord_hermes_scan.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rehearsal-discord-hermes-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rehearsal-discord-out/
+          if-no-files-found: ignore
 
   codex-app-server:
     # The turn conformance kit and the integration's tests through a real

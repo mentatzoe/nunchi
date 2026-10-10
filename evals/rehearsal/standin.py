@@ -451,18 +451,26 @@ class RoomScript:
 
     @staticmethod
     def received(turn: Mapping[str, Any] | None) -> dict[str, Any] | None:
-        """How the turn showed its trigger was addressed: whom it pings, which message it replies to and which thread it is in; None without a trigger."""
+        """How the turn showed its trigger was addressed: whom it pings, which message it replies to and which thread it is in; None without a trigger.
+
+        Also what the turn's memory held of the agent's own moves (``own_moves``: each one's kind, the message it
+        was about and its reaction), so a later turn shows whether the agent remembers an earlier one.
+        """
 
         wake = (turn or {}).get("wake") or {}
         trigger = str(wake.get("trigger_event_id") or "")
         event = next((event for event in wake.get("events", ()) if event.get("id") == trigger), None)
         if not trigger or event is None:
             return None
+        moves = (wake.get("memory") or {}).get("own_moves") or ()
         return {
             "trigger": trigger,
             "mentioned_actor_ids": list(event.get("mentioned_actor_ids") or ()),
             "reply_to_event_id": event.get("reply_to_event_id"),
             "thread_root_event_id": event.get("thread_root_event_id"),
+            "own_moves": [
+                {key: move[key] for key in ("kind", "about_event_id", "reaction") if key in move} for move in moves if isinstance(move, Mapping)
+            ],
         }
 
     def move(self, turn: Mapping[str, Any] | None) -> tuple[str, dict[str, Any]]:
@@ -637,18 +645,52 @@ class ScriptedCodexAgent:
 
 
 class ScriptedHermesAgent:
-    """The kit's chat endpoint for Hermes, answering every turn with ``answer``: its final answer is its post."""
+    """The kit's chat endpoint for Hermes: its final answer is its post.
 
-    def __init__(self, answer: str) -> None:
+    Without a ``script`` every turn is answered with ``answer``. With one
+    (`RoomScript`, the Discord room's moments) the model reads the newest turn
+    in the request and does what the script says: a reaction is a call of the
+    plugin's ``room_react`` tool followed, once Hermes returns its result, by
+    the silence marker; anything else is the script's text as the final answer.
+    Hermes posts a final answer where the run started, so a reply to a message
+    is only ever text here, whatever the script calls it. Each decision is kept
+    in ``moves``, with the trigger it was made for: Hermes runs in a process of
+    its own, and this is how the probe knows what the model chose.
+    """
+
+    def __init__(self, answer: str, *, script: RoomScript | None = None) -> None:
         from nunchi.integrations.hermes_plugin_conformance import ScriptedModel
 
         self.answer = answer
+        self.script = script
+        self.moves: list[dict[str, Any]] = []
         self.model = ScriptedModel()
-        self.model.on_request = lambda: self.model.reply({"text": self.answer})
+        self.model.on_request = self._next
 
     @property
     def base_url(self) -> str:
         return self.model.base_url
+
+    def _next(self) -> None:
+        if self.script is None:
+            self.model.reply({"text": self.answer})
+            return
+        from nunchi.integrations.hermes_plugin.plugin import SILENCE_MARKER, TOOL_NAMES
+
+        request = self.model.latest()
+        messages = [message for message in request.get("messages", ()) if isinstance(message, Mapping)]
+        if messages and messages[-1].get("role") == "tool":
+            # The room tool's result: the move is made, and nothing more is said.
+            self.model.reply({"text": SILENCE_MARKER})
+            return
+        turn = turn_document(request)
+        role, arguments = self.script.move(turn)
+        trigger, _ = self.script.trigger(turn or {})
+        self.moves.append({"trigger": trigger or None, "role": role, "arguments": dict(arguments)})
+        if role == "react":
+            self.model.reply({"tool": TOOL_NAMES["react"], "arguments": arguments})
+        else:
+            self.model.reply({"text": arguments["text"]})
 
     def requests(self) -> list[dict[str, Any]]:
         return list(self.model.requests)
