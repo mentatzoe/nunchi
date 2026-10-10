@@ -128,7 +128,8 @@ class ScriptTest(unittest.TestCase):
         self.assertEqual("reaction", envelope["action"]["kind"])
         self.assertEqual([("req-1", "discord:message:9", "WAKE")], [(a["request_id"], a["trigger"], a["source"]) for a in participant.answers])
         self.assertEqual(
-            {"trigger": "discord:message:9", "mentioned_actor_ids": [], "reply_to_event_id": None, "thread_root_event_id": None},
+            {"trigger": "discord:message:9", "mentioned_actor_ids": [], "reply_to_event_id": None, "thread_root_event_id": None,
+             "own_moves": []},
             participant.answers[0]["received"],
         )
 
@@ -137,15 +138,24 @@ class ScriptTest(unittest.TestCase):
         woken = _turn("discord:message:7", "q", mentioned_actor_ids=[ping], reply_to_event_id=reply)
         in_thread = _turn("discord:message:8", "q2", thread_root_event_id="discord:message:3")
         earlier = _turn("discord:message:6", "e")
+        # The turn's memory: the agent's own moves, as far as the check needs them (kind, the message, the reaction).
+        woken["wake"]["memory"] = {"own_moves": [
+            {"kind": "reply", "event_id": "discord:message:5", "about_event_id": reply, "text": "an answer", "at": "2026-10-10T10:00:00Z"},
+            {"kind": "reaction", "event_id": "discord:reaction:1", "about_event_id": "discord:message:4", "reaction": "x"},
+            {"kind": "silence", "about_event_id": "discord:message:6"},
+        ]}
         requests = [{"input": [{"content": [{"text": _tagged(earlier)}]}]},
                     {"body": {"messages": [{"content": [{"type": "text", "text": _tagged(woken)}]}]}, "headers": {}},
                     {"input": [{"content": [{"text": _tagged(woken)}, {"output": "ok"}]}]},  # the call after the tool's result
                     {"input": [{"content": [{"text": "no turn here"}]}]}]
         self.assertEqual(
             {"discord:message:6": {"trigger": "discord:message:6", "mentioned_actor_ids": [], "reply_to_event_id": None,
-                                   "thread_root_event_id": None},
+                                   "thread_root_event_id": None, "own_moves": []},
              "discord:message:7": {"trigger": "discord:message:7", "mentioned_actor_ids": [ping], "reply_to_event_id": reply,
-                                   "thread_root_event_id": None}},
+                                   "thread_root_event_id": None,
+                                   "own_moves": [{"kind": "reply", "about_event_id": reply},
+                                                 {"kind": "reaction", "about_event_id": "discord:message:4", "reaction": "x"},
+                                                 {"kind": "silence", "about_event_id": "discord:message:6"}]}},
             standin.received_triggers(requests),
         )
         self.assertEqual("discord:message:3", standin.RoomScript.received(in_thread)["thread_root_event_id"])
@@ -293,20 +303,25 @@ class DiscordChecksTest(unittest.TestCase):
         moments = [
             {"name": "direct-question", "expect": "post", "graded_event": "discord:message:200", "deliveries": [
                 {"event_id": "discord:message:200", "message_id": "200", "mentioned_actor_ids": [agent], "reply_to": None,
-                 "received": {"trigger": "discord:message:200", "mentioned_actor_ids": [agent], "reply_to_event_id": None}}]},
+                 "received": {"trigger": "discord:message:200", "mentioned_actor_ids": [agent], "reply_to_event_id": None, "own_moves": []}}]},
             {"name": "bot-status-report", "expect": "no-turn", "graded_event": "discord:message:210", "deliveries": [{"event_id": "discord:message:210"}]},
+            # A reply pings the author of the message it answers: the agent, whose post it is.
             {"name": "reply", "expect": "reply", "graded_event": "discord:message:250", "deliveries": [
-                {"event_id": "discord:message:250", "message_id": "250", "mentioned_actor_ids": [], "reply_to": "100",
-                 "received": {"trigger": "discord:message:250", "mentioned_actor_ids": [zoe], "reply_to_event_id": "discord:message:100"}}]},
+                {"event_id": "discord:message:250", "message_id": "250", "mentioned_actor_ids": [agent], "reply_to": "100",
+                 "reply_resolves": True,
+                 "received": {"trigger": "discord:message:250", "mentioned_actor_ids": [agent, zoe], "reply_to_event_id": "discord:message:100",
+                              "own_moves": [{"kind": "message"}]}}]},
             {"name": "reaction", "expect": "reaction", "graded_event": "discord:message:400", "deliveries": [
                 {"event_id": "discord:message:400", "message_id": "400", "mentioned_actor_ids": [agent], "reply_to": None,
-                 "received": {"trigger": "discord:message:400", "mentioned_actor_ids": [agent], "reply_to_event_id": None}}]},
+                 "received": {"trigger": "discord:message:400", "mentioned_actor_ids": [agent], "reply_to_event_id": None, "own_moves": []}}]},
             {"name": "thread", "expect": "report", "graded_event": "discord:message:500", "deliveries": [{"event_id": "discord:message:500"}]},
             {"name": "thread-question", "expect": "thread-reply", "graded_event": "discord:message:600", "deliveries": [
                 {"event_id": "discord:message:600", "message_id": "600", "mentioned_actor_ids": [agent], "reply_to": None,
                  "thread": "discord:message:550",
                  "received": {"trigger": "discord:message:600", "mentioned_actor_ids": [agent], "reply_to_event_id": None,
-                              "thread_root_event_id": "discord:message:550"}}]},
+                              "thread_root_event_id": "discord:message:550",
+                              "own_moves": [{"kind": "reply", "about_event_id": "discord:message:250"},
+                                            {"kind": "reaction", "about_event_id": "discord:message:400", "reaction": "\N{THUMBS UP SIGN}"}]}}]},
         ]
         check = checks.discord_addressing
         self.assertTrue(check(moments, agent=agent, writes=writes).ok, check(moments, agent=agent, writes=writes).detail)
@@ -326,7 +341,33 @@ class DiscordChecksTest(unittest.TestCase):
         self.assertFalse(check(lost_received(3, mentioned_actor_ids=[zoe]), agent=agent, writes=writes).ok)
         failed = check(lost_received(2, reply_to_event_id=None), agent=agent, writes=writes)
         self.assertIn("Nunchi saw reply_to_event_id=None", failed.detail)
+        # The reply's own ping is compared too: a harness that drops the mentions of a reply (and keeps its target) fails.
+        failed = check(lost_received(2, mentioned_actor_ids=[]), agent=agent, writes=writes)
+        self.assertFalse(failed.ok)
+        self.assertIn(f"reply: sent pinging {agent}, but Nunchi saw mentioned_actor_ids=[]", failed.detail)
         self.assertFalse(check(lost_received(2, reply_to_event_id="discord:message:300"), agent=agent, writes=writes).ok)
+        # The reply's target must be the agent's own post in the room log, unless the column is pinned to a gap (Hermes).
+        failed = check(changed(2, reply_resolves=False), agent=agent, writes=writes)
+        self.assertIn("is not the agent's own post in the room log", failed.detail)
+        pinned = check(changed(2, reply_resolves=False), agent=agent, writes=writes, reply_resolves=False)
+        self.assertTrue(pinned.ok, pinned.detail)
+        self.assertIn("the reply's target does not resolve to the agent's post", pinned.detail)
+        fixed = check(moments, agent=agent, writes=writes, reply_resolves=False)  # a fix turns the pin red until the docs flip
+        self.assertFalse(fixed.ok)
+        self.assertIn("now resolves to the agent's own post in the room log: update the pin", fixed.detail)
+        self.assertIn("No delivered message id", fixed.detail)
+        # The next turn after the agent's reaction must hold that reaction in memory.own_moves, unless pinned to a gap (Hermes).
+        forgotten = [*moments[:5], {**moments[5], "deliveries": [{**moments[5]["deliveries"][0], "received": {
+            **moments[5]["deliveries"][0]["received"], "own_moves": [{"kind": "reply", "about_event_id": "discord:message:250"}]}}]}]
+        failed = check(forgotten, agent=agent, writes=writes)
+        self.assertIn("does not hold the agent's reaction to discord:message:400 in memory.own_moves", failed.detail)
+        pinned = check(forgotten, agent=agent, writes=writes, own_reaction_remembered=False)
+        self.assertTrue(pinned.ok, pinned.detail)
+        self.assertIn("the agent's own reaction is not remembered", pinned.detail)
+        fixed = check(moments, agent=agent, writes=writes, own_reaction_remembered=False)
+        self.assertIn("now holds the agent's reaction to discord:message:400 in memory.own_moves: update the pin", fixed.detail)
+        self.assertIn("The agent's own reaction is not remembered", fixed.detail)
+        self.assertIn("no later turn showed whether the agent remembers its reaction", check(moments[:5], agent=agent, writes=writes).detail)
         # The scene must address the agent, the reply must be to the agent's own last post, and a turn must have shown it.
         self.assertIn("did not ping the agent", check(changed(0, mentioned_actor_ids=[]), agent=agent, writes=writes).detail)
         self.assertIn("did not ping the agent", check(changed(3, mentioned_actor_ids=[]), agent=agent, writes=writes).detail)
@@ -456,10 +497,14 @@ class RoomTest(_StandIn, unittest.TestCase):
             plain = room.post(scene.events[0], datetime_now(), scene, moment)
             self.assertIn("no post to reply to", plain["note"])
             self.assertEqual(([], None), (plain["mentioned_actor_ids"], plain["reply_to"]))
-            room.agent_last_post = lambda: delivery["message_id"]
+            answer, _ = fd.world.create_message(fd.world.member("Vigil").id, fd.world.channel("codex").id, "Ten seconds.", wall=True)
+            room.agent_last_post = lambda: answer["id"]
             reply = room.post(scene.events[0], datetime_now(), scene, moment)
-            self.assertEqual(delivery["message_id"], fd.world.messages[reply["message_id"]]["reply_to"])
-            self.assertEqual(delivery["message_id"], reply["reply_to"], "what the scene sent as the message replied to")
+            self.assertEqual(answer["id"], fd.world.messages[reply["message_id"]]["reply_to"])
+            self.assertEqual(answer["id"], reply["reply_to"], "what the scene sent as the message replied to")
+            # The scene pings nobody, but Discord pings the author of the message a reply answers: the agent.
+            self.assertEqual([f"discord:actor:{fd.world.member('Vigil').id}"], reply["mentioned_actor_ids"])
+            self.assertEqual([fd.world.member("Vigil").id], fd.world.messages[reply["message_id"]]["mentions"])
             moment, scene = scenes["thread"]
             first = room.post(scene.events[0], datetime_now(), scene, moment)
             again = room.post(scene.events[0], datetime_now(), scene, moment)
@@ -647,6 +692,8 @@ class JudgeTest(unittest.TestCase):
         for where, outcome in ((discord_room.THREAD, "fits"), ("codex", "misses")):
             with self.subTest(where=where):
                 leg = SimpleNamespace(
+                    harness_posts=False,
+                    discord=SimpleNamespace(column="codex"),
                     committed=[{"request_id": "r1", "kind": "reply", "text": discord_room.SCRIPTED_THREAD_REPLY,
                                 "target_event_id": "discord:message:600", "delivery": "sent"}],
                     room_effects=lambda where=where: [
@@ -662,6 +709,8 @@ class JudgeTest(unittest.TestCase):
 
     def test_each_moment_reads_its_graded_turns_delivered_actions(self):
         leg = SimpleNamespace(
+            harness_posts=False,
+            discord=SimpleNamespace(column="codex", holds_own_post=lambda event_id: event_id == "discord:message:1"),
             committed=[
                 {"request_id": "r1", "kind": "reply", "text": "t", "target_event_id": "discord:message:2", "delivery": "sent"},
                 {"request_id": "r2", "kind": "reaction", "reaction": "x", "target_event_id": "discord:message:3", "delivery": "failed"},
@@ -679,6 +728,8 @@ class JudgeTest(unittest.TestCase):
         seen = {"trigger": "discord:message:2", "mentioned_actor_ids": [], "reply_to_event_id": "discord:message:1"}
         discord_room.judge_discord_moments(leg, moments, {"discord:message:2": seen})
         self.assertEqual((seen, None), (moments[0]["deliveries"][0]["received"], moments[1]["deliveries"][0]["received"]))
+        # Whether the reply's target is the agent's own post in the room log is read for the delivery that has one.
+        self.assertEqual((True, False), (moments[0]["deliveries"][0].get("reply_resolves"), "reply_resolves" in moments[1]["deliveries"][0]))
         self.assertEqual(("fits", "misses"), (moments[0]["outcome"], moments[1]["outcome"]))
         self.assertEqual([{"text": "t", "delivery": "sent", "delivered": True}], moments[0]["posts"])
         self.assertEqual([False], [action["delivered"] for action in moments[1]["actions"]])
@@ -730,7 +781,7 @@ class DiscordCommandTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stderr(io.StringIO()) as error:
             self.assertEqual(probe.EXIT_USAGE, probe.main(["--harness", "reference", "--scripted", "--out", directory]))
             self.assertEqual(probe.EXIT_USAGE, probe.main(["--harness", "codex", "--room", "discord", "--out", directory]))
-            self.assertEqual(probe.EXIT_USAGE, probe.main(["--harness", "hermes", "--room", "discord", "--scripted", "--out", directory]))
+            self.assertEqual(probe.EXIT_USAGE, probe.main(["--harness", "hermes", "--room", "discord", "--out", directory]))
             self.assertEqual([], list(Path(directory).iterdir()))
         self.assertIn("--room discord --scripted", error.getvalue())
 

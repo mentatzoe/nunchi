@@ -19,8 +19,10 @@ against scripted model endpoints, for CI.
 - `discord_net.py`: the launcher that leads Discord's names to the stand-in
   in a private namespace, and `preflight.py`, the check each Discord process
   runs first (PR 3b).
-- `discord_room.py`: the probe's ``--room discord``: Nunchi's own Discord
-  processes, unmodified, on the stand-in (PR 3b).
+- `discord_room.py`: the probe's ``--room discord``: the harnesses' own Discord
+  processes, unmodified, on the stand-in: Nunchi's for Claude Code, Codex and
+  the reference (PR 3b), and Hermes's gateway, `hermes gateway run`, with the
+  Nunchi plugin, whose evidence is read from outside its process (PR 3c).
 
 See `docs/rehearsal.md`.
 """

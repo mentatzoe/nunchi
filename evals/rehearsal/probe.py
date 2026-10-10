@@ -61,10 +61,11 @@ run; the run records the sandbox as off. CI never passes it.
 
 ``--room discord`` (scripted only, inside the launcher, `discord_net.py`) puts
 the room on the Discord stand-in at Discord's real names instead, with
-Nunchi's own Discord processes unmodified: a `nunchi-mcp-discord` for Claude
-Code or Codex, whose runner stays in this process, or, as ``--harness
-reference``, `nunchi-discord` with a scripted participant. Its moments, legs
-and checks are in `discord_room.py`.
+the harnesses' Discord processes unmodified: a `nunchi-mcp-discord` for Claude
+Code or Codex, whose runner stays in this process, `hermes gateway run` with
+the Nunchi plugin for Hermes, or, as ``--harness reference``,
+`nunchi-discord` with a scripted participant. Its moments, legs and checks
+are in `discord_room.py`.
 
 Exit status: 0 every hard check held; 1 a hard check failed, the probe
 raised an error, or the scan found a secret; 2 bad arguments (among them a
@@ -329,7 +330,8 @@ class Leg:
         # Where the harness showed it did not run as the probe configured it (pins-and-isolation).
         self.not_as_configured: list[str] = []
         # Each turn the harness itself ended in error, in its own words, even one that posted
-        # first (turns-bound-and-ended): Claude Code's error results, Codex's failed turns.
+        # first (turns-bound-and-ended): Claude Code's error results, Codex's failed turns. Also a
+        # turn whose delivery the library has no record of (the Hermes gateway leg).
         self.harness_failures: list[str] = []
         self.tool_names: list[str] = []
         # What the integration declares its harness shows by itself (`turn_conformance.KnownGap`).
@@ -2096,9 +2098,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_USAGE
     if args.room == "discord" and not args.scripted:
         print("--room discord is scripted only for now; a live run keeps the in-process room (9f, PR 4)", file=sys.stderr)
-        return EXIT_USAGE
-    if args.room == "discord" and args.harness == "hermes":
-        print("Hermes joins the Discord room in a later step (9f, PR 3c): use --room standin", file=sys.stderr)
         return EXIT_USAGE
     try:
         attention_config(args.attention_model)

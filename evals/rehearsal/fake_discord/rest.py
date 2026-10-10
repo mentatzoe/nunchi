@@ -26,10 +26,10 @@ import json
 import math
 import time
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote
 
 from . import payloads
-from .world import INTENTS, DiscordError, iso
+from .world import COMMAND_FIELDS, INTENTS, DiscordError, _form_error, iso
 
 API = "/api/v10"
 # The body fields of a message post that the stand-in models; any other that is set (tts, embeds, files...) is unknown.
@@ -55,6 +55,11 @@ def _me(fd: Any, bot: Any, params: dict[str, str], body: Any) -> tuple[int, Any,
 
 
 def _application(fd: Any, bot: Any, params: dict[str, str], body: Any) -> tuple[int, Any, str | None]:
+    return 200, payloads.application(fd.world, bot), "application"
+
+
+def _application_me(fd: Any, bot: Any, params: dict[str, str], body: Any) -> tuple[int, Any, str | None]:
+    # Hermes's own Discord tool reads `flags` from it, to see which privileged intents are enabled; the same object as discord.py's.
     return 200, payloads.application(fd.world, bot), "application"
 
 
@@ -111,6 +116,51 @@ def _roles(fd: Any, bot: Any, params: dict[str, str], body: Any) -> tuple[int, A
     return 200, [payloads.role(r) for r in fd.world.roles.values()], "role"
 
 
+def _history(fd: Any, bot: Any, params: dict[str, str], body: Any) -> tuple[int, Any, str | None]:
+    """A channel's messages, newest first: Hermes's backfill, ``limit`` and ``before`` (any other parameter is unmodelled)."""
+    query = parse_qs(params.get("query", ""), keep_blank_values=True)
+    unmodelled = sorted(set(query) - {"limit", "before"})
+    if unmodelled:
+        raise Unmodelled(f"message history parameters not modelled: {', '.join(unmodelled)}")
+    try:
+        limit = int(query["limit"][0]) if "limit" in query else 50
+    except ValueError:
+        raise _form_error("limit", "NUMBER_TYPE_COERCE", "Value is not an int.") from None
+    before = query["before"][0] if "before" in query else None
+    if before is not None and not before.isdigit():
+        raise _form_error("before", "NUMBER_TYPE_COERCE", "Value is not snowflake.")
+    records = fd.world.history(bot.id, params["channel"], limit=limit, before=before)
+    return 200, [payloads.message(fd.world, record, viewer=bot.id) for record in records], "message"
+
+
+def _one_message(fd: Any, bot: Any, params: dict[str, str], body: Any) -> tuple[int, Any, str | None]:
+    return 200, payloads.message(fd.world, fd.world.message(bot.id, params["channel"], params["message"]), viewer=bot.id), "message"
+
+
+def _own_application(fd: Any, bot: Any, application_id: str) -> None:
+    # An application's id is its bot's: a token reaches no other application's commands.
+    if application_id != bot.id:
+        raise DiscordError(404, 10002, "Unknown Application")
+
+
+def _commands(fd: Any, bot: Any, params: dict[str, str], body: Any) -> tuple[int, Any, str | None]:
+    """The application's global commands (discord.py's ``tree.fetch_commands``, ``with_localizations`` ignored: none carry any)."""
+    _own_application(fd, bot, params["application"])
+    return 200, [payloads.command(c) for c in fd.world.commands.get(bot.id, {}).values()], "command"
+
+
+def _command_create(fd: Any, bot: Any, params: dict[str, str], body: Any) -> tuple[int, Any, str | None]:
+    """Create a global command, or overwrite the one of its name (Hermes's slash-command sync: one POST per command)."""
+    _own_application(fd, bot, params["application"])
+    if not isinstance(body, dict):
+        raise DiscordError(400, 50109, "The request body contains invalid JSON.")
+    unmodelled = sorted(k for k, v in body.items() if v not in (None, [], {}, "") and k not in COMMAND_FIELDS)
+    if unmodelled or body.get("type", 1) != 1:
+        raise Unmodelled(f"command fields not modelled: {', '.join(unmodelled) or 'a type other than chat input'}")
+    command, new = fd.world.upsert_command(bot.id, body)
+    return (201 if new else 200), payloads.command(command), "command"
+
+
 def _preflight(fd: Any, bot: Any, params: dict[str, str], body: Any) -> tuple[int, Any, str | None]:
     if params["nonce"] != fd.preflight_nonce:  # another run's check, or a guess: this is not its stand-in
         fd.wire.write("unknown", what="preflight nonce", nonce=params["nonce"])
@@ -121,6 +171,11 @@ def _preflight(fd: Any, bot: Any, params: dict[str, str], body: Any) -> tuple[in
 ROUTES = {
     ("GET", "/users/@me"): _me,
     ("GET", "/oauth2/applications/@me"): _application,
+    ("GET", "/applications/@me"): _application_me,
+    ("GET", "/applications/{application}/commands"): _commands,
+    ("POST", "/applications/{application}/commands"): _command_create,
+    ("GET", "/channels/{channel}/messages"): _history,
+    ("GET", "/channels/{channel}/messages/{message}"): _one_message,
     ("POST", "/channels/{channel}/messages"): _post,
     ("PUT", "/channels/{channel}/messages/{message}/reactions/{emoji}/@me"): _reaction(True),
     ("DELETE", "/channels/{channel}/messages/{message}/reactions/{emoji}/@me"): _reaction(False),
@@ -208,6 +263,7 @@ def handle(fd: Any, request: Request) -> tuple[int, dict[str, str], bytes]:
         fd.wire.write("unknown", what="route", method=request.method, path=path, host=request.host)
     else:
         template, params = found
+        params["query"] = query  # the raw query string, for the routes that read one
         record["route"] = template
         fault = _fault(fd, request.method, template, path[len(API):])
         if fault is not None:

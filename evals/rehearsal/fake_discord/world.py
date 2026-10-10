@@ -49,6 +49,14 @@ ROLE_MENTION = re.compile(r"<@&(\d+)>")
 EVERYONE_MENTION = re.compile(r"@(?:everyone|here)\b")
 MAX_LENGTH = 2000
 MAX_REACTIONS = 20
+MAX_COMMANDS = 100  # global application commands per application
+# The application flags that say a privileged intent is enabled (Discord's Application Flags): the "limited" bit is a bot in
+# fewer than 100 servers, the full bit a verified bot in 100 or more; an application has one or the other.
+APPLICATION_FLAGS = {"GUILD_MEMBERS": {"limited": 1 << 15, "full": 1 << 14}, "MESSAGE_CONTENT": {"limited": 1 << 19, "full": 1 << 18}}
+COMMAND_NAME = re.compile(r"[\w-]{1,32}")
+# The fields of a command's create body that the stand-in models; any other that is set is unknown.
+COMMAND_FIELDS = {"name", "description", "type", "options", "default_member_permissions", "dm_permission", "nsfw", "contexts",
+                  "integration_types", "name_localizations", "description_localizations"}
 
 
 class DiscordError(Exception):
@@ -169,7 +177,10 @@ class World:
       "room" and "agents"; no role is mentionable;
     - ``channels``: ``{name: {target: {"allow": [...], "deny": [...]}}}``,
       each target a role or a member (default: one channel, "room");
-    - ``reply_ping`` and ``people_mention_everyone`` (both true), ``guild``.
+    - ``reply_ping`` and ``people_mention_everyone`` (both true), ``guild``;
+    - ``verified`` (false): the bots are verified and in 100 or more servers, so
+      their application flags carry the full privileged-intent bits instead of
+      the "limited" ones an unverified bot in fewer servers has.
 
     ``log(kind, **fields)`` receives what the world itself has to report: a
     message time raised to keep a channel's ids increasing.
@@ -180,6 +191,7 @@ class World:
         self.clock = clock
         self.log: Callable[..., Any] = lambda kind, **fields: None
         self.reply_ping = bool(spec.get("reply_ping", True))
+        self.verified = bool(spec.get("verified", False))
         self.name = spec.get("guild", "nunchi-rehearsal")
         self._ids: set[int] = set()
         self._increment = 0
@@ -210,6 +222,8 @@ class World:
             self.channels[channel_id] = Channel(channel_id, name, position, self._overwrites(overwrites), last_id=channel_id)
         self.messages: dict[str, dict[str, Any]] = {}
         self._nonces: dict[tuple[str, str], str] = {}
+        # Global application commands, by application id (a bot's id) and name.
+        self.commands: dict[str, dict[str, dict[str, Any]]] = {}
 
     # -- names, ids and tokens --------------------------------------------------------------------
 
@@ -246,6 +260,10 @@ class World:
         """A fake per-run token in Discord's three-part shape, so the token guards see one."""
         head = base64.urlsafe_b64encode(user_id.encode()).decode().rstrip("=")
         return f"{head}.{secrets.token_urlsafe(8)[:6]}.{secrets.token_urlsafe(32)[:38]}"
+
+    def new_id(self) -> str:
+        """A snowflake for something that is not a message (a command, say), minted now."""
+        return self._mint(int(self.clock() * 1000))
 
     def _mint(self, ms: int, floor: str = "0") -> str:
         """A snowflake for ``ms``, above ``floor``, never issued before."""
@@ -456,6 +474,71 @@ class World:
         users.append(user_id)
         return True
 
+    def history(self, user_id: str, channel_id: str, *, limit: int = 50, before: str | None = None) -> list[dict[str, Any]]:
+        """A channel's messages, newest first: up to ``limit`` of those before ``before``.
+
+        Discord returns none to a user without READ_MESSAGE_HISTORY, and refuses one who cannot see the channel.
+        """
+        channel = self.find_channel(channel_id)
+        perms = self.require(user_id, channel.id)
+        if not 1 <= limit <= 100:
+            raise _form_error("limit", "NUMBER_TYPE_MAX" if limit > 100 else "NUMBER_TYPE_MIN", "int value should be between 1 and 100.")
+        if not perms & P["READ_MESSAGE_HISTORY"]:
+            return []
+        found = [m for m in self.messages.values() if m["channel_id"] == channel.id and (before is None or int(m["id"]) < int(before))]
+        return sorted(found, key=lambda m: int(m["id"]), reverse=True)[:limit]
+
+    def message(self, user_id: str, channel_id: str, message_id: str) -> dict[str, Any]:
+        """One message of a channel; it takes READ_MESSAGE_HISTORY, and a message of another channel is unknown."""
+        channel = self.find_channel(channel_id)
+        self.require(user_id, channel.id, "READ_MESSAGE_HISTORY")
+        record = self.messages.get(str(message_id))
+        if record is None or record["channel_id"] != channel.id:
+            raise DiscordError(404, 10008, "Unknown Message")
+        return record
+
+    def application_flags(self, bot: Member) -> int:
+        """The flags of a bot's application: the privileged intents enabled for it, in the bits of an unverified bot (or a verified one's)."""
+        form = "full" if self.verified else "limited"
+        return sum(bits[form] for name, bits in APPLICATION_FLAGS.items() if bot.privileged & INTENTS[name])
+
+    def upsert_command(self, application_id: str, body: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        """Create a global chat-input command, or overwrite the one of that name; returns it and whether it is new.
+
+        Only chat-input commands (type 1) are modelled; the route refuses any other as unmodelled.
+
+        Discord answers 201 for a new command and 200 for an overwrite; an application holds at most
+        `MAX_COMMANDS` (error 30032), and a new command is above that limit only if it adds one.
+        """
+        name, description = body.get("name"), body.get("description")
+        if not isinstance(name, str) or not COMMAND_NAME.fullmatch(name) or name != name.lower():
+            raise _form_error("name", "APPLICATION_COMMAND_INVALID_NAME", "Command name is invalid")
+        if not isinstance(description, str) or not 1 <= len(description) <= 100:
+            raise _form_error("description", "BASE_TYPE_BAD_LENGTH", "Must be between 1 and 100 in length.")
+        store = self.commands.setdefault(application_id, {})
+        existing = store.get(name)
+        if existing is None and len(store) >= MAX_COMMANDS:
+            raise DiscordError(400, 30032, f"Maximum number of application commands reached ({MAX_COMMANDS})")
+        command = {
+            "id": existing["id"] if existing else self.new_id(),
+            "application_id": application_id,
+            "version": self.new_id(),
+            "type": 1,
+            "name": name,
+            "description": description,
+            "options": list(body.get("options") or []),
+            # Discord sends the permission set as a string, whatever number the client posted.
+            "default_member_permissions": None if body.get("default_member_permissions") is None else str(body["default_member_permissions"]),
+            "dm_permission": body.get("dm_permission", True),
+            "nsfw": bool(body.get("nsfw", False)),
+            "contexts": list(body.get("contexts") or [0, 1, 2]),
+            "integration_types": list(body.get("integration_types") or [0]),
+            "name_localizations": body.get("name_localizations"),
+            "description_localizations": body.get("description_localizations"),
+        }
+        store[name] = command
+        return command, existing is None
+
     def create_thread(self, owner_id: str, parent_id: str, name: str, from_message: str | None = None) -> Channel:
         """A public thread under a text channel; one started from a message takes that message's id, as on Discord."""
         parent = self.find_channel(parent_id)
@@ -498,4 +581,5 @@ class World:
                 for m in self.members.values() if m.bot
             },
             "reply_ping": self.reply_ping,
+            "verified": self.verified,
         }

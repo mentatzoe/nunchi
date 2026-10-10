@@ -1,7 +1,7 @@
 """The Discord room: Nunchi's own Discord processes, unmodified, on the Discord stand-in (step 9f, PR 3b).
 
     sudo -E "$PY" -m evals.rehearsal.discord_net --offline -- \\
-        "$PY" -m evals.rehearsal.probe --harness {claude-code,codex,reference} --scripted --room discord --out DIR
+        "$PY" -m evals.rehearsal.probe --harness {claude-code,codex,reference,hermes} --scripted --room discord --out DIR
 
 The launcher (`discord_net.py`) leads Discord's names to this machine and
 names its record in ``NUNCHI_DISCORD_NET``; without it ``--room discord`` does
@@ -19,6 +19,16 @@ launcher's certificate, and each column runs at Discord's real names:
   scripted plain-call participant (`standin.ScriptedParticipant`). Its
   evidence comes from outside it: its receipts and delivery audits, what the
   scripted endpoints were asked and answered, and the wire.
+- **Hermes** (PR 3c): `hermes gateway run`, unmodified, with the Nunchi plugin,
+  in its own process with a fresh ``HERMES_HOME`` written as the plugin's
+  README says, and a scripted model (`standin.ScriptedHermesAgent`). The
+  plugin and the library run inside Hermes, so its evidence comes from outside
+  too (`HermesGatewayLeg`), and Hermes posts the agent's final answer itself:
+  a plain message, in the main channel also for a thread question. The lane
+  pins what Hermes and its plugin do not do (README, Known gaps), so that a
+  change either way fails it until the pins and docs follow: those two, no
+  gap declared at the start, a person's reply to the agent's answer has no
+  target in the room log, and the agent's own reaction is not remembered.
 
 Each Discord process starts as its console script does (``main`` from the
 same module), and only after the preflight (`preflight.py`) reached this
@@ -48,9 +58,9 @@ The moments, in one channel named after the column:
    channel): the wire shows where it was posted.
 
 Each graded message must reach the agent as it was sent
-(``discord-addressing``): the pings it carried, for the reply the agent's
-own last post as the message it answers, and for the thread question the
-thread it was said in.
+(``discord-addressing``): the pings it carried (a reply pings the author of the
+message it answers), for the reply the agent's own last post as the message it
+answers, and for the thread question the thread it was said in.
 """
 
 from __future__ import annotations
@@ -63,6 +73,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import socket
 import subprocess
@@ -74,10 +85,12 @@ from typing import Any
 from evals.behavior.scene import SCENES as BEHAVIOR_SCENES, Scene, load_scene
 
 from . import checks as checks_module
-from .checks import REACHED, Check
+from .checks import PROBE_SCENARIO, REACHED, Check
 from .discord_net import ENV as NET_ENV
 from .fake_discord.control import FakeDiscord
 from .probe import (
+    HERMES_PEER_AGENTS,
+    HERMES_STATE_TABLES,
     PARTICIPANT,
     REFERENCE,
     ROOT,
@@ -90,12 +103,22 @@ from .probe import (
     Leg,
     MomentSpec,
     _env_names,
+    _plugin_version,
     _summarize_action,
     play_moment,
 )
-from .record import write_json
-from .routes import ATTENTION_KEY_ENV, OUTPUT_KEY_ENV, PASSTHROUGH_ENV, Route
-from .standin import RoomScript, ScriptedParticipant, received_triggers
+from .record import copy_tree, sqlite_tables, write_json
+from .routes import (
+    ATTENTION_KEY_ENV,
+    CANARY_ENV,
+    OUTPUT_KEY_ENV,
+    PASSTHROUGH_ENV,
+    PINS,
+    Route,
+    hermes_model_config,
+    hermes_section,
+)
+from .standin import RoomScript, ScriptedHermesAgent, ScriptedParticipant, received_triggers
 
 # What the scripted agent does at each graded moment, and the phrases scripted attention wakes for.
 REPLY_PHRASE = "back off exponentially"
@@ -151,8 +174,8 @@ CONSOLE_SCRIPTS = {
     "nunchi-discord": "nunchi.adapters.discord",
 }
 # What each process runs on, recorded from its own Python and environment: the transport's
-# mcp-discord extra, the reference's discord.py.
-PACKAGES = {"nunchi-mcp-discord": ("mcp",), "nunchi-discord": ("discord.py", "aiohttp")}
+# mcp-discord extra, the reference's discord.py, Hermes's own package and its discord.py.
+PACKAGES = {"nunchi-mcp-discord": ("mcp",), "nunchi-discord": ("discord.py", "aiohttp"), "hermes": ("hermes-agent", "discord.py", "aiohttp")}
 INSTALLED = (
     "import importlib.metadata as metadata, json, sys\n"
     "import nunchi\n"
@@ -267,6 +290,18 @@ def audit_for(audits: Sequence[Mapping[str, Any]], message_id: str) -> dict[str,
     return None
 
 
+def room_events(state: Path) -> dict[str, dict[str, Any]]:
+    """Every event in the participant's own room log (its observations, `nunchi.observation`) in ``state``, by id."""
+
+    found: dict[str, dict[str, Any]] = {}
+    for path in sorted(state.glob("*observations.jsonl")):
+        for record in read_jsonl(path):
+            event = record.get("event") if isinstance(record.get("event"), Mapping) else {}
+            if event.get("id"):
+                found[str(event["id"])] = dict(event)
+    return found
+
+
 # Outcomes of an audit that mean the message is now in the participant's room.
 OBSERVED = ("recorded", "exact-self-context", "exact-duplicate")
 
@@ -317,6 +352,23 @@ def wire_calls(records: Sequence[Mapping[str, Any]], bot: str) -> list[str]:
         if record.get("kind") == "http" and record.get("bot") == bot and isinstance(status, int) and 200 <= status < 300:
             calls[f"{record.get('method')} {record.get('route')}"] = None
     return list(calls)
+
+
+def typing_calls(records: Sequence[Mapping[str, Any]], bot: str) -> int:
+    """How many typing indicators the bot sent, read from its requests (``POST .../typing``), not from a route.
+
+    The stand-in serves no typing route: such a request is answered 599 and recorded as unknown, which
+    fails ``discord-standin-clean``, and it carries no route template to count by.
+    """
+
+    return sum(
+        1
+        for record in records
+        if record.get("kind") == "http"
+        and record.get("bot") == bot
+        and record.get("method") == "POST"
+        and str(record.get("decoded_path", "")).endswith("/typing")
+    )
 
 
 def reconnect_facts(
@@ -428,9 +480,12 @@ class DiscordProcess:
 class DiscordRoom:
     """The stand-in and the Discord processes of one run: what every column in the Discord room shares."""
 
-    def __init__(self, ctx: Context, column: str) -> None:
+    def __init__(self, ctx: Context, column: str, *, actor: str = "discord:actor") -> None:
         self.ctx = ctx
         self.column = column
+        # How a person's or bot's id reads in an event: the shared transport and the reference
+        # say ``discord:actor:<id>``, the Hermes plugin ``discord:user:<id>``.
+        self.actor = actor
         self.net = load_net(ctx.original_env)
         self.python = ctx.options.discord_python or sys.executable
         self.base = ctx.base / "discord"
@@ -531,9 +586,13 @@ class DiscordRoom:
         except (ValueError, TypeError):
             return {"error": f"exit {done.returncode}: {' | '.join(done.stderr.strip().splitlines()[-3:])[-400:]}"}
 
-    def launch(self, name: str, own: Mapping[str, str], *, own_keys: Sequence[str], arguments: Sequence[str] = ()) -> DiscordProcess:
+    def launch(
+        self, name: str, own: Mapping[str, str], *, own_keys: Sequence[str], arguments: Sequence[str] = (), argv: Sequence[str] | None = None
+    ) -> DiscordProcess:
         env, directory = self.environment(name, own)
-        argv = [self.python, "-c", f"import sys; from {CONSOLE_SCRIPTS[name]} import main; sys.exit(main())", *arguments]
+        if argv is None:
+            argv = [self.python, "-c", f"import sys; from {CONSOLE_SCRIPTS[name]} import main; sys.exit(main())", *arguments]
+        argv = list(argv)
         process = DiscordProcess(
             name, argv, env, cwd=directory, log=self.ctx.out / "discord" / f"{name}.log", secrets=self.ctx.secrets, own_keys=own_keys
         )
@@ -637,11 +696,12 @@ class DiscordRoom:
         delivery: dict[str, Any] = {
             "scene_event": raw["id"],
             "event_id": f"discord:message:{answer['id']}",
-            "author": f"discord:actor:{self.fd.world.member(author).id}",
+            "author": f"{self.actor}:{self.fd.world.member(author).id}",
             "channel": channel,
-            # What the message carried, for `checks.discord_addressing` to compare with what Nunchi received:
-            # whom it pinged, and the message it replied to.
-            "mentioned_actor_ids": [f"discord:actor:{self.fd.world.member(self.members[name]).id}" for name in raw.get("mentions", ())],
+            # What the message carried, for `checks.discord_addressing` to compare with what Nunchi received: whom it
+            # pinged (the pings in its text, and, for a reply, its target's author, as Discord does), and the message
+            # it replied to.
+            "mentioned_actor_ids": [f"{self.actor}:{user}" for user in self.fd.world.messages[answer["id"]]["mentions"]],
             "reply_to": reply_to,
             "dispatched_to": answer["dispatched_to"],
             "message_id": answer["id"],
@@ -670,6 +730,12 @@ class DiscordRoom:
         elif audit is None:
             delivery["note"] = "it never reached Nunchi"
         return delivery
+
+    def holds_own_post(self, event_id: str) -> bool:
+        """Whether the participant's room log holds the agent's own message under ``event_id``: what a reply to it resolves to."""
+
+        event = room_events(self.state).get(event_id) or {}
+        return event.get("type") == "message" and event.get("author_id") == f"{self.actor}:{self.agent_id}"
 
     def reconnect(self) -> None:
         """Op 7 to every harness bot; what follows is read after the next moment (`reconnected`)."""
@@ -750,6 +816,9 @@ class DiscordRoom:
         expected: Mapping[str, Mapping[str, Any]],
         gaps_fail: bool,
         moments: Sequence[Mapping[str, Any]],
+        start_required: bool | None = True,
+        reply_resolves: bool = True,
+        own_reaction_remembered: bool = True,
     ) -> list[Check]:
         verdict = self.verdict or {"clean": False, "unknown": [{"what": "no verdict: the stand-in never stopped"}]}
         records = self.records
@@ -762,8 +831,14 @@ class DiscordRoom:
                 verdict.get("bots", {}), expected, {bot: wire_calls(records, bot) for bot in expected}
             ),
             checks_module.discord_writes_reconciled(committed, wire_writes(records, self.agent)),
-            checks_module.discord_continuity(self.start_gap, self.reconnects, gaps_fail=gaps_fail),
-            checks_module.discord_addressing(moments, agent=f"discord:actor:{self.agent_id}", writes=wire_writes(records, self.agent)),
+            checks_module.discord_continuity(self.start_gap, self.reconnects, gaps_fail=gaps_fail, start_required=start_required),
+            checks_module.discord_addressing(
+                moments,
+                agent=f"{self.actor}:{self.agent_id}",
+                writes=wire_writes(records, self.agent),
+                reply_resolves=reply_resolves,
+                own_reaction_remembered=own_reaction_remembered,
+            ),
         ]
 
 
@@ -789,30 +864,50 @@ def landed(action: Mapping[str, Any], effects: Sequence[Mapping[str, Any]]) -> s
     return None
 
 
+def replied_to(action: Mapping[str, Any], effects: Sequence[Mapping[str, Any]]) -> str | None:
+    """The message a harness-posted message answers on the wire: None when the wire shows it posted plain (or not posted at all)."""
+
+    posted = [effect for effect in effects if effect.get("kind") == "message" and effect.get("text") == action.get("text")]
+    if not posted or any(not effect.get("reply_to") for effect in posted):
+        return None
+    return str(posted[0]["reply_to"])
+
+
 def judge_discord_moments(leg: Leg, moments: Sequence[dict[str, Any]], received: Mapping[str, Mapping[str, Any]]) -> None:
     """Mark each committed action delivered or not, then each moment's actions and outcome (`checks.discord_moment_outcome`).
 
     ``received`` is how the agent's turns showed each trigger was addressed; it goes beside what was sent, in
-    each delivery (`checks.discord_addressing`). Each action also records ``where`` it landed, by channel name,
-    from the wire.
+    each delivery (`checks.discord_addressing`), with ``reply_resolves``: whether the message a reply answers
+    is the agent's own post in the participant's room log. Each action also records ``where`` it landed, by
+    channel name, from the wire, and, for a message its harness posted itself, ``replied_to``: the message
+    the wire shows it answering (None for a plain message).
     """
 
     for moment in moments:
         for delivery in moment.get("deliveries", ()):
             delivery["received"] = received.get(delivery.get("event_id"))
-    flags = checks_module.delivered(leg.committed, leg.room_effects(), harness_posts=False)
+            target = (delivery["received"] or {}).get("reply_to_event_id")
+            if target:
+                delivery["reply_resolves"] = leg.discord.holds_own_post(target)  # type: ignore[attr-defined]
+    flags = checks_module.delivered(leg.committed, leg.room_effects(), harness_posts=leg.harness_posts)
     for item, ok in zip(leg.committed, flags):
         item["delivered"] = ok
     effects = leg.room_effects()
     for moment in moments:
         graded = {turn["request_id"] for turn in moment["turns"] if turn.get("trigger") == moment["graded_event"]}
         actions = [
-            {key: item.get(key) for key in ("kind", "text", "reaction", "target_event_id", "operation", "delivery", "delivered") if key in item}
+            {
+                key: item.get(key)
+                for key in ("kind", "text", "reaction", "target_event_id", "origin_event_id", "operation", "delivery", "delivered")
+                if key in item
+            }
             for item in leg.committed
             if item.get("request_id") in graded
         ]
         for action in actions:
             action["where"] = landed(action, effects)
+            if leg.harness_posts and action.get("kind") == "message":
+                action["replied_to"] = replied_to(action, effects)
         moment["actions"] = actions
         moment["posts"] = [
             {"text": action.get("text"), "delivery": action.get("delivery"), "delivered": action["delivered"]}
@@ -826,6 +921,8 @@ def judge_discord_moments(leg: Leg, moments: Sequence[dict[str, Any]], received:
             actions=[action for action in actions if action.get("delivered")],
             graded_event=moment["graded_event"],
             thread=moment.get("thread"),
+            posts_itself=leg.harness_posts,
+            channel=leg.discord.column,  # type: ignore[attr-defined]
         )
 
 
@@ -1241,4 +1338,563 @@ class ReferenceLeg(Leg):
                 self.participant_endpoint.close()
 
 
-LEGS: dict[str, type[Leg]] = {"claude-code": DiscordClaudeCodeLeg, "codex": DiscordCodexLeg, REFERENCE: ReferenceLeg}
+# -- Hermes: `hermes gateway run` in its own process, with the Nunchi plugin ----------------------------
+
+HERMES = "hermes"
+# The plugin's actor ids read ``discord:user:<id>``, not the shared transport's ``discord:actor:<id>``.
+HERMES_ACTOR = "discord:user"
+HERMES_KEY_ENV = "OPENROUTER_API_KEY"
+# What Hermes's model posts at each graded moment: its final answer, in the channel, as a plain message
+# (no Discord reply, whatever the moment is called); a reaction is the one move made with a room tool.
+HERMES_EXPECTED = {
+    "post": {"kind": "message", "text": SCRIPTED_ANSWER},
+    "reply": {"kind": "message", "text": SCRIPTED_REPLY},
+    "reaction": {"kind": "reaction", "reaction": REACTION},
+    "thread-reply": {"kind": "message", "text": SCRIPTED_THREAD_REPLY},
+}
+HERMES_PINS = {"first-message": REACHED, "thread": REACHED}
+# The known gap the thread question pins (integrations/hermes-plugin/README.md, Known gaps): Hermes posts the
+# final answer where the run started, and the plugin starts every run in the main channel. The note is shown
+# when that moment misses (`checks.discord_scripted_outcomes`): its reply would read this way too if it landed
+# in the thread.
+HERMES_NOTES = {
+    "thread-question": "Hermes posts its answer in the main channel, a gap the README names; an answer that landed in the "
+    "thread would read like this too: update the pin and its docs"
+}
+# The plain-message pin: Hermes posts its final answer as a plain message, never a Discord reply. An answer
+# the wire shows as a reply fails with this note.
+HERMES_REPLY_NOTE = "Hermes now replies: update the plain-message pin and the docs"
+# Every call Hermes is shown to make on the stand-in (each has a route of its own there): its login, its capability read
+# (`tools/discord_tool.py`), the slash-command sync (`GET` then one `POST` per command), the history it backfills for a
+# reply or a thread message, the message it fetches to react to, and the agent's post and reaction.
+HERMES_CALLS = (
+    "GET /users/@me",
+    "GET /applications/@me",
+    "GET /applications/{application}/commands",
+    "POST /applications/{application}/commands",
+    "GET /channels/{channel}/messages",
+    "GET /channels/{channel}/messages/{message}",
+    POST,
+    REACT,
+)
+# Python run in Hermes's own Python, from the checkout, before its home has a config: which Hermes this is, the
+# auxiliary tasks its config has (`routes.hermes_auxiliary_tasks`), and the config version `hermes setup` stamps (a
+# config without it is taken for a two-year-old one at boot). Prints one JSON line.
+HERMES_INSTALL_FACTS = (
+    "import json, sys\n"
+    "from evals.rehearsal.probe import hermes_install\n"
+    "from evals.rehearsal.routes import hermes_auxiliary_tasks\n"
+    "from hermes_cli.config import DEFAULT_CONFIG\n"
+    "print(json.dumps({'install': hermes_install(sys.argv[1]), 'auxiliary_tasks': hermes_auxiliary_tasks(),\n"
+    "                  'config_version': DEFAULT_CONFIG.get('_config_version')}))\n"
+)
+# The same, once Hermes has run: what Hermes's own builders give the agent's terminal and its other children in
+# exactly Hermes's environment, and the terminal backend its config names (`probe.HermesLeg.record_environments`).
+HERMES_ENVIRONMENT_FACTS = (
+    "import json, os\n"
+    "facts = {}\n"
+    "try:\n"
+    "    from tools.environments import local\n"
+    "    facts['terminal'] = local._make_run_env({})\n"
+    "    facts['children'] = local._sanitize_subprocess_env(dict(os.environ))\n"
+    "except Exception as exc:\n"
+    "    facts['builders_error'] = f'{type(exc).__name__}: {exc}'[:300]\n"
+    "try:\n"
+    "    from hermes_cli.config import load_config\n"
+    "    facts['backend'] = (load_config().get('terminal') or {}).get('backend') or 'local'\n"
+    "except Exception as exc:\n"
+    "    facts['backend_error'] = f'{type(exc).__name__}: {exc}'[:300]\n"
+    "print(json.dumps(facts))\n"
+)
+
+
+def hermes_argv(python: str) -> list[str]:
+    """`hermes gateway run` as a user starts it: the console script beside the Python, else its own body."""
+
+    script = Path(python).with_name("hermes")
+    if script.is_file():
+        return [str(script), "gateway", "run"]
+    return [python, "-c", "import sys; sys.argv[0] = 'hermes'; from hermes_cli.main import main; sys.exit(main())", "gateway", "run"]
+
+
+# `nunchi.participant.DELIVERED_EVENT_PREFIX`, as the room log spells it.
+DELIVERED_PREFIX = "nunchi:delivered:"
+
+
+def delivered_messages(state: Path) -> dict[str, dict[str, Any]]:
+    """The messages the harness posted that the library put in the room log, by the turn's request id.
+
+    When the harness delivers a final answer itself, the library records it in the participant's own
+    observations as a message of its own, in reply to the message the turn was about
+    (``nunchi:delivered:<request_id>``, `nunchi.participant.DELIVERED_EVENT_PREFIX`): the one place outside
+    the plugin's process that holds what the turn committed.
+    """
+
+    return {event_id[len(DELIVERED_PREFIX):]: event for event_id, event in room_events(state).items() if event_id.startswith(DELIVERED_PREFIX)}
+
+
+class HermesGatewayLeg(Leg):
+    """Hermes's real gateway process, unmodified, with the Nunchi plugin, on the Discord stand-in.
+
+    The plugin runs inside Hermes's process, so the probe sees none of its objects: its evidence is
+    outside it. The turns, their wake and their end come from the participant's receipts, the committed
+    text from the library's own record of the message Hermes delivered (none is a hard problem), a
+    reaction's emoji and target from the wire (the library records none), and what landed in the room
+    from the stand-in's wire. The scripted endpoint says what the model was asked and only counts its
+    calls. Whether a turn was bound to its wake cannot be seen from outside: a turn counts as bound when
+    the plugin's hooks brought it to its result (a delivery or a silence), which only a bound run can do.
+    """
+
+    harness = HERMES
+    harness_posts = True
+    script = SCRIPT
+    pins: Mapping[str, str] = HERMES_PINS
+    expected_calls = HERMES_CALLS
+
+    def __init__(self, ctx: Context) -> None:
+        super().__init__(ctx)
+        self.discord = DiscordRoom(ctx, HERMES, actor=HERMES_ACTOR)
+        self.agent: ScriptedHermesAgent | None = None
+        self.process: DiscordProcess | None = None
+        self.home: Path | None = None
+        self.facts: dict[str, Any] = {}
+        self._spec: MomentSpec | None = None
+
+    @property
+    def room(self) -> Any:
+        return None
+
+    # -- starting Hermes -------------------------------------------------------------------------
+
+    def run_facts(self, script: str, env: Mapping[str, str], *args: str) -> dict[str, Any]:
+        """Run ``script`` in Hermes's Python with ``env``, from the checkout; the one JSON line it prints."""
+
+        argv = [self.discord.python, "-c", script, *args]
+        done = subprocess.run(argv, env=dict(env), cwd=ROOT, capture_output=True, text=True, timeout=120, check=False)
+        try:
+            return dict(json.loads(done.stdout.strip().splitlines()[-1]))
+        except (ValueError, IndexError, TypeError) as exc:
+            raise CouldNotRun(
+                f"Hermes cannot be read in {self.discord.python} (hermes-agent[messaging] installed?): exit {done.returncode}: "
+                f"{' | '.join(done.stderr.strip().splitlines()[-3:])[-400:] or exc}"
+            ) from exc
+
+    def own_environment(self) -> dict[str, str]:
+        """What Hermes gets beside the path, locale and fresh HOME and TMPDIR: its home, its bot's token, and its model key and canary.
+
+        The token goes in the environment and never in a file, so no recorded config holds it. The model
+        key is the run's placeholder, which Hermes and the plugin's attention both read under its name,
+        and the canary is in every harness's environment (`routes.CANARY_ENV`).
+        """
+
+        assert self.discord.fd is not None and self.home is not None
+        return {
+            "HERMES_HOME": str(self.home),
+            "DISCORD_BOT_TOKEN": self.discord.fd.token(self.discord.agent),
+            HERMES_KEY_ENV: self.ctx.env[HERMES_KEY_ENV],
+            CANARY_ENV: self.ctx.env[CANARY_ENV],
+        }
+
+    def write_home(self, config_path: Path, auxiliary_tasks: Sequence[str], config_version: Any = None) -> None:
+        """The room's Hermes profile, as integrations/hermes-plugin/README.md says to set it up.
+
+        ``config.yaml`` has the README's room settings (`hermes_plugin_conformance.room_settings`: display,
+        the ``discord:`` block with the bound channel as a free-response channel, sessions, disabled
+        toolsets) beside the probe's peer-agent settings and the scripted model; ``.env`` has the room's
+        role and no user allowlist, the turns' identity and no text batching. The plugin directory is
+        copied where ``hermes plugins install`` puts it.
+        """
+
+        import nunchi.integrations.hermes_plugin as package
+        from nunchi.integrations import hermes_plugin_conformance as kit
+
+        assert self.home is not None and self.agent is not None and self.discord.fd is not None
+        plugin = self.home / "plugins" / kit.PLUGIN_NAME
+        shutil.copytree(Path(package.__file__).parent, plugin, ignore=shutil.ignore_patterns("__pycache__"))
+        work = self.ctx.base / "work"
+        work.mkdir(parents=True, exist_ok=True)
+        settings = kit.room_settings("discord", channel=self.room_id)
+        settings["discord"] = {**settings["discord"], **HERMES_PEER_AGENTS}
+        config = {
+            **hermes_model_config(self.ctx.route.model, auxiliary_tasks, scripted_base_url=self.agent.base_url),
+            "plugins": {
+                "enabled": [kit.PLUGIN_NAME],
+                "entries": {
+                    kit.PLUGIN_NAME: {"allow_gateway_injection": True, "allow_platform_actions": True, "settings": {"config_path": str(config_path)}}
+                },
+            },
+            **settings,
+            # The plugin's tools are shown to the model directly (the README: tool_search off also works).
+            "tools": {"tool_search": {"enabled": "off"}},
+            # The agent's terminal starts in a fresh directory, not the checkout or the home.
+            "terminal": {"cwd": str(work)},
+        }
+        if config_version:
+            config["_config_version"] = config_version
+        (self.home / "config.yaml").write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
+        environment = {**kit.room_env("discord"), "DISCORD_ALLOWED_ROLES": self.discord.fd.world.role("room").id}
+        (self.home / ".env").write_text("".join(f"{name}={value}\n" for name, value in environment.items()), encoding="utf-8")
+        self.configs.append(("hermes config.yaml", self.home / "config.yaml"))
+        self.configs.append(("hermes profile .env", self.home / ".env"))
+
+    def prepare(self) -> None:
+        self.discord.start()
+        self.room_id = self.discord.channel_id
+        self.actor_id = f"{HERMES_ACTOR}:{self.discord.agent_id}"
+        self.scope = f"discord:{self.room_id}"
+        self.home = Path(self.ctx.homes["HERMES_HOME"])
+        self.agent = ScriptedHermesAgent(SCRIPTED_ANSWER, script=self.script)
+        self.ctx.route = replace(self.ctx.route, base_url=self.agent.base_url)
+        env, _ = self.discord.environment(HERMES, {"HERMES_HOME": str(self.home)})
+        self.facts = self.run_facts(HERMES_INSTALL_FACTS, env, self.ctx.options.expect_version or PINS[HERMES])
+        self.install = dict(self.facts["install"])
+        self.ran(
+            "Hermes's version and its source tree's commit (git rev-parse HEAD), for the record",
+            [self.discord.python, "-c", HERMES_INSTALL_FACTS, self.ctx.options.expect_version or PINS[HERMES]],
+            env,
+        )
+        _, config_path = self.room_config({"hermes": hermes_section(self.room_id)})
+        self.write_home(config_path, self.facts["auxiliary_tasks"], self.facts.get("config_version"))
+        from nunchi.integrations.hermes_plugin import plugin as plugin_module
+        from nunchi.integrations.hermes_plugin_conformance import HERMES_KNOWN_GAPS
+
+        self.tool_names = list(plugin_module.TOOL_NAMES.values())
+        self.known_gaps = [replace(gap, scenarios=(PROBE_SCENARIO,)) for gap in HERMES_KNOWN_GAPS]
+        self.install["plugin_version"] = _plugin_version(Path(plugin_module.__file__).with_name("plugin.yaml"))
+        process = self.discord.launch(
+            HERMES, self.own_environment(), own_keys=[HERMES_KEY_ENV, "DISCORD_BOT_TOKEN", CANARY_ENV], argv=hermes_argv(self.discord.python)
+        )
+        self.process = process
+        self.actual_homes = {name: process.env[name] for name in ("HOME", "TMPDIR", "HERMES_HOME")}
+        self.discord.wait_ready(process, self.discord.agent)
+        self.wait_connected(process)
+
+    def wait_connected(self, process: DiscordProcess, *, timeout: float = 120.0) -> None:
+        """Until Hermes's own record (``gateway_state.json``) says the gateway is running with its Discord adapter connected.
+
+        Hermes writes that when the adapter connects, before its inbound gate opens: a message that comes in
+        then is queued ("Queued inbound message during gateway startup restore" in ``gateway.log``) and handled
+        about a second later, once the restore ends. The wait keeps the first moment from starting on a gateway
+        that is still connecting; the queueing is covered by the reach budget (``REACH_SECONDS``), not by this wait.
+        """
+
+        assert self.home is not None
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if not process.alive():
+                raise RuntimeError(f"hermes gateway run exited ({process.process.poll() if process.process else '?'}) before it connected: {process.tail()}")
+            try:
+                state = json.loads((self.home / "gateway_state.json").read_text(encoding="utf-8"))
+                if state.get("gateway_state") == "running" and ((state.get("platforms") or {}).get("discord") or {}).get("state") == "connected":
+                    return
+            except (OSError, ValueError, AttributeError):
+                pass
+            time.sleep(0.5)
+        raise RuntimeError(f"Hermes never reported its gateway running with Discord connected within {timeout:.0f} s: {process.tail()}")
+
+    # -- the moments -------------------------------------------------------------------------------
+
+    def deliver(self, raw: Mapping[str, Any], at: datetime, scene: Scene, sequence: int) -> dict[str, Any]:
+        assert self._spec is not None
+        return self.discord.reach(self.discord.post(raw, at, scene, self._spec))
+
+    def play(self, spec: MomentSpec, *, settle_seconds: float) -> dict[str, Any]:
+        self._spec = spec
+        if spec.reconnect_before:
+            self.discord.reconnect()
+        moment = play_moment(self, spec, settle_seconds=settle_seconds)
+        if spec.thread:
+            moment["thread"] = spec.thread
+        if spec.reconnect_before:
+            self.discord.reconnected(moment)
+        # Hermes runs in its own process: its turns are read from outside it after each moment.
+        self.read_turns()
+        moment["turns"] = [turn for turn in self.invocations if turn.get("moment") == spec.name or turn.get("moment") is None]
+        for turn in moment["turns"]:
+            turn["moment"] = spec.name
+        graded = [turn for turn in moment["turns"] if turn.get("trigger") == moment["graded_event"]]
+        moment["graded_turns"] = len(graded)
+        moment["graded_wake_sources"] = [turn.get("source") for turn in graded]
+        moment["other_turns"] = len(moment["turns"]) - len(graded)
+        if spec.name == "first-message":
+            self.discord.start_gap = self.start_facts()
+        return moment
+
+    def start_facts(self) -> dict[str, Any]:
+        """What the plugin said of its start: a continuity gap in the participant's audit, or the coverage of its first snapshot.
+
+        The shared transport and the reference declare a gap when they start. The plugin does not: its room is
+        built on the first admitted message, and the first snapshot reports the participant's own log as
+        restart-safe, with no restart gap.
+        """
+
+        gaps = [audit for audit in delivery_audits(self.discord.state) if audit.get("outcome") == "continuity-gap"]
+        first = next((stage["observation"] for stage in self.stages().values() if stage.get("observation")), {})
+        coverage = first.get("coverage") or {}
+        return {
+            "process": "hermes gateway run",
+            "gap": gaps[0]["delivery_id"] if gaps else None,
+            "declared": bool(gaps),
+            "detail": (
+                "the plugin declared a continuity gap when it started" if gaps
+                else "the plugin declares no gap when it starts: its first snapshot reports continuity "
+                f"{coverage.get('continuity')!r}, has_gaps {coverage.get('has_gaps')}, has_restart_gap {coverage.get('has_restart_gap')}"
+            ),
+        }
+
+    def open_turns(self) -> list[str]:
+        """Turns attention woke that the host has not ended yet: a receipt for the wake, none for the host."""
+
+        stages = self.stages()
+        return [
+            request_id
+            for request_id, stage in stages.items()
+            if (stage.get("attention") or {}).get("effective_disposition") not in (None, "SUPPRESS") and "participant-host" not in stage
+        ]
+
+    def settle(self, timeout: float) -> bool:
+        """Until no turn is open and nothing moved for 2 s: the wire, both scripted endpoints, and the plugin's files."""
+
+        deadline = time.monotonic() + timeout
+        last: Any = None
+        since = time.monotonic()
+        while time.monotonic() < deadline:
+            mark = (
+                len(self.agent.model.requests) if self.agent else 0,
+                len(getattr(self.ctx.attention_endpoint, "judged", ())),
+                self._written(),
+            )
+            if mark != last:
+                last, since = mark, time.monotonic()
+            if time.monotonic() - since >= 2.0 and not self.open_turns() and self.discord.quiet(2.0):
+                return True
+            time.sleep(0.2)
+        return False
+
+    def _written(self) -> int:
+        total = 0
+        for path in self.discord.state.glob("*.jsonl"):
+            with contextlib.suppress(OSError):
+                total += path.stat().st_size
+        return total
+
+    # -- what is read from outside the process ---------------------------------------------------------
+
+    def receipts(self) -> list[dict[str, Any]]:
+        found: list[dict[str, Any]] = []
+        for path in sorted(self.discord.state.glob("*receipts.jsonl")):
+            found += read_jsonl(path)
+        return found
+
+    def stages(self) -> dict[str, dict[str, Any]]:
+        stages: dict[str, dict[str, Any]] = {}
+        for receipt in self.receipts():
+            stages.setdefault(receipt["request_id"], {})[receipt["stage"]] = receipt.get("body") or {}
+        return stages
+
+    def read_turns(self) -> None:
+        """The turns, committed actions and attention calls, from the participant's receipts and the library's own record.
+
+        A turn is a request the host invoked the harness for. Its result is a silence (the host's outcome), a
+        message (the transport receipt says the harness delivers it; the text is what the library recorded
+        as delivered, and with no record it is missing: a hard problem, never the scripted model's text) or a
+        reaction (Hermes's other transport, which adds it). A reaction's emoji and target are in neither the
+        receipt nor the library's record, which keeps none (README, Known gaps), so they are what Hermes put on
+        the wire, the nth reaction for the nth reaction turn; the scripted model's arguments are never used.
+        Each action's delivery is the transport receipt's.
+        """
+
+        from nunchi.participant import HARNESS_DELIVERS
+
+        stages = self.stages()
+        delivered = delivered_messages(self.discord.state)
+        reactions = [write for write in wire_writes(self.discord.records, self.discord.agent) if write["kind"] == "reaction" and not write["removed"]]
+        known = {turn["request_id"]: turn for turn in self.invocations}
+        committed = {item["request_id"]: item for item in self.committed}
+        reacted = 0
+        for request_id, stage in stages.items():
+            host = stage.get("participant-host")
+            if host is None or not host.get("invoked"):
+                continue
+            trigger = (stage.get("observation") or {}).get("trigger_event_id")
+            transport = stage.get("transport")
+            result: dict[str, Any] | None
+            item: dict[str, Any] | None = None
+            if transport is not None and transport.get("detail") == HARNESS_DELIVERS:
+                event = delivered.get(request_id)
+                item = {
+                    "kind": "message",
+                    "text": event.get("text") if event else None,
+                    "origin_event_id": (event or {}).get("reply_to_event_id") or trigger,
+                    "text_from": "the library's record of the delivered message" if event else "missing: the library holds no record of it",
+                }
+            elif transport is not None:
+                write = reactions[reacted] if reacted < len(reactions) else {}
+                reacted += 1
+                item = {
+                    "kind": "reaction",
+                    "reaction": write.get("emoji"),
+                    "target_event_id": f"discord:message:{write['message_id']}" if write else None,
+                    "operation": "add",
+                    "reaction_from": "the wire: neither the receipt nor the library's record names it" if write else "missing: no reaction on the wire",
+                }
+            if item is not None:
+                result = {key: item[key] for key in ("kind", "text", "reaction", "target_event_id") if key in item}
+            elif host.get("outcome") == "silent":
+                result = {"kind": "silence"}
+            else:
+                result = None
+            turn = known.get(request_id)
+            if turn is None:
+                turn = {"request_id": request_id, "trigger": trigger, "source": host.get("wake_source"), "moment": None}
+                self.invocations.append(turn)
+            turn.update(
+                {
+                    "calls": sum(1 for entry in (self.agent.moves if self.agent else ()) if entry["trigger"] == trigger),
+                    # Not seen, only inferred: only a run bound to its wake reaches the plugin's result.
+                    "bound": result is not None,
+                    "bound_evidence": "inferred from the receipts: the turn ended in a delivery or a silence through the plugin's hooks",
+                    "result": result,
+                }
+            )
+            if item is not None:
+                action = {"request_id": request_id, **item, "delivery": transport.get("delivery"), "detail": transport.get("detail")}
+                if request_id in committed:
+                    # Read again: the record or the write may have come after the earlier read.
+                    committed[request_id].update(action)
+                else:
+                    committed[request_id] = action
+                    self.committed.append(action)
+        # What the transport receipt says Hermes delivered, the library must hold: no fallback to the scripted model's words.
+        self.harness_failures = [
+            f"turn {item['request_id']}: the transport receipt says Hermes delivered its answer, but the library's room log "
+            f"holds no record of it ({DELIVERED_PREFIX}{item['request_id']})"
+            for item in self.committed
+            if item.get("kind") == "message" and item.get("text") is None
+        ]
+        self.attention_calls = []
+        for request_id, stage in stages.items():
+            attention = stage.get("attention")
+            if attention is None:
+                continue
+            trigger = (stage.get("observation") or {}).get("trigger_event_id")
+            entry: dict[str, Any] = {"request_id": request_id, "trigger": trigger, "model": (self.ctx.attention or {}).get("model")}
+            if "error" in attention:
+                entry["error"] = f"{attention['error'].get('code')}: {attention['error'].get('detail')}"
+            else:
+                entry["disposition"] = attention.get("effective_disposition")
+                entry["served"] = {"provider": "scripted"}
+            self.attention_calls.append(entry)
+
+    def stop_hermes(self) -> None:
+        if self.process is not None and self.process.process is not None:
+            self.process.stop()
+
+    def collect(self) -> None:
+        """Stop Hermes, then copy what it left: the plugin's state, Hermes's sessions, logs and ``state.db``."""
+
+        self.stop_hermes()
+        self.copy_state()
+        self.read_turns()
+        if self.home is None:
+            return
+        if self.process is not None:
+            self.record_environments()
+        copied = copy_tree(self.home / "sessions", self.ctx.out / "transcript" / "hermes-sessions")
+        copied += copy_tree(self.home / "logs", self.ctx.out / "transcript" / "hermes-logs")
+        # Hermes keeps its sessions in state.db, which is deleted with the run's home.
+        try:
+            state = sqlite_tables(self.home / "state.db", HERMES_STATE_TABLES)
+        except Exception as exc:
+            state = {"error": [{"error": f"{type(exc).__name__}: {exc}"}]}
+        write_json(self.ctx.out / "transcript" / "hermes-state.json", state)
+        usage = [row for row in state.get("session_model_usage", ()) if isinstance(row, Mapping)]
+        calls = sum(int(row.get("api_call_count") or 0) for row in usage)
+        sent = sum(1 for item in self.committed if item.get("delivery") in ("sent", "unknown"))
+        records = self.discord.records
+        report: dict[str, Any] = {
+            "verdict": (
+                f"hermes gateway run took {len(self.invocations)} turn(s) through the plugin and committed {sent} action(s); "
+                f"its session records {calls} model call(s)"
+            ),
+            "sandbox": self.sandbox,
+            "model_calls_in_session": calls,
+            "transcript_files": [*copied, "hermes-state.json"],
+            "typing": typing_calls(records, self.discord.agent),
+            "commands_registered": sum(
+                1 for r in records if r.get("kind") == "http" and r.get("bot") == self.discord.agent and r.get("method") == "POST" and r.get("route") == "/applications/{application}/commands"
+            ),
+            "evidence": "outside the process: the plugin's receipts and observations and the stand-in's wire; binding is inferred; "
+            "Hermes's state.db is recorded for reading and no check reads it",
+        }
+        if self.agent is not None:
+            report["scripted_model"] = {"agent_requests": len(self.agent.requests()), "moves": len(self.agent.moves)}
+            write_json(self.ctx.out / "transcript" / "scripted-model-requests.json", self.agent.requests())
+        self.reports[HERMES] = report
+
+    def record_environments(self) -> None:
+        """Hermes's environment, and what Hermes's own builders give the agent's commands in exactly that environment."""
+
+        assert self.process is not None
+        # Hermes's own process is recorded with the Discord room's (`DiscordProcess.document`): it holds its bot's token.
+        try:
+            facts = self.run_facts(HERMES_ENVIRONMENT_FACTS, self.process.env)
+        except CouldNotRun as exc:
+            self.processes.append({"process": "the agent's terminal", "agent_shell": True, "error": str(exc)[:300]})
+            return
+        if "builders_error" in facts:
+            self.processes.append({"process": "the agent's terminal", "agent_shell": True, "error": facts["builders_error"]})
+        else:
+            self.runs_in("the agent's terminal and code tools (Hermes's _make_run_env)", facts["terminal"], agent_shell=True)
+            self.runs_in("Hermes's background and other children (Hermes's _sanitize_subprocess_env)", facts["children"], agent_shell=True)
+        backend = facts.get("backend")
+        self.sandbox = (
+            {"on": None, "detail": f"Hermes's terminal backend could not be read: {facts.get('backend_error')}"}
+            if backend is None
+            else {
+                "on": backend != "local",
+                "detail": f"Hermes's terminal backend is {backend}" + (": the agent's commands run as this user, unsandboxed" if backend == "local" else ""),
+                "terminal_backend": backend,
+            }
+        )
+
+    # -- judging and checking ----------------------------------------------------------------------------
+
+    def room_effects(self) -> list[dict[str, Any]]:
+        return self.discord.effects()
+
+    def judge(self, moments: Sequence[dict[str, Any]]) -> None:
+        judge_discord_moments(self, moments, received_triggers(self.agent.requests() if self.agent else ()))
+
+    def scripted_check(self, moments: Sequence[Mapping[str, Any]]) -> Check:
+        return checks_module.discord_scripted_outcomes(moments, HERMES_EXPECTED, pins=self.pins, notes=HERMES_NOTES, reply_note=HERMES_REPLY_NOTE)
+
+    def room_checks(self, document: Mapping[str, Any]) -> list[Check]:
+        expected = {self.discord.agent: {"chunk": True, "calls": self.expected_calls}}
+        # The known gaps of the plugin and Hermes, pinned as they are (README, Known gaps): the plugin declares no gap
+        # when it starts, a reply to the agent's answer has no target in the room log, and the agent's own reaction is
+        # not remembered. It marks no gap after a reconnect either, so one that appears fails. Each fails the lane
+        # when it changes, until the pin and its docs are updated.
+        return self.discord.checks(
+            self.committed,
+            expected=expected,
+            gaps_fail=True,
+            moments=document["moments"],
+            start_required=None,
+            reply_resolves=False,
+            own_reaction_remembered=False,
+        )
+
+    def room_record(self) -> dict[str, Any]:
+        return {"discord": self.discord.record()}
+
+    def close(self) -> None:
+        try:
+            self.stop_hermes()
+            self.discord.close()
+        finally:
+            if self.agent is not None:
+                self.agent.close()
+
+
+LEGS: dict[str, type[Leg]] = {"claude-code": DiscordClaudeCodeLeg, "codex": DiscordCodexLeg, REFERENCE: ReferenceLeg, HERMES: HermesGatewayLeg}

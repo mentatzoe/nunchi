@@ -8,7 +8,11 @@ discovery, with only the model scripted. On Discord they use Hermes's stock
 Discord adapter with fake discord.py channels, threads and messages, as
 Hermes's own tests do. It replaces the older Hermes
 integration under `integrations/hermes/`, which stays until this plugin has
-passed live checks and Zoe decides to remove it.
+passed live checks and Zoe decides to remove it. Hermes's own gateway process
+(`hermes gateway run`), with this plugin and the settings below, has also run
+offline on a Discord stand-in at Discord's real names, in a scripted lane
+(`docs/rehearsal.md`, the Hermes column): implemented, unverified in CI, and
+not a live Discord room either.
 
 The plugin uses Hermes's public plugin surface only (hooks, tools,
 `ctx.inject_message`, `ctx.platform_actions`). It patches nothing.
@@ -278,7 +282,11 @@ The kit's Discord lane runs Hermes with this block and these variables (the
 room's role, and no user allowlist), and runs Hermes's connect-time
 allowlist check; a test checks that they match. Tests pin who the role lets
 in and that it keeps direct messages out, and the direct messages a user
-list, `*` or `dm_role_auth_guild` opens.
+list, `*` or `dm_role_auth_guild` opens. The rehearsal's Hermes lane writes
+the same block and variables into the profile of a real `hermes gateway run`
+and shows what they do there: with a role id that none of the scripted
+people has, none of them is heard, and with `allow_bots: all` left out, the
+bot's status report is not (`docs/rehearsal.md`).
 
 More setup on Discord:
 
@@ -308,7 +316,14 @@ More setup on Discord:
   bot's own messages before any plugin hook. The library records each message
   it committed for Hermes in the room log itself, with an id of its own, as a
   reply to the message the turn was about. So memory, threads and the room's
-  pace see it, but nothing can target it on the platform.
+  pace see it, but nothing can target it on the platform. A person's reply to
+  it names the real Discord id, which the room log does not hold: the reply
+  reaches the agent with its ping and its reply target, but the library cannot
+  link it to the agent's own message, so the exchange is not filed as a
+  response to the agent unless attention judges that it responds to it. The
+  rehearsal's Hermes lane pins that the target does not resolve
+  (`docs/rehearsal.md`, the Hermes column), so a fix fails the lane until its
+  pin and this entry are updated.
 - **Mentions under `plugins.isolation: host`.** Mentions and the bot flag come
   from the platform's own message object, which does not cross into the plugin
   host. There a message reads as mentioning nobody, and on Discord Hermes has
@@ -395,7 +410,11 @@ More setup on Discord:
   channel (on Telegram, in General), not in the thread. The library places a
   library-hosted agent's reply, post and reaction in the thread (the shared
   Discord transport and the reference adapter do); here only the agent's
-  reaction does, since it goes through `platform_actions`. Not fixed.
+  reaction does, since it goes through `platform_actions`. Not fixed. The
+  rehearsal's Hermes lane pins it against `hermes gateway run`: its answer to
+  a question asked in a thread must land in the main channel, so a fix makes
+  the lane fail until its pin and this entry are updated
+  (`docs/rehearsal.md`, the Hermes column).
 - **Messages that name another bot.** Hermes drops a Discord message that
   @mentions another bot and not this one, before any plugin hook, whatever
   the settings. That includes a reply to a peer agent's message: Discord's
@@ -452,6 +471,34 @@ More setup on Discord:
   the runs in flight end, up to `agent.restart_after_turn_timeout` (30
   minutes by default). No setting stops the notices (candidate gap 14).
 - **No room history after a restart** beyond Nunchi's own log.
+- **No continuity gap when it starts.** The plugin builds its room on the first
+  message it admits and marks no gap then, as the shared Discord transport and
+  the reference adapter do (and the older Hermes integration did). Its first
+  snapshot reports continuity `restart-safe`, with no gap and no restart gap,
+  even when Hermes was down and missed messages, so the participant does not
+  know it cannot attest what it missed. Not fixed: closing it is library work
+  (declare the gap when the room starts). The rehearsal's Hermes lane pins it
+  absent, so a plugin that starts declaring one fails the lane until the pin and
+  this entry are updated; it never restarts Hermes, so what happens after a real
+  restart is not shown there.
+- **The agent's own reaction is not remembered.** Hermes gives plugins no
+  reaction events, and `platform_actions.add_reaction` returns only `ok`, so the
+  library records no event for a reaction the agent added. The agent's next turn
+  has its messages in `memory.own_moves` and not the reaction, so it can nod at
+  a message again, or answer one it has already acknowledged, with no sign it
+  did. Not fixed: the library could put the reaction in the room log when the
+  transport reports it sent, as it does for a message Hermes delivered. The
+  rehearsal's Hermes lane pins it, so a fix fails the lane until the pin and
+  this entry are updated.
+- **Registered slash commands.** Besides answering typed commands (Built-in
+  slash commands), Hermes registers about 70 application commands in the bot's
+  name on Discord, one every 4.5 seconds from its start, whatever the plugin
+  does. Everyone in the server sees them in the slash menu, not only the room.
+  Hermes's default (`DISCORD_COMMAND_SYNC_POLICY`, `safe`) is kept until the
+  slash-command work (decision D4). The rehearsal's Hermes lane sees them
+  register (all 70 in a run held open for 5.5 minutes) but never invokes one: the
+  stand-in cannot send an interaction, so what an invoked command does is not
+  shown.
 - **Hermes's process is not private.** The plugin runs inside Hermes's own
   process, and Nunchi leaves a stock harness's process alone: it does not
   call `nunchi.private_process.keep_private`, as its own runners do. Another

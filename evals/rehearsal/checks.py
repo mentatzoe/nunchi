@@ -410,8 +410,11 @@ def scripted_outcomes(moments: Sequence[Mapping[str, Any]], answer: str, *, room
 #     failed.
 # 14. **discord-addressing**: a graded message reached the agent as it was
 #     sent: the pings it carried (the direct question and the thumbs-up
-#     request ping the agent) and, for the reply, the agent's own last
-#     message as the one it replies to.
+#     request ping the agent, and the reply pings its target's author) and,
+#     for the reply, the agent's own last message as the one it replies to.
+#     Two things the room log must give the agent are pinned per column: the
+#     reply's target resolves to the agent's own post, and the next turn
+#     after its reaction holds that reaction in memory.
 #
 # With ``--scripted``, `discord_scripted_outcomes` checks each moment of the
 # Discord room. A moment that expects ``report`` is reported, not graded,
@@ -430,6 +433,8 @@ def discord_moment_outcome(
     actions: Sequence[Mapping[str, Any]],
     graded_event: str | None,
     thread: str | None = None,
+    posts_itself: bool = False,
+    channel: str | None = None,
 ) -> str:
     """How a moment of the Discord room went against what it expects.
 
@@ -439,6 +444,14 @@ def discord_moment_outcome(
     ``thread-reply`` one reply to it that landed in the thread named
     ``thread`` (the action's ``where``, read from the wire), not in the
     channel. ``report`` reads `NOT_DELIVERED` or `REACHED`: it is never graded.
+
+    A harness that posts its final answer itself (``posts_itself``, Hermes)
+    makes no Discord reply: a ``reply`` fits one plain message the turn was
+    about the graded message (``origin_event_id``) that the wire shows posted
+    as a plain message (``replied_to`` None), and a ``thread-reply`` the
+    same message landing in the main ``channel``, where Hermes starts every
+    run, not in the thread: gaps pinned until Hermes or its plugin closes
+    them (integrations/hermes-plugin/README.md, Known gaps).
     """
 
     if expect in ("post", "no-turn"):
@@ -448,6 +461,16 @@ def discord_moment_outcome(
         return REACHED if reached else NOT_DELIVERED
     if not reached:
         return NOT_DELIVERED
+    if expect in ("reply", "thread-reply") and posts_itself:
+        fits = (
+            len(actions) == 1
+            and actions[0].get("kind") == "message"
+            and actions[0].get("origin_event_id") == graded_event
+            and not actions[0].get("replied_to")
+        )
+        if fits and expect == "thread-reply":
+            fits = bool(channel) and actions[0].get("where") == channel
+        return FITS if fits else MISSES
     if expect in ("reply", "thread-reply"):
         wanted = "reply"
     elif expect == "reaction":
@@ -466,6 +489,8 @@ def discord_scripted_outcomes(
     *,
     pins: Mapping[str, str] | None = None,
     room_tool_called: bool | None = None,
+    notes: Mapping[str, str] | None = None,
+    reply_note: str | None = None,
 ) -> Check:
     """With the model and attention scripted, every graded moment of the Discord room is known: check it.
 
@@ -475,6 +500,10 @@ def discord_scripted_outcomes(
     with exactly that action, and no other message may start a turn. A
     ``report`` moment is checked only where ``pins`` names it, against the
     outcome pinned (a known gap, kept visible until the library closes it).
+    ``notes`` says, by moment name, what a graded moment in a thread that
+    misses may mean: a gap it pins, so that a fix reads as one. A harness that
+    posts its answers itself is pinned to plain messages: an action the wire
+    shows posted as a Discord reply (``replied_to``) fails with ``reply_note``.
     """
 
     problems: list[str] = []
@@ -488,11 +517,15 @@ def discord_scripted_outcomes(
                 problems.append(f"{name} reads {moment.get('outcome')!r}, not the pinned {pins[name]!r}: update the pin and its docs")
             continue
         if moment.get("outcome") != FITS:
-            problems.append(f"{name} reads {moment.get('outcome')!r}, not {FITS!r}")
+            # The note names a gap about where an answer lands: only for a thread's moment that missed, not one never heard.
+            note = (notes or {}).get(name) if moment.get("outcome") == MISSES and moment.get("thread") else None
+            problems.append(f"{name} reads {moment.get('outcome')!r}, not {FITS!r}" + (f" ({note})" if note else ""))
         wanted = script.get(expect)
         if wanted is None:
             continue
         for action in moment.get("actions", ()):
+            if reply_note and action.get("replied_to"):
+                problems.append(f"{name}'s {action.get('kind')} was posted as a Discord reply to {action['replied_to']} ({reply_note})")
             if action.get("kind") != wanted["kind"]:
                 problems.append(f"{name} made a {action.get('kind')}, not the scripted {wanted['kind']}")
             for field in ("text", "reaction"):
@@ -649,7 +682,9 @@ def discord_writes_reconciled(committed: Sequence[Mapping[str, Any]], writes: Se
     return Check("discord-writes-reconciled", not problems, detail)
 
 
-def discord_continuity(start: Mapping[str, Any], reconnects: Sequence[Mapping[str, Any]], *, gaps_fail: bool) -> Check:
+def discord_continuity(
+    start: Mapping[str, Any], reconnects: Sequence[Mapping[str, Any]], *, gaps_fail: bool, start_required: bool | None = True
+) -> Check:
     """The gap a fresh process declares reached the participant, and a reconnect lost nothing.
 
     ``start`` is the continuity gap the column's process declares when it
@@ -661,12 +696,22 @@ def discord_continuity(start: Mapping[str, Any], reconnects: Sequence[Mapping[st
     transport's journal (``transport_gaps``) and in the participant's
     observations (``participant_gaps``). ``gaps_fail`` is False for the
     reference, which marks a stream gap on any disconnect by design: those
-    are recorded, not failed.
+    are recorded, not failed. ``start_required`` is False for a column whose
+    process declares no gap when it starts: the start is then recorded, and a
+    gap it did declare is still shown. It is None for a column pinned to
+    declare none (Hermes's plugin, a known gap): a gap it starts declaring
+    fails, so the pin and its docs are updated, and then the gap is required.
     """
 
     problems: list[str] = []
     recorded: list[str] = []
-    if not start.get("gap"):
+    if start_required is None:
+        if start.get("gap"):
+            problems.append(
+                f"the {start.get('process', 'process')} now declares a gap when it starts ({start['gap']}): update the pin, "
+                "docs/rehearsal.md, the CHANGELOG and the plugin README's Known gaps, then require the gap"
+            )
+    elif start_required and not start.get("gap"):
         problems.append(f"the participant never saw the gap its {start.get('process', 'process')} declares when it starts")
     for item in reconnects:
         bot = item.get("bot")
@@ -684,36 +729,53 @@ def discord_continuity(start: Mapping[str, Any], reconnects: Sequence[Mapping[st
     if not reconnects:
         problems.append("no reconnect was played")
     detail = "; ".join(problems) or (
-        f"the start gap reached the participant; {len(reconnects)} bot(s) resumed after op 7 and the message posted meanwhile "
+        ("the start gap reached the participant" if start.get("gap") else "the process declares no start gap")
+        + f"; {len(reconnects)} bot(s) resumed after op 7 and the message posted meanwhile "
         "reached Nunchi" + ("; " + "; ".join(recorded) if recorded else ", with no continuity gap")
     )
     return Check("discord-continuity", not problems, detail)
 
 
-def discord_addressing(moments: Sequence[Mapping[str, Any]], *, agent: str, writes: Sequence[Mapping[str, Any]]) -> Check:
-    """A graded message reached the agent as it was sent: whom it pinged, and the message it replied to.
+def discord_addressing(
+    moments: Sequence[Mapping[str, Any]],
+    *,
+    agent: str,
+    writes: Sequence[Mapping[str, Any]],
+    reply_resolves: bool = True,
+    own_reaction_remembered: bool = True,
+) -> Check:
+    """A graded message reached the agent as it was sent, and the agent can find its own part in the room log.
 
     Each delivery of a graded moment (``post``, ``reply``, ``reaction``)
     records what the stand-in sent (``mentioned_actor_ids``, ``reply_to``)
     and ``received``, what the turn handed to the scripted agent or
     participant showed of that trigger (``mentioned_actor_ids``,
-    ``reply_to_event_id``). The direct question and the thumbs-up request
-    must ping ``agent`` (its actor id), and every ping sent must have
-    arrived; the reply must have been sent as a reply to the agent's own
-    last message on the wire (``writes``, the bot's 2xx writes) and arrive
-    as one. The question in a thread (``thread-reply``) must ping the
-    agent too, and arrive as a message in the thread it was sent in
-    (``thread``, the thread's event id, against the trigger's
-    ``thread_root_event_id``). A transport or reference that drops a ping, a
-    reply reference or a thread fails here: the scripted agent answers a
-    phrase either way, but a participant reading the room would not know it
-    had been addressed.
+    ``reply_to_event_id``, and the agent's ``own_moves`` in its memory). The
+    direct question and the thumbs-up request must ping ``agent`` (its actor
+    id), and every ping sent must have arrived, a reply's ping at its
+    author included (Discord pings the author of the message replied to); the
+    reply must have been sent as a reply to the agent's own last message on
+    the wire (``writes``, the bot's 2xx writes) and arrive as one. The
+    question in a thread (``thread-reply``) must ping the agent too, and
+    arrive as a message in the thread it was sent in (``thread``, the
+    thread's event id, against the trigger's ``thread_root_event_id``). A
+    transport or reference that drops a ping, a reply reference or a thread
+    fails here: the scripted agent answers a phrase either way, but a
+    participant reading the room would not know it had been addressed.
+
+    Two facts are pinned either way, because a harness may not give the
+    library what it needs (``reply_resolves`` and ``own_reaction_remembered``
+    are True for every column but Hermes, whose gaps they pin until the plugin
+    or Hermes closes them): the reply's target must resolve to the agent's own
+    post in the room log (``reply_resolves`` on the delivery), and the next
+    turn after the agent's reaction must hold that reaction in its
+    ``own_moves``. A pin that no longer holds fails and says to update it.
     """
 
     problems: list[str] = []
     ours = [int(write["message_id"]) for write in writes if write.get("kind") == "message" and str(write.get("message_id", "")).isdigit()]
     graded: list[str] = []
-    for moment in moments:
+    for index, moment in enumerate(moments):
         expect, name = moment.get("expect"), moment.get("name")
         if expect not in ("post", "reply", "reaction", "thread-reply"):
             continue
@@ -739,6 +801,16 @@ def discord_addressing(moments: Sequence[Mapping[str, Any]], *, agent: str, writ
                 problems.append(f"{name}: it was not sent as a reply to the agent's own last message (reply_to {reply_to})")
             elif received.get("reply_to_event_id") != f"discord:message:{reply_to}":
                 problems.append(f"{name}: sent as a reply to {reply_to}, but Nunchi saw reply_to_event_id={received.get('reply_to_event_id')}")
+            elif bool(delivery.get("reply_resolves")) != reply_resolves:
+                problems.append(
+                    f"{name}: the reply's target {received.get('reply_to_event_id')} "
+                    + (
+                        "is not the agent's own post in the room log, so the library cannot link the reply to it"
+                        if reply_resolves
+                        else "now resolves to the agent's own post in the room log: update the pin, docs/rehearsal.md, "
+                        "the CHANGELOG and the plugin README's Known gaps (No delivered message id), then require it"
+                    )
+                )
         if expect == "thread-reply":
             thread = delivery.get("thread")
             if not thread:
@@ -747,8 +819,37 @@ def discord_addressing(moments: Sequence[Mapping[str, Any]], *, agent: str, writ
                 problems.append(
                     f"{name}: sent in the thread {thread}, but Nunchi saw thread_root_event_id={received.get('thread_root_event_id')}"
                 )
+        if expect == "reaction":
+            target = moment.get("graded_event")
+            after = next(
+                (
+                    item["received"]
+                    for later in moments[index + 1:]
+                    for item in later.get("deliveries", ())
+                    if (item.get("received") or {}).get("own_moves") is not None
+                ),
+                None,
+            )
+            if after is None:
+                problems.append(f"{name}: no later turn showed whether the agent remembers its reaction")
+            elif any(move.get("kind") == "reaction" and move.get("about_event_id") == target for move in after["own_moves"]) != own_reaction_remembered:
+                problems.append(
+                    f"{name}: the next turn ({after.get('trigger')}) "
+                    + (
+                        f"does not hold the agent's reaction to {target} in memory.own_moves"
+                        if own_reaction_remembered
+                        else f"now holds the agent's reaction to {target} in memory.own_moves: update the pin, docs/rehearsal.md, "
+                        "the CHANGELOG and the plugin README's Known gaps (The agent's own reaction is not remembered), then require it"
+                    )
+                )
         graded.append(f"{name} {'replied to the agent' if expect == 'reply' else 'pinged the agent'}")
     if not graded and not problems:
         problems.append("no graded message was played")
-    detail = "; ".join(problems) or f"each graded message reached the agent as sent: {', '.join(graded)}"
+    pinned = [
+        *([] if reply_resolves else ["the reply's target does not resolve to the agent's post"]),
+        *([] if own_reaction_remembered else ["the agent's own reaction is not remembered"]),
+    ]
+    detail = "; ".join(problems) or (
+        f"each graded message reached the agent as sent: {', '.join(graded)}" + (f"; pinned: {', '.join(pinned)}" if pinned else "")
+    )
     return Check("discord-addressing", not problems, detail)

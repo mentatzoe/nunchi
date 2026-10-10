@@ -170,6 +170,43 @@ class DiscordPyTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(forbidden.exception.code, 50013)
         self.assertClean()
 
+    async def test_the_routes_hermes_calls_are_read_by_discord_py(self):
+        """History, one message, a reaction read back, the slash-command sync and the application's flags: what `hermes gateway run` asks of Discord."""
+        room = self.channel("room")
+        ids = [int(self.fd.post("zoe", "room", f"message {number}")["id"]) for number in range(3)]
+        found = [m async for m in room.history(limit=2, before=discord.Object(ids[2]))]
+        self.assertEqual([m.id for m in found], [ids[1], ids[0]], "newest first, before the id")
+        self.assertEqual([m.content for m in found], ["message 1", "message 0"])
+        message = await room.fetch_message(ids[0])
+        self.assertEqual((message.content, message.author.name), ("message 0", "zoe"))
+        await message.add_reaction("👍")
+        read_back = await room.fetch_message(ids[0])
+        self.assertEqual([(str(r.emoji), r.count, r.me) for r in read_back.reactions], [("👍", 1, True)])
+        with self.assertRaises(discord.NotFound) as unknown:
+            await room.fetch_message(1)
+        self.assertEqual(unknown.exception.code, 10008)
+        flags = self.client.application_flags
+        # An unverified bot in fewer than 100 servers, as Discord sets its flags: the "limited" bits, not the full ones.
+        self.assertTrue(flags.gateway_message_content_limited and flags.gateway_guild_members_limited, "both privileged intents are enabled for the bot")
+        self.assertFalse(flags.gateway_message_content or flags.gateway_guild_members, "the full bits are a verified bot's")
+
+        tree = discord.app_commands.CommandTree(self.client)
+
+        @tree.command(name="status", description="Show the session")
+        async def status(interaction: discord.Interaction) -> None:  # pragma: no cover - never invoked
+            pass
+
+        self.assertEqual(await tree.fetch_commands(), [])
+        desired = [command.to_dict(tree) for command in tree.get_commands()]
+        created = await self.client.http.upsert_global_command(self.client.application_id, desired[0])
+        self.assertEqual((created["name"], created["type"]), ("status", 1))
+        (fetched,) = await tree.fetch_commands()
+        self.assertEqual((fetched.name, fetched.description, fetched.id), ("status", "Show the session", int(created["id"])))
+        again = await self.client.http.upsert_global_command(self.client.application_id, desired[0])
+        self.assertEqual(again["id"], created["id"], "the same name overwrites")
+        self.assertEqual(len(await tree.fetch_commands()), 1)
+        self.assertClean()
+
     async def test_a_reconnect_resumes_the_session(self):
         self.fd.gateway("dpy", "reconnect")
         await self.next("resumed")
