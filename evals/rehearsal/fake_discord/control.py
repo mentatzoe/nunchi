@@ -15,6 +15,7 @@ from datetime import datetime
 import itertools
 import json
 from pathlib import Path
+import secrets
 import threading
 from typing import Any, Callable
 
@@ -28,13 +29,16 @@ class FakeDiscord:
     """Discord's REST API and gateway for one world, at ``host:port``.
 
     With ``tls=(certfile, keyfile)`` it answers as ``discord.com`` and
-    ``gateway.discord.gg`` (PR 3b's launcher maps those names here); without,
-    on plain loopback. With ``out``, it writes ``world.json`` on start, the
-    wire log as it goes, and ``discord-standin.json`` (the verdict) on stop.
+    ``gateway.discord.gg`` (the launcher, `discord_net.py`, maps those names
+    here); without, on plain loopback. With ``out``, it writes ``world.json``
+    on start, the wire log as it goes, and ``discord-standin.json`` (the
+    verdict) on stop. ``preflight_nonce`` (random unless given) is what its
+    preflight route answers, and what `preflight.py` checks for.
     """
 
     def __init__(self, world: World | dict[str, Any] | None = None, out: str | Path | None = None, *,
-                 host: str = "127.0.0.1", port: int = 0, tls: tuple[str, str] | None = None) -> None:
+                 host: str = "127.0.0.1", port: int = 0, tls: tuple[str, str] | None = None,
+                 preflight_nonce: str | None = None) -> None:
         self.world = world if isinstance(world, World) else World(world)
         self.out = Path(out) if out is not None else None
         bots = [m for m in self.world.members.values() if m.bot]
@@ -43,6 +47,7 @@ class FakeDiscord:
         self.hub = Hub(self)
         self.faults: list[dict[str, Any]] = []
         self.host, self.port, self.tls = host, port, tls
+        self.preflight_nonce = preflight_nonce or secrets.token_hex(16)
         self.rest_hosts = {REST_HOST} if tls else {REST_HOST, host}
         self.gateway_hosts = {GATEWAY_HOST} if tls else {GATEWAY_HOST, host}
         self._conns = itertools.count(1)

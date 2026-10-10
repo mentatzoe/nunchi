@@ -42,6 +42,37 @@ Pending gaps and accepted-but-unconfirmed deliveries are reconstructed after
 restart. A non-resumable gateway session marks every configured route
 uncertain. Gaps make subsequent coverage continuity `unknown`.
 
+## What it does not deliver yet
+
+Three gaps, each library work in the transport. The first two are pinned as
+`not delivered` by the rehearsal probe's Discord room
+(`evals/rehearsal/discord_room.py`, docs/rehearsal.md) until the transport
+closes them.
+
+- **A message in a thread.** A message in a thread under a routed channel
+  carries the thread's id as its channel. That id is not routed, so the
+  gateway runner drops the message (`runner.py`) and the participant never
+  hears it. The Hermes plugin hears such threads as part of the room.
+  Closing it means mapping a thread to its routed parent channel.
+- **The first message after the transport starts.** A fresh process cannot
+  know what happened before its gateway session, so it marks every route
+  uncertain. The next routed event is then rejected (`queue-rejected`) and a
+  gap notification takes its place, although the transport had the event in
+  hand. The participant learns that something may be missing, but not what a
+  person just said.
+- **A notification sent before the runner's stream is open** (not pinned:
+  it depends on timing). The runner registers, then opens its notification
+  stream (`GET /mcp`). The MCP SDK keeps no event store here, so a
+  notification sent in between is dropped, while the transport's journal
+  records it as delivered. Run here (2026-10-09, mcp 1.28.1) inside the
+  rehearsal launcher: a message posted right after registration became the
+  start gap, the journal read `gap-delivered`, and the runner never received
+  it; the next message arrived with `continuity_gap: false`, so the
+  participant never learned that anything was missing. The rehearsal waits
+  for the stream before it plays, so its lanes do not hit this. Closing it
+  means opening the stream before registering, or keeping each notification
+  until a stream takes it.
+
 ## Tools
 
 - `register_participant`

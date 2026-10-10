@@ -229,6 +229,12 @@ NUNCHI_DISCORD_STATE_DIRECTORY
 `{"codex":["123456789"]}`. It defines exact participant/room pairs, never a
 participant-by-room cross product.
 
+The shared transport does not deliver everything yet: a message in a thread
+under a routed channel, the first routed message after it starts (the
+participant gets only a continuity gap), and a notification sent before the
+runner's stream is open. See
+[What it does not deliver yet](../integrations/mcp-discord/README.md#what-it-does-not-deliver-yet).
+
 `NUNCHI_DISCORD_OUTPUT_HMAC_KEY` must be at least 32 bytes and shared only
 between the host-owned participant runner and transport. Output/history tool
 calls require a short-lived, exact-operation HMAC. Accepted nonces are fsynced

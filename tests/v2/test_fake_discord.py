@@ -478,6 +478,22 @@ class SocialFactsTest(StandIn, unittest.TestCase):
         self.assertEqual(len([r for r in self.fd.wire.records if r["kind"] == "http"]), 5)
 
 
+class PreflightRouteTest(StandIn, unittest.TestCase):
+    """The stand-in's own route, not Discord's: it answers this run's nonce, with no token, and nothing else."""
+
+    def test_it_answers_only_the_runs_nonce(self):
+        fd = self.start(preflight_nonce="run-nonce")
+        self.assertEqual(self.api("GET", "/_preflight/run-nonce", bot=None)[::2], (200, {"nonce": "run-nonce"}))
+        self.assertTrue(fd.verdict()["clean"], "the run's own check is not unknown")
+        status, _, body = self.api("GET", "/_preflight/another-run", bot=None)
+        self.assertEqual((status, body), (404, {"message": "404: Not Found", "code": 0}), "as the real Discord would answer it")
+        self.assertEqual([(u["what"], u["nonce"]) for u in fd.verdict()["unknown"]], [("preflight nonce", "another-run")])
+        self.assertEqual(self.api("POST", "/_preflight/run-nonce", bot=None)[0], 599, "GET only")
+
+    def test_each_run_has_its_own(self):
+        self.assertNotEqual(FakeDiscord(WORLD).preflight_nonce, FakeDiscord(WORLD).preflight_nonce)
+
+
 class ClockTest(StandIn, unittest.TestCase):
     def test_the_rooms_clock_only_moves_forward_and_a_bots_post_brings_it_to_the_wall(self):
         start = datetime(2026, 10, 9, 12, 0, tzinfo=timezone.utc).timestamp()

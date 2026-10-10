@@ -36,6 +36,9 @@ summary.md:
 7. **scripted-outcomes** (``--scripted`` only): with the model and attention
    scripted, each moment's outcome is known, so it is checked.
 
+A run in the Discord room (``--room discord``, PR 3b) holds seven more, the
+``discord-*`` checks, listed with them below.
+
 Neither the key nor the canary may be in any output: the scan
 (`scan.enforce`) fails the run after the record is written.
 
@@ -50,6 +53,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import Any
 
@@ -377,3 +381,358 @@ def scripted_outcomes(moments: Sequence[Mapping[str, Any]], answer: str, *, room
         problems.append("no room tool was called")
     detail = "; ".join(problems) or f"{len(moments)} moment(s), each as scripted"
     return Check("scripted-outcomes", not problems, detail)
+
+
+# -- the Discord room (step 9f, PR 3b; `discord_room.py`) -------------------------------------------
+#
+# With ``--room discord`` the room is the Discord stand-in, reached at
+# Discord's names through the launcher, and Nunchi's own Discord processes
+# run on it unmodified. Beside the checks above, a run in it holds these:
+#
+# 8. **discord-preflight**: each Discord process's preflight passed in that
+#    process's own environment, and showed the launcher's certificate.
+# 9. **discord-processes**: each Discord process got only its own keys, was
+#    still running when the moments ended, and stopped when asked.
+# 10. **discord-standin-clean**: the stand-in's verdict is clean: no unknown
+#     route, op, host, request or payload shape.
+# 11. **discord-clients-complete**: every bot identified, got READY (and a
+#     member chunk, where its client asks for one), and made the calls its
+#     column must make.
+# 12. **discord-writes-reconciled**: each committed action that reads
+#     ``sent`` matches exactly one write the bot made, with the same content
+#     and target, and every write the bot made matches a committed action.
+# 13. **discord-continuity**: the continuity gap the column's process
+#     declares when it starts reached the participant; after op 7, every bot
+#     resumed its session (no new IDENTIFY) and the message posted meanwhile
+#     reached Nunchi. On the shared transport, also no continuity gap: not in
+#     the transport's journal, not in the participant's observations. The
+#     reference marks a stream gap on any disconnect; that is recorded, not
+#     failed.
+# 14. **discord-addressing**: a graded message reached the agent as it was
+#     sent: the pings it carried (the direct question and the thumbs-up
+#     request ping the agent) and, for the reply, the agent's own last
+#     message as the one it replies to.
+#
+# With ``--scripted``, `discord_scripted_outcomes` checks each moment of the
+# Discord room. A moment that expects ``report`` is reported, not graded,
+# unless the column pins it (the shared transport drops thread messages and
+# the first message after it starts: both read ``not delivered``; the
+# reference's first message reads ``reached`` and its thread message ``not
+# delivered``).
+
+REACHED = "reached"
+
+
+def discord_moment_outcome(
+    expect: str,
+    *,
+    reached: bool,
+    graded_turns: int,
+    actions: Sequence[Mapping[str, Any]],
+    graded_event: str | None,
+) -> str:
+    """How a moment of the Discord room went against what it expects.
+
+    ``actions`` are the delivered committed actions of the moment's graded
+    turns. ``post`` and ``no-turn`` read as `moment_outcome`. ``reply`` fits
+    one reply to the graded message, ``reaction`` one reaction on it.
+    ``report`` reads `NOT_DELIVERED` or `REACHED`: it is never graded.
+    """
+
+    if expect in ("post", "no-turn"):
+        posts = sum(1 for action in actions if action.get("kind") in ("message", "reply"))
+        return moment_outcome(expect, reached=reached, graded_turns=graded_turns, delivered_posts=posts)
+    if expect == "report":
+        return REACHED if reached else NOT_DELIVERED
+    if not reached:
+        return NOT_DELIVERED
+    if expect == "reply":
+        wanted = "reply"
+    elif expect == "reaction":
+        wanted = "reaction"
+    else:
+        raise ValueError(f"unknown expectation {expect!r}")
+    fits = len(actions) == 1 and actions[0].get("kind") == wanted and actions[0].get("target_event_id") == graded_event
+    return FITS if fits else MISSES
+
+
+def discord_scripted_outcomes(
+    moments: Sequence[Mapping[str, Any]],
+    script: Mapping[str, Mapping[str, Any]],
+    *,
+    pins: Mapping[str, str] | None = None,
+    room_tool_called: bool | None = None,
+) -> Check:
+    """With the model and attention scripted, every graded moment of the Discord room is known: check it.
+
+    ``script`` gives, for each expectation (``post``, ``reply``,
+    ``reaction``), the one delivered action the scripted agent makes: its
+    ``kind`` and its ``text`` or ``reaction``. Each graded moment must fit,
+    with exactly that action, and no other message may start a turn. A
+    ``report`` moment is checked only where ``pins`` names it, against the
+    outcome pinned (a known gap, kept visible until the library closes it).
+    """
+
+    problems: list[str] = []
+    pins = dict(pins or {})
+    for moment in moments:
+        name, expect = moment.get("name"), moment.get("expect")
+        if moment.get("other_turns"):
+            problems.append(f"{name} had {moment['other_turns']} turn(s) on other messages")
+        if expect == "report":
+            if name in pins and moment.get("outcome") != pins[name]:
+                problems.append(f"{name} reads {moment.get('outcome')!r}, not the pinned {pins[name]!r}: update the pin and its docs")
+            continue
+        if moment.get("outcome") != FITS:
+            problems.append(f"{name} reads {moment.get('outcome')!r}, not {FITS!r}")
+        wanted = script.get(expect)
+        if wanted is None:
+            continue
+        for action in moment.get("actions", ()):
+            if action.get("kind") != wanted["kind"]:
+                problems.append(f"{name} made a {action.get('kind')}, not the scripted {wanted['kind']}")
+            for field in ("text", "reaction"):
+                if field in wanted and action.get(field) != wanted[field]:
+                    problems.append(f"{name}'s {field} is {str(action.get(field))[:80]!r}, not the scripted one")
+    if not moments:
+        problems.append("no moment was played")
+    if room_tool_called is False:
+        problems.append("no room tool was called")
+    detail = "; ".join(problems) or (
+        f"{len(moments)} moment(s), each as scripted"
+        + (f"; pinned: {', '.join(f'{name} {outcome}' for name, outcome in pins.items())}" if pins else "")
+    )
+    return Check("scripted-outcomes", not problems, detail)
+
+
+def discord_preflight(processes: Sequence[Mapping[str, Any]], *, leaf_sha256: str | None) -> Check:
+    """Each Discord process's preflight passed in its own environment and showed the launcher's certificate."""
+
+    problems: list[str] = []
+    for process in processes:
+        name = process.get("name", "a Discord process")
+        result = process.get("preflight") or {}
+        if not result.get("ok"):
+            problems.append(f"{name}'s preflight failed: {'; '.join(result.get('failures') or ['it did not run'])}")
+        elif not result.get("nonce_checked"):
+            problems.append(f"{name}'s preflight did not check the run's nonce")
+        elif not leaf_sha256 or result.get("certificate_sha256") != leaf_sha256:
+            problems.append(f"{name}'s preflight saw another certificate than the launcher's")
+    if not processes:
+        problems.append("no Discord process ran")
+    detail = "; ".join(problems) or (
+        f"{len(processes)} process(es): Discord's names led each to this run's stand-in, with the launcher's certificate, and no proxy"
+    )
+    return Check("discord-preflight", not problems, detail)
+
+
+def discord_processes(processes: Sequence[Mapping[str, Any]]) -> Check:
+    """Each Discord process got only its own keys, ran through the moments, and stopped when asked.
+
+    Each entry names the variables holding a key (``secrets``) and those its
+    column allows (``own_keys``): its bot token, and for the transport its
+    output key, for the reference its attention and participant keys. Any
+    other key, the harness's or the canary, fails.
+    """
+
+    problems: list[str] = []
+    for process in processes:
+        name = process.get("name", "a Discord process")
+        extra = sorted(set(process.get("secrets", ())) - set(process.get("own_keys", ())))
+        if extra:
+            problems.append(f"{name} got a key that is not its own in {', '.join(extra)}")
+        if not process.get("running_after_moments"):
+            problems.append(f"{name} was not running when the moments ended (exit {process.get('exit')})")
+        if process.get("stopped_by") not in ("SIGINT", "SIGTERM") or process.get("exit") is None:
+            problems.append(f"{name} did not stop when asked ({process.get('stopped_by')}, exit {process.get('exit')})")
+    if not processes:
+        problems.append("no Discord process ran")
+    detail = "; ".join(problems) or "; ".join(
+        f"{process.get('name')}: keys {', '.join(process.get('secrets', ())) or 'none'}, stopped by {process.get('stopped_by')} "
+        f"(exit {process.get('exit')})"
+        for process in processes
+    )
+    return Check("discord-processes", not problems, detail)
+
+
+def discord_standin_clean(verdict: Mapping[str, Any]) -> Check:
+    """The stand-in's own verdict: no unknown route, op, host, request or payload shape (`fake_discord.wire.verdict`)."""
+
+    unknown = list(verdict.get("unknown") or ())
+    if verdict.get("clean") and not unknown:
+        raised = len(verdict.get("raised") or ())
+        return Check("discord-standin-clean", True, "no unknown record" + (f"; {raised} message time(s) raised to keep ids increasing" if raised else ""))
+    shown = "; ".join(
+        f"{item.get('what')}: " + json.dumps({key: value for key, value in item.items() if key not in ("kind", "at", "n", "what")}, sort_keys=True)[:200]
+        for item in unknown[:10]
+    )
+    return Check("discord-standin-clean", False, f"{len(unknown)} unknown record(s): {shown or 'the verdict is not clean'}")
+
+
+def discord_clients_complete(
+    bots: Mapping[str, Mapping[str, Any]],
+    expected: Mapping[str, Mapping[str, Any]],
+    calls: Mapping[str, Iterable[str]],
+) -> Check:
+    """Every expected bot identified, got READY (and a member chunk where asked), and made its column's calls.
+
+    ``bots`` is the verdict's per-bot count; ``expected`` gives, per bot,
+    ``chunk`` (its client asks for members) and ``calls``, each
+    ``METHOD /route`` it must have made with a 2xx answer; ``calls`` is what
+    it made.
+    """
+
+    problems: list[str] = []
+    for bot, want in expected.items():
+        seen = bots.get(bot) or {}
+        if not seen.get("identify"):
+            problems.append(f"{bot} never identified")
+        if not seen.get("ready"):
+            problems.append(f"{bot} never got READY")
+        if want.get("chunk") and not seen.get("chunks"):
+            problems.append(f"{bot} never got a member chunk")
+        missing = sorted(set(want.get("calls", ())) - set(calls.get(bot, ())))
+        if missing:
+            problems.append(f"{bot} never made {', '.join(missing)}")
+    if not expected:
+        problems.append("no bot was expected")
+    detail = "; ".join(problems) or "; ".join(
+        f"{bot}: identified, READY" + (", chunk" if want.get("chunk") else "") + f", {len(set(want.get('calls', ())))} call(s) made"
+        for bot, want in expected.items()
+    )
+    return Check("discord-clients-complete", not problems, detail)
+
+
+def _write_matches(action: Mapping[str, Any], write: Mapping[str, Any]) -> bool:
+    native = str(action.get("target_event_id") or "").removeprefix("discord:message:")
+    kind = action.get("kind")
+    if kind in ("message", "reply"):
+        return (
+            write.get("kind") == "message"
+            and write.get("content") == action.get("text")
+            and (write.get("reply_to") or None) == (native if kind == "reply" else None)
+        )
+    if kind == "reaction":
+        return (
+            write.get("kind") == "reaction"
+            and write.get("emoji") == action.get("reaction")
+            and write.get("message_id") == native
+            and write.get("removed", False) == (action.get("operation") == "remove")
+        )
+    return False
+
+
+def discord_writes_reconciled(committed: Sequence[Mapping[str, Any]], writes: Sequence[Mapping[str, Any]]) -> Check:
+    """Each committed action that reads ``sent`` is exactly one write the bot made, and each write is a committed action.
+
+    ``writes`` are the agent's bot's 2xx writes on the stand-in's wire: a
+    message with its content and reply target, or a reaction with its emoji
+    and message. A committed action that does not read ``sent`` may match a
+    write too (its acknowledgement was lost), but never needs one.
+    """
+
+    problems: list[str] = []
+    left = [dict(write) for write in writes]
+    for action in committed:
+        matches = [write for write in left if _write_matches(action, write)]
+        if action.get("delivery") == "sent":
+            if len(matches) != 1:
+                problems.append(f"turn {action.get('request_id')}'s {action.get('kind')} reads sent and matches {len(matches)} write(s)")
+        if matches:
+            left.remove(matches[0])
+    problems += [f"the bot wrote a {write.get('kind')} that no committed action matches: {json.dumps(write, sort_keys=True)[:200]}" for write in left]
+    detail = "; ".join(problems) or f"{len(committed)} committed action(s) and {len(writes)} write(s), each matched once"
+    return Check("discord-writes-reconciled", not problems, detail)
+
+
+def discord_continuity(start: Mapping[str, Any], reconnects: Sequence[Mapping[str, Any]], *, gaps_fail: bool) -> Check:
+    """The gap a fresh process declares reached the participant, and a reconnect lost nothing.
+
+    ``start`` is the continuity gap the column's process declares when it
+    starts (``gap``, its delivery id, or None when the participant never
+    saw one): it cannot know what happened before it connected, and says so.
+    Each of ``reconnects`` is one bot's op 7: ``resumed`` (RESUME sent and
+    RESUMED answered), ``identified_again``, ``message_reached`` (the
+    message posted meanwhile), and the gaps marked after it, in the
+    transport's journal (``transport_gaps``) and in the participant's
+    observations (``participant_gaps``). ``gaps_fail`` is False for the
+    reference, which marks a stream gap on any disconnect by design: those
+    are recorded, not failed.
+    """
+
+    problems: list[str] = []
+    recorded: list[str] = []
+    if not start.get("gap"):
+        problems.append(f"the participant never saw the gap its {start.get('process', 'process')} declares when it starts")
+    for item in reconnects:
+        bot = item.get("bot")
+        if not item.get("resumed"):
+            problems.append(f"{bot} did not resume its session after op 7")
+        if item.get("identified_again"):
+            problems.append(f"{bot} identified again after op 7, so its session's missed events were not replayed")
+        if not item.get("message_reached"):
+            problems.append(f"the message posted during {bot}'s reconnect never reached Nunchi")
+        gaps = [*item.get("transport_gaps", ()), *item.get("participant_gaps", ())]
+        if gaps and gaps_fail:
+            problems.append(f"{bot}'s reconnect marked {len(gaps)} continuity gap(s): {', '.join(map(str, gaps))[:300]}")
+        elif gaps:
+            recorded.append(f"{bot} marked {len(gaps)} stream gap(s), recorded and not failed")
+    if not reconnects:
+        problems.append("no reconnect was played")
+    detail = "; ".join(problems) or (
+        f"the start gap reached the participant; {len(reconnects)} bot(s) resumed after op 7 and the message posted meanwhile "
+        "reached Nunchi" + ("; " + "; ".join(recorded) if recorded else ", with no continuity gap")
+    )
+    return Check("discord-continuity", not problems, detail)
+
+
+def discord_addressing(moments: Sequence[Mapping[str, Any]], *, agent: str, writes: Sequence[Mapping[str, Any]]) -> Check:
+    """A graded message reached the agent as it was sent: whom it pinged, and the message it replied to.
+
+    Each delivery of a graded moment (``post``, ``reply``, ``reaction``)
+    records what the stand-in sent (``mentioned_actor_ids``, ``reply_to``)
+    and ``received``, what the turn handed to the scripted agent or
+    participant showed of that trigger (``mentioned_actor_ids``,
+    ``reply_to_event_id``). The direct question and the thumbs-up request
+    must ping ``agent`` (its actor id), and every ping sent must have
+    arrived; the reply must have been sent as a reply to the agent's own
+    last message on the wire (``writes``, the bot's 2xx writes) and arrive
+    as one. A transport or reference that drops a ping or a reply
+    reference fails here: the scripted agent answers a phrase either way,
+    but a participant reading the room would not know it had been addressed.
+    """
+
+    problems: list[str] = []
+    ours = [int(write["message_id"]) for write in writes if write.get("kind") == "message" and str(write.get("message_id", "")).isdigit()]
+    graded: list[str] = []
+    for moment in moments:
+        expect, name = moment.get("expect"), moment.get("name")
+        if expect not in ("post", "reply", "reaction"):
+            continue
+        delivery = next((item for item in moment.get("deliveries", ()) if item.get("event_id") == moment.get("graded_event")), None)
+        if delivery is None:
+            problems.append(f"{name}: the graded message was never posted")
+            continue
+        received = delivery.get("received")
+        if not received:
+            problems.append(f"{name}: no turn showed how the message reached the agent")
+            continue
+        sent = list(delivery.get("mentioned_actor_ids") or ())
+        seen = list(received.get("mentioned_actor_ids") or ())
+        if expect in ("post", "reaction") and agent not in sent:
+            problems.append(f"{name}: the scene did not ping the agent")
+        lost = [actor for actor in sent if actor not in seen]
+        if lost:
+            problems.append(f"{name}: sent pinging {', '.join(lost)}, but Nunchi saw mentioned_actor_ids={seen}")
+        if expect == "reply":
+            reply_to, posted = delivery.get("reply_to"), str(delivery.get("message_id", ""))
+            before = [message for message in ours if posted.isdigit() and message < int(posted)]
+            if not reply_to or not before or str(before[-1]) != str(reply_to):
+                problems.append(f"{name}: it was not sent as a reply to the agent's own last message (reply_to {reply_to})")
+            elif received.get("reply_to_event_id") != f"discord:message:{reply_to}":
+                problems.append(f"{name}: sent as a reply to {reply_to}, but Nunchi saw reply_to_event_id={received.get('reply_to_event_id')}")
+        graded.append(f"{name} {'replied to the agent' if expect == 'reply' else 'pinged the agent'}")
+    if not graded and not problems:
+        problems.append("no graded message was played")
+    detail = "; ".join(problems) or f"each graded message reached the agent as sent: {', '.join(graded)}"
+    return Check("discord-addressing", not problems, detail)

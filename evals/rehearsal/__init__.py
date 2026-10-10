@@ -15,7 +15,12 @@ against scripted model endpoints, for CI.
 - `spend.py`: the spend watchdog on the OpenRouter key.
 - `checks.py`: the hard checks, and what is reported but not judged.
 - `fake_discord/`: a Discord stand-in for the production Discord clients
-  (PR 3a; nothing runs on it yet).
+  (PR 3a).
+- `discord_net.py`: the launcher that leads Discord's names to the stand-in
+  in a private namespace, and `preflight.py`, the check each Discord process
+  runs first (PR 3b).
+- `discord_room.py`: the probe's ``--room discord``: Nunchi's own Discord
+  processes, unmodified, on the stand-in (PR 3b).
 
 See `docs/rehearsal.md`.
 """

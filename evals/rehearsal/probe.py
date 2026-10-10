@@ -2,7 +2,7 @@
 
     python -m evals.rehearsal.probe --harness {claude-code,codex,hermes} --out DIR \\
         --budget-usd 2 --agent-model anthropic/claude-haiku-4.5 \\
-        --attention-model openai/gpt-6-luna@low [--scripted] [--arm LABEL]
+        --attention-model openai/gpt-6-luna@low [--scripted] [--arm LABEL] [--room {standin,discord}]
 
 One harness per run, on its pinned install, as a clean user: fresh HOME,
 CODEX_HOME, HERMES_HOME, CLAUDE_CONFIG_DIR and TMPDIR, and nothing else of
@@ -15,7 +15,8 @@ which runs the plugin in its own process, in Hermes's ``OPENROUTER_API_KEY``
 process got, and the pins-and-isolation check fails when a process got a key
 it should not.
 
-The room is the in-process stand-in the tests already have (`standin.py`):
+With ``--room standin`` (the default) the room is the in-process stand-in
+the tests already have (`standin.py`):
 
 - Claude Code and Codex run through their production runtimes
   (`ClaudeCodeRoomRuntime`, `CodexRoomRunner`) with the stand-in in place of
@@ -58,6 +59,13 @@ Codex and Claude Code so is the room tool call. ``--no-sandbox`` runs Claude
 Code without its README's Bash sandbox, for a machine where bubblewrap cannot
 run; the run records the sandbox as off. CI never passes it.
 
+``--room discord`` (scripted only, inside the launcher, `discord_net.py`) puts
+the room on the Discord stand-in at Discord's real names instead, with
+Nunchi's own Discord processes unmodified: a `nunchi-mcp-discord` for Claude
+Code or Codex, whose runner stays in this process, or, as ``--harness
+reference``, `nunchi-discord` with a scripted participant. Its moments, legs
+and checks are in `discord_room.py`.
+
 Exit status: 0 every hard check held; 1 a hard check failed, the probe
 raised an error, or the scan found a secret; 2 bad arguments (among them a
 Claude Code agent model with no row in `routes.CLAUDE_CODE_MODELS`); 3 the
@@ -79,6 +87,7 @@ from pathlib import Path
 import re
 import secrets
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -178,10 +187,16 @@ CLAUDE_CODE_FIXED_CREDENTIAL_FILES = (".oauth_token", ".api_key", ".session_ingr
 class MomentSpec:
     name: str
     scene: Path
-    # "post": a wake, a bound turn, one room post. "no-turn": no harness turn.
+    # "post": a wake, a bound turn, one room post. "no-turn": no harness turn. The Discord room
+    # adds "reply", "reaction" and "report" (reported, never graded; `discord_room.py`).
     expect: str
     # Scripted attention wakes for a message holding this phrase.
     wake_phrase: str | None = None
+    # The Discord room only: the graded message replies to the agent's last post; it goes in a
+    # thread of this name under the room; the gateway reconnects every bot just before it.
+    reply_to_agent: bool = False
+    thread: str | None = None
+    reconnect_before: bool = False
 
 
 # The status report first: its first message is 30 minutes old, so playing it
@@ -216,6 +231,11 @@ class Options:
     command: list[str] = field(default_factory=list)
     # A label for a run that is one arm of a comparison (the workflow's OpenAI-model arm for Codex).
     arm: str = ""
+    # "standin": the in-process room; "discord": Nunchi's own Discord processes on the
+    # Discord stand-in, inside the launcher (`discord_room.py`).
+    room: str = "standin"
+    # The Python that runs the Discord processes (the reference needs discord.py); default this one.
+    discord_python: str | None = None
 
 
 @dataclass
@@ -231,6 +251,10 @@ class Context:
     route: Route
     attention: Mapping[str, Any]
     profile: Mapping[str, Any]
+    # The scripted attention endpoint, in a scripted run.
+    attention_endpoint: Any = None
+    # The job's environment as the probe found it, before it became the clean user.
+    original_env: Mapping[str, str] = field(default_factory=dict)
 
 
 def _now() -> str:
@@ -278,8 +302,9 @@ class Leg:
     """One harness taking part in the stand-in room; subclasses adapt each harness."""
 
     harness = ""
-    # Nunchi's actor id for the agent's bot, and the room's continuity scope.
+    # Nunchi's actor id for the agent's bot, the bound channel, and the room's continuity scope.
     actor_id = ""
+    room_id = ROOM_ID
     scope = ""
     # The harness posts the agent's final answer itself, so its delivery reads "unknown" by design.
     harness_posts = False
@@ -398,7 +423,7 @@ class Leg:
                 "participant_id": PARTICIPANT,
                 "actor_id": self.actor_id,
                 "platform": "discord",
-                "room_id": ROOM_ID,
+                "room_id": self.room_id,
                 "continuity_scope_id": self.scope,
                 "names": list(self.ctx.profile["names"]),
             },
@@ -508,6 +533,31 @@ class Leg:
             return []
         return [dict(record) for record in room.receipts.all_records()]
 
+    # -- what a room other than the in-process stand-in changes (`discord_room.py`) ---------------
+
+    def play(self, spec: MomentSpec, *, settle_seconds: float) -> dict[str, Any]:
+        return play_moment(self, spec, settle_seconds=settle_seconds)
+
+    def judge(self, moments: Sequence[dict[str, Any]]) -> None:
+        judge_moments(self, moments)
+
+    def scripted_check(self, moments: Sequence[Mapping[str, Any]]) -> Check:
+        """With the model and attention scripted, each moment's outcome is known (`checks.scripted_outcomes`)."""
+
+        # Codex and Claude Code post through a room tool; Hermes posts its final answer itself.
+        report = self.reports.get("codex") or self.reports.get("claude_code") or {}
+        return checks_module.scripted_outcomes(moments, SCRIPTED_ANSWER, room_tool_called=report.get("room_tool_called"))
+
+    def room_checks(self, document: Mapping[str, Any]) -> list[Check]:
+        """The room's own hard checks, beside the shared ones: none for the in-process stand-in."""
+
+        return []
+
+    def room_record(self) -> dict[str, Any]:
+        """The room's own part of run.json: none for the in-process stand-in."""
+
+        return {}
+
     def copy_state(self) -> None:
         state = self.ctx.base / "state"
         copy_tree(state, self.ctx.out / "receipts", patterns=("*.jsonl",))
@@ -521,6 +571,8 @@ class SharedTransportLeg(Leg):
 
     actor_id = f"discord:actor:{BOT_ID}"
     scope = f"discord:channel:{ROOM_ID}"
+    # What the scripted agent does at each moment (`standin.RoomScript`); None posts the answer once.
+    script: Any = None
 
     def __init__(self, ctx: Context) -> None:
         super().__init__(ctx)
@@ -543,6 +595,16 @@ class SharedTransportLeg(Leg):
     def transport_section(self) -> dict[str, Any]:
         # The stand-in is in process; the URL is never dialled.
         return {"url": "http://127.0.0.1:9/mcp", "timeout_seconds": 30, "output_key_env": OUTPUT_KEY_ENV}
+
+    def runtime_inputs(self, config: dict[str, Any], path: Path, *, label: str) -> tuple[dict[str, Any], Any]:
+        """The config and the transport client the runtime is built with: here the config as written, and the stand-in."""
+
+        return config, self.client
+
+    def attach(self, connection: Any) -> None:
+        """Connect the runtime's room to its transport: here the registration alone, since the probe delivers each event."""
+
+        connection.register()
 
     def deliver(self, raw: Mapping[str, Any], at: datetime, scene: Scene, sequence: int) -> dict[str, Any]:
         if raw.get("type", "message") != "message":
@@ -625,7 +687,7 @@ class ClaudeCodeLeg(SharedTransportLeg):
         except ValueError as exc:
             raise CouldNotRun(str(exc)) from exc
         if self.ctx.options.scripted:
-            self.go_offline(full_tool_name("send"))
+            self.go_offline(full_tool_name("send"), {role: full_tool_name(role) for role in ("send", "react")})
         # The README's settings, and the slug mapped to the id Claude Code knows the model by.
         sandbox = CLAUDE_SETTINGS["sandbox"] if self.ctx.options.sandbox else {"enabled": False}
         self.settings = {**CLAUDE_SETTINGS, "sandbox": sandbox, "modelOverrides": {self.model.anthropic_id: self.ctx.route.model}}
@@ -634,7 +696,7 @@ class ClaudeCodeLeg(SharedTransportLeg):
         self.configs.append(("claude code user settings", settings))
         work = self.ctx.base / "work"
         work.mkdir(parents=True, exist_ok=True)
-        config, _ = self.room_config(
+        config, config_path = self.room_config(
             {
                 "transport": self.transport_section(),
                 "claude_code": {
@@ -648,8 +710,9 @@ class ClaudeCodeLeg(SharedTransportLeg):
         )
         (self.ctx.out / "transcript").mkdir(parents=True, exist_ok=True)
         session_class = recording_claude_session(self.transcript, self.launched, self.claude_env)
+        config, client = self.runtime_inputs(config, config_path, label="Claude Code")
         with mock.patch.object(claude_code_v2, "ClaudeCodeSession", session_class):
-            runtime = claude_code_v2.ClaudeCodeRoomRuntime(config, self.client)
+            runtime = claude_code_v2.ClaudeCodeRoomRuntime(config, client)
         self.runtime = runtime
         self.install = {
             "version": self.version([executable, "--version"], {**runtime.user_environment(), **self.claude_env}),
@@ -670,9 +733,9 @@ class ClaudeCodeLeg(SharedTransportLeg):
         self.tool_names = [full_tool_name(role) for role in runtime.participant.registered_roles]
         self.instrument(runtime.participant, runtime.room)
         runtime.start()
-        runtime.register_transport()
+        self.attach(runtime.connection)
 
-    def go_offline(self, room_tool: str) -> None:
+    def go_offline(self, room_tool: str, tools: Mapping[str, str] | None = None) -> None:
         """Point Claude Code at the scripted Messages endpoint, and everything else at a proxy that refuses it.
 
         Claude Code reads both from its environment. The runtime takes it
@@ -688,7 +751,7 @@ class ClaudeCodeLeg(SharedTransportLeg):
         and named in the report (``network``).
         """
 
-        self.agent = ScriptedClaudeAgent(SCRIPTED_ANSWER, room_tool)
+        self.agent = ScriptedClaudeAgent(SCRIPTED_ANSWER, room_tool, script=self.script, tools=tools)
         self.proxy = RefusingProxy()
         self.claude_env = self.proxy.environment()
         os.environ["ANTHROPIC_BASE_URL"] = self.agent.base_url
@@ -960,7 +1023,7 @@ class CodexLeg(SharedTransportLeg):
         executable = self.executable()
         base_url = OPENROUTER
         if self.ctx.options.scripted:
-            self.agent = ScriptedCodexAgent(SCRIPTED_ANSWER)
+            self.agent = ScriptedCodexAgent(SCRIPTED_ANSWER, script=self.script)
             base_url = self.agent.base_url
             self.ctx.route = replace(self.ctx.route, base_url=base_url)
         codex_home = Path(self.ctx.homes["CODEX_HOME"])
@@ -973,7 +1036,7 @@ class CodexLeg(SharedTransportLeg):
         git_init = ["git", "init", "-q", str(work)]
         self.ran("git init, the agent's working directory", git_init, self.ctx.env)
         subprocess.run(git_init, check=True, env=self.ctx.env, capture_output=True)
-        config, _ = self.room_config(
+        config, config_path = self.room_config(
             {
                 "transport": self.transport_section(),
                 "codex": {
@@ -990,7 +1053,8 @@ class CodexLeg(SharedTransportLeg):
         # Every app-server the integration starts is recorded, for the whole leg.
         self._patch = mock.patch.object(codex_integration, "AppServer", recording_app_server(self.transcript, self.launched))
         self._patch.start()
-        runner = CodexRoomRunner(config, self.client, environ=dict(os.environ))
+        config, client = self.runtime_inputs(config, config_path, label="Codex app-server")
+        runner = CodexRoomRunner(config, client, environ=dict(os.environ))
         self.runner = runner
         environment = runner.integration.environment
         self.install = {
@@ -1006,7 +1070,7 @@ class CodexLeg(SharedTransportLeg):
         self.tool_names = [TOOL_NAMES[role] for role in self.participant.registered_roles]
         self.tool_names.append(f"mcp__{codex_integration.MCP_SERVER_NAME}")
         self.instrument(self.participant, runner.room)
-        runner.connection.register()
+        self.attach(runner.connection)
 
     def collect(self) -> None:
         self.copy_state()
@@ -1486,6 +1550,21 @@ def _plugin_version(manifest: Path) -> str | None:
 
 
 LEGS: dict[str, type[Leg]] = {"claude-code": ClaudeCodeLeg, "codex": CodexLeg, "hermes": HermesLeg}
+# The rooms a run can take place in, and the column that only the Discord room has: the
+# reference, `nunchi-discord`, with a scripted plain-call participant (`discord_room.py`).
+ROOMS = ("standin", "discord")
+REFERENCE = "reference"
+
+
+def _room_parts(options: Options) -> tuple[type[Leg], tuple[MomentSpec, ...], Route]:
+    """The leg, the moments and the model route for this run's harness in this run's room."""
+
+    if options.room == "discord":
+        from . import discord_room
+
+        route = discord_room.reference_route() if options.harness == REFERENCE else route_for(options.harness, options.agent_model)
+        return discord_room.LEGS[options.harness], discord_room.MOMENTS, route
+    return LEGS[options.harness], MOMENTS, route_for(options.harness, options.agent_model)
 
 
 def _version_text(argv: Sequence[str], environment: Mapping[str, str]) -> str | None:
@@ -1582,11 +1661,45 @@ def _reset(directory: Path) -> None:
     directory.mkdir(parents=True, exist_ok=True)
 
 
+def _interrupt_on_termination() -> dict[int, Any]:
+    """SIGTERM and SIGHUP interrupt the run once, as Ctrl-C does, so its ``finally`` stops the Discord processes.
+
+    They run in sessions of their own, so no signal sent to the probe reaches
+    them. A second signal is ignored while the run is wound up. Returns the
+    handlers to put back; none where signals cannot be handled (not the main
+    thread).
+    """
+
+    numbers = (signal.SIGTERM, signal.SIGHUP)
+    armed = [True]
+
+    def interrupt(signum: int, _frame: Any) -> None:
+        try:
+            armed.pop()  # atomic: of signals that arrive together, one interrupts
+        except IndexError:
+            return
+        raise KeyboardInterrupt(f"signal {signum}")
+
+    previous: dict[int, Any] = {}
+    for number in numbers:
+        if signal.getsignal(number) == signal.SIG_IGN:
+            continue  # ignored on purpose, as nohup does
+        try:
+            previous[number] = signal.signal(number, interrupt)
+        except ValueError:
+            break
+    return previous
+
+
 def run_probe(options: Options) -> int:
     """Run the probe for one harness; returns the exit status. Restores this process's environment."""
 
-    if options.harness not in HARNESSES:
+    if options.harness not in HARNESSES and not (options.harness == REFERENCE and options.room == "discord"):
         raise ValueError(f"unknown harness {options.harness!r}")
+    if options.room not in ROOMS:
+        raise ValueError(f"unknown room {options.room!r}")
+    if options.room == "discord" and not options.scripted:
+        raise ValueError("the Discord room is scripted only; a live run keeps the in-process room (9f, PR 4)")
     out = options.out / options.harness
     _reset(out)
     original_env = dict(os.environ)
@@ -1611,7 +1724,8 @@ def run_probe(options: Options) -> int:
     leg: Leg | None = None
     spend: SpendWatch | None = None
     scripted_attention: ScriptedAttention | None = None
-    route = route_for(options.harness, options.agent_model)
+    leg_class, moment_specs, route = _room_parts(options)
+    handlers = _interrupt_on_termination()
     try:
         attention_key, harness_key, canary = _secret_values(options)
         key_env = attention_key_env(options.harness)
@@ -1627,11 +1741,11 @@ def run_probe(options: Options) -> int:
             secret_values[name] = harness_key
         if key_env not in harness_env:
             nunchi_env[key_env] = attention_key
-        if issubclass(LEGS[options.harness], SharedTransportLeg):
+        if issubclass(leg_class, SharedTransportLeg):
             nunchi_env[OUTPUT_KEY_ENV] = secrets.token_urlsafe(48)
         secret_values.update(nunchi_env)
         if options.scripted:
-            scripted_attention = ScriptedAttention(spec.wake_phrase for spec in MOMENTS if spec.wake_phrase)
+            scripted_attention = ScriptedAttention(spec.wake_phrase for spec in moment_specs if spec.wake_phrase)
             attention = attention_config(
                 options.attention_model, base_url=scripted_attention.base_url, provider="scripted", api_key_env=key_env
             )
@@ -1655,16 +1769,18 @@ def run_probe(options: Options) -> int:
             route=route,
             attention=attention,
             profile=_profile(),
+            attention_endpoint=scripted_attention,
+            original_env=original_env,
         )
         spend = SpendWatch(None if options.scripted else attention_key, options.budget_usd)
-        leg = LEGS[options.harness](ctx)
+        leg = leg_class(ctx)
         leg.prepare()
         settle = 120.0 if options.scripted else options.turn_timeout_seconds + 60
         spend.read("before the first moment")
-        for index, spec in enumerate(MOMENTS):
+        for index, spec in enumerate(moment_specs):
             if index and not spend.may_continue(spec.name):
                 break
-            moments.append(play_moment(leg, spec, settle_seconds=settle))
+            moments.append(leg.play(spec, settle_seconds=settle))
     except CouldNotRun as exc:
         could_not_run = True
         errors.append(str(exc))
@@ -1695,10 +1811,12 @@ def run_probe(options: Options) -> int:
         tempfile.tempdir = original_tempdir
         # urlopen keeps the proxy settings it saw at its first call: the next call builds anew.
         urllib.request.install_opener(None)
+        for number, handler in handlers.items():
+            signal.signal(number, handler)
     after = [home_snapshot(path) for path in user_homes]
     if leg is not None:
         try:
-            judge_moments(leg, moments)
+            leg.judge(moments)
         except Exception as exc:
             errors.append(f"judging the moments failed: {type(exc).__name__}: {exc}")
     # A key echoed in an exception is replaced by its name, so it does not cost the whole record.
@@ -1777,7 +1895,7 @@ def _record(
         "binding": {
             "participant_id": PARTICIPANT,
             "actor_id": leg.actor_id if leg is not None else None,
-            "room_id": ROOM_ID,
+            "room_id": leg.room_id if leg is not None else ROOM_ID,
             "continuity_scope_id": leg.scope if leg is not None else None,
             "names": list(_profile()["names"]),
         },
@@ -1815,6 +1933,7 @@ def _record(
         "reports": leg.reports if leg is not None else {},
         "lane_errors": list(leg.room.errors) if leg is not None and leg.room is not None else [],
         "errors": errors,
+        **(leg.room_record() if leg is not None else {}),
     }
 
 
@@ -1852,7 +1971,7 @@ def _checks(
     """The hard checks; the scan runs over the written outputs (`_finish`)."""
 
     install = leg.install or {}
-    host_receipts = [record for record in leg.receipts() if record.get("stage") == "participant-host"] if leg.room is not None else []
+    host_receipts = [record for record in leg.receipts() if record.get("stage") == "participant-host"]
     ids = [*(turn["request_id"] for turn in leg.invocations), *leg.tool_names]
     environment = document["environment"]
     checks = [
@@ -1878,12 +1997,9 @@ def _checks(
         checks_module.one_room_action_per_turn(leg.committed, [item.get("delivered", False) for item in leg.committed]),
         checks_module.no_leaks(leg.committed, leg.room_effects(), ids, known_gaps=leg.known_gaps),
     ]
+    checks += leg.room_checks(document)
     if scripted:
-        # Codex and Claude Code post through a room tool; Hermes posts its final answer itself.
-        report = leg.reports.get("codex") or leg.reports.get("claude_code") or {}
-        checks.append(
-            checks_module.scripted_outcomes(document["moments"], SCRIPTED_ANSWER, room_tool_called=report.get("room_tool_called"))
-        )
+        checks.append(leg.scripted_check(document["moments"]))
     return checks
 
 
@@ -1927,7 +2043,12 @@ def _write(out: Path, document: Mapping[str, Any]) -> None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m evals.rehearsal.probe", description=__doc__.split("\n\n")[0])
-    parser.add_argument("--harness", required=True, choices=HARNESSES)
+    parser.add_argument(
+        "--harness",
+        required=True,
+        choices=(*HARNESSES, REFERENCE),
+        help=f"{REFERENCE}: nunchi-discord with a scripted participant, in the Discord room only (--room discord --scripted)",
+    )
     parser.add_argument("--out", required=True, help="output directory; the run writes <out>/<harness>/")
     parser.add_argument("--budget-usd", type=float, default=2.0, help="stop before the next moment once the key has spent this (soft)")
     parser.add_argument("--agent-model", default=DEFAULT_AGENT_MODEL)
@@ -1945,6 +2066,18 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--turn-timeout", type=float, default=300.0, help="seconds one harness turn may take")
     parser.add_argument("--keep-work", action="store_true", help="keep the throwaway homes after the run")
     parser.add_argument("--arm", default="", help="a label for this run as one arm of a comparison, recorded and shown in the summary")
+    parser.add_argument(
+        "--room",
+        choices=ROOMS,
+        default="standin",
+        help="standin: the in-process room (default); discord: Nunchi's own Discord processes on the Discord stand-in, "
+        "inside the launcher (python -m evals.rehearsal.discord_net)",
+    )
+    parser.add_argument(
+        "--discord-python",
+        help="the Python that runs the Discord processes, with Nunchi installed (the reference also needs discord.py); "
+        "default this one",
+    )
     return parser
 
 
@@ -1957,6 +2090,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.budget_usd <= 0:
         print("--budget-usd must be positive", file=sys.stderr)
         return EXIT_USAGE
+    if args.harness == REFERENCE and args.room != "discord":
+        print(f"--harness {REFERENCE} runs in the Discord room only: pass --room discord --scripted", file=sys.stderr)
+        return EXIT_USAGE
+    if args.room == "discord" and not args.scripted:
+        print("--room discord is scripted only for now; a live run keeps the in-process room (9f, PR 4)", file=sys.stderr)
+        return EXIT_USAGE
+    if args.room == "discord" and args.harness == "hermes":
+        print("Hermes joins the Discord room in a later step (9f, PR 3c): use --room standin", file=sys.stderr)
+        return EXIT_USAGE
     try:
         attention_config(args.attention_model)
         if args.harness == "claude-code":
@@ -1968,7 +2110,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         harness=args.harness,
         out=Path(args.out).absolute(),
         budget_usd=args.budget_usd,
-        agent_model=args.agent_model,
+        # The reference's agent is its scripted plain-call participant.
+        agent_model="scripted-participant" if args.harness == REFERENCE else args.agent_model,
         attention_model=args.attention_model,
         scripted=args.scripted,
         sandbox=not args.no_sandbox,
@@ -1980,9 +2123,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         turn_timeout_seconds=args.turn_timeout,
         command=["python", "-m", "evals.rehearsal.probe", *arguments],
         arm=args.arm,
+        room=args.room,
+        discord_python=str(Path(args.discord_python).absolute()) if args.discord_python else None,
     )
     return run_probe(options)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # One module whether run or imported: the Discord room's legs subclass this module's
+    # classes (`discord_room.py`), so `python -m` runs the imported module's main.
+    from evals.rehearsal.probe import main as _main
+
+    raise SystemExit(_main())

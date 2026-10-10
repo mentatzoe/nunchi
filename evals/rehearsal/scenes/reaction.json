@@ -1,0 +1,30 @@
+{
+  "id": "rehearsal-reaction",
+  "title": "A person asks the agent for a thumbs up",
+  "source": "docs/behavior.md",
+  "review": "draft: written for the step 9f Discord room (PR 3b). A reaction is the agent's smallest move.",
+  "platform": "discord",
+  "participants": ["vigil"],
+  "actors": {
+    "zoe": {"display_name": "Zoe", "kind": "human"}
+  },
+  "events": [
+    {"id": "a1", "author": "zoe", "at": "0s", "mentions": ["vigil"],
+     "text": "Vigil, going with ten seconds and exponential backoff then. Give this a thumbs up if that works for you."}
+  ],
+  "moments": [
+    {
+      "label": "asked for a thumbs up",
+      "event": "a1",
+      "step1": "pass",
+      "notice": [
+        {"fact": "Zoe asked Vigil for a thumbs up", "events": ["a1"]}
+      ],
+      "fitting": ["mhm"],
+      "misses": [
+        {"move": "stay_quiet", "why": "Zoe asked Vigil for a thumbs up by name"},
+        {"move": "speak", "why": "a message adds noise where a thumbs up was asked for"}
+      ]
+    }
+  ]
+}

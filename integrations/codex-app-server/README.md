@@ -206,6 +206,11 @@ declined in a room.
 - **Not run in a live room yet.** The runner is tested against a stub of the
   shared transport, and the integration against a real `codex app-server`;
   the two have not met a real Discord room.
+- **Threads, and the first message after the transport starts.** The shared
+  Discord transport does not deliver a message in a thread under the room,
+  and the first message after it starts reaches the participant only as a
+  continuity gap, among others; see
+  [its README](../mcp-discord/README.md#what-it-does-not-deliver-yet).
 - **Steering after Codex's own tools can come late.** `turn/steer` adds the
   room's news to the run's next model call; if the run ends first, the update
   is lost for that run, though the library already counts it as shown. The
