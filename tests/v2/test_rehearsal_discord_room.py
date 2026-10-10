@@ -20,8 +20,10 @@ import os
 from pathlib import Path
 import secrets
 import shutil
+import signal
 import sys
 import tempfile
+import threading
 import time
 from types import SimpleNamespace
 import unittest
@@ -43,11 +45,11 @@ from evals.rehearsal.fake_discord.control import FakeDiscord
 SCRIPT = discord_room.SCRIPT
 
 
-def _turn(trigger: str, text: str, *, request_id: str = "req-1") -> dict:
+def _turn(trigger: str, text: str, *, request_id: str = "req-1", **addressing) -> dict:
     return {
         "protocol": {"name": "nunchi.participant-turn", "version": 1},
         "binding": {"request_id": request_id},
-        "wake": {"trigger_event_id": trigger, "events": [{"id": trigger, "text": text}], "attention": {"source": "WAKE"}},
+        "wake": {"trigger_event_id": trigger, "events": [{"id": trigger, "text": text, **addressing}], "attention": {"source": "WAKE"}},
     }
 
 
@@ -118,6 +120,23 @@ class ScriptTest(unittest.TestCase):
         self.assertEqual({"protocol": turn["protocol"], "binding": {"request_id": "req-1"}}, {k: envelope[k] for k in ("protocol", "binding")})
         self.assertEqual("reaction", envelope["action"]["kind"])
         self.assertEqual([("req-1", "discord:message:9", "WAKE")], [(a["request_id"], a["trigger"], a["source"]) for a in participant.answers])
+        self.assertEqual({"trigger": "discord:message:9", "mentioned_actor_ids": [], "reply_to_event_id": None}, participant.answers[0]["received"])
+
+    def test_what_a_turn_showed_of_its_trigger_is_read_from_the_requests_an_agent_was_asked(self):
+        ping, reply = "discord:actor:5", "discord:message:3"
+        woken = _turn("discord:message:7", "q", mentioned_actor_ids=[ping], reply_to_event_id=reply)
+        earlier = _turn("discord:message:6", "e")
+        requests = [{"input": [{"content": [{"text": _tagged(earlier)}]}]},
+                    {"body": {"messages": [{"content": [{"type": "text", "text": _tagged(woken)}]}]}, "headers": {}},
+                    {"input": [{"content": [{"text": _tagged(woken)}, {"output": "ok"}]}]},  # the call after the tool's result
+                    {"input": [{"content": [{"text": "no turn here"}]}]}]
+        self.assertEqual(
+            {"discord:message:6": {"trigger": "discord:message:6", "mentioned_actor_ids": [], "reply_to_event_id": None},
+             "discord:message:7": {"trigger": "discord:message:7", "mentioned_actor_ids": [ping], "reply_to_event_id": reply}},
+            standin.received_triggers(requests),
+        )
+        self.assertIsNone(standin.RoomScript.received(None))
+        self.assertIsNone(standin.RoomScript.received({"wake": {"trigger_event_id": "x", "events": []}}))
 
     def test_the_scripted_claude_agent_follows_the_script_with_each_room_tool(self):
         agent = standin.ScriptedClaudeAgent("unused", "mcp__nunchi__room_send", script=SCRIPT, tools={"react": "mcp__nunchi__room_react"})
@@ -176,6 +195,15 @@ class DiscordChecksTest(unittest.TestCase):
         failed = check(flipped, discord_room.EXPECTED, pins=pins)
         self.assertFalse(failed.ok)
         self.assertIn("not the pinned 'not delivered'", failed.detail)
+        # The reference is pinned too: its first message reaches Nunchi, and a thread's message does not.
+        reference = [{"name": "first-message", "expect": "report", "outcome": "reached"}, *moments, ]
+        reference_pins = discord_room.REFERENCE_PINS
+        self.assertTrue(check(reference, discord_room.EXPECTED, pins=reference_pins).ok)
+        for name, outcome in (("first-message", "not delivered"), ("thread", "reached")):
+            changed = [{**moment, "outcome": outcome} if moment["name"] == name else moment for moment in reference]
+            failed = check(changed, discord_room.EXPECTED, pins=reference_pins)
+            self.assertFalse(failed.ok, name)
+            self.assertIn(f"{name} reads {outcome!r}, not the pinned", failed.detail)
         wrong = [{**moments[2], "actions": [{"kind": "reaction", "reaction": "ok"}]}]
         self.assertIn("reaction is 'ok'", check(wrong, discord_room.EXPECTED).detail)
         self.assertIn("1 turn(s) on other messages", check([{**moments[0], "other_turns": 1}], discord_room.EXPECTED).detail)
@@ -233,6 +261,51 @@ class DiscordChecksTest(unittest.TestCase):
         self.assertTrue(checks.discord_writes_reconciled(lost, writes[:1]).ok)
         self.assertTrue(checks.discord_writes_reconciled(lost, []).ok)
 
+    def test_addressing_compares_what_was_sent_with_what_the_agent_received(self):
+        agent, zoe = "discord:actor:5", "discord:actor:9"
+        writes = [{"kind": "message", "message_id": "100"}, {"kind": "message", "message_id": "300"}, {"kind": "reaction", "message_id": "250"}]
+        moments = [
+            {"name": "direct-question", "expect": "post", "graded_event": "discord:message:200", "deliveries": [
+                {"event_id": "discord:message:200", "message_id": "200", "mentioned_actor_ids": [agent], "reply_to": None,
+                 "received": {"trigger": "discord:message:200", "mentioned_actor_ids": [agent], "reply_to_event_id": None}}]},
+            {"name": "bot-status-report", "expect": "no-turn", "graded_event": "discord:message:210", "deliveries": [{"event_id": "discord:message:210"}]},
+            {"name": "reply", "expect": "reply", "graded_event": "discord:message:250", "deliveries": [
+                {"event_id": "discord:message:250", "message_id": "250", "mentioned_actor_ids": [], "reply_to": "100",
+                 "received": {"trigger": "discord:message:250", "mentioned_actor_ids": [zoe], "reply_to_event_id": "discord:message:100"}}]},
+            {"name": "reaction", "expect": "reaction", "graded_event": "discord:message:400", "deliveries": [
+                {"event_id": "discord:message:400", "message_id": "400", "mentioned_actor_ids": [agent], "reply_to": None,
+                 "received": {"trigger": "discord:message:400", "mentioned_actor_ids": [agent], "reply_to_event_id": None}}]},
+            {"name": "thread", "expect": "report", "graded_event": "discord:message:500", "deliveries": [{"event_id": "discord:message:500"}]},
+        ]
+        check = checks.discord_addressing
+        self.assertTrue(check(moments, agent=agent, writes=writes).ok, check(moments, agent=agent, writes=writes).detail)
+
+        def changed(index: int, **fields):
+            delivery = {**moments[index]["deliveries"][0], **fields}
+            return [*moments[:index], {**moments[index], "deliveries": [delivery]}, *moments[index + 1:]]
+
+        def lost_received(index: int, **fields):
+            delivery = moments[index]["deliveries"][0]
+            return changed(index, received={**delivery["received"], **fields})
+
+        # The transport or the reference dropped a ping, or the reply reference.
+        failed = check(lost_received(0, mentioned_actor_ids=[]), agent=agent, writes=writes)
+        self.assertFalse(failed.ok)
+        self.assertIn(f"sent pinging {agent}, but Nunchi saw mentioned_actor_ids=[]", failed.detail)
+        self.assertFalse(check(lost_received(3, mentioned_actor_ids=[zoe]), agent=agent, writes=writes).ok)
+        failed = check(lost_received(2, reply_to_event_id=None), agent=agent, writes=writes)
+        self.assertIn("Nunchi saw reply_to_event_id=None", failed.detail)
+        self.assertFalse(check(lost_received(2, reply_to_event_id="discord:message:300"), agent=agent, writes=writes).ok)
+        # The scene must address the agent, the reply must be to the agent's own last post, and a turn must have shown it.
+        self.assertIn("did not ping the agent", check(changed(0, mentioned_actor_ids=[]), agent=agent, writes=writes).detail)
+        self.assertIn("did not ping the agent", check(changed(3, mentioned_actor_ids=[]), agent=agent, writes=writes).detail)
+        self.assertIn("not sent as a reply to the agent's own last message", check(changed(2, reply_to=None), agent=agent, writes=writes).detail)
+        also = [*writes, {"kind": "message", "message_id": "220"}]  # a later post of the agent's: the reply was to an older one
+        self.assertIn("not sent as a reply", check(moments, agent=agent, writes=also).detail)
+        self.assertIn("no turn showed", check(changed(0, received=None), agent=agent, writes=writes).detail)
+        self.assertIn("never posted", check([{**moments[0], "graded_event": "discord:message:1"}], agent=agent, writes=writes).detail)
+        self.assertFalse(check([moments[1], moments[4]], agent=agent, writes=writes).ok)
+
     def test_continuity(self):
         start = {"process": "nunchi-mcp-discord", "gap": "discord:transport-gap:1"}
         clean = {"bot": "Vigil", "resumed": True, "identified_again": False, "message_reached": True, "transport_gaps": [], "participant_gaps": []}
@@ -280,6 +353,9 @@ class WorldTest(unittest.TestCase):
         self.assertEqual(["reaction"], [spec.name for spec in discord_room.MOMENTS if spec.reconnect_before])
         self.assertEqual(["reply"], [spec.name for spec in discord_room.MOMENTS if spec.reply_to_agent])
         self.assertEqual({"first-message", "thread"}, set(discord_room.TRANSPORT_PINS))
+        self.assertEqual({"first-message": checks.REACHED, "thread": checks.NOT_DELIVERED}, discord_room.REFERENCE_PINS)
+        self.assertIs(discord_room.REFERENCE_PINS, discord_room.ReferenceLeg.pins)
+        self.assertIs(discord_room.TRANSPORT_PINS, discord_room.OnTheTransport.pins)
 
     def test_the_room_needs_the_launchers_record(self):
         with self.assertRaisesRegex(probe.CouldNotRun, "discord_net --offline"):
@@ -329,15 +405,18 @@ class RoomTest(_StandIn, unittest.TestCase):
             moment, scene = scenes["direct-question"]
             delivery = room.post(scene.events[0], datetime_now(), scene, moment)
             text = fd.world.messages[delivery["message_id"]]["content"]
+            self.assertEqual([f"discord:actor:{fd.world.member('Vigil').id}"], delivery["mentioned_actor_ids"], "what the scene sent, for discord-addressing")
             self.assertTrue(text.startswith(f"<@{fd.world.member('Vigil').id}>, quick question"))
             self.assertEqual([fd.world.member("Vigil").id], fd.world.messages[delivery["message_id"]]["mentions"])
             # The reply moment answers the agent's last post; with none, it goes as a plain message and says so.
             moment, scene = scenes["reply"]
             plain = room.post(scene.events[0], datetime_now(), scene, moment)
             self.assertIn("no post to reply to", plain["note"])
+            self.assertEqual(([], None), (plain["mentioned_actor_ids"], plain["reply_to"]))
             room.agent_last_post = lambda: delivery["message_id"]
             reply = room.post(scene.events[0], datetime_now(), scene, moment)
             self.assertEqual(delivery["message_id"], fd.world.messages[reply["message_id"]]["reply_to"])
+            self.assertEqual(delivery["message_id"], reply["reply_to"], "what the scene sent as the message replied to")
             moment, scene = scenes["thread"]
             first = room.post(scene.events[0], datetime_now(), scene, moment)
             again = room.post(scene.events[0], datetime_now(), scene, moment)
@@ -510,10 +589,52 @@ class JudgeTest(unittest.TestCase):
             {"name": "reaction", "expect": "reaction", "reached": True, "graded_turns": 1, "graded_event": "discord:message:3",
              "turns": [{"request_id": "r2", "trigger": "discord:message:3"}]},
         ]
-        discord_room.judge_discord_moments(leg, moments)
+        moments[0]["deliveries"] = [{"event_id": "discord:message:2"}]
+        moments[1]["deliveries"] = [{"event_id": "discord:message:3"}]
+        seen = {"trigger": "discord:message:2", "mentioned_actor_ids": [], "reply_to_event_id": "discord:message:1"}
+        discord_room.judge_discord_moments(leg, moments, {"discord:message:2": seen})
+        self.assertEqual((seen, None), (moments[0]["deliveries"][0]["received"], moments[1]["deliveries"][0]["received"]))
         self.assertEqual(("fits", "misses"), (moments[0]["outcome"], moments[1]["outcome"]))
         self.assertEqual([{"text": "t", "delivery": "sent", "delivered": True}], moments[0]["posts"])
         self.assertEqual([False], [action["delivered"] for action in moments[1]["actions"]])
+
+
+# -- the probe's signals -------------------------------------------------------------------------------
+
+
+class TerminationTest(unittest.TestCase):
+    """SIGTERM and SIGHUP end a run as Ctrl-C does, so the Discord processes it started are stopped (`leg.close`)."""
+
+    def setUp(self) -> None:
+        before = {number: signal.getsignal(number) for number in (signal.SIGTERM, signal.SIGHUP)}
+        for number, handler in before.items():
+            self.addCleanup(signal.signal, number, handler)
+
+    def test_the_first_signal_interrupts_the_run_once_and_the_handlers_come_back(self):
+        before = {number: signal.getsignal(number) for number in (signal.SIGTERM, signal.SIGHUP)}
+        handlers = probe._interrupt_on_termination()
+        self.assertEqual(set(before), set(handlers))
+        with self.assertRaises(KeyboardInterrupt):
+            os.kill(os.getpid(), signal.SIGTERM)
+        os.kill(os.getpid(), signal.SIGHUP)  # disarmed: a second signal does not cut the wind-down short
+        os.kill(os.getpid(), signal.SIGTERM)
+        for number, handler in handlers.items():
+            signal.signal(number, handler)
+        self.assertEqual(before, {number: signal.getsignal(number) for number in before})
+
+    def test_a_signal_ignored_on_purpose_stays_ignored(self):
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)  # as nohup does
+        handlers = probe._interrupt_on_termination()
+        self.assertEqual([signal.SIGTERM], list(handlers))
+        os.kill(os.getpid(), signal.SIGHUP)
+        self.assertEqual(signal.SIG_IGN, signal.getsignal(signal.SIGHUP))
+
+    def test_off_the_main_thread_it_sets_nothing(self):
+        found: list[object] = []
+        thread = threading.Thread(target=lambda: found.append(probe._interrupt_on_termination()))
+        thread.start()
+        thread.join()
+        self.assertEqual([{}], found)
 
 
 # -- the probe's command --------------------------------------------------------------------------------

@@ -54,14 +54,25 @@ jobs:
         run: python -m evals.rehearsal.fake_discord.shapes --check
       - name: The stand-in through discord.py
         run: python -m unittest tests.v2.test_fake_discord_discordpy -v
+      - name: Make the canary for the Discord room lane's scan
+        # A random value the probe puts in the harness's environment, where no
+        # key variable names it: only the scan can find it in an output.
+        shell: bash
+        run: |
+          set -euo pipefail
+          canary="canary-$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
+          echo "::add-mask::$canary"
+          echo "REHEARSAL_CANARY=$canary" >> "$GITHUB_ENV"
       - name: The reference in the Discord room, scripted (docs/rehearsal.md)
         # nunchi-discord from Nunchi's wheel, on the pinned discord.py, in a
         # clean virtualenv, with a scripted participant and scripted
         # attention, no key. The launcher (root, hence sudo -E) maps
         # Discord's real names to the stand-in in a private namespace with
-        # only loopback (--offline), checks bubblewrap, and runs the probe as
-        # the runner user. Each moment's outcome and the six discord-* checks
-        # are hard checks.
+        # only loopback (--offline) and runs the probe as the runner user.
+        # nunchi-discord has no sandbox, so no --require-bwrap and no
+        # bubblewrap here. Each moment's outcome and the seven discord-*
+        # checks are hard checks.
+        id: discord_reference_lane
         shell: bash
         run: |
           set -euo pipefail
@@ -73,17 +84,32 @@ jobs:
           "$PY" -m pip install 'discord.py==2.7.1' 'aiohttp==3.14.3'
           "$PY" -m pip install --no-deps "$RUNNER_TEMP"/nunchi-wheels/*.whl
           "$PY" -m pip freeze
-          # The launcher's bubblewrap check, as in the claude-code-mod job.
-          sudo apt-get update -q
-          sudo apt-get install -y -q bubblewrap
-          if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = "1" ]; then
-            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          fi
           LANE_HOME="$(mktemp -d)"
           LANE_TMP="$(mktemp -d)"
           sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline -- \
             /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness reference --scripted --room discord \
             --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-discord-out"
+      - name: Scan the failed Discord room lane's record for the key and the canary
+        # Only after a failure of the lane above, and as the rehearsal workflow
+        # does: this repository is public, so the record is uploaded only when
+        # the scan passes. The lane's keys are per-run placeholders the probe
+        # scans for itself; the canary is the value made above. A hit deletes
+        # the record and fails this step.
+        id: discord_reference_scan
+        if: failure() && steps.discord_reference_lane.outcome == 'failure'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -uo pipefail
+          python -m evals.rehearsal.scan --out "$RUNNER_TEMP/rehearsal-discord-out" \
+            --env NUNCHI_ATTENTION_API_KEY --env REHEARSAL_CANARY
+      - name: Keep the failed Discord room lane's record
+        if: failure() && steps.discord_reference_scan.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rehearsal-discord-reference-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rehearsal-discord-out/
+          if-no-files-found: ignore
 
   hermes-plugin:
     # The turn conformance kit and the plugin's tests inside a real Hermes
@@ -195,15 +221,28 @@ jobs:
           "$RUNNER_TEMP/codex-env/bin/python" -m unittest tests.v2.test_rehearsal -v
           "$RUNNER_TEMP/codex-env/bin/python" -m evals.rehearsal.probe --harness codex --scripted \
             --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-out"
+      - name: Make the canary for the Discord room lane's scan
+        # A random value the probe puts in the harness's environment, where no
+        # key variable names it: only the scan can find it in an output.
+        shell: bash
+        run: |
+          set -euo pipefail
+          canary="canary-$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
+          echo "::add-mask::$canary"
+          echo "REHEARSAL_CANARY=$canary" >> "$GITHUB_ENV"
       - name: The rehearsal probe in the Discord room, through codex app-server, scripted (docs/rehearsal.md)
         # The same scripted probe on the Discord stand-in at Discord's real
         # names, with Nunchi's own nunchi-mcp-discord process, unmodified, as
         # the transport; the Codex runner stays in the probe's process. The
         # launcher (root, hence sudo -E) maps the names to the stand-in in a
-        # private namespace with only loopback (--offline), checks
-        # bubblewrap, and runs the probe as the runner user. sudo resets
-        # PATH, so the probe gets this step's (Node). Each moment's outcome,
-        # the room tool call and the six discord-* checks are hard checks.
+        # private namespace with only loopback (--offline), and runs the probe
+        # as the runner user. Codex's Linux sandbox is bubblewrap (the one on
+        # PATH, else its bundled copy; codex-rs/linux-sandbox/README.md at
+        # 0.160.1), so --require-bwrap checks here that it runs, as in the
+        # claude-code-mod job. sudo resets PATH, so the probe gets this
+        # step's (Node). Each moment's outcome, the room tool call and the
+        # seven discord-* checks are hard checks.
+        id: discord_codex_lane
         shell: bash
         run: |
           set -euo pipefail
@@ -218,9 +257,30 @@ jobs:
           fi
           LANE_HOME="$(mktemp -d)"
           LANE_TMP="$(mktemp -d)"
-          sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline -- \
+          sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline --require-bwrap -- \
             /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness codex --scripted --room discord \
             --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-discord-out"
+      - name: Scan the failed Discord room lane's record for the key and the canary
+        # Only after a failure of the lane above, and as the rehearsal workflow
+        # does: this repository is public, so the record is uploaded only when
+        # the scan passes. The lane's keys are per-run placeholders the probe
+        # scans for itself; the canary is the value made above. A hit deletes
+        # the record and fails this step.
+        id: discord_codex_scan
+        if: failure() && steps.discord_codex_lane.outcome == 'failure'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -uo pipefail
+          python -m evals.rehearsal.scan --out "$RUNNER_TEMP/rehearsal-discord-out" \
+            --env NUNCHI_ATTENTION_API_KEY --env REHEARSAL_CANARY
+      - name: Keep the failed Discord room lane's record
+        if: failure() && steps.discord_codex_scan.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rehearsal-discord-codex-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rehearsal-discord-out/
+          if-no-files-found: ignore
 
   package:
     name: clean-install packaging
@@ -321,18 +381,28 @@ jobs:
           "$RUNNER_TEMP/claude-env/bin/python" -m unittest tests.v2.test_rehearsal -v
           "$RUNNER_TEMP/claude-env/bin/python" -m evals.rehearsal.probe --harness claude-code --scripted \
             --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-out"
+      - name: Make the canary for the Discord room lane's scan
+        # A random value the probe puts in the harness's environment, where no
+        # key variable names it: only the scan can find it in an output.
+        shell: bash
+        run: |
+          set -euo pipefail
+          canary="canary-$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
+          echo "::add-mask::$canary"
+          echo "REHEARSAL_CANARY=$canary" >> "$GITHUB_ENV"
       - name: The rehearsal probe in the Discord room, through claude -p, scripted (docs/rehearsal.md)
         # The same scripted probe on the Discord stand-in at Discord's real
         # names, with Nunchi's own nunchi-mcp-discord process, unmodified, as
         # the transport; the Claude Code runner stays in the probe's process.
         # The launcher (root, hence sudo -E) maps the names to the stand-in
-        # in a private namespace with only loopback (--offline), checks that
-        # bubblewrap (installed above) runs there as the runner user, and
-        # runs the probe as that user. sudo resets PATH, so the probe gets
-        # this step's (Node). With the README's sandbox on: this step never
-        # passes --no-sandbox, and the launcher refuses --no-bwrap-check here.
-        # Each moment's outcome, the room tool call and the six discord-*
-        # checks are hard checks.
+        # in a private namespace with only loopback (--offline), checks
+        # (--require-bwrap) that bubblewrap (installed above), which Claude
+        # Code's sandbox uses, runs there as the runner user, and runs the
+        # probe as that user. sudo resets PATH, so the probe gets this step's
+        # (Node). With the README's sandbox on: this step never passes
+        # --no-sandbox. Each moment's outcome, the room tool call and the
+        # seven discord-* checks are hard checks.
+        id: discord_claude_lane
         shell: bash
         run: |
           set -euo pipefail
@@ -341,6 +411,27 @@ jobs:
           "$PY" -m pip freeze
           LANE_HOME="$(mktemp -d)"
           LANE_TMP="$(mktemp -d)"
-          sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline -- \
+          sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline --require-bwrap -- \
             /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness claude-code --scripted --room discord \
             --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-discord-out"
+      - name: Scan the failed Discord room lane's record for the key and the canary
+        # Only after a failure of the lane above, and as the rehearsal workflow
+        # does: this repository is public, so the record is uploaded only when
+        # the scan passes. The lane's keys are per-run placeholders the probe
+        # scans for itself; the canary is the value made above. A hit deletes
+        # the record and fails this step.
+        id: discord_claude_scan
+        if: failure() && steps.discord_claude_lane.outcome == 'failure'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -uo pipefail
+          python -m evals.rehearsal.scan --out "$RUNNER_TEMP/rehearsal-discord-out" \
+            --env NUNCHI_ATTENTION_API_KEY --env REHEARSAL_CANARY
+      - name: Keep the failed Discord room lane's record
+        if: failure() && steps.discord_claude_scan.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rehearsal-discord-claude-code-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rehearsal-discord-out/
+          if-no-files-found: ignore

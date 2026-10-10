@@ -87,6 +87,7 @@ from pathlib import Path
 import re
 import secrets
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -1660,6 +1661,36 @@ def _reset(directory: Path) -> None:
     directory.mkdir(parents=True, exist_ok=True)
 
 
+def _interrupt_on_termination() -> dict[int, Any]:
+    """SIGTERM and SIGHUP interrupt the run once, as Ctrl-C does, so its ``finally`` stops the Discord processes.
+
+    They run in sessions of their own, so no signal sent to the probe reaches
+    them. A second signal is ignored while the run is wound up. Returns the
+    handlers to put back; none where signals cannot be handled (not the main
+    thread).
+    """
+
+    numbers = (signal.SIGTERM, signal.SIGHUP)
+    armed = [True]
+
+    def interrupt(signum: int, _frame: Any) -> None:
+        try:
+            armed.pop()  # atomic: of signals that arrive together, one interrupts
+        except IndexError:
+            return
+        raise KeyboardInterrupt(f"signal {signum}")
+
+    previous: dict[int, Any] = {}
+    for number in numbers:
+        if signal.getsignal(number) == signal.SIG_IGN:
+            continue  # ignored on purpose, as nohup does
+        try:
+            previous[number] = signal.signal(number, interrupt)
+        except ValueError:
+            break
+    return previous
+
+
 def run_probe(options: Options) -> int:
     """Run the probe for one harness; returns the exit status. Restores this process's environment."""
 
@@ -1694,6 +1725,7 @@ def run_probe(options: Options) -> int:
     spend: SpendWatch | None = None
     scripted_attention: ScriptedAttention | None = None
     leg_class, moment_specs, route = _room_parts(options)
+    handlers = _interrupt_on_termination()
     try:
         attention_key, harness_key, canary = _secret_values(options)
         key_env = attention_key_env(options.harness)
@@ -1779,6 +1811,8 @@ def run_probe(options: Options) -> int:
         tempfile.tempdir = original_tempdir
         # urlopen keeps the proxy settings it saw at its first call: the next call builds anew.
         urllib.request.install_opener(None)
+        for number, handler in handlers.items():
+            signal.signal(number, handler)
     after = [home_snapshot(path) for path in user_homes]
     if leg is not None:
         try:

@@ -36,7 +36,7 @@ summary.md:
 7. **scripted-outcomes** (``--scripted`` only): with the model and attention
    scripted, each moment's outcome is known, so it is checked.
 
-A run in the Discord room (``--room discord``, PR 3b) holds six more, the
+A run in the Discord room (``--room discord``, PR 3b) holds seven more, the
 ``discord-*`` checks, listed with them below.
 
 Neither the key nor the canary may be in any output: the scan
@@ -408,11 +408,17 @@ def scripted_outcomes(moments: Sequence[Mapping[str, Any]], answer: str, *, room
 #     the transport's journal, not in the participant's observations. The
 #     reference marks a stream gap on any disconnect; that is recorded, not
 #     failed.
+# 14. **discord-addressing**: a graded message reached the agent as it was
+#     sent: the pings it carried (the direct question and the thumbs-up
+#     request ping the agent) and, for the reply, the agent's own last
+#     message as the one it replies to.
 #
 # With ``--scripted``, `discord_scripted_outcomes` checks each moment of the
 # Discord room. A moment that expects ``report`` is reported, not graded,
 # unless the column pins it (the shared transport drops thread messages and
-# the first message after it starts: both read ``not delivered``).
+# the first message after it starts: both read ``not delivered``; the
+# reference's first message reads ``reached`` and its thread message ``not
+# delivered``).
 
 REACHED = "reached"
 
@@ -678,3 +684,55 @@ def discord_continuity(start: Mapping[str, Any], reconnects: Sequence[Mapping[st
         "reached Nunchi" + ("; " + "; ".join(recorded) if recorded else ", with no continuity gap")
     )
     return Check("discord-continuity", not problems, detail)
+
+
+def discord_addressing(moments: Sequence[Mapping[str, Any]], *, agent: str, writes: Sequence[Mapping[str, Any]]) -> Check:
+    """A graded message reached the agent as it was sent: whom it pinged, and the message it replied to.
+
+    Each delivery of a graded moment (``post``, ``reply``, ``reaction``)
+    records what the stand-in sent (``mentioned_actor_ids``, ``reply_to``)
+    and ``received``, what the turn handed to the scripted agent or
+    participant showed of that trigger (``mentioned_actor_ids``,
+    ``reply_to_event_id``). The direct question and the thumbs-up request
+    must ping ``agent`` (its actor id), and every ping sent must have
+    arrived; the reply must have been sent as a reply to the agent's own
+    last message on the wire (``writes``, the bot's 2xx writes) and arrive
+    as one. A transport or reference that drops a ping or a reply
+    reference fails here: the scripted agent answers a phrase either way,
+    but a participant reading the room would not know it had been addressed.
+    """
+
+    problems: list[str] = []
+    ours = [int(write["message_id"]) for write in writes if write.get("kind") == "message" and str(write.get("message_id", "")).isdigit()]
+    graded: list[str] = []
+    for moment in moments:
+        expect, name = moment.get("expect"), moment.get("name")
+        if expect not in ("post", "reply", "reaction"):
+            continue
+        delivery = next((item for item in moment.get("deliveries", ()) if item.get("event_id") == moment.get("graded_event")), None)
+        if delivery is None:
+            problems.append(f"{name}: the graded message was never posted")
+            continue
+        received = delivery.get("received")
+        if not received:
+            problems.append(f"{name}: no turn showed how the message reached the agent")
+            continue
+        sent = list(delivery.get("mentioned_actor_ids") or ())
+        seen = list(received.get("mentioned_actor_ids") or ())
+        if expect in ("post", "reaction") and agent not in sent:
+            problems.append(f"{name}: the scene did not ping the agent")
+        lost = [actor for actor in sent if actor not in seen]
+        if lost:
+            problems.append(f"{name}: sent pinging {', '.join(lost)}, but Nunchi saw mentioned_actor_ids={seen}")
+        if expect == "reply":
+            reply_to, posted = delivery.get("reply_to"), str(delivery.get("message_id", ""))
+            before = [message for message in ours if posted.isdigit() and message < int(posted)]
+            if not reply_to or not before or str(before[-1]) != str(reply_to):
+                problems.append(f"{name}: it was not sent as a reply to the agent's own last message (reply_to {reply_to})")
+            elif received.get("reply_to_event_id") != f"discord:message:{reply_to}":
+                problems.append(f"{name}: sent as a reply to {reply_to}, but Nunchi saw reply_to_event_id={received.get('reply_to_event_id')}")
+        graded.append(f"{name} {'replied to the agent' if expect == 'reply' else 'pinged the agent'}")
+    if not graded and not problems:
+        problems.append("no graded message was played")
+    detail = "; ".join(problems) or f"each graded message reached the agent as sent: {', '.join(graded)}"
+    return Check("discord-addressing", not problems, detail)

@@ -269,20 +269,36 @@ with Nunchi installed in it. In order, the launcher:
 3. sets `net.ipv4.ip_unprivileged_port_start=443`, so the stand-in binds
    443 as you. The setting belongs to the network namespace. Without
    `--offline` it would change this machine's, so the launcher refuses that
-   unless `CI=true`, and restores it afterwards;
+   unless `CI=true`, and restores it afterwards; that mode exists for later
+   live lanes, which need their model provider's network, and no scripted
+   lane uses it;
 4. checks that no proxy variable is set (`HTTP_PROXY`, `HTTPS_PROXY`,
    `ALL_PROXY`, `WS_PROXY`, `WSS_PROXY` or `DISCORD_PROXY`, in any case: the
    transport's REST calls and Hermes's discord.py follow one past the
-   mapping), that each name resolves to 127.0.0.1 alone, and, as you, that
-   `bwrap --ro-bind / / true` runs, so a sandbox that needs bubblewrap fails
-   before any harness starts. `--no-bwrap-check` skips that on a machine
-   without bubblewrap; the run records the skip, and the launcher refuses
-   it when `CI=true`;
+   mapping), that each name resolves to 127.0.0.1 alone, and, with
+   `--require-bwrap`, that `bwrap --ro-bind / / true` runs as you, so a
+   sandbox that uses bubblewrap fails before any harness starts. Only a lane
+   whose harness sandbox uses bubblewrap passes the flag (Claude Code and
+   Codex); without it the check does not run, and the record says `checked:
+   false, skipped: not required`;
 5. runs the command as you (`SUDO_UID`, `SUDO_GID` and your groups), with
    `NUNCHI_DISCORD_NET` naming `net.json`: the names, the stand-in's
    certificate and key, and what the launcher did. When the command ends,
    the run's files, the key included, are removed. The exit status is the
-   command's, or 2 for a refusal and 3 for a failed setup or check.
+   command's, which can be any number, or 2 for a refusal and 3 for a failed
+   setup or check, including a namespace that could not be made.
+
+The launcher maps Discord's names and cuts TCP and UDP with `--offline`; it
+is not a filesystem or privilege sandbox, and it runs this checkout and the
+chosen Python's packages as root before it drops to you, so run it only on a
+checkout you have read. Root writes and changes an owner only in directories
+only root can write: the run directory and `tls/` stay root's (0711), you own
+the leaf key alone, and the chain and `net.json` are root's and readable
+(0644), so nothing running as you can redirect what root writes. SIGTERM and
+SIGHUP end the launcher after the run's files are removed and the port
+setting restored, whenever they come, and are passed on to the command; the
+probe turns them into an interrupt, as Ctrl-C does, so it stops the Discord
+processes it started.
 
 The stand-in has one route of its own for this, `GET
 /api/v10/_preflight/{nonce}`: it needs no token and answers the run's nonce
@@ -303,7 +319,8 @@ as an unprivileged user, and this machine's `/etc/hosts`, trust store and
 port setting stayed unchanged. Not run yet: without `--offline` (that needs
 `CI=true`), and the bubblewrap check itself, since bubblewrap is not
 installed here. CI passes `--offline` too, so the port setting stays in the
-run's namespace on a runner as well, and never passes `--no-bwrap-check`.
+run's namespace on a runner as well, and passes `--require-bwrap` only for
+Claude Code and Codex.
 Its tests are `tests/v2/test_discord_net.py`; the one that runs the
 launcher needs root, so it skips in the `test` job.
 
@@ -352,14 +369,14 @@ endpoint. The moments play in one channel, named after the column:
 
 | Moment | What happens | Checked |
 |---|---|---|
-| first-message | a person greets the room | reported; on the shared transport, pinned `not delivered` (below) |
+| first-message | a person greets the room | reported; pinned: `not delivered` on the shared transport, `reached` on the reference (below) |
 | bot-status-report | a scripted bot posts a build report | no turn |
 | direct-question | a person asks the agent | one post: the scripted answer |
 | reply | the person replies to the agent's post | one reply, to that message |
 | reaction | op 7 goes to every bot, then at once the person asks for a thumbs up, so the message crosses the reconnect | one 👍 on that message |
-| thread | the person opens a thread under the room and posts in it | reported; on the shared transport, pinned `not delivered` |
+| thread | the person opens a thread under the room and posts in it | reported; pinned `not delivered` on both |
 
-Beside the probe's hard checks, a run in the Discord room holds six more:
+Beside the probe's hard checks, a run in the Discord room holds seven more:
 
 - `discord-preflight`: each process's preflight passed and showed the
   launcher's certificate;
@@ -375,10 +392,23 @@ Beside the probe's hard checks, a run in the Discord room holds six more:
   participant; after op 7 each bot resumed, did not identify again, and the
   message posted meanwhile reached Nunchi; on the shared transport no gap
   was marked. The reference marks a stream gap on any disconnect
-  (`on_disconnect`): recorded, not failed.
+  (`on_disconnect`): recorded, not failed;
+- `discord-addressing`: a graded message reached the agent as it was sent.
+  The scene's pings and the message a reply answers are recorded when the
+  stand-in sends it, and compared with the trigger in the turn the scripted
+  agent or participant was handed (`mentioned_actor_ids`,
+  `reply_to_event_id`): the direct question and the thumbs-up request must
+  ping the agent and every ping must arrive, and the reply must be sent to
+  the agent's own last post on the wire and arrive as a reply to it. A
+  transport or reference that drops a mention or a reply reference fails
+  here. Scripted attention wakes on a phrase and the scripted agent answers
+  it, so no other check would notice.
 
 With `--scripted`, each graded moment is checked against the script, and
-each pin holds. What the runs here showed (2026-10-09):
+each pin holds: `TRANSPORT_PINS` for the shared transport, `REFERENCE_PINS`
+for the reference. A pin fails when its moment reads otherwise, a fix
+included ("update the pin and its docs"). What the runs here showed
+(2026-10-09):
 
 - **A reconnect loses nothing.** The message posted right after op 7 went
   out on the old connection behind the op 7 frame, so no client read it
@@ -390,7 +420,8 @@ each pin holds. What the runs here showed (2026-10-09):
   after it starts with a continuity gap, so a person's first message after
   a start never reaches the agent. Closing either is library work.
 - **The reference refuses thread messages too.** Its delivery audit reads
-  `route-rejected`: a thread's id is not the bound channel.
+  `route-rejected`: a thread's id is not the bound channel. Pinned `not
+  delivered`, with the first message pinned `reached`.
 - **A notification sent before the runner's stream is open is lost**, and
   the transport's journal says it was delivered (found reading the MCP SDK,
   then reproduced inside the launcher; `integrations/mcp-discord/README.md`).
@@ -420,13 +451,19 @@ it.
 
 The two transport lanes come after their job's in-process probe, and the
 `mcp` install comes just before the lane, so the in-process steps run as
-before. Each step prints `pip freeze`. The launcher's bubblewrap check needs
-bubblewrap, so the Codex and reference steps install it and lift Ubuntu's
-AppArmor limit on user namespaces, as `claude-code-mod` already does for
-Claude Code's sandbox. These steps have not run in CI yet. Here
-(2026-10-09), each job's steps ran from `ci.yml`'s own text on Python 3.12,
-with these local changes: no bubblewrap here, so the launcher got
-`--no-bwrap-check` and Claude Code `--no-sandbox`; no `apt-get` or `sysctl`;
+before. Each step prints `pip freeze`. The Claude Code and Codex lanes pass
+`--require-bwrap`, since both harnesses' sandboxes use bubblewrap (Codex's
+uses the one on `PATH` and falls back to a copy it bundles), so those jobs
+install it and lift Ubuntu's AppArmor limit on user namespaces; the
+reference has no sandbox, so its job installs nothing and passes no flag.
+When a lane fails, the job scans the lane's output for the canary it made
+(and for `NUNCHI_ATTENTION_API_KEY`, which these jobs do not have) with the
+scan the rehearsal workflow uses, and only if the scan passes uploads it as
+`rehearsal-discord-<column>-<run id>-<attempt>`. These steps have not run in
+CI yet. Here (2026-10-09), each job's steps ran from `ci.yml`'s own text on
+Python 3.12, with these local changes: no bubblewrap here, so the launcher
+ran without `--require-bwrap` and Claude Code with `--no-sandbox`; no
+`apt-get` or `sysctl`;
 the pinned harnesses already on disk instead of `npm install`; and `pip`
 reaching PyPI through this machine's settings, which the `sudo` line
 unsets. All three lanes passed with every hard check, as root and dropping
@@ -436,8 +473,8 @@ Expected on `ubuntu-latest`, not checked: passwordless `sudo -E`, no proxy
 variables, bubblewrap running in the launcher's namespace after the drop to
 the runner user, Claude Code's sandbox inside that namespace, and
 setup-python's Python trusting `/etc/ssl/certs`. The launcher refuses a
-proxy variable, its bubblewrap check fails before any harness starts, and
-the preflight fails on an untrusted certificate, so none of these can pass
+proxy variable, `--require-bwrap` fails before any harness starts where
+bubblewrap cannot run, and the preflight fails on an untrusted certificate, so none of these can pass
 quietly.
 
 ## What a pass means
@@ -527,7 +564,9 @@ moments, a stop can only come before the direct question, and a run that
 stops there usually has no wake, so it reads as a failure (exit 1); the
 first lines of `summary.md` name the stop either way.
 `--room discord` is scripted only, needs the launcher, and is not for
-Hermes yet (exit 2 otherwise); `--harness reference` runs in it alone.
+Hermes yet. It exits 2 for Hermes, a live run, or the reference outside the
+Discord room, and 3 (could not run) without the launcher; `--harness
+reference` runs in it alone.
 `--attention-model` takes the behavior eval's label (`id` or `id@effort`);
 a label for another route (`messages:`, `responses:`) is refused, since the
 probe builds the chat route only. `--arm LABEL` names a run that is one arm

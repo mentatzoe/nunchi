@@ -435,6 +435,21 @@ class RoomScript:
         text = next((str(event.get("text") or "") for event in wake.get("events", ()) if event.get("id") == trigger), "")
         return trigger, text
 
+    @staticmethod
+    def received(turn: Mapping[str, Any] | None) -> dict[str, Any] | None:
+        """How the turn showed its trigger was addressed: whom it pings and which message it replies to; None without a trigger."""
+
+        wake = (turn or {}).get("wake") or {}
+        trigger = str(wake.get("trigger_event_id") or "")
+        event = next((event for event in wake.get("events", ()) if event.get("id") == trigger), None)
+        if not trigger or event is None:
+            return None
+        return {
+            "trigger": trigger,
+            "mentioned_actor_ids": list(event.get("mentioned_actor_ids") or ()),
+            "reply_to_event_id": event.get("reply_to_event_id"),
+        }
+
     def move(self, turn: Mapping[str, Any] | None) -> tuple[str, dict[str, Any]]:
         trigger, text = self.trigger(turn or {})
         if trigger and self.reaction_phrase in text:
@@ -452,6 +467,20 @@ class RoomScript:
         if "reply_to_event_id" in arguments:
             return {"kind": "reply", "origin_event_id": trigger, "target_event_id": trigger, "text": arguments["text"]}
         return {"kind": "message", "origin_event_id": trigger, "text": arguments["text"]}
+
+
+def received_triggers(requests: Iterable[Any]) -> dict[str, dict[str, Any]]:
+    """For each message a scripted agent was woken on, how its turn showed it was addressed (`RoomScript.received`).
+
+    Read from the model requests the agent was asked; the first request that holds a trigger gives it.
+    """
+
+    found: dict[str, dict[str, Any]] = {}
+    for request in requests:
+        seen = RoomScript.received(turn_document(request))
+        if seen is not None:
+            found.setdefault(seen["trigger"], seen)
+    return found
 
 
 class ScriptedParticipant:
@@ -500,6 +529,7 @@ class ScriptedParticipant:
                     "trigger": wake.get("trigger_event_id"),
                     "source": (wake.get("attention") or {}).get("source"),
                     "at": timestamp(datetime.now(timezone.utc)),
+                    "received": RoomScript.received(turn),
                     "action": envelope["action"],
                 }
             )

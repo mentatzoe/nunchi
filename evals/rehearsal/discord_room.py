@@ -33,7 +33,7 @@ The moments, in one channel named after the column:
    shared transport replaces the first routed event after it starts with a
    continuity gap, so for Claude Code and Codex it is pinned ``not
    delivered``; the gap itself must reach the participant
-   (``discord-continuity``).
+   (``discord-continuity``). The reference is pinned ``reached``.
 2. ``bot-status-report``: a scripted bot posts; no turn.
 3. ``direct-question``: one post.
 4. ``reply``: the person replies to the agent's post; the agent replies to it.
@@ -42,8 +42,12 @@ The moments, in one channel named after the column:
    agent reacts. The transport must resume with no gap; the reference marks
    a stream gap on any disconnect, which is recorded, not failed.
 6. ``thread``: the person posts in a thread under the room. Reported, not
-   graded: the shared transport drops thread messages (pinned ``not
-   delivered``), and the reference refuses them as another room.
+   graded: the shared transport drops thread messages and the reference
+   refuses them as another room (both pinned ``not delivered``).
+
+Each graded message must reach the agent as it was sent
+(``discord-addressing``): the pings it carried, and for the reply the agent's
+own last post as the message it answers.
 """
 
 from __future__ import annotations
@@ -67,7 +71,7 @@ from typing import Any
 from evals.behavior.scene import SCENES as BEHAVIOR_SCENES, Scene, load_scene
 
 from . import checks as checks_module
-from .checks import NOT_DELIVERED, Check
+from .checks import NOT_DELIVERED, REACHED, Check
 from .discord_net import ENV as NET_ENV
 from .fake_discord.control import FakeDiscord
 from .probe import (
@@ -88,7 +92,7 @@ from .probe import (
 )
 from .record import write_json
 from .routes import ATTENTION_KEY_ENV, OUTPUT_KEY_ENV, PASSTHROUGH_ENV, Route
-from .standin import RoomScript, ScriptedParticipant
+from .standin import RoomScript, ScriptedParticipant, received_triggers
 
 # What the scripted agent does at each graded moment, and the phrases scripted attention wakes for.
 REPLY_PHRASE = "back off exponentially"
@@ -119,6 +123,10 @@ MOMENTS = (
 # message in a thread under a routed channel (`nunchi.mcp_discord.runner`), and it replaces the
 # first routed event after it starts with a continuity gap (`nunchi.mcp_discord.server.GapAwareEnqueuer`).
 TRANSPORT_PINS = {"first-message": NOT_DELIVERED, "thread": NOT_DELIVERED}
+# The reference, the control column, takes the first message, and refuses a thread message as `route-rejected`
+# (a thread's id is not the bound channel). Pinned so that a regression, or a fix, fails the lane: update the
+# pin and its docs.
+REFERENCE_PINS = {"first-message": REACHED, "thread": NOT_DELIVERED}
 
 # The reference runs discord.py; the stand-in's shape pin is discord.py 2.7.1's.
 REFERENCE_PIN = "discord.py 2.7.1"
@@ -619,6 +627,9 @@ class DiscordRoom:
             "event_id": f"discord:message:{answer['id']}",
             "author": f"discord:actor:{self.fd.world.member(author).id}",
             "channel": channel,
+            # What the message carried, for `checks.discord_addressing` to compare with what Nunchi received:
+            # whom it pinged, and the message it replied to.
+            "mentioned_actor_ids": [f"discord:actor:{self.fd.world.member(self.members[name]).id}" for name in raw.get("mentions", ())],
             "reply_to": reply_to,
             "dispatched_to": answer["dispatched_to"],
             "message_id": answer["id"],
@@ -718,7 +729,14 @@ class DiscordRoom:
             "writes": wire_writes(self.records, self.agent) if self.fd is not None else [],
         }
 
-    def checks(self, committed: Sequence[Mapping[str, Any]], *, expected: Mapping[str, Mapping[str, Any]], gaps_fail: bool) -> list[Check]:
+    def checks(
+        self,
+        committed: Sequence[Mapping[str, Any]],
+        *,
+        expected: Mapping[str, Mapping[str, Any]],
+        gaps_fail: bool,
+        moments: Sequence[Mapping[str, Any]],
+    ) -> list[Check]:
         verdict = self.verdict or {"clean": False, "unknown": [{"what": "no verdict: the stand-in never stopped"}]}
         records = self.records
         processes = [process.document() for process in self.processes]
@@ -731,12 +749,20 @@ class DiscordRoom:
             ),
             checks_module.discord_writes_reconciled(committed, wire_writes(records, self.agent)),
             checks_module.discord_continuity(self.start_gap, self.reconnects, gaps_fail=gaps_fail),
+            checks_module.discord_addressing(moments, agent=f"discord:actor:{self.agent_id}", writes=wire_writes(records, self.agent)),
         ]
 
 
-def judge_discord_moments(leg: Leg, moments: Sequence[dict[str, Any]]) -> None:
-    """Mark each committed action delivered or not, then each moment's actions and outcome (`checks.discord_moment_outcome`)."""
+def judge_discord_moments(leg: Leg, moments: Sequence[dict[str, Any]], received: Mapping[str, Mapping[str, Any]]) -> None:
+    """Mark each committed action delivered or not, then each moment's actions and outcome (`checks.discord_moment_outcome`).
 
+    ``received`` is how the agent's turns showed each trigger was addressed; it goes beside what was sent, in
+    each delivery (`checks.discord_addressing`).
+    """
+
+    for moment in moments:
+        for delivery in moment.get("deliveries", ()):
+            delivery["received"] = received.get(delivery.get("event_id"))
     flags = checks_module.delivered(leg.committed, leg.room_effects(), harness_posts=False)
     for item, ok in zip(leg.committed, flags):
         item["delivered"] = ok
@@ -888,7 +914,8 @@ class OnTheTransport:
         return self.discord.effects()
 
     def judge(self, moments: Sequence[dict[str, Any]]) -> None:
-        judge_discord_moments(self, moments)  # type: ignore[arg-type]
+        requests = self.agent.requests() if self.agent is not None else ()  # type: ignore[attr-defined]
+        judge_discord_moments(self, moments, received_triggers(requests))  # type: ignore[arg-type]
 
     def scripted_check(self, moments: Sequence[Mapping[str, Any]]) -> Check:
         report = self.reports.get("codex") or self.reports.get("claude_code") or {}  # type: ignore[attr-defined]
@@ -896,7 +923,7 @@ class OnTheTransport:
 
     def room_checks(self, document: Mapping[str, Any]) -> list[Check]:
         expected = {self.discord.agent: {"chunk": False, "calls": self.expected_calls}}
-        return self.discord.checks(self.committed, expected=expected, gaps_fail=True)  # type: ignore[attr-defined]
+        return self.discord.checks(self.committed, expected=expected, gaps_fail=True, moments=document["moments"])  # type: ignore[attr-defined]
 
     def room_record(self) -> dict[str, Any]:
         return {"discord": {**self.discord.record(), "runner": self.runner_calls, "serve_errors": list(self.serve_errors)}}
@@ -927,7 +954,7 @@ class ReferenceLeg(Leg):
 
     harness = REFERENCE
     script = SCRIPT
-    pins: Mapping[str, str] = {}
+    pins: Mapping[str, str] = REFERENCE_PINS
     expected_calls = REFERENCE_CALLS
 
     def __init__(self, ctx: Context) -> None:
@@ -1141,14 +1168,16 @@ class ReferenceLeg(Leg):
         return self.discord.effects()
 
     def judge(self, moments: Sequence[dict[str, Any]]) -> None:
-        judge_discord_moments(self, moments)
+        answers = self.participant_endpoint.answers if self.participant_endpoint else ()
+        received = {answer["received"]["trigger"]: answer["received"] for answer in answers if answer.get("received")}
+        judge_discord_moments(self, moments, received)
 
     def scripted_check(self, moments: Sequence[Mapping[str, Any]]) -> Check:
         return checks_module.discord_scripted_outcomes(moments, EXPECTED, pins=self.pins)
 
     def room_checks(self, document: Mapping[str, Any]) -> list[Check]:
         expected = {self.discord.agent: {"chunk": True, "calls": self.expected_calls}}
-        return self.discord.checks(self.committed, expected=expected, gaps_fail=False)
+        return self.discord.checks(self.committed, expected=expected, gaps_fail=False, moments=document["moments"])
 
     def room_record(self) -> dict[str, Any]:
         return {"discord": self.discord.record()}
