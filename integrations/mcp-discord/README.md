@@ -36,42 +36,84 @@ shapes. Exact self messages are delivered; participant-specific observation
 retains them as context without self-waking.
 
 A gap notification has `event: null`, `actors: {}`, and
-`continuity_gap: true`. It is emitted before the next accepted room event after
-queue rejection or client-delivery loss for that exact participant route.
-Pending gaps and accepted-but-unconfirmed deliveries are reconstructed after
-restart. A non-resumable gateway session marks every configured route
-uncertain. Gaps make subsequent coverage continuity `unknown`.
+`continuity_gap: true`. It tells the participant that something before the
+next event may be missing, so it can read history. Gaps make subsequent
+coverage continuity `unknown`.
 
-## What it does not deliver yet
+## What reaches the participant
 
-Three gaps, each library work in the transport. The first two are pinned as
-`not delivered` by the rehearsal probe's Discord room
-(`evals/rehearsal/discord_room.py`, docs/rehearsal.md) until the transport
-closes them.
+Every message reaches the participant, or the participant is told plainly
+that something may have been missed. The rules, and what pins each:
 
-- **A message in a thread.** A message in a thread under a routed channel
-  carries the thread's id as its channel. That id is not routed, so the
-  gateway runner drops the message (`runner.py`) and the participant never
-  hears it. The Hermes plugin hears such threads as part of the room.
-  Closing it means mapping a thread to its routed parent channel.
-- **The first message after the transport starts.** A fresh process cannot
-  know what happened before its gateway session, so it marks every route
-  uncertain. The next routed event is then rejected (`queue-rejected`) and a
-  gap notification takes its place, although the transport had the event in
-  hand. The participant learns that something may be missing, but not what a
-  person just said.
-- **A notification sent before the runner's stream is open** (not pinned:
-  it depends on timing). The runner registers, then opens its notification
-  stream (`GET /mcp`). The MCP SDK keeps no event store here, so a
-  notification sent in between is dropped, while the transport's journal
-  records it as delivered. Run here (2026-10-09, mcp 1.28.1) inside the
-  rehearsal launcher: a message posted right after registration became the
-  start gap, the journal read `gap-delivered`, and the runner never received
-  it; the next message arrived with `continuity_gap: false`, so the
-  participant never learned that anything was missing. The rehearsal waits
-  for the stream before it plays, so its lanes do not hit this. Closing it
-  means opening the stream before registering, or keeping each notification
-  until a stream takes it.
+- **A gap goes ahead of the next event, and the event follows it.** After a
+  queue rejection, a lost delivery, a stream that ended, a source gap (a
+  non-resumable gateway session marks every configured route uncertain, so a
+  fresh process always starts with one), or a restart with unconfirmed
+  deliveries in the journal, the next event for that exact route is queued
+  behind a gap notification. The event is rejected (`queue-rejected`) only
+  when the queue has no slot left, and then the gap that stands for it is
+  still pending. An event queued behind a gap whose delivery failed is not
+  delivered without it: it is recorded lost, and the next event queues a
+  fresh gap. (Before 2026-10-10 the event itself was dropped and only the gap
+  was delivered, so a person's first message after the transport started never
+  reached the agent.) Tests: `tests/v2/test_runtime_hardening.py`
+  (`TransportGapTests`) and `tests/v2/test_mcp_discord_gaps.py`.
+- **The stream first, then registration.** The MCP SDK keeps no event store
+  here: a notification sent to a session whose notification stream
+  (`GET /mcp`) is not open is dropped, with no error
+  (`SdkDropTests` pins that behavior for the pinned `mcp` version). A client
+  must connect, open the stream, mark a gap of its own, register, and only
+  then read (`StreamableMCPClient.open_stream`, `DiscordRoomConnection.serve`;
+  [harness guide](../../docs/harness-guide.md), "Room events in"). The
+  transport does not rely on the client alone: it sees each `GET /mcp` begin
+  and end (`nunchi.mcp_discord._binding.track_streams`, standard ASGI, no SDK
+  internals) and records a notification as delivered only while the session's
+  stream is open. A notification for a session whose stream is not open, a
+  client that registers first, or a runner whose stream has died while its
+  session stays registered, is a failed delivery (`client-delivery-lost`),
+  and a stream that ends marks its route uncertain. The next listener on the
+  route is told with a gap. Before 2026-10-10 such messages were journaled as
+  delivered and never arrived.
+- **Threads are part of the room, by default.** A message or reaction in a
+  thread under a routed channel carries the thread's own id as its channel.
+  The transport asks Discord once for each channel that is not routed
+  (`GET /channels/{id}`, remembered; `nunchi.mcp_discord.threads`) and, when it
+  is a thread of a routed channel, delivers the event with `room_id` set to
+  the routed channel and, for a message, `thread_root_event_id` set to
+  `discord:message:<thread id>`. The first message of a forum post, whose id is
+  the thread's own, starts the thread and names no other. When Discord cannot
+  say what a channel is, the transport declares a source gap instead of
+  dropping the event quietly. A reply, a post or a reaction about a message in
+  a thread goes to the thread (`nunchi.integrations.discord_participant_transport.thread_of`),
+  whichever way the agent saw the message: the host gives the transport the
+  wake's events and every message the turn showed (a look-again, a steering
+  or history page; a message its memory points at is read from the room's
+  log), so the message's `thread_root_event_id` is there when the move goes
+  out. The host's authorization for a room covers the threads under it
+  (`ToolAuthorizer`). The setting is below.
+
+Limits that remain:
+
+- The transport knows a stream ended when its HTTP request ends, which for a
+  connection that dies without a close (a network partition) is when the next
+  write to it fails, not at once. Anything sent in between is covered by the
+  gap the transport then marks, so the participant learns of it on its next
+  event, not before.
+- Each thread's parent comes from a REST lookup, once per channel that is not
+  routed. The gateway's read loop waits for it at most 3 seconds
+  (`ThreadDirectory.parent_within`): while Discord's REST API is slow or down,
+  a late or failed lookup declares a gap (one record while the route is already
+  pending) and the next message from that channel does not wait again. Taking
+  the parents from the gateway's own events (`THREAD_CREATE`,
+  `THREAD_LIST_SYNC` and the guild's thread list, which need the `GUILDS`
+  intent) would spare the lookup and its wait. That is a follow-up, not done.
+- The extra needs `mcp>=1.10,<2`. CI runs this transport's gap tests on 1.10.0
+  and on the pinned newest release.
+- Reaction capability is measured on the room channel, not on a thread.
+- The probe's Discord room pins these (`evals/rehearsal/discord_room.py`,
+  [docs/rehearsal.md](../../docs/rehearsal.md)): the first message and a
+  thread remark read `reached` on every column, and a question asked in a
+  thread must be answered there.
 
 ## Tools
 
@@ -84,6 +126,8 @@ closes them.
 - `read_history`
 
 The registration call is mandatory before notifications or any other tool.
+It takes the participant, its channel and, optionally, `threads_in_room` (a
+boolean; see "Threads" below).
 Every call requires `_nunchi_authorization`: a one-use HMAC over request,
 participant, room, tool, exact argument digest, issue time, and nonce. The
 transport checks the exact configured participant/room route, authenticated
@@ -96,6 +140,32 @@ registered bot identity, reads the configured guild channel, member roles, and
 permission overwrites, and returns only the effective add-reaction capability
 plus a non-secret permission revision. Missing, denied, malformed, or
 mismatched facts fail closed: the participant's turn offers no reaction.
+
+## Threads
+
+Whether a thread opened under a routed channel is part of the room is one
+setting, the same in every harness: `threads_in_room` in the participant's
+`binding` ([harness guide](../../docs/harness-guide.md), step 1). It is `true`
+unless the config says `false`.
+
+- **`true` (the default).** The participant hears the thread (a message
+  carries `thread_root_event_id`), and its reply, post or reaction about a
+  message in a thread lands in the thread.
+- **`false`.** Thread messages are not part of the room: the participant
+  neither hears them nor acts in them. The runner tells the transport at
+  registration (`register_participant` with `threads_in_room: false`, inside
+  the authorized arguments), so the transport sends that participant nothing
+  from threads, and asks Discord about no channel at all while every route
+  has said so. The library also refuses a thread message, which the transport
+  marks with its thread (`thread_root_event_id`), in the participant's
+  observation (`route-rejected`) whichever way a harness delivered it
+  (`ParticipantBinding.threads_in_room`), so a harness that never tells the
+  transport still gets the setting.
+
+The transport's own configuration (below) has no such setting: one transport
+can serve participants whose rooms differ. A participant that has not
+registered yet counts as `true`, since leaving a message out is the worse
+mistake.
 
 ## Configuration
 

@@ -48,7 +48,7 @@ The wheel is the subject. A source checkout on `PYTHONPATH` is not evidence.
 python3 -m build
 python3 -m venv /tmp/nunchi-live
 /tmp/nunchi-live/bin/python -m pip install --no-deps dist/nunchi-2.0.0-py3-none-any.whl
-/tmp/nunchi-live/bin/python -m pip install 'mcp>=1.9,<2'
+/tmp/nunchi-live/bin/python -m pip install 'mcp>=1.10,<2'
 /tmp/nunchi-live/bin/nunchi probe
 /tmp/nunchi-live/bin/nunchi-claude-code-room-runner --probe
 ```

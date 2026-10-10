@@ -5544,6 +5544,42 @@ class GatewayRunner:
         ):
             hermes_v2._load_room(room, index=0)
 
+    def test_config_that_sets_threads_in_room_is_told_this_integration_does_not_take_it(self):
+        room = {
+            "binding": {
+                "participant_id": "participant",
+                "actor_id": "discord:actor:999",
+                "platform": "discord",
+                "room_id": "42",
+                "continuity_scope_id": "room-42",
+                "provenance": "test",
+                "threads_in_room": False,
+            },
+            "profile": {
+                "document": {
+                    "profile_id": "profile",
+                    "participant_id": "participant",
+                    "actor_id": "discord:actor:999",
+                    "instructions": "Be useful.",
+                    "provenance": "test",
+                }
+            },
+            "attention": {
+                "policy": {},
+                "model": {"provider": "test", "model": "small"},
+            },
+            "limits": {},
+            "participant": {"timeout_seconds": 2, "max_expansions": 1},
+        }
+        # Named, with where it is taken; not the generic "unexpected field".
+        with self.assertRaisesRegex(
+            ValidationError,
+            r"rooms\[0\]\.binding\.threads_in_room is not supported.*Hermes plugin",
+        ):
+            hermes_v2._load_room(room, index=0)
+        del room["binding"]["threads_in_room"]
+        self.assertEqual("discord", hermes_v2._load_room(room, index=0).binding.platform)
+
     def test_package_has_entry_point_without_hermes_dependency(self):
         pyproject = (
             Path(__file__).resolve().parents[2] / "pyproject.toml"

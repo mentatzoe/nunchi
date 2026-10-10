@@ -189,6 +189,11 @@ for the shared fields). Its `claude_code` block:
 | `protect_nunchi_files` | `true` | deny Read and Edit on Nunchi's state directory |
 | `withhold_env` | `[]` | more variable names to keep out of the session |
 
+The room is the config's `binding`. Its optional `threads_in_room` (`true` by
+default) says whether the threads opened under the room's channel are part of
+the room, as in every harness: the agent hears them and answers in them, or,
+with `false`, neither ([harness guide](../../docs/harness-guide.md), step 1).
+
 ```sh
 nunchi-claude-code-room-runner --config /srv/nunchi/claude-code.json --probe
 NUNCHI_CLAUDE_CODE_CONFIG_SHA256=<64 hex> \
@@ -209,9 +214,12 @@ procedure for a live run.
 ## Limits
 
 - Discord only, through the shared Discord MCP transport (#57).
-- The transport does not deliver a message in a thread under the room, or
-  the first message after it starts (only a continuity gap), among others;
-  see [its README](../mcp-discord/README.md#what-it-does-not-deliver-yet).
+- A thread under the room is part of it by default, and the agent answers in
+  the thread; `binding.threads_in_room` set to `false` keeps threads out of
+  the room (the same key in every harness,
+  [harness guide](../../docs/harness-guide.md), step 1). The shared
+  transport's remaining limits are in
+  [its README](../mcp-discord/README.md#what-reaches-the-participant).
 - No installer or service supervision yet (#58), and no live proof (#39).
 - The attention model needs an OpenAI-compatible endpoint. Running attention
   on your Claude plan through the mod is not built.

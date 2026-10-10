@@ -56,7 +56,10 @@ class ToolAuthorizer:
         participant_routes: Mapping[str, frozenset[str]],
         max_age_seconds: int = 60,
         journal_path: str | Path | None = None,
+        threads: Any = None,
     ) -> None:
+        # A ThreadDirectory: a thread under an authorized room is part of that room.
+        self._threads = threads
         if len(secret) < 32:
             raise ValueError("Discord output authorization secret must be at least 32 bytes")
         if (
@@ -134,6 +137,16 @@ class ToolAuthorizer:
             finally:
                 os.close(directory_fd)
 
+    def _thread_of_room(self, channel: Any, room_id: str) -> bool:
+        """Whether *channel* is a thread under the authorized room (False when it cannot be told)."""
+
+        if self._threads is None or not isinstance(channel, str):
+            return False
+        try:
+            return self._threads.parent_of(channel) == room_id
+        except Exception:  # noqa: BLE001 - cannot tell: do not authorize
+            return False
+
     def verify(
         self,
         *,
@@ -171,7 +184,10 @@ class ToolAuthorizer:
             return False, "authorization participant does not match authenticated session"
         if expected_room_id is not None and room_id != expected_room_id:
             return False, "authorization room does not match authenticated session"
-        if arguments.get("channel_id") != authorization["room_id"]:
+        channel = arguments.get("channel_id")
+        if channel != authorization["room_id"] and not self._thread_of_room(
+            channel, authorization["room_id"]
+        ):
             return False, "authorization channel binding mismatch"
         if (
             "participant_id" in arguments

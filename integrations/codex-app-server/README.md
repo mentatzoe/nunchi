@@ -84,6 +84,12 @@ plus a `codex` section:
   act again without it.
 - `resume_thread` keeps the thread id in `state_directory/codex-thread.json`
   and resumes it after Codex or Nunchi restarts.
+- `binding.threads_in_room` (shared section, `true` by default) says whether
+  the threads opened under the room's channel are part of the room: the agent
+  hears them, and its reply, post or reaction about a message in a thread
+  lands in the thread. With `false` the runner tells the transport at
+  registration, and the agent neither hears nor answers in threads. The same
+  key in every harness ([harness guide](../../docs/harness-guide.md), step 1).
 
 ## Run it
 
@@ -206,11 +212,11 @@ declined in a room.
 - **Not run in a live room yet.** The runner is tested against a stub of the
   shared transport, and the integration against a real `codex app-server`;
   the two have not met a real Discord room.
-- **Threads, and the first message after the transport starts.** The shared
-  Discord transport does not deliver a message in a thread under the room,
-  and the first message after it starts reaches the participant only as a
-  continuity gap, among others; see
-  [its README](../mcp-discord/README.md#what-it-does-not-deliver-yet).
+- **The shared transport's limits.** A thread under the room is part of it
+  and the agent answers in the thread (`binding.threads_in_room`, below), and
+  every message reaches the participant or it is told with a gap; the
+  transport's remaining limits are in
+  [its README](../mcp-discord/README.md#what-reaches-the-participant).
 - **Steering after Codex's own tools can come late.** `turn/steer` adds the
   room's news to the run's next model call; if the run ends first, the update
   is lost for that run, though the library already counts it as shown. The

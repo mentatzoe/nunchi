@@ -13,6 +13,44 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- `binding.threads_in_room`, one per-room setting with the same name and
+  meaning in every harness (Zoe, 2026-10-10: "This should be configurable by
+  the user"): whether the threads opened under the room's channel are part of
+  the room. **Implemented, unverified** (offline tests and the three Discord
+  room lanes; no live room). The default, `true`: the agent hears a thread
+  (its messages carry `thread_root_event_id`) and its reply, post or reaction
+  about a message in a thread lands in the thread, whether that message woke
+  the agent or it read it during the turn (a look again, steering, a history
+  page, or its memory). `false`: thread messages
+  are not part of the room. It is a field of `ParticipantBinding`, so every
+  integration reads it from the same `binding` section
+  (`RoomSettings.from_config`; `docs/harness-guide.md`, step 1). The core
+  keeps a message that names its thread out of a binding's observation when
+  it is off (`route-rejected`), so a harness that names the thread gets it;
+  the shared Discord transport
+  takes it at registration (`register_participant`'s optional
+  `threads_in_room`) and sends nothing from threads to a participant that
+  turned them off, and the reference adapter then does not place a thread in
+  its parent channel. Which shipped adapters honor it: the Discord reference
+  adapter, the shared Discord transport (the Claude Code, Codex and Codex
+  app-server integrations) and the Hermes plugin. The Telegram, Matrix and
+  channel reference adapters accept the key and ignore it: they carry no
+  thread facts, so with either setting a topic or thread message reaches the
+  agent as an ordinary message of the room (the channel adapter honors it for
+  a producer that sets `thread_root_event_id`). The older `integrations/hermes`
+  integration rejects the key at load, with an error that names it and points
+  to the Hermes plugin. Remaining gap, not fixed: the Hermes plugin posts the
+  agent's final answer in the main channel, not in the thread.
+- The Discord room's rehearsal grades a question asked in a thread
+  (`thread-question`, expectation `thread-reply`): the scripted agent replies
+  to it, and the reply must land in the thread, read from the wire. The pins
+  for the first message and the thread remark read `reached` on every column.
+- `StreamableMCPClient.open_stream()`, and `notifications(stream)`: the
+  client rule is to open the notification stream before registering
+  (`docs/harness-guide.md`). `nunchi.mcp_discord.threads.ThreadDirectory`
+  maps a thread to its routed parent channel; `DiscordRestClient.get_channel`;
+  `AuthenticatedSessionRegistry` knows which sessions have a stream open
+  (`nunchi.mcp_discord._binding.track_streams`).
 - The Discord room for the rehearsals (step 9f, PR 3b;
   [docs/rehearsal.md](docs/rehearsal.md)): **implemented, unverified** in
   CI, run here offline for Claude Code, Codex and the reference. The probe's
@@ -37,13 +75,13 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   with those the agent's turn showed. CI runs one lane per column, inside
   the launcher with `--offline`: Claude Code in `claude-code-mod`, Codex in
   `codex-app-server`, both with the `mcp-discord` extra pinned as
-  `mcp==1.28.1`, and the reference in `discord-standin`. It pins two gaps
+  `mcp==1.28.1`, and the reference in `discord-standin`. It pinned two gaps
   of the shared transport as `not delivered` (a message in a thread, and
   the first message after it starts) and the reference's two readings (the
   first message reached, a thread's message not delivered), and found a
-  third: a notification sent before the runner's stream is open is lost
-  while the transport's journal says it was delivered. All three are
-  documented in `integrations/mcp-discord/README.md`.
+  third: a notification sent before the runner's stream is open was lost
+  while the transport's journal said it was delivered. All three are fixed
+  (see Fixed, 2026-10-10) and the pins read `reached`.
 - The Discord stand-in for the rehearsals (step 9f, PR 3a;
   [docs/rehearsal.md](docs/rehearsal.md)): **implemented, unverified** in
   CI; the Discord room (PR 3b) runs on it. `evals/rehearsal/fake_discord/` answers
@@ -796,6 +834,75 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Fixed
 
+- The shared Discord transport hid a person's message from the agent in
+  three ways, and the reference shared one; every message now reaches the
+  agent, or the agent is told plainly that something was missed (2026-10-10;
+  **implemented, unverified**: offline tests, the three Discord room lanes and
+  reproductions on the stand-in; no live room):
+  - **The first message after the transport starts** was replaced by the
+    continuity gap the transport declares when it starts, although the queue
+    had room (`GapAwareEnqueuer`). Now the gap is queued and the event
+    behind it; an event is rejected only when no slot is left, and one queued
+    behind a gap whose delivery failed is recorded lost, never delivered
+    without its gap.
+  - **A notification sent before the runner's stream was open** was dropped by
+    the MCP SDK and journaled as delivered, because the runner registered
+    before its `GET` stream opened. The runner (`DiscordRoomConnection.serve`,
+    `nunchi-codex-room-runner`, and the rehearsal wrapper) now connects, opens
+    the stream, marks a gap, registers, then reads. Because the same cause
+    reached further, the transport also records a delivery only while the
+    session's stream is open: a runner whose stream died while its session
+    stayed registered, or a client that registers first, now gets a failed
+    delivery and, on its next listener, a gap; a stream that ends marks its
+    route uncertain. A stream that ends in the middle of a chunk
+    (`http.client.IncompleteRead`) is now a network error the runner
+    reconnects from, not an exception that stopped its thread. The SDK's drop
+    is pinned by a test.
+  - **A message or reaction in a thread under a routed channel** carried the
+    thread's id, which is not routed, and was dropped (and the reference
+    refused it as another room). Now it is part of the room by default (see
+    `binding.threads_in_room` under Added), a lookup that fails declares a
+    gap instead of dropping the event, and replies, posts and reactions about
+    a message in a thread go to the thread.
+  - Review fixes to those three (2026-10-10):
+    - **A move about a thread message the agent read only during the turn**
+      (a look again, a steering page, a history page, or its memory) went to
+      the main channel, because the transport looked for the thread among the
+      wake's events alone. The host (`ParticipantTurnHost`) now hands
+      `Transport.dispatch` the wake with every message the turn showed
+      (`RoomView.shown_events`; a message only the memory points at is read
+      from the room's log), so every transport finds the message's
+      `thread_root_event_id`. Pinned for the shared transport and the
+      reference, each by look again, steering, history and memory.
+    - **The reference adapter bound to a thread** (`binding.room_id` set to a
+      thread's id) dropped every message in its own room, since a thread was
+      mapped to its parent. The bound room is the room, whatever it is.
+    - **The thread lookup no longer stalls the gateway's read loop.** The
+      transport waits at most 3 seconds for it (`ThreadDirectory.parent_within`);
+      a late answer counts as a failure (a gap is declared) and is remembered
+      like one, so the next message from that channel does not wait again.
+      Every failure of the lookup is remembered, timeouts and resets
+      included: `DiscordRestClient` turns `OSError` and
+      `http.client.HTTPException` into `DiscordRestError`. A source gap that
+      is declared while a route is already pending and no gap is queued for
+      it adds no record, so a Discord REST outage is one record and one gap,
+      not one per message.
+    - **The `mcp-discord` extra needs `mcp>=1.10,<2`** (it was `>=1.9`).
+      From 1.10 the SDK hands a tool call its HTTP request; below it the
+      transport could not register a participant, and with the request hidden
+      the stream guard would have counted every session as open. `_stream_id`
+      now logs one error when the SDK gives it no request. CI's
+      `codex-app-server` job runs the gap tests on `mcp==1.10.0` (with
+      `pydantic<2.14`, whose 2.14 removed an internal function that mcp
+      1.10.0 imports) in a separate venv, besides the pinned 1.28.1.
+    - **A transport that dies in the middle of an answer during the
+      handshake** (`initialize`, `tools/list`, registration) ended the runner:
+      `StreamableMCPClient` now raises `ConnectionError` for
+      `http.client.HTTPException` there too, as it does on the stream, and the
+      runner reconnects.
+    - **Each runner reconnect left an MCP session alive in the transport.**
+      `StreamableMCPClient.connect` now ends the session it replaces, and
+      `close()` ends the current one (`DELETE /mcp` with the session id).
 - The library never posts a wake marker, in any posting style, and
   changes nothing else in a post
   ([leak audit in #135](https://github.com/mentatzoe/nunchi/issues/135#issuecomment-6057394431), row 7).

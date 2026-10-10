@@ -149,8 +149,13 @@ def v2_notification_from_dispatch(
     delivery_epoch: str,
     transport_self_actor_id: str,
     room_id: str | None = None,
+    thread_id: str | None = None,
 ) -> dict:
     """Build the closed shared V2 notification for one gateway dispatch.
+
+    ``thread_id`` says the dispatch happened in a thread under ``room_id``: the
+    event belongs to that room, and a message names the thread it is in
+    (``thread_root_event_id``).
 
     Self-authored messages are deliberately preserved.  Exact self is a
     participant-specific observation fact and only suppresses that
@@ -171,6 +176,15 @@ def v2_notification_from_dispatch(
     native = dict(data)
     if room_id is not None:
         native["room_id"] = room_id
+    if thread_id is not None:
+        if room_id is None:
+            raise ValueError("a thread event needs the room that holds the thread")
+        # A message in a thread is in the room that holds the thread; the thread
+        # names where in the room it was said. A forum post's first message has
+        # the thread's own id: it starts the thread and names no other.
+        native["channel_id"] = room_id
+        if thread_id != str(native.get("id")):
+            native["thread"] = {"id": thread_id}
     placeholder = ParticipantBinding(
         participant_id="transport",
         actor_id="discord:actor:transport",

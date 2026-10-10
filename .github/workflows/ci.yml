@@ -181,7 +181,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CODEX_VERSION: "0.160.1"
-      # The mcp-discord extra (mcp>=1.9,<2), pinned, for nunchi-mcp-discord in the Discord room.
+      # The mcp-discord extra (mcp>=1.10,<2), pinned, for nunchi-mcp-discord in the Discord room.
       MCP_VERSION: "1.28.1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -249,6 +249,9 @@ jobs:
           PY="$RUNNER_TEMP/codex-env/bin/python"
           "$PY" -m pip install "mcp==${MCP_VERSION}"
           "$PY" -m pip freeze
+          # The shared transport's gap tests, on the real MCP SDK (they skip
+          # where the extra is absent, as in the unittest job).
+          "$PY" -m unittest tests.v2.test_mcp_discord_gaps -v
           # The launcher's bubblewrap check, as in the claude-code-mod job.
           sudo apt-get update -q
           sudo apt-get install -y -q bubblewrap
@@ -260,6 +263,22 @@ jobs:
           sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline --require-bwrap -- \
             /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness codex --scripted --room discord \
             --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-discord-out"
+      - name: The shared transport's gap tests on the lowest supported mcp (mcp==1.10.0)
+        # pyproject.toml declares mcp>=1.10 for the mcp-discord extra, and the
+        # lanes pin the newest (MCP_VERSION). This installs the floor, as the
+        # extra would, into a separate venv with the wheel and runs the gap
+        # tests on it, so the range stays honest: below 1.10 the SDK hands a
+        # tool call no HTTP request and the transport cannot register. pydantic
+        # is held below 2.14, which dropped an internal function that mcp 1.10.0
+        # imports; a fresh install resolves the newest mcp and is not affected.
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/mcp-floor-env"
+          "$RUNNER_TEMP/mcp-floor-env/bin/python" -m pip install --no-deps "$RUNNER_TEMP"/nunchi-wheels/*.whl
+          "$RUNNER_TEMP/mcp-floor-env/bin/python" -m pip install "mcp==1.10.0" "pydantic<2.14"
+          "$RUNNER_TEMP/mcp-floor-env/bin/python" -m pip freeze
+          "$RUNNER_TEMP/mcp-floor-env/bin/python" -m unittest tests.v2.test_mcp_discord_gaps -v
       - name: Scan the failed Discord room lane's record for the key and the canary
         # Only after a failure of the lane above, and as the rehearsal workflow
         # does: this repository is public, so the record is uploaded only when
@@ -337,7 +356,7 @@ jobs:
       # The mod needs the mods API; keep this at or above MINIMUM_CLAUDE_CODE.
       # The rehearsal probe checks it against its pin (evals/rehearsal/routes.py, PINS).
       CLAUDE_CODE_VERSION: "2.1.289"
-      # The mcp-discord extra (mcp>=1.9,<2), pinned, for nunchi-mcp-discord in the Discord room.
+      # The mcp-discord extra (mcp>=1.10,<2), pinned, for nunchi-mcp-discord in the Discord room.
       MCP_VERSION: "1.28.1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -409,6 +428,9 @@ jobs:
           PY="$RUNNER_TEMP/claude-env/bin/python"
           "$PY" -m pip install "mcp==${MCP_VERSION}"
           "$PY" -m pip freeze
+          # The shared transport's gap tests, on the real MCP SDK (they skip
+          # where the extra is absent, as in the unittest job).
+          "$PY" -m unittest tests.v2.test_mcp_discord_gaps -v
           LANE_HOME="$(mktemp -d)"
           LANE_TMP="$(mktemp -d)"
           sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline --require-bwrap -- \

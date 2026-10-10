@@ -17,7 +17,7 @@ from .. import __version__
 from ..errors import NunchiError, ValidationError
 from ..private_process import keep_private
 from ..reactions import ReactionCapability
-from ..integrations.discord_participant_transport import DISCORD_TOKEN_PATTERNS
+from ..integrations.discord_participant_transport import DISCORD_TOKEN_PATTERNS, thread_of
 from ..participant import TransportResult
 from .runtime import CAPABILITIES, ReferenceAdapterRuntime, load_pinned_config
 
@@ -141,7 +141,8 @@ class DiscordPyTransport:
         )
 
     async def _dispatch(self, action, wake):
-        channel_id = int(wake["room"]["id"])
+        # The answer goes where the message it answers was said: in its thread, when it is in one.
+        channel_id = int(thread_of(action, wake) or wake["room"]["id"])
         channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
         if action["kind"] == "message":
             sent = await channel.send(action["text"])
@@ -289,6 +290,34 @@ def main(argv: Sequence[str] | None = None) -> int:
             except BaseException:
                 print("discord delivery error", file=sys.stderr)
 
+        async def room_of(channel_id, channel=None) -> str:
+            """The bound channel a message's channel belongs to: a thread's parent, else the channel itself.
+
+            ``channel`` is the channel object when the event brought one. Only
+            when the binding keeps threads in the room (``threads_in_room``, the
+            default); otherwise a thread is another channel, as before. The
+            bound room itself is the room, even when it is a thread (a binding
+            to one thread).
+            """
+            runtime = runtime_holder.get("runtime")
+            if (
+                runtime is None
+                or not runtime.binding.threads_in_room
+                or str(channel_id) == runtime.binding.room_id
+            ):
+                return str(channel_id)
+            channel = channel or bot.get_channel(int(channel_id))
+            if channel is None:
+                try:
+                    channel = await bot.fetch_channel(int(channel_id))
+                except discord.HTTPException:
+                    # Cannot tell whether it was a thread of the room: say so.
+                    runtime.pipeline.observation.mark_continuity_gap(
+                        delivery_id=f"discord:standalone-thread-gap:{time.time_ns()}",
+                        detail="a channel could not be placed in or out of the room",
+                    )
+            return str(channel.parent_id) if isinstance(channel, discord.Thread) else str(channel_id)
+
         @bot.event
         async def on_message(message):
             payload = {
@@ -296,7 +325,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "s": None,
                 "d": {
                     "id": str(message.id),
-                    "channel_id": str(message.channel.id),
+                    "channel_id": await room_of(message.channel.id, message.channel),
                     "guild_id": str(message.guild.id) if message.guild else None,
                     "author": {
                         "id": str(message.author.id),
@@ -323,9 +352,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                         if message.reference and message.reference.message_id
                         else None
                     ),
+                    # A forum post's first message has the thread's own id: it starts the thread.
                     "thread": (
                         {"id": str(message.channel.id)}
                         if isinstance(message.channel, discord.Thread)
+                        and message.channel.id != message.id
                         else None
                     ),
                 },
@@ -339,7 +370,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "s": runtime_holder["synthetic_sequence"].next(),
                     "delivery_epoch": "standalone-durable",
                     "d": {
-                        "channel_id": str(raw.channel_id),
+                        "channel_id": await room_of(raw.channel_id),
                         "guild_id": str(raw.guild_id) if raw.guild_id else None,
                         "user_id": str(raw.user_id),
                         "message_id": str(raw.message_id),

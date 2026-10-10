@@ -17,6 +17,7 @@ Error messages never include the token or request headers.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import logging
 import time
@@ -66,6 +67,10 @@ def _urllib_call(
         return (exc.code, {k.lower(): v for k, v in exc.headers.items()}, exc.read())
     except urllib.error.URLError as exc:
         raise DiscordRestError(None, f"network error reaching Discord API: {exc.reason}") from None
+    except (OSError, http.client.HTTPException) as exc:
+        # A read that times out is a bare TimeoutError, a reset an OSError, a
+        # response cut short an IncompleteRead: none is a URLError.
+        raise DiscordRestError(None, f"network error reaching Discord API: {exc}") from None
 
 
 def _error_detail(body: bytes, token: str) -> str:
@@ -133,6 +138,14 @@ class DiscordRestClient:
                 "fail_if_not_exists": False,
             }
         return self._request("POST", f"/channels/{channel_id}/messages", body=body)
+
+    def get_channel(self, channel_id: str) -> dict:
+        """The channel object: its type and, for a thread, its parent."""
+
+        result = self._request("GET", f"/channels/{channel_id}")
+        if not isinstance(result, Mapping):
+            raise DiscordRestError(None, "Discord channel response is malformed")
+        return dict(result)
 
     def get_messages(
         self, channel_id: str, *, limit: int = 50, before: str | None = None

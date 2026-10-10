@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import http.client
 import json
 from typing import Any, Iterator
 import urllib.request
@@ -21,6 +23,16 @@ def _iter_sse(lines) -> Iterator[str]:
             data.append(line[5:].lstrip())
     if data:
         yield "\n".join(data)
+
+
+@contextlib.contextmanager
+def _ends_as_a_network_error():
+    """``http.client``'s errors (a response cut short) are not ``OSError``s; the runners reconnect on those."""
+
+    try:
+        yield
+    except http.client.HTTPException as exc:
+        raise ConnectionError(f"the transport ended mid-response: {type(exc).__name__}") from exc
 
 
 class StreamableMCPClient:
@@ -51,9 +63,12 @@ class StreamableMCPClient:
         return urllib.request.urlopen(request, timeout=self.timeout_seconds)
 
     def connect(self) -> str:
+        # A reconnect drops the old session first: the transport keeps one alive,
+        # with its tasks and streams, until it is ended.
+        self.close()
         request_id = self._next_id
         self._next_id += 1
-        with self._post(
+        with _ends_as_a_network_error(), self._post(
             {
                 "jsonrpc": "2.0",
                 "id": request_id,
@@ -70,7 +85,7 @@ class StreamableMCPClient:
             response.read()
         if not self.session_id:
             raise RuntimeError("shared Discord transport did not issue an MCP session")
-        with self._post(
+        with _ends_as_a_network_error(), self._post(
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
             session=True,
         ) as response:
@@ -78,10 +93,30 @@ class StreamableMCPClient:
         self.call("tools/list", {})
         return self.session_id
 
+    def close(self) -> None:
+        """End the MCP session on the server, if there is one (``DELETE``), and forget it.
+
+        Best effort: a transport that is gone ends its sessions itself.
+        """
+
+        session_id, self.session_id = self.session_id, None
+        if not session_id:
+            return
+        request = urllib.request.Request(
+            self.url,
+            headers={"MCP-Protocol-Version": "2025-03-26", "mcp-session-id": session_id},
+            method="DELETE",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                response.read()
+        except (OSError, http.client.HTTPException):
+            pass
+
     def call(self, method: str, params: dict[str, Any]) -> Any:
         request_id = self._next_id
         self._next_id += 1
-        with self._post(
+        with _ends_as_a_network_error(), self._post(
             {
                 "jsonrpc": "2.0",
                 "id": request_id,
@@ -116,7 +151,15 @@ class StreamableMCPClient:
     def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         return self.call("tools/call", {"name": name, "arguments": arguments})
 
-    def notifications(self) -> Iterator[tuple[str, dict[str, Any]]]:
+    def open_stream(self):
+        """Open the notification stream (``GET``) and return once the server has it.
+
+        The server keeps a notification for a session only while this stream is
+        open: the MCP SDK drops one sent earlier, with no error. Open the stream
+        before anything registers the session for notifications, and read it
+        with :meth:`notifications`. The caller closes a stream it does not read.
+        """
+
         if not self.session_id:
             self.connect()
         headers = {
@@ -125,14 +168,24 @@ class StreamableMCPClient:
             "mcp-session-id": self.session_id,
         }
         request = urllib.request.Request(self.url, headers=headers, method="GET")
-        with urllib.request.urlopen(request, timeout=None) as response:
-            for data in _iter_sse(response):
-                try:
-                    message = json.loads(data)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(message, dict) or message.get("method") is None:
-                    continue
-                params = message.get("params")
-                if isinstance(params, dict):
-                    yield str(message["method"]), params
+        return urllib.request.urlopen(request, timeout=None)
+
+    def notifications(self, stream=None) -> Iterator[tuple[str, dict[str, Any]]]:
+        """The notifications of *stream* (from :meth:`open_stream`), or of a stream opened here; closes it at the end."""
+
+        with (stream if stream is not None else self.open_stream()) as response:
+            try:
+                for data in _iter_sse(response):
+                    try:
+                        message = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(message, dict) or message.get("method") is None:
+                        continue
+                    params = message.get("params")
+                    if isinstance(params, dict):
+                        yield str(message["method"]), params
+            except http.client.HTTPException as exc:
+                # The server went away mid-chunk. Say so as the network error it
+                # is, so the caller reconnects and records a gap.
+                raise ConnectionError(f"the notification stream ended: {type(exc).__name__}") from exc

@@ -285,6 +285,13 @@ Hermes 0.19.0 does not expose a complete V2 media mapping; reaction and
 membership events are unavailable to this adapter. Reply relations carried by
 normal text messages remain supported.
 
+This integration does not take `binding.threads_in_room`, the per-room setting
+that says whether the threads under a room are part of it (the
+[harness guide](../../docs/harness-guide.md), step 1). A config that sets it,
+`true` or `false`, is rejected at load with an error that names the key; it
+does not extend the room to threads. The Hermes plugin
+([`integrations/hermes-plugin`](../hermes-plugin/README.md)) takes it.
+
 Hermes's `DISCORD_ALLOW_BOTS=mentions` or `all` remains a profile-wide fallback.
 If set, it can admit bot messages outside Nunchi rooms under Hermes's normal
 rules. The dashboard reports that state. Keep it `none` unless another Hermes

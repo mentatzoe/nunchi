@@ -24,7 +24,7 @@ harness-hosted, consume-and-start shape with final-answer posting
 | Step | Hermes surface | What happens |
 |---|---|---|
 | Message facts | `pre_gateway_dispatch` | For each message in the bound chat, the plugin notes what the admission payload leaves out: the message it replies to, when it was sent, who it mentions (Hermes takes the bot's own Discord mention out of the text), whether its author is a bot, and whether the platform says it was meant for the bot. Dispatch goes on unchanged. A message Hermes runs from its busy queue without this hook reaches the room without them; on Discord the plugin reads its time from its id (Known gaps, Quick messages). |
-| Ingress | `post_gateway_admission` | Every message Hermes admits in the bound chat goes to the room, with those facts; Hermes runs no turn of its own on it. Threads inside the room are part of it: on Discord the threads under a bound channel, on Telegram the topics of a forum group. Their messages go to the room too, marked with their thread (`thread_root_event_id`). Messages in other chats are left to Hermes. What Hermes drops before this hook never reaches the room (Hermes setup, Known gaps). |
+| Ingress | `post_gateway_admission` | Every message Hermes admits in the bound chat goes to the room, with those facts; Hermes runs no turn of its own on it. Threads inside the room are part of it by default: on Discord the threads under a bound channel, on Telegram the topics of a forum group. Their messages go to the room too, marked with their thread (`thread_root_event_id`). With `binding.threads_in_room` set to `false` they are not part of the room: the plugin still takes the message, so Hermes does not answer it itself, and the library keeps it out of the room (its delivery audit reads `route-rejected`). Messages in other chats are left to Hermes. What Hermes drops before this hook never reaches the room (Hermes setup, Known gaps). |
 | Start | `ctx.inject_message(origin=...)` | When the library gives the agent a turn, the plugin injects the turn's text into the chat as its own message. |
 | Bind | `pre_llm_call` | The run whose message carries the turn's wake marker is bound to the turn. |
 | Steering | `transform_tool_result` | What others posted meanwhile is added to every tool result in a bound run. |
@@ -105,6 +105,13 @@ plus a `hermes` section:
 - On Discord, `chat_id` is the channel's id and `thread_id` is null: the room
   is the channel and every thread under it. To bind one thread only, set both
   to the thread's id.
+- `binding.threads_in_room` (`true` by default) is the same key in every
+  harness's config ([harness guide](../../docs/harness-guide.md), step 1).
+  Set it to `false` to keep the threads under the channel (and a forum
+  group's topics) out of the room: the agent neither hears them nor answers
+  in them. Hermes still hands the plugin their messages, and the plugin still
+  consumes them (Hermes would otherwise run its agent on them); the library
+  keeps them out of the room's log.
 - `turn_user_id` is the identity Hermes runs the injected turns as.
 - `withheld_env` names environment variables whose values the agent must
   never post (default: the platform bot tokens). The value of every other
@@ -382,10 +389,13 @@ More setup on Discord:
   after a restart.
 - **Answers to a thread land in the main chat.** The room hears a thread
   under the bound Discord channel, or a topic in the bound Telegram group,
-  and knows which thread each message is in. But the agent's turns run in
-  the main chat, so its answer to a thread message is posted in the channel
-  (on Telegram, in General), not in the thread, until the library can place
-  an answer in a thread.
+  and knows which thread each message is in. But Hermes posts the agent's
+  final answer where the run started, and the plugin starts every run in the
+  main chat, so the agent's answer to a thread message is posted in the
+  channel (on Telegram, in General), not in the thread. The library places a
+  library-hosted agent's reply, post and reaction in the thread (the shared
+  Discord transport and the reference adapter do); here only the agent's
+  reaction does, since it goes through `platform_actions`. Not fixed.
 - **Messages that name another bot.** Hermes drops a Discord message that
   @mentions another bot and not this one, before any plugin hook, whatever
   the settings. That includes a reply to a peer agent's message: Discord's

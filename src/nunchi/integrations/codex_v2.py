@@ -509,10 +509,12 @@ class CodexRoomRuntime:
         )
 
     def register_transport(self) -> None:
-        arguments = {
+        arguments: dict[str, Any] = {
             "participant_id": self.binding.participant_id,
             "channel_id": self.binding.room_id,
         }
+        if not self.binding.threads_in_room:
+            arguments["threads_in_room"] = False
         supplied = {
             **arguments,
             "_nunchi_authorization": make_tool_authorization(
@@ -637,16 +639,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         delay = 1.0
         while True:
+            stream = None
             try:
                 client.connect()
+                # The stream first, then the gap, then registration: the shared
+                # transport drops a notification sent before the stream is open
+                # (`DiscordRoomConnection.serve`).
+                stream = client.open_stream()
+                runtime.transport_interrupted()
                 runtime.register_transport()
-                for method, params in client.notifications():
+                for method, params in client.notifications(stream):
                     if method != NOTIFICATION_METHOD:
                         continue
                     runtime.handle(params)
                 runtime.transport_interrupted()
                 delay = 1.0
             except (urllib.error.URLError, RuntimeError, OSError):
+                if stream is not None:
+                    stream.close()
                 runtime.transport_interrupted()
                 print("Codex shared transport reconnect after operational error", file=sys.stderr)
                 time.sleep(delay)

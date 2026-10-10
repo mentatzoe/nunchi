@@ -22,6 +22,11 @@ Backpressure: the notification queue is bounded
 (NUNCHI_MCP_DISCORD_QUEUE_MAXSIZE, default 256). A delivery that arrives while
 the queue is full is explicitly rejected and audited in logs; an already
 accepted older event is never silently erased to make room.
+
+Gaps: when a route may have missed something, the next event for it is queued
+behind a continuity-gap notification, so the participant learns that something
+may be missing and still hears the event. An event is rejected only when the
+queue has no slot left, and never overtakes a gap whose delivery failed.
 """
 
 from __future__ import annotations
@@ -48,10 +53,19 @@ _PUMP_POLL_SECONDS = 0.25
 
 
 class AuthenticatedSessionRegistry:
-    """One live session per authenticated participant/room route."""
+    """One live session per authenticated participant/room route.
+
+    Event-loop only. Beside the session it keeps what the participant said at
+    registration: whether threads under the room are part of it, and the id of
+    the session's notification stream, so the transport knows whether a
+    notification sent now would reach anyone.
+    """
 
     def __init__(self) -> None:
         self._sessions: dict[tuple[str, str], tuple[object, str]] = {}
+        self._threads: dict[tuple[str, str], bool] = {}
+        self._stream_ids: dict[tuple[str, str], str | None] = {}
+        self._open_streams: dict[str, int] = {}
 
     def bind(
         self,
@@ -60,24 +74,33 @@ class AuthenticatedSessionRegistry:
         participant_id: str,
         room_id: str,
         transport_self_actor_id: str,
+        threads_in_room: bool = True,
+        stream_id: str | None = None,
     ) -> None:
         if any(
             not isinstance(value, str) or not value
             for value in (participant_id, room_id, transport_self_actor_id)
         ):
             raise ValueError("authenticated session route must be exact")
+        if not isinstance(threads_in_room, bool):
+            raise ValueError("threads_in_room must be true or false")
         for route, (existing, _) in list(self._sessions.items()):
             if existing is session:
-                self._sessions.pop(route, None)
-        self._sessions[(participant_id, room_id)] = (
-            session,
-            transport_self_actor_id,
-        )
+                self._forget(route)
+        route = (participant_id, room_id)
+        self._sessions[route] = (session, transport_self_actor_id)
+        self._threads[route] = threads_in_room
+        self._stream_ids[route] = stream_id
+
+    def _forget(self, route: tuple[str, str]) -> None:
+        self._sessions.pop(route, None)
+        self._threads.pop(route, None)
+        self._stream_ids.pop(route, None)
 
     def discard(self, session: object) -> None:
         for route, (existing, _) in list(self._sessions.items()):
             if existing is session:
-                self._sessions.pop(route, None)
+                self._forget(route)
 
     def route(self, session: object) -> tuple[str, str] | None:
         for route, (existing, _) in self._sessions.items():
@@ -91,6 +114,51 @@ class AuthenticatedSessionRegistry:
         room_id: str,
     ) -> tuple[object, str] | None:
         return self._sessions.get((participant_id, room_id))
+
+    def threads_in_room(self, participant_id: str, room_id: str) -> bool:
+        """What the route's participant said about threads; True (the default) until it registers."""
+
+        return self._threads.get((participant_id, room_id), True)
+
+    def threads_wanted(self, routes: Mapping[str, frozenset[str]]) -> bool:
+        """Whether any of the configured routes wants threads in its room."""
+
+        return any(
+            self.threads_in_room(participant, room)
+            for participant, rooms in routes.items()
+            for room in rooms
+        )
+
+    # -- the notification streams ---------------------------------------------------
+
+    def stream_opened(self, stream_id: str) -> None:
+        self._open_streams[stream_id] = self._open_streams.get(stream_id, 0) + 1
+
+    def stream_closed(self, stream_id: str) -> list[tuple[str, str]]:
+        """A stream ended; the routes still registered on it, whose last notifications may be lost."""
+
+        count = self._open_streams.get(stream_id, 0) - 1
+        if count > 0:
+            self._open_streams[stream_id] = count
+            return []  # another request still holds the session's stream
+        self._open_streams.pop(stream_id, None)
+        return [
+            route
+            for route, bound in self._stream_ids.items()
+            if bound == stream_id and route in self._sessions
+        ]
+
+    def stream_is_open(self, session: object) -> bool:
+        """Whether a notification sent to *session* now would reach a client.
+
+        The MCP SDK drops, without an error, a notification sent while the
+        session's notification stream is not open. A session registered
+        without a stream id (nothing tracks its stream) counts as open.
+        """
+
+        route = self.route(session)
+        stream_id = self._stream_ids.get(route) if route is not None else None
+        return stream_id is None or self._open_streams.get(stream_id, 0) > 0
 
 
 async def deliver_targeted(
@@ -113,6 +181,9 @@ async def deliver_targeted(
     session, registered_self = registered
     if registered_self != self_actor:
         registry.discard(session)
+        return False
+    if not registry.stream_is_open(session):
+        # Sent now, the SDK would drop it and this would read as delivered.
         return False
     try:
         await session.send_notification(notification)  # type: ignore[attr-defined]
@@ -253,13 +324,24 @@ class TransportAuditJournal:
 
 
 class GapAwareEnqueuer:
-    """Target every route and require a delivered gap before later facts."""
+    """Target every route and require a delivered gap before later facts.
+
+    A route that may have missed something (queue rejection, a delivery lost,
+    a source gap, a stream that ended) is *pending*. The next event for it
+    queues a continuity gap first, then the event behind it when the queue has
+    room: the gap says "something before this may be missing", not "this event
+    is lost". Only when no slot is left is the event rejected. An event queued
+    behind a gap must not overtake it if the gap's delivery fails
+    (:meth:`behind_a_failed_gap`).
+    """
 
     def __init__(
         self,
         queue: asyncio.Queue,
         audit: TransportAuditJournal,
         participant_routes: Mapping[str, frozenset[str]],
+        *,
+        wants_threads: Callable[[str, str], bool] | None = None,
     ) -> None:
         self.queue = queue
         self.audit = audit
@@ -271,8 +353,19 @@ class GapAwareEnqueuer:
             raise ValueError("Discord enqueuer requires exact participant routes")
         self._pending_routes = audit.pending_routes
         self._gap_enqueued: set[tuple[str, str]] = set()
+        # Routes whose queued gap failed to reach the client.
+        self._failed_gaps: set[tuple[str, str]] = set()
+        # Whether a participant's room includes its threads (its registration says).
+        self._wants_threads = wants_threads
 
-    def __call__(self, event: dict) -> bool:
+    def __call__(self, event: dict, *, in_thread: bool = False) -> bool:
+        """Queue *event* for every participant of its room; True when all accepted it.
+
+        ``in_thread`` says the event happened in a thread under the room: a
+        participant whose room does not include threads is skipped, as the
+        event is not part of its room.
+        """
+
         room_id = event.get("room_id")
         self_actor = event.get("transport_self_actor_id")
         if not isinstance(room_id, str) or not room_id:
@@ -288,10 +381,21 @@ class GapAwareEnqueuer:
             raise ValueError("Discord event has no configured participant route")
         accepted_all = True
         for participant_id in targets:
+            if (
+                in_thread
+                and self._wants_threads is not None
+                and not self._wants_threads(participant_id, room_id)
+            ):
+                continue
             targeted = {**event, "target_participant_id": participant_id}
             route = (participant_id, room_id)
             if route in self._pending_routes:
-                if route not in self._gap_enqueued and not self.queue.full():
+                if route not in self._gap_enqueued:
+                    if self.queue.full():
+                        # Not even the gap fits; the route stays pending.
+                        self.audit.append(outcome="queue-rejected", event=targeted)
+                        accepted_all = False
+                        continue
                     gap = {
                         "schema_version": 2,
                         "delivery_id": f"discord:transport-gap:{uuid4()}",
@@ -305,10 +409,13 @@ class GapAwareEnqueuer:
                     self.audit.append(outcome="gap-signal", event=gap)
                     self.queue.put_nowait(gap)
                     self._gap_enqueued.add(route)
-                self.audit.append(outcome="queue-rejected", event=targeted)
-                accepted_all = False
-                continue
-            if self.queue.full():
+                if self.queue.full():
+                    # The gap is queued, and a gap delivered later covers this
+                    # event too: whoever reads history after it sees the event.
+                    self.audit.append(outcome="queue-rejected", event=targeted)
+                    accepted_all = False
+                    continue
+            elif self.queue.full():
                 self.audit.append(outcome="queue-rejected", event=targeted)
                 self._pending_routes.add(route)
                 accepted_all = False
@@ -328,8 +435,20 @@ class GapAwareEnqueuer:
             self.audit.append(outcome="gap-delivered", event=event)
             self._pending_routes.discard(route)
             self._gap_enqueued.discard(route)
+            self._failed_gaps.discard(route)
         else:
             self.audit.append(outcome="client-delivered", event=event)
+
+    def behind_a_failed_gap(self, event: dict) -> bool:
+        """Whether *event* is queued behind a gap whose delivery failed.
+
+        Delivering it would let it overtake the gap: the participant would hear
+        it with no sign that something before it is missing. The pump treats it
+        as lost instead, and the next event for the route queues a fresh gap.
+        """
+
+        route = (event["target_participant_id"], event["room_id"])
+        return event.get("continuity_gap") is not True and route in self._failed_gaps
 
     def declare_delivery_gap(self, event: dict) -> None:
         self.audit.append(outcome="client-delivery-lost", event=event)
@@ -337,6 +456,20 @@ class GapAwareEnqueuer:
         self._pending_routes.add(route)
         if event.get("continuity_gap") is True:
             self._gap_enqueued.discard(route)
+            self._failed_gaps.add(route)
+
+    def declare_stream_gap(self, participant_id: str, room_id: str) -> None:
+        """A route's notification stream ended: what was sent to it last may be lost."""
+
+        event = {
+            "delivery_id": f"discord:stream-gap:{uuid4()}",
+            "room_id": room_id,
+            "target_participant_id": participant_id,
+        }
+        self.audit.append(outcome="client-delivery-lost", event=event)
+        route = (participant_id, room_id)
+        self._pending_routes.add(route)
+        self._gap_enqueued.discard(route)
 
     def declare_shutdown_gap(self, event: dict) -> None:
         self.audit.append(outcome="shutdown-lost", event=event)
@@ -345,17 +478,25 @@ class GapAwareEnqueuer:
         self._gap_enqueued.discard(route)
 
     def declare_source_gap(self) -> None:
-        """Persist uncertainty for every configured participant/room route."""
+        """Persist uncertainty for every configured participant/room route.
+
+        A route that is already pending, with no gap queued for it yet, is
+        covered: the gap its next event brings says it too. So a source that
+        keeps failing (Discord's REST API down) leaves one record and one gap,
+        not one per message.
+        """
         gap_id = f"discord:gateway-source-gap:{uuid4()}"
         for participant_id, rooms in self._routes.items():
             for room_id in rooms:
+                route = (participant_id, room_id)
+                if route in self._pending_routes and route not in self._gap_enqueued:
+                    continue
                 event = {
                     "delivery_id": gap_id,
                     "room_id": room_id,
                     "target_participant_id": participant_id,
                 }
                 self.audit.append(outcome="source-gap", event=event)
-                route = (participant_id, room_id)
                 self._pending_routes.add(route)
                 self._gap_enqueued.discard(route)
 
@@ -399,11 +540,13 @@ async def pump_notifications(
     shutdown: asyncio.Event,
     on_delivery_gap: Callable[[dict], None] | None = None,
     on_delivery_success: Callable[[dict], None] | None = None,
+    hold: Callable[[dict], bool] | None = None,
 ) -> None:
     """Drain the queue into *send* (broadcast to MCP sessions) until shutdown.
 
     A failing send declares a continuity gap for the room before pumping
-    continues.
+    continues. An event for which *hold* answers True is not sent: it counts as
+    a failed delivery (it sat behind a gap that did not arrive).
     """
     while not shutdown.is_set() or not queue.empty():
         try:
@@ -411,7 +554,7 @@ async def pump_notifications(
         except asyncio.TimeoutError:
             continue
         try:
-            delivered = await send(event)
+            delivered = False if hold is not None and hold(event) else await send(event)
             if delivered is False and on_delivery_gap is not None:
                 on_delivery_gap(event)
             elif delivered is not False and on_delivery_success is not None:

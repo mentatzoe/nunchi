@@ -25,13 +25,29 @@ from ..mcp_discord.authorization import make_tool_authorization
 from ..participant import TransportResult
 from .mcp_client import StreamableMCPClient
 
-__all__ = ["DISCORD_TOKEN_PATTERNS", "MCPDiscordTransport"]
+__all__ = ["DISCORD_TOKEN_PATTERNS", "MCPDiscordTransport", "thread_of"]
 
 # A Discord bot token's shape: three dot-separated base64url parts. Every
 # integration that holds or reaches a Discord token refuses posts that match.
 DISCORD_TOKEN_PATTERNS = (
     re.compile(r"[A-Za-z\d_-]{23,28}\.[A-Za-z\d_-]{6}\.[A-Za-z\d_-]{27,}"),
 )
+
+
+def thread_of(action: Mapping[str, Any], wake: Mapping[str, Any]) -> str | None:
+    """The Discord thread a move belongs in: the one holding the message it answers, else None (the room itself).
+
+    A message in a thread under the room carries ``thread_root_event_id``
+    (``discord:message:<thread id>``); the move is about that message, so it
+    goes where that message was said.
+    """
+
+    about = action.get("target_event_id") or action.get("origin_event_id")
+    for event in wake.get("events") or ():
+        root = event.get("thread_root_event_id") if event.get("id") == about else None
+        if isinstance(root, str) and root.startswith("discord:message:") and root[16:].isdigit():
+            return root[16:]
+    return None
 
 
 class MCPDiscordTransport:
@@ -135,21 +151,23 @@ class MCPDiscordTransport:
     def dispatch(self, *, action, wake) -> TransportResult:
         if wake["room"]["id"] != self.room_id:
             return TransportResult("failed", "Discord room binding changed before dispatch")
+        # Where the message this move answers was said: a thread under the room, or the room.
+        channel = thread_of(action, wake) or self.room_id
         if action["kind"] == "message":
             name = "send_message"
-            arguments = {"channel_id": self.room_id, "content": action["text"]}
+            arguments = {"channel_id": channel, "content": action["text"]}
         elif action["kind"] == "reply":
             name = "reply_message"
             target = action["target_event_id"].removeprefix("discord:message:")
             arguments = {
-                "channel_id": self.room_id,
+                "channel_id": channel,
                 "message_id": target,
                 "content": action["text"],
             }
         elif action["kind"] == "reaction":
             name = "add_reaction" if action["operation"] == "add" else "remove_reaction"
             arguments = {
-                "channel_id": self.room_id,
+                "channel_id": channel,
                 "message_id": action["target_event_id"].removeprefix("discord:message:"),
                 "reaction": action["reaction"],
             }
@@ -200,7 +218,7 @@ class MCPDiscordTransport:
             if (
                 not isinstance(message_id, str)
                 or not message_id.isdigit()
-                or message.get("channel_id") != self.room_id
+                or message.get("channel_id") != channel
                 or message.get("author_id") != self.native_actor_id
                 or message.get("author_is_bot") is not True
                 or message.get("content") != action["text"]
@@ -217,7 +235,7 @@ class MCPDiscordTransport:
                 )
             return TransportResult("sent", f"discord:message:{message_id}")
         expected_reaction = {
-            "channel_id": self.room_id,
+            "channel_id": channel,
             "message_id": arguments["message_id"],
             "reaction": arguments["reaction"],
             "operation": "add" if name == "add_reaction" else "remove",
