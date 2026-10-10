@@ -16,7 +16,10 @@ How a turn goes:
    time is read from its id. A thread inside the bound chat (a
    Discord thread under the channel, a Telegram topic in the group) is part
    of the room: its messages are handled the same way, with the thread they
-   belong to.
+   belong to. The room is built on the first message after Hermes starts, and
+   it declares a continuity gap first: Hermes may have been down and gives a
+   plugin no history, so the agent's first turn is told it may have missed
+   messages.
 2. **Start.** When the library decides, `start` injects the turn's text into
    the chat as the plugin's own message (`ctx.inject_message(origin=...)`),
    after a wake marker that only this plugin knows.
@@ -44,6 +47,10 @@ How a turn goes:
    `pre_api_request` let the plugin end that turn as a failure: within
    seconds when the provider refused, or once Hermes's own recovery waits
    are over when it kept retrying.
+
+Hermes drops the bot's own messages before any hook and gives a plugin no
+reaction events, so the library puts what the agent posted and what it reacted
+with into the room log itself (`HarnessDelivery`, `transport()`).
 
 The adapter decides nothing about whether or what the agent says. Any run that
 carries a Nunchi marker but is not bound to the open turn (a cancelled or
@@ -147,6 +154,11 @@ _INSIDE_MESSAGES = 1024
 # A platform's thread id for the main chat: Hermes gives a Telegram forum's
 # General topic the id 1.
 _MAIN_THREAD = {"telegram": "1"}
+# Why the room declares a gap when it starts.
+START_GAP_DETAIL = (
+    "the Hermes plugin cannot attest messages sent in the chat before its room started "
+    "(Hermes was down, or the plugin was not loaded): it has no history to read"
+)
 # What the room needs when Hermes opened a thread for a room message itself.
 AUTO_THREAD_SETUP = (
     "nunchi-room: Hermes opened a Discord thread for room message %s before the plugin saw it. "
@@ -574,15 +586,35 @@ class HermesRoomPlugin:
         if self.room is None and self.room_factory is not None:
             with self._room_lock:
                 if self.room is None:
-                    self.room = self.room_factory(self)
+                    room = self.room_factory(self)
+                    self._declare_start_gap(room)
+                    self.room = room
         return self.room
+
+    def _declare_start_gap(self, room: Any) -> None:
+        """Tell the room it cannot attest what happened before it started.
+
+        Hermes may have been down, and it gives a plugin no history of the chat,
+        so messages sent while it was away never reach the room. The agent's
+        next turn is told it may have missed some, as on the shared Discord
+        transport and in the reference adapter. It is declared before the
+        room hears its first message.
+        """
+
+        room.observation.mark_continuity_gap(
+            delivery_id=f"hermes:startup-gap:{time.time_ns()}",
+            detail=START_GAP_DETAIL,
+        )
 
     def transport(self) -> HarnessDelivery:
         """Hermes posts the agent's messages; reactions go through platform actions."""
 
-        # Hermes drops the bot's own messages before any plugin hook, so the
-        # library puts each delivered message into the room log itself.
-        return HarnessDelivery(HermesReactions(self), room_shows_own_messages=False)
+        # Hermes drops the bot's own messages before any plugin hook, and gives
+        # a plugin no reaction events, so the library puts each delivered
+        # message and each reaction it sent into the room log itself.
+        return HarnessDelivery(
+            HermesReactions(self), room_shows_own_messages=False, room_shows_own_reactions=False
+        )
 
     # -- ingress -----------------------------------------------------------------------
 

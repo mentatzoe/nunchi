@@ -201,55 +201,48 @@ class HermesChecksTest(unittest.TestCase):
         self.assertEqual({"first-message": checks.REACHED, "thread": checks.REACHED}, discord_room.HERMES_PINS)
         self.assertEqual(["thread-question"], list(discord_room.HERMES_NOTES))
 
-    def test_a_process_that_declares_no_gap_at_its_start_is_recorded_and_not_failed(self):
+    def test_every_column_declares_a_gap_when_its_process_starts_and_hermes_is_no_exception(self):
         clean = {"bot": "Vigil", "resumed": True, "identified_again": False, "message_reached": True, "transport_gaps": [], "participant_gaps": []}
         start = {"process": "hermes gateway run", "gap": None, "declared": False}
-        self.assertFalse(checks.discord_continuity(start, [clean], gaps_fail=False).ok, "the other columns must see the gap they declare")
-        recorded = checks.discord_continuity(start, [clean], gaps_fail=False, start_required=False)
-        self.assertTrue(recorded.ok, recorded.detail)
-        self.assertIn("declares no start gap", recorded.detail)
-        # Op 7 is still checked: a bot that identified again, or lost the message, fails.
-        self.assertFalse(checks.discord_continuity(start, [{**clean, "identified_again": True}], gaps_fail=False, start_required=False).ok)
-        self.assertFalse(checks.discord_continuity(start, [{**clean, "message_reached": False}], gaps_fail=False, start_required=False).ok)
-        self.assertFalse(checks.discord_continuity(start, [], gaps_fail=False, start_required=False).ok)
-        # Pinned absent (Hermes's plugin, a known gap): no start gap passes; one that appears fails and says to update the pin.
-        pinned = checks.discord_continuity(start, [clean], gaps_fail=True, start_required=None)
-        self.assertTrue(pinned.ok, pinned.detail)
-        self.assertIn("declares no start gap", pinned.detail)
-        declared = {"process": "hermes gateway run", "gap": "hermes:gap:1", "declared": True}
-        now = checks.discord_continuity(declared, [clean], gaps_fail=True, start_required=None)
-        self.assertFalse(now.ok)
-        self.assertIn("now declares a gap when it starts (hermes:gap:1): update the pin, docs/rehearsal.md, the CHANGELOG and the plugin README", now.detail)
-        # Recorded (False) still shows a declared gap without failing; every column but Hermes requires it.
-        self.assertTrue(checks.discord_continuity(declared, [clean], gaps_fail=False, start_required=False).ok)
-        self.assertTrue(checks.discord_continuity(declared, [clean], gaps_fail=False).ok)
-        # And after op 7 a gap fails Hermes (it marks none), where the reference only records its own.
+        declared = {"process": "hermes gateway run", "gap": "hermes:startup-gap:1", "declared": True}
+        # A plugin that declares none when its room starts fails (it did, until the room declared its gap).
+        failed = checks.discord_continuity(start, [clean], gaps_fail=True)
+        self.assertFalse(failed.ok)
+        self.assertIn("the participant never saw the gap its hermes gateway run declares when it starts", failed.detail)
+        ok = checks.discord_continuity(declared, [clean], gaps_fail=True)
+        self.assertTrue(ok.ok, ok.detail)
+        self.assertIn("the start gap reached the participant", ok.detail)
+        # Op 7 is still checked, and the plugin marks no gap after a reconnect.
+        self.assertFalse(checks.discord_continuity(declared, [{**clean, "identified_again": True}], gaps_fail=True).ok)
+        self.assertFalse(checks.discord_continuity(declared, [{**clean, "message_reached": False}], gaps_fail=True).ok)
+        self.assertFalse(checks.discord_continuity(declared, [], gaps_fail=True).ok)
         gap = {**clean, "participant_gaps": ["hermes:gap:2"]}
-        self.assertFalse(checks.discord_continuity(start, [gap], gaps_fail=True, start_required=None).ok)
-        self.assertTrue(checks.discord_continuity(start, [gap], gaps_fail=False, start_required=None).ok)
-        shown = record._discord_lines({"start_gap": {**start, "detail": "no gap"}})
-        self.assertIn("- Start: no gap", shown)
+        self.assertFalse(checks.discord_continuity(declared, [gap], gaps_fail=True).ok)
+        self.assertTrue(checks.discord_continuity(declared, [gap], gaps_fail=False).ok, "the reference's own stream gap is recorded, not failed")
+        shown = record._discord_lines({"start_gap": {**declared, "detail": "declared"}})
+        self.assertIn("- Start: declared", shown)
         self.assertNotIn("never saw it", " ".join(shown))
         self.assertIn("never saw it", " ".join(record._discord_lines({"start_gap": {"gap": None, "detail": "x"}})))
 
-    def test_the_hermes_leg_pins_its_known_gaps_in_the_checks_and_every_other_column_requires_them_closed(self):
+    def test_the_hermes_leg_pins_the_one_gap_the_library_cannot_close_and_every_other_column_requires_it_closed(self):
         import inspect
 
         defaults = inspect.signature(discord_room.DiscordRoom.checks).parameters
-        self.assertEqual((True, True, True), tuple(defaults[name].default for name in ("start_required", "reply_resolves", "own_reaction_remembered")))
+        self.assertEqual(True, defaults["reply_resolves"].default)
+        # The gaps the library closed are not knobs any more: every column holds them.
+        for closed in ("start_required", "own_reaction_remembered"):
+            self.assertNotIn(closed, defaults)
+            self.assertNotIn(closed, inspect.signature(checks.discord_addressing).parameters)
+            self.assertNotIn(closed, inspect.signature(checks.discord_continuity).parameters)
         with tempfile.TemporaryDirectory() as directory:
             leg = discord_room.HermesGatewayLeg(_context(Path(directory)))
             with mock.patch.object(leg.discord, "checks", return_value=[]) as called:
                 leg.room_checks({"moments": []})
-        self.assertEqual(
-            {"gaps_fail": True, "start_required": None, "reply_resolves": False, "own_reaction_remembered": False},
-            {key: called.call_args.kwargs[key] for key in ("gaps_fail", "start_required", "reply_resolves", "own_reaction_remembered")},
-        )
-        # Not Hermes: the transport columns and the reference ask for all three.
+        self.assertEqual({"gaps_fail": True, "reply_resolves": False}, {key: called.call_args.kwargs[key] for key in ("gaps_fail", "reply_resolves")})
+        self.assertEqual({"expected", "gaps_fail", "moments", "reply_resolves"}, set(called.call_args.kwargs), "no other pin")
+        # Not Hermes: the transport columns and the reference ask for it.
         for source in (inspect.getsource(discord_room.OnTheTransport.room_checks), inspect.getsource(discord_room.ReferenceLeg.room_checks)):
-            self.assertNotIn("start_required", source)
             self.assertNotIn("reply_resolves", source)
-            self.assertNotIn("own_reaction_remembered", source)
 
     def test_typing_is_counted_from_the_requests_the_bot_made_not_from_a_route(self):
         # The stand-in serves no typing route, so such a request has no route template on the wire: it is answered 599.
@@ -451,12 +444,21 @@ class OutsideTheProcessTest(_Leg):
         return {"kind": "http", "bot": "Vigil", "method": "PUT", "status": 204, "route": "/channels/{channel}/messages/{message}/reactions/{emoji}/@me",
                 "decoded_path": f"/api/v10/channels/5/messages/{message}/reactions/{emoji}/@me"}
 
-    def write_run(self, leg: discord_room.HermesGatewayLeg, receipts: list[str], observed: dict[str, tuple[str, str]] | None = None) -> None:
+    def write_run(
+        self,
+        leg: discord_room.HermesGatewayLeg,
+        receipts: list[str],
+        observed: dict[str, tuple[str, str]] | None = None,
+        reacted: dict[str, tuple[str, str]] | None = None,
+    ) -> None:
         state = self.state(leg)
         (state / "hermes-plugin-receipts.jsonl").write_text("\n".join(receipts) + "\n")
         events = [
             {"event": {"id": f"nunchi:delivered:{request_id}", "text": text, "reply_to_event_id": origin, "type": "message"}}
             for request_id, (text, origin) in (observed or {}).items()
+        ] + [
+            {"event": {"id": f"nunchi:reaction:{request_id}", "type": "reaction", "reaction": emoji, "target_event_id": target, "operation": "add"}}
+            for request_id, (emoji, target) in (reacted or {}).items()
         ]
         # The plugin's file is `<state_prefix>observations.jsonl`, its audits beside it with a suffix.
         (state / "hermes-plugin-observations.jsonl").write_text("".join(json.dumps(event) + "\n" for event in events))
@@ -473,7 +475,8 @@ class OutsideTheProcessTest(_Leg):
                 {"trigger": "discord:message:5", "role": "send", "arguments": {"text": "unused"}},
             ]
         )
-        leg.discord.fd = SimpleNamespace(wire=SimpleNamespace(records=[self.reaction_on_the_wire("3", "\N{THUMBS UP SIGN}")]))
+        # The wire has another emoji on another message: the committed reaction is not read from it.
+        leg.discord.fd = SimpleNamespace(wire=SimpleNamespace(records=[self.reaction_on_the_wire("7", "\N{PARTY POPPER}")]))
         leg.discord.agent = "Vigil"
         delivered = {"transport": {"delivery": "unknown", "detail": HARNESS_DELIVERS}}
         receipts = [
@@ -484,13 +487,14 @@ class OutsideTheProcessTest(_Leg):
             *_turn_receipts("r3", "discord:message:4", host={"outcome": "silent"}),
             *_turn_receipts("r4", "discord:message:5", host={"outcome": "unknown"}),  # handed nothing: it failed
         ]
-        self.write_run(leg, receipts, {"r1": ("the words the library recorded", "discord:message:2")})
+        self.write_run(leg, receipts, {"r1": ("the words the library recorded", "discord:message:2")},
+                       {"r2": ("\N{THUMBS UP SIGN}", "discord:message:3")})
         leg.read_turns()
         turns = {turn["request_id"]: turn for turn in leg.invocations}
         self.assertEqual(["r1", "r2", "r3", "r4"], list(turns), "a turn is a request the host invoked the harness for; a suppressed one is not")
         self.assertEqual({"kind": "message", "text": "the words the library recorded"}, turns["r1"]["result"])
         self.assertEqual({"kind": "reaction", "reaction": "\N{THUMBS UP SIGN}", "target_event_id": "discord:message:3"}, turns["r2"]["result"],
-                         "the wire's reaction, not the model's call")
+                         "the library's record of the reaction, not the wire's and not the model's call")
         self.assertEqual({"kind": "silence"}, turns["r3"]["result"])
         self.assertIsNone(turns["r4"]["result"])
         self.assertEqual([True, True, True, False], [turns[name]["bound"] for name in turns])
@@ -504,7 +508,7 @@ class OutsideTheProcessTest(_Leg):
             {key: committed["r1"][key] for key in ("kind", "text", "origin_event_id", "delivery", "detail")},
         )
         self.assertEqual("the library's record of the delivered message", committed["r1"]["text_from"])
-        self.assertIn("the wire", committed["r2"]["reaction_from"])
+        self.assertEqual("the library's record of the reaction", committed["r2"]["reaction_from"])
         self.assertEqual([], leg.harness_failures, "the library holds a record of what Hermes delivered")
         self.assertEqual(
             {"kind": "reaction", "reaction": "\N{THUMBS UP SIGN}", "target_event_id": "discord:message:3", "operation": "add", "delivery": "sent"},
@@ -547,25 +551,39 @@ class OutsideTheProcessTest(_Leg):
         self.assertEqual([], leg.harness_failures)
         self.assertEqual("the words the library recorded", leg.invocations[0]["result"]["text"])
 
-    def test_a_reaction_the_wire_does_not_show_is_missing_not_the_models_call(self):
+    def test_without_the_librarys_record_of_a_reaction_it_is_missing_and_that_is_a_hard_problem(self):
         leg = self.leg()
         leg.agent = SimpleNamespace(
             moves=[{"trigger": "discord:message:3", "role": "react", "arguments": {"target_event_id": "discord:message:3", "reaction": "\N{THUMBS UP SIGN}"}}]
         )
-        leg.discord.fd = SimpleNamespace(wire=SimpleNamespace(records=[]))
+        # The wire shows the reaction, and the scripted model asked for it: neither stands in for the library's record.
+        leg.discord.fd = SimpleNamespace(wire=SimpleNamespace(records=[self.reaction_on_the_wire("3", "\N{THUMBS UP SIGN}")]))
         leg.discord.agent = "Vigil"
-        self.write_run(leg, _turn_receipts("r2", "discord:message:3", host={"outcome": "unknown"},
-                                           transport={"delivery": "sent", "detail": "Hermes added the reaction"}))
+        receipts = _turn_receipts("r2", "discord:message:3", host={"outcome": "unknown"}, transport={"delivery": "sent", "detail": "Hermes added the reaction"})
+        self.write_run(leg, receipts)
         leg.read_turns()
         (item,) = leg.committed
         self.assertEqual(("reaction", None, None), (item["kind"], item["reaction"], item["target_event_id"]))
         self.assertIn("missing", item["reaction_from"])
-        # It reads `sent` and no write matches it: discord-writes-reconciled fails.
-        self.assertIn("matches 0 write(s)", checks.discord_writes_reconciled(leg.committed, []).detail)
-        # The nth reaction turn takes the nth reaction on the wire, and later reads fill it in.
-        leg.discord.fd.wire.records.append(self.reaction_on_the_wire("3", "\N{THUMBS UP SIGN}"))
+        self.assertEqual(["turn r2: the transport receipt says Hermes added the reaction, but the library's room log holds no record of it "
+                          "(nunchi:reaction:r2)"], leg.harness_failures)
+        problems = checks.turns_bound_and_ended(leg.invocations, [r for r in leg.receipts() if r["stage"] == "participant-host"], leg.committed,
+                                                harness_failures=leg.harness_failures)
+        self.assertFalse(problems.ok)
+        self.assertIn("holds no record of it", problems.detail)
+        # A reaction Hermes did not add is no hard problem: there is nothing to record.
+        refused = _turn_receipts("r3", "discord:message:4", host={"outcome": "unknown"}, transport={"delivery": "failed", "detail": "Hermes refused the reaction"})
+        self.write_run(leg, [*receipts, *refused])
+        leg.read_turns()
+        self.assertEqual(["r2"], [failure.split(":")[0].removeprefix("turn ") for failure in leg.harness_failures])
+        # Read again once the library has written it (the transport receipt comes first): the same action, now with its emoji and target.
+        self.write_run(leg, receipts, reacted={"r2": ("\N{THUMBS UP SIGN}", "discord:message:3")})
         leg.read_turns()
         self.assertEqual(("\N{THUMBS UP SIGN}", "discord:message:3"), (item["reaction"], item["target_event_id"]))
+        self.assertEqual([], leg.harness_failures)
+        # What the library recorded is compared with the wire: a different emoji there is not the committed action.
+        wire = discord_room.wire_writes([self.reaction_on_the_wire("3", "\N{PARTY POPPER}")], "Vigil")
+        self.assertIn("matches 0 write(s)", checks.discord_writes_reconciled(leg.committed, wire).detail)
         self.assertTrue(checks.discord_writes_reconciled(leg.committed, discord_room.wire_writes(leg.discord.records, "Vigil")).ok)
 
     def test_the_library_records_what_hermes_delivered_in_the_observation_log_and_nowhere_else(self):
@@ -578,6 +596,17 @@ class OutsideTheProcessTest(_Leg):
         # The audits beside the log hold no message: only the observation file is read.
         (leg.discord.state / "x.delivery-audit.jsonl").write_text(json.dumps({"event": {"id": "nunchi:delivered:other", "text": "no"}}) + "\n")
         self.assertEqual(["discord:1:abc"], list(discord_room.delivered_messages(leg.discord.state)))
+
+    def test_the_library_records_what_hermes_reacted_with_in_the_observation_log_under_its_own_id(self):
+        from nunchi.participant import SENT_REACTION_EVENT_PREFIX
+
+        self.assertEqual(SENT_REACTION_EVENT_PREFIX, discord_room.SENT_REACTION_PREFIX, "the prefix the library files a reaction it sent under")
+        leg = self.leg()
+        self.assertEqual({}, discord_room.sent_reactions(self.base / "no-such-directory"))
+        self.write_run(leg, [], {"r1": ("an answer", "discord:message:9")}, {"r2": ("\N{THUMBS UP SIGN}", "discord:message:3")})
+        found = discord_room.sent_reactions(leg.discord.state)
+        self.assertEqual(["r2"], list(found))
+        self.assertEqual(("\N{THUMBS UP SIGN}", "discord:message:3"), (found["r2"]["reaction"], found["r2"]["target_event_id"]))
 
     def test_the_room_log_holds_the_agents_own_post_under_its_discord_id_or_under_the_librarys_own(self):
         from nunchi.participant import DELIVERED_EVENT_PREFIX
@@ -641,15 +670,17 @@ class OutsideTheProcessTest(_Leg):
     def test_the_start_is_what_the_plugin_says_of_it(self):
         leg = self.leg()
         self.write_run(leg, _turn_receipts("r1", "discord:message:2"))
+        # A plugin that said nothing: its first snapshot reports the participant's own log as restart-safe.
         start = leg.start_facts()
         self.assertEqual((None, False), (start["gap"], start["declared"]))
-        self.assertIn("declares no gap when it starts", start["detail"])
+        self.assertIn("declared no gap when it started", start["detail"])
         self.assertIn("'restart-safe'", start["detail"])
         (leg.discord.state / "hermes-plugin-observations.jsonl.delivery-audit.jsonl").write_text(
-            json.dumps({"outcome": "continuity-gap", "delivery_id": "hermes:gap:1"}) + "\n"
+            json.dumps({"outcome": "continuity-gap", "delivery_id": "hermes:startup-gap:1"}) + "\n"
         )
         start = leg.start_facts()
-        self.assertEqual(("hermes:gap:1", True), (start["gap"], start["declared"]))
+        self.assertEqual(("hermes:startup-gap:1", True), (start["gap"], start["declared"]))
+        self.assertIn("declared a continuity gap when it started", start["detail"])
 
     def test_the_leg_waits_for_hermes_own_record_of_a_running_gateway_with_discord_connected(self):
         leg = self.leg()

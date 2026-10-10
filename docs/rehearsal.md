@@ -396,11 +396,12 @@ Beside the probe's hard checks, a run in the Discord room holds seven more:
   exactly one write the bot made, with the same content and target, and
   every write the bot made is a committed action;
 - `discord-continuity`: the gap a fresh process declares reached the
-  participant (Hermes's plugin declares none: pinned absent, below); after op
-  7 each bot resumed, did not identify again, and the message posted
-  meanwhile reached Nunchi; on the shared transport and in Hermes no gap was
-  marked. The reference marks a stream gap on any disconnect
-  (`on_disconnect`): recorded, not failed;
+  participant (Hermes's plugin declares it when its room starts, which is
+  when the first message arrives, ahead of that message); after op 7 each bot
+  resumed, did not identify again, and the message posted meanwhile reached
+  Nunchi; on the shared transport and in Hermes no gap was marked. The
+  reference marks a stream gap on any disconnect (`on_disconnect`): recorded,
+  not failed;
 - `discord-addressing`: a graded message reached the agent as it was sent.
   The scene's pings, the message a reply answers and the thread a message was
   said in are recorded when the stand-in sends it, and compared with the
@@ -415,11 +416,12 @@ Beside the probe's hard checks, a run in the Discord room holds seven more:
   a mention, a reply reference or a thread fails here. Scripted attention
   wakes on a phrase and the scripted agent answers it, so no other check would
   notice. Two things the room log must give the agent are checked here too:
-  the reply's target must be the agent's own post in the participant's log
-  (`reply_resolves`), and the next turn after the agent's reaction must hold
-  it in `memory.own_moves`. Every column holds both except Hermes, whose two
-  gaps are pinned the other way (below): a fix fails the lane until the pins
-  and these docs are updated.
+  the next turn after the agent's reaction must hold it in `memory.own_moves`
+  (every column does, Hermes's too since the library records the reaction it
+  sent), and the reply's target must be the agent's own post in the
+  participant's log (`reply_resolves`). Every column holds the second but
+  Hermes, whose gap is pinned the other way (below): a fix fails the lane
+  until the pin and these docs are updated.
 
 With `--scripted`, each graded moment is checked against the script, and
 each pin holds: `TRANSPORT_PINS` for the shared transport, `REFERENCE_PINS`
@@ -506,7 +508,8 @@ quietly.
 
 ## The Hermes column (PR 3c)
 
-**Status: implemented, unverified in CI. Run here offline, inside the launcher, against Hermes `a50406d9` on Python 3.14: every hard check held in each run of the final code (2026-10-10), from a virtualenv built as the `hermes-plugin` job builds it (the wheel, Hermes editable with `[messaging]`), as root and dropping to an unprivileged user.**
+**Status: implemented, unverified in CI; the plugin is parked (2026-10-10), and this lane stays in the `hermes-plugin` CI job.** Run here offline, inside the launcher, against Hermes `a50406d9` on Python 3.14: every hard check held in the last run (2026-10-10, once, after the plugin was parked: the thread question pinned to the main channel, the start gap and the reaction record required), from a virtualenv built as the `hermes-plugin` job builds it (the wheel, Hermes editable with `[messaging]`), as root.
+The plugin is parked because it injects a turn of its own instead of riding Hermes's native flow (`integrations/hermes-plugin/README.md`, Parked): the lane records what it does, and no new Hermes work is planned until it is unparked.
 `--harness hermes --room discord` runs Hermes's own gateway process,
 `hermes gateway run`, unmodified, with the Nunchi plugin loaded the way Hermes
 loads any plugin, on the stand-in at Discord's real names
@@ -595,31 +598,36 @@ in a copy of the tree with one change made (the end of this section).
   read from the wire, so a fix makes the lane fail with a note to update the pin
   and its docs (the note is shown only when that moment misses). Not fixed, and
   no change to Hermes.
-- **The plugin declares no gap when it starts.** The transport and the reference
-  put a continuity gap ahead of their first message; the plugin's first
-  snapshot reports continuity `restart-safe` with no restart gap, and the
-  audit holds no gap, so after a Hermes restart the participant reports full
-  continuity although messages sent while Hermes was down are missing (README,
-  Known gaps). `discord-continuity` pins it absent (`start_required=None`): it
-  records what the plugin said (`discord.start_gap`) and fails, with a note to
-  update the pin and these docs, if the plugin starts declaring one. The lane
-  never restarts Hermes, so the "restart-safe" claim itself is not exercised.
+- **The plugin declares a gap when its room starts.** The transport and the
+  reference put a continuity gap ahead of their first message, and so does the
+  plugin now: its room is built on the first message it admits, and the gap
+  (`hermes:startup-gap:<ns>`) is declared before that message reaches it. The
+  first snapshot reports continuity `unknown` with a restart gap, so after a
+  Hermes restart the participant knows it may have missed messages although
+  Hermes gives the plugin no history to read. `discord-continuity` requires it
+  and records what the plugin said (`discord.start_gap`). The lane never
+  restarts Hermes, so what a real restart does is not exercised.
 - **A person's reply to the agent's answer has a target the library does not
   hold.** Hermes reports no id for its post and drops the bot's own messages
   before any hook, so the library files the answer as
   `nunchi:delivered:<request id>`. The reply arrives with the real Discord id
   as `reply_to_event_id`, ping and all, but that id is in no event of the
   participant's log: the library cannot link the reply to the agent's own
-  message (README, Known gaps, No delivered message id). `discord-addressing`
-  pins `reply_resolves` false for Hermes and true for every other column,
-  where the same reply resolves to the agent's post.
-- **The agent's own reaction is not remembered.** Hermes gives plugins no
-  reaction events and `platform_actions.add_reaction` returns only `ok`, so the
-  library records no event for the agent's thumbs-up. The next turn's
-  `memory.own_moves` holds the two answers and not the reaction, so the agent
-  could nod again at a message it has already acknowledged (README, Known
-  gaps). `discord-addressing` pins that for Hermes; the transport and the
-  reference record it, and their next turn holds it.
+  message. No public Hermes extension point gives a plugin that id (README,
+  Known gaps, No delivered message id, with what was checked and what would
+  fix it). `discord-addressing` pins `reply_resolves` false for Hermes and
+  true for every other column, where the same reply resolves to the agent's
+  post.
+- **The agent's own reaction is remembered.** Hermes gives plugins no reaction
+  events and `platform_actions.add_reaction` returns only `ok`, so the
+  plugin tells the library its room never shows the agent's own reactions
+  (`HarnessDelivery(room_shows_own_reactions=False)`), and the host records each
+  reaction the transport reports sent in the room log
+  (`nunchi:reaction:<request id>`, the participant's own reaction on the message
+  the turn was about). The next turn's `memory.own_moves` holds it, as it does
+  for the transport and the reference. `discord-addressing` requires it; the
+  lane reads the committed reaction's emoji and target from that record, and
+  `discord-writes-reconciled` compares them with the wire.
 - **Op 7**: Hermes (discord.py) resumed with no new IDENTIFY, the message posted
   meanwhile reached Nunchi, and no gap was marked anywhere. The plugin marks
   none after a reconnect either, so a gap marked after one fails the lane
@@ -636,7 +644,8 @@ of their objects. It reads:
 | the library's record of the message Hermes delivered (`nunchi:delivered:<request id>` in the observation log, which also holds the events the reply and memory checks look for) | the text the turn committed, and the message it was about. When the transport receipt says Hermes delivered and the library holds no such record, that is a hard problem (`turns-bound-and-ended`), and the scripted model's words are never put in its place |
 | the scripted model | what it was asked, and how often (`moves`, counted as the turn's calls; nothing committed is taken from it), and what Hermes showed the agent (`discord-addressing`) |
 | Hermes's `state.db` and logs, copied after it stops (`hermes-state.json`) | its sessions: each injected turn with the wake marker, the `room_react` call and its result, `[SILENT]`. Recorded for reading: no check reads it, and "the harness reached its model" rests on the scripted endpoint's own request log |
-| the stand-in's wire (`discord-wire.jsonl`) | every call Hermes made and every message and reaction that landed, and where; a reaction's emoji and target too, since neither the receipt nor the library names them (the library records no reaction) |
+| the library's record of the reaction Hermes added (`nunchi:reaction:<request id>` in the observation log) | the emoji and the message the turn reacted to, which no receipt names. When the transport receipt says Hermes added the reaction and the library holds no such record, that is a hard problem (`turns-bound-and-ended`), as for a delivered message |
+| the stand-in's wire (`discord-wire.jsonl`) | every call Hermes made and every message and reaction that landed, and where; `discord-writes-reconciled` compares the committed reaction (the library's record) with the reaction on the wire, so a different emoji or message there fails |
 
 **What the Hermes column can prove, and what it cannot**
 
@@ -657,8 +666,8 @@ turn counts as bound when the receipts show it ended in a delivery or a silence,
 which only a bound run can reach (`bound_evidence` says so in `turns.json`).
 It cannot read the library's decisions inside the process, only what the
 participant shows the scripted model of its memory; and with a live model it
-could read a committed message only from the library's record of it, and a
-reaction's emoji and target only from the wire. It does not show how well the
+could read a committed message and a committed reaction only from the library's
+record of them. It does not show how well the
 agent reads the room (the model and attention are scripted), anything about a
 live Discord (the stand-in is our model of it, `fidelity` in
 `discord-standin.json`), a restart of Hermes (the lane never stops and starts
@@ -716,21 +725,26 @@ pass silently, so it comes with a pin that allows it in a fresh-run turn only.
   its start. In a real room they appear in everyone's slash menu; the README
   keeps Hermes's default (Known gaps, Registered slash commands, decision D4).
 - The agent's own message comes back to the library as a message of its own,
-  in reply to the one the turn was about; later turns' packets list it
-  (`delivered_event_ids`), so its memory and the room's pace see it. A
-  person's reply to it does not resolve to it, though, and the agent's own
-  reaction is not in its memory at all (above).
+  in reply to the one the turn was about, and its reaction as a reaction of its
+  own on the message it was about; later turns' packets list both
+  (`delivered_event_ids`, `memory.own_moves`), so its memory and the room's
+  pace see them. A person's reply to the message does not resolve to it,
+  though (above).
 - `hermes.typing` is 0 in every run: no scripted moment starts a fresh run.
 
-**What turns the lane red** (each shown offline on 2026-10-10, inside the
-launcher, in a copy of the tree with one change made; the copy was thrown away,
-so nothing was left changed): the plugin dropping the mentions of a reply
-(`discord-addressing`: the reply pings the agent, and Nunchi saw none); the
-plugin declaring a gap when it starts (`discord-continuity`); the library unable
-to record its own delivered post (`turns-bound-and-ended`, `discord-writes-reconciled`
-and others: the scripted model's words are not put in its place); a prototype of
-the repair that records the agent's reaction in the room log, and a simulated fix
-of the reply's target (`discord-addressing`, the two pins); the stand-in making
+**What turns the lane red** (each shown offline on 2026-10-10, before the
+plugin was parked, inside the launcher, in a copy of the tree with one change
+made; the copy was thrown away, so nothing was left changed): the plugin
+dropping the mentions of a reply (`discord-addressing`: the reply pings the
+agent, and Nunchi saw none); the plugin not declaring its gap when its room
+starts (`discord-continuity`); the plugin telling the library that the room
+shows the agent's reactions, or the library not recording the reaction it sent
+(`turns-bound-and-ended`: the transport receipt says Hermes added it and the
+library holds no record, then `no-leaks`, `discord-writes-reconciled`,
+`discord-addressing` and `scripted-outcomes`); the library unable to record its
+own delivered post (`turns-bound-and-ended`, `discord-writes-reconciled` and
+others: the scripted model's words are not put in its place); a simulated fix
+of the reply's target (`discord-addressing`, the pin); the stand-in making
 Hermes's answers Discord replies (`scripted-outcomes`: "Hermes now replies", and
 `discord-writes-reconciled`); and one answer that the plugin must refuse, which
 starts a fresh run and so Hermes's typing (`discord-standin-clean` names the

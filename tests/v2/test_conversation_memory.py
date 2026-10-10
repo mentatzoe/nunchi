@@ -15,7 +15,9 @@ import unittest
 from nunchi.attention_questions import answers_leaning
 from nunchi.errors import ValidationError
 from nunchi.memory import ConversationMemory
+from nunchi.participant import TransportResult
 from nunchi.participant_model import ParticipantTurnProtocol
+from nunchi.reactions import ReactionCapability
 from nunchi.turn import HarnessDelivery
 from nunchi.v2_contracts import validate_participant_wake
 from tests.v2.test_operator_protocol import PROFILE, opportunity
@@ -40,6 +42,24 @@ def reaction(event_id, target, *, author_id=SELF, operation="add", **extra):
         "operation": operation,
         **extra,
     }
+
+
+_ADD_REACTIONS = ReactionCapability(
+    supported=True, authenticated=True, operations=("add",), reactions=("*",), permissions_revision="test"
+)
+
+
+class _ReactingTransport(HarnessDelivery):
+    """A harness-hosted transport that reports every reaction sent, and whose room never shows it back."""
+
+    def __init__(self):
+        super().__init__(room_shows_own_messages=False, room_shows_own_reactions=False)
+
+    def dispatch(self, *, action, wake):
+        return TransportResult("sent", "native:1")
+
+    def reaction_capability(self):
+        return _ADD_REACTIONS
 
 
 class OwnMovesTests(unittest.TestCase):
@@ -470,6 +490,87 @@ class TurnTests(unittest.TestCase):
         self.assertIn(move["event_id"], [event["id"] for event in wakes[1]["events"]])
         self.assertEqual(1, wakes[1]["pace"]["own_messages"])
         validate_participant_wake(wakes[1])
+
+    def _reacting(self, *, shows=None, result=None, reaction="\U0001f44d", operation="add"):
+        """A participant that reacts to q1 through a transport; the wake of its next turn, and the transport."""
+
+        wakes = []
+        replies = iter([
+            {"kind": "reaction", "origin_event_id": "q1", "target_event_id": "q1", "reaction": reaction,
+             "operation": operation, "why": "Zoe asked for a nod."},
+            None,
+        ])
+
+        class Native(HarnessDelivery):
+            def __init__(self):
+                kwargs = {} if shows is None else {"room_shows_own_reactions": shows}
+                super().__init__(room_shows_own_messages=False, **kwargs)
+                self.reacted = []
+
+            def dispatch(self, *, action, wake):
+                if action.get("kind") == "reaction":
+                    self.reacted.append(action)
+                    return result or TransportResult("sent", "the harness added the reaction")
+                return super().dispatch(action=action, wake=wake)
+
+            def ordinary_action_capabilities(self):
+                return ["message", "reaction"]
+
+            def reaction_capability(self):
+                return _ADD_REACTIONS
+
+        transport = Native()
+        pipeline, _, _, _ = foundation(
+            participant=lambda **turn: wakes.append(turn["wake"]) or next(replies), transport=transport
+        )
+        pipeline.handle_delivery(delivery_id="d-q1", event=message("q1", text="Deploy is green."), actors=ZOE)
+        pipeline.handle_delivery(delivery_id="d-q2", event=message("q2", text="Anyone?"), actors=ZOE)
+        self.assertEqual(1, len(transport.reacted))
+        return wakes[1], transport
+
+    def test_a_reaction_the_room_never_shows_back_is_put_in_the_room_log(self):
+        # A harness reports no reaction events and its reaction call says only that it worked (the Hermes
+        # plugin): the host records the reaction it sent as the participant's own event.
+        wake, _ = self._reacting(shows=False)
+        (move,) = wake["memory"]["own_moves"]
+        self.assertEqual(
+            ("reaction", "q1", "\U0001f44d", "Zoe asked for a nod."),
+            (move["kind"], move["about_event_id"], move["reaction"], move["why"]),
+        )
+        self.assertTrue(move["event_id"].startswith("nunchi:reaction:"))
+        (event,) = [item for item in wake["events"] if item["id"] == move["event_id"]]
+        self.assertEqual(
+            {"type": "reaction", "author_id": SELF, "target_event_id": "q1", "reaction": "\U0001f44d", "operation": "add"},
+            {key: event[key] for key in ("type", "author_id", "target_event_id", "reaction", "operation")},
+        )
+        validate_participant_wake(wake)
+
+    def test_a_reaction_the_room_shows_back_is_left_to_the_room(self):
+        # The default, and every transport whose room echoes the participant's reactions: recording it too
+        # would count it twice.
+        for shows in (None, True):
+            with self.subTest(shows=shows):
+                wake, _ = self._reacting(shows=shows)
+                self.assertEqual([], wake.get("memory", {}).get("own_moves", []))
+                self.assertFalse([event for event in wake["events"] if event["type"] == "reaction"])
+
+    def test_a_reaction_that_did_not_go_is_not_recorded(self):
+        for delivery in ("failed", "unknown", "unavailable"):
+            with self.subTest(delivery=delivery):
+                wake, _ = self._reacting(shows=False, result=TransportResult(delivery, "no"))
+                self.assertFalse([event for event in wake["events"] if event["type"] == "reaction"])
+
+    def test_the_reaction_is_recorded_once_per_request(self):
+        pipeline, _, transport, _ = foundation(transport=_ReactingTransport())
+        host = pipeline.host
+        pipeline.handle_delivery(delivery_id="d-q1", event=message("q1"), actors=ZOE)
+        wake = {"request_id": "r1"}
+        action = {"kind": "reaction", "origin_event_id": "q1", "target_event_id": "q1", "reaction": "x", "operation": "add"}
+        self.assertTrue(host._record_sent_reaction(wake, action))
+        self.assertFalse(host._record_sent_reaction(wake, action), "the same request's reaction is not filed twice")
+        for bad in ({**action, "reaction": ""}, {**action, "target_event_id": None}, {**action, "operation": "toggle"}):
+            self.assertFalse(host._record_sent_reaction({"request_id": "r2"}, bad))
+        self.assertEqual(["nunchi:reaction:r1"], [event["id"] for event in pipeline.observation.retained_events() if event["type"] == "reaction"])
 
     def test_the_runtime_contract_checks_memory(self):
         wakes = []

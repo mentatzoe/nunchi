@@ -17,6 +17,16 @@ marked *to verify*. A cell that fails becomes a gap in
 [#135](https://github.com/mentatzoe/nunchi/issues/135), and this contract
 changes with it.
 
+**The Hermes plugin is parked (Zoe and Claude as lead engineer, 2026-10-10).**
+The code and its CI lanes stay, and there is no new Hermes work until it is
+unparked: it consumes each message and injects a turn of its own, so Hermes's
+native settings (threads, sessions, identity) never apply to Nunchi's turns
+([`integrations/hermes-plugin/README.md`](../integrations/hermes-plugin/README.md#parked-2026-10-10)).
+The Hermes column and the Hermes gaps below describe the plugin as it last ran.
+Codex stays active. An integration follows the harness's own plugin rules and
+never rewrites or reimplements the harness, so a proposal below that would
+rewrite Hermes is marked not allowed.
+
 ## Why
 
 Nunchi is a library that any agent harness can use
@@ -281,7 +291,7 @@ source. The conformance kit checks the *to verify* cells. A gap becomes an issue
 here, with the alternatives considered, before anyone asks a harness's
 maintainers.
 
-| Behavior | Claude Code | Codex (app-server) | Hermes (plugin) | One-reply |
+| Behavior | Claude Code | Codex (app-server) | Hermes (plugin, parked) | One-reply |
 |---|---|---|---|---|
 | Topology, posting | library-hosted, tools | library-hosted, tools | harness-hosted (consume and start), final answer | library-hosted, tools |
 | Gate before the agent runs | library | library | `post_gateway_admission` consumes every message Hermes admits in the bound chat and in the threads inside it (a Discord thread under the channel, a Telegram forum topic), each with its thread (`handled`, no reply), with the reply target, time, mentions and bot flag noted at `pre_gateway_dispatch` (mentions and bot flag in-process only); the library starts turns with `inject_message`. Hermes's own gates run first and need the operator setup below; what they drop regardless is in gap 12. A message Hermes rescues from its busy queue reaches `post_gateway_admission` without `pre_gateway_dispatch`, so without those facts (gap 13) | library |
@@ -532,8 +542,9 @@ None goes to a harness's maintainers without Zoe's decision.
 2. **Hermes, the id of the message it delivered.** There is no hook, ledger
    field or transcript field for it, and the Discord adapter drops the bot's
    own messages before any hook. Memory records the move by text and time.
-   A raw Discord listener (`register_platform_handler`) would see it, but
-   only in-process, with no stability guarantee.
+   - Not allowed: a raw Discord listener (`register_platform_handler`) would
+     see it, but it wraps Hermes's own message handling instead of using an
+     extension point, only in-process and with no stability guarantee.
 3. **Hermes, interrupting a running agent.** `PluginContext` has no interrupt,
    `agent_loop_stopped` only observes, and injected text cannot run `/stop`.
    The fallback silences the answer; tools already run stay run.
@@ -596,8 +607,12 @@ None goes to a harness's maintainers without Zoe's decision.
     settings for the whole profile with them: `/reasoning show` posts the
     agent's private thinking with each answer. Gating with
     `group_allow_admin_from` limits who can; a denied command still gets a
-    reply. Dropping or rewriting built-in commands in the bound chat is
-    decision D4.
+    reply.
+    - **Decided (D4, Zoe and Claude as lead engineer, 2026-10-10):** Hermes's
+      built-in commands stay Hermes's. The plugin never drops or rewrites them
+      in the bound chat; operators restrict them with `group_allow_admin_from`.
+      Nunchi sees neither the command nor Hermes's reply, and that stays a
+      known gap.
 12. **Hermes, Discord messages dropped before any hook.** Hermes's Discord
     adapter drops, before `pre_gateway_dispatch` and whatever the settings: a
     message that @mentions another bot and not this one, which includes a
@@ -609,8 +624,9 @@ None goes to a harness's maintainers without Zoe's decision.
     both.
     - Alternatives: asking Hermes for a hook, or a setting, that lets a
       plugin see messages its Discord admission drops in a free-response
-      channel; a raw listener (`register_platform_handler`), in-process
-      only and without a stability guarantee.
+      channel. Not allowed: a raw listener (`register_platform_handler`),
+      which wraps Hermes's message handling instead of using an extension
+      point.
 13. **Hermes, a person's quick messages.** Hermes's text batching merges
     a person's messages sent close together into the first, with its id,
     mentions and reply target (`HERMES_DISCORD_TEXT_BATCH_DELAY_SECONDS`,
@@ -728,7 +744,7 @@ thread without the room tools, which the integration treats as unbound.
 |---|---|
 | Turn rules inside the Claude Code gate | The library's `Turn`; the gate keeps only the session and the mod (done in step 9c) |
 | `ParticipantTurnProtocol` as a separate turn | The one-reply driver of the same `Turn` (done in step 9c) |
-| The Hermes integration's shims over Hermes internals | A plugin on Hermes's public hooks (built from the harness guide: `nunchi.integrations.hermes_plugin`, verified offline; not yet live) |
+| The Hermes integration's shims over Hermes internals | A plugin on Hermes's public hooks (built from the harness guide: `nunchi.integrations.hermes_plugin`, verified offline; not yet live; parked since 2026-10-10) |
 | Codex with its tools turned off | The app-server with the user's own configuration and room tools (built from the harness guide: `nunchi.integrations.codex_app_server`, verified offline on Codex CLI 0.160.1; its runner `nunchi-codex-app-server-runner` is on the shared room connection, not yet run live) |
 
 Each current integration stays until its replacement passes the conformance
@@ -741,4 +757,6 @@ package and one optional install. The Hermes plugin can also be installed
 from its subdirectory with `hermes plugins install`. That keeps one source of
 truth for the contract and the conformance kit. An integration can move out
 later if its harness's ecosystem calls for it, for example Hermes's reviewed
-plugin catalog.
+plugin catalog (not for the parked Hermes plugin: by Hermes's docs, listing
+needs a package-manager-managed install, unverified for the catalog process
+itself; plugin README, Before unparking).

@@ -141,7 +141,14 @@ A truthful attention request represents:
   shows the participant's own messages (`HarnessDelivery(room_shows_own_messages=False)`),
   the reference host records that message itself. It carries an `id` of the
   library's own, `nunchi:delivered:<request_id>`, which no platform message
-  has, and `reply_to_event_id` naming the message its turn was about.
+  has, and `reply_to_event_id` naming the message its turn was about. One
+  `reaction` is host-attested the same way: when the participant's transport
+  reports a reaction it added as sent and the room never shows the
+  participant's own reactions (`room_shows_own_reactions` false on the
+  transport), the reference host records it, with an `id` of the library's own,
+  `nunchi:reaction:<request_id>`, the participant as `author_id`, the message
+  its turn was about as `target_event_id`, and the move's `reaction` and
+  `operation`.
 - **One included trigger** — `trigger_event_id` must name an event in
   `events` (runtime-adapter-only rule; see the partition below).
 - **Honest coverage** — `has_more_before`/`has_more_after` (boolean or
@@ -423,7 +430,10 @@ and a restart forgets it. Attention's request (I-010A@7) carries the same
 memory. A room that never shows the participant's own messages (Hermes hides
 them from plugins) gets the host-attested message in the event union
 instead, so the move is a `reply` with that message's id, and threads and
-the room's pace count it too (#94 step 9e).
+the room's pace count it too (#94 step 9e). A room that never shows the
+participant's own reactions (Hermes gives plugins no reaction events) gets the
+host-attested `reaction` event in the same way, so the move is a `reaction`
+with that event's id.
 
 ## I-010D ContextContinuationV2@1
 

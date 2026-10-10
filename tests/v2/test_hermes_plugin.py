@@ -107,14 +107,30 @@ class _StubContext:
         return False
 
 
+class _StubObservation:
+    """The room's log, as far as the plugin writes to it: a gap it declares."""
+
+    def __init__(self, calls: list[str]) -> None:
+        self.gaps: list[tuple[str, str]] = []
+        self.calls = calls
+
+    def mark_continuity_gap(self, *, delivery_id, detail):
+        self.calls.append("gap")
+        self.gaps.append((delivery_id, detail))
+
+
 class _StubRoom:
     def __init__(self, *, fail: bool = False) -> None:
         self.delivered: list[dict] = []
         self.fail = fail
+        # What happened to the room, in order: "gap" and "deliver".
+        self.calls: list[str] = []
+        self.observation = _StubObservation(self.calls)
 
     def deliver(self, **kwargs):
         if self.fail:
             raise RuntimeError("room unavailable")
+        self.calls.append("deliver")
         # The room needs every actor an event names, except the agent itself.
         event = kwargs["event"]
         named = {event["author_id"], *event["mentioned_actor_ids"]} - {PROFILE.actor_id, DISCORD_PROFILE.actor_id}
@@ -230,6 +246,54 @@ class IngressTest(unittest.TestCase):
         self.assertEqual(event["author_id"], "telegram:user:u1")
         # Hermes's admission payload does not say whether the author is a bot.
         self.assertEqual(delivery["actors"]["telegram:user:u1"]["kind"], "unknown")
+
+    def test_the_room_declares_a_gap_when_it_starts_before_it_hears_a_message(self):
+        # Hermes gives the plugin no history, and may have been down: the room
+        # cannot attest what was said before it started, and says so first.
+        room = _StubRoom()
+        plugin = _plugin(room)
+        self.assertEqual([], room.calls, "the room is built on the first message, not when the plugin loads")
+        for message_id in ("100", "101"):
+            self._admit(plugin, session_key="k", platform="telegram", source={"chat_id": ROOM, "user_id": "u1"},
+                        message_id=message_id, text="anyone around?")
+        self.assertEqual(["gap", "deliver", "deliver"], room.calls, "one gap, ahead of the first message")
+        ((delivery_id, detail),) = room.observation.gaps
+        self.assertTrue(delivery_id.startswith("hermes:startup-gap:"), delivery_id)
+        self.assertIn("cannot attest", detail)
+
+    def test_the_agents_first_snapshot_says_it_may_have_missed_messages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            plugin = HermesRoomPlugin(profile=PROFILE, guard=SecretGuard([]), route=ROUTE,
+                                      room_factory=_room_factory(Path(directory)))
+            self._admit(plugin, session_key="k", platform="telegram", source={"chat_id": ROOM, "user_id": "u1"},
+                        message_id="100", text="anyone around?")
+            room = plugin.room
+            self.assertTrue(room.drain(5))
+            (gap,) = [audit for audit in room.observation.delivery_audits() if audit.outcome == "continuity-gap"]
+            self.assertTrue(gap.delivery_id.startswith("hermes:startup-gap:"))
+            coverage = room.observation.build_snapshot("telegram:message:100", record_receipt=False)["coverage"]
+            self.assertEqual(("unknown", True, True), (coverage["continuity"], coverage["has_gaps"], coverage["has_restart_gap"]))
+
+    def test_a_room_that_cannot_declare_its_gap_is_not_kept(self):
+        # Fail closed: a room that never said it may have missed messages must not hear any, and the next
+        # message builds it again.
+        room = _StubRoom()
+        plugin = _plugin(room)
+        fail = [True]
+
+        def gap(**kwargs):
+            if fail[0]:
+                raise OSError("cannot persist")
+
+        room.observation.mark_continuity_gap = gap
+        with self.assertLogs("nunchi.hermes_plugin", level="ERROR"):
+            answer = self._admit(plugin, platform="telegram", source={"chat_id": ROOM, "user_id": "u1"},
+                                 message_id="100", text="hi")
+        self.assertEqual({"action": "handled"}, answer)
+        self.assertEqual(([], None), (room.delivered, plugin.room))
+        fail[0] = False
+        self._admit(plugin, platform="telegram", source={"chat_id": ROOM, "user_id": "u1"}, message_id="101", text="hi")
+        self.assertEqual(["telegram:message:101"], [item["event"]["id"] for item in room.delivered])
 
     def _dispatch(self, plugin, message_id, *, chat_id=ROOM, **fields):
         source = SimpleNamespace(platform=SimpleNamespace(value="telegram"), chat_id=chat_id, thread_id=None)
@@ -348,7 +412,7 @@ class IngressTest(unittest.TestCase):
             self.assertTrue(room.drain(5))
             self.assertEqual(["discord:message:2003"], [event["id"] for event in room.observation.retained_events()])
             audits = {audit.outcome for audit in room.observation.delivery_audits()}
-            self.assertEqual({"route-rejected", "recorded"}, audits)
+            self.assertEqual({"continuity-gap", "route-rejected", "recorded"}, audits)
             (refused,) = [audit for audit in room.observation.delivery_audits() if audit.outcome == "route-rejected"]
             self.assertIn("threads out of the room", refused.detail)
 
@@ -1445,6 +1509,27 @@ class HermesGatewayTest(unittest.TestCase):
         self.assertEqual(harness.gateway.adapter.reactions, [(ROOM, "100", "👍")])
         self.assertEqual(harness.gateway.adapter.sent, [])
 
+    def test_the_agents_reaction_is_in_its_memory(self):
+        # Hermes gives a plugin no reaction events and its add_reaction returns only that it worked: the
+        # library puts the reaction it sent into the room log, so the next turn holds it among its own moves.
+        harness = self._harness(platform_actions=True)
+        harness.person_says("Deploy is green again.", message_id="100")
+        self.assertTrue(harness.wait_for_requests(1))
+        harness.model.reply({"tool": "room_react",
+                             "arguments": {"target_event_id": "telegram:message:100", "reaction": "👍"}})
+        self.assertTrue(harness.wait_for_requests(2))
+        harness.model.reply({"text": "Nice."})
+        self.assertTrue(harness.settle())
+        self.assertEqual([(ROOM, "100", "👍")], harness.gateway.adapter.reactions)
+        harness.person_says("Thanks! Ping me when it's green.", message_id="102")
+        self.assertTrue(harness.wait_for_requests(3))
+        wake = _wake_in(_user_text(harness.model.latest()))
+        (move,) = wake["memory"]["own_moves"]
+        self.assertEqual(("reaction", "telegram:message:100", "👍"), (move["kind"], move["about_event_id"], move["reaction"]))
+        self.assertTrue(move["event_id"].startswith("nunchi:reaction:"), move["event_id"])
+        harness.model.reply({"text": SILENCE_MARKER})
+        self.assertTrue(harness.settle())
+
     def test_without_the_grant_the_agent_is_not_offered_reactions(self):
         harness = self._harness()
         harness.person_says("Deploy is green again.", message_id="100")
@@ -1719,6 +1804,16 @@ class HermesDiscordTest(unittest.TestCase):
         facts = harness.plugin.room.host.memory_facts("discord:message:2002") or {}
         self.assertEqual([("reply", "Yes, it finished at 02:10.")],
                          [(move.get("kind"), move.get("text")) for move in facts.get("own_moves", ())])
+
+    def test_the_agents_first_turn_says_it_may_have_missed_messages(self):
+        # Hermes may have been down, and gives the plugin no history: the room declares a gap when it starts.
+        harness = self._harness()
+        self.assertTrue(harness.person_says("Is the deploy green?", message_id="2001"))
+        self.assertTrue(harness.wait_for_requests(1))
+        coverage = _wake_in(_user_text(harness.model.latest()))["coverage"]
+        self.assertEqual(("unknown", True, True), (coverage["continuity"], coverage["has_gaps"], coverage["has_restart_gap"]))
+        harness.model.reply({"text": SILENCE_MARKER})
+        self.assertTrue(harness.settle())
 
     def test_hermes_discord_defaults_drop_the_room_and_open_threads(self):
         # Hermes's Discord defaults, kept as a regression pin: without

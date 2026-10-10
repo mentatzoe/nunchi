@@ -356,17 +356,12 @@ class DiscordChecksTest(unittest.TestCase):
         self.assertFalse(fixed.ok)
         self.assertIn("now resolves to the agent's own post in the room log: update the pin", fixed.detail)
         self.assertIn("No delivered message id", fixed.detail)
-        # The next turn after the agent's reaction must hold that reaction in memory.own_moves, unless pinned to a gap (Hermes).
+        # The next turn after the agent's reaction must hold that reaction in memory.own_moves, in every column.
         forgotten = [*moments[:5], {**moments[5], "deliveries": [{**moments[5]["deliveries"][0], "received": {
             **moments[5]["deliveries"][0]["received"], "own_moves": [{"kind": "reply", "about_event_id": "discord:message:250"}]}}]}]
         failed = check(forgotten, agent=agent, writes=writes)
+        self.assertFalse(failed.ok)
         self.assertIn("does not hold the agent's reaction to discord:message:400 in memory.own_moves", failed.detail)
-        pinned = check(forgotten, agent=agent, writes=writes, own_reaction_remembered=False)
-        self.assertTrue(pinned.ok, pinned.detail)
-        self.assertIn("the agent's own reaction is not remembered", pinned.detail)
-        fixed = check(moments, agent=agent, writes=writes, own_reaction_remembered=False)
-        self.assertIn("now holds the agent's reaction to discord:message:400 in memory.own_moves: update the pin", fixed.detail)
-        self.assertIn("The agent's own reaction is not remembered", fixed.detail)
         self.assertIn("no later turn showed whether the agent remembers its reaction", check(moments[:5], agent=agent, writes=writes).detail)
         # The scene must address the agent, the reply must be to the agent's own last post, and a turn must have shown it.
         self.assertIn("did not ping the agent", check(changed(0, mentioned_actor_ids=[]), agent=agent, writes=writes).detail)
