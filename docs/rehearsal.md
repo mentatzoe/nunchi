@@ -328,7 +328,8 @@ launcher needs root, so it skips in the `test` job.
 
 **Status: implemented, unverified in CI. Run here offline, inside the
 launcher, for Claude Code (2.1.289, with `--no-sandbox`), Codex (0.160.1)
-and the reference: every hard check held in each.** `--room discord` plays
+and the reference: every hard check held in each (2026-10-09, and again on
+2026-10-10 with the transport's three gaps closed, below).** `--room discord` plays
 the probe's moments on the Discord stand-in at Discord's real names, with
 Nunchi's own Discord processes unmodified (`evals/rehearsal/discord_room.py`):
 
@@ -369,12 +370,13 @@ endpoint. The moments play in one channel, named after the column:
 
 | Moment | What happens | Checked |
 |---|---|---|
-| first-message | a person greets the room | reported; pinned: `not delivered` on the shared transport, `reached` on the reference (below) |
+| first-message | a person greets the room | reported; pinned `reached` on every column: a fresh transport declares its gap, and the message arrives behind it (below) |
 | bot-status-report | a scripted bot posts a build report | no turn |
 | direct-question | a person asks the agent | one post: the scripted answer |
 | reply | the person replies to the agent's post | one reply, to that message |
 | reaction | op 7 goes to every bot, then at once the person asks for a thumbs up, so the message crosses the reconnect | one 👍 on that message |
-| thread | the person opens a thread under the room and posts in it | reported; pinned `not delivered` on both |
+| thread | the person opens a thread under the room and posts in it | reported; pinned `reached` on every column: a thread under the room is part of it |
+| thread-question | the person asks the agent a question in that thread | one reply to that message, and it must land in the thread, not in the channel (read from the wire) |
 
 Beside the probe's hard checks, a run in the Discord room holds seven more:
 
@@ -394,39 +396,47 @@ Beside the probe's hard checks, a run in the Discord room holds seven more:
   was marked. The reference marks a stream gap on any disconnect
   (`on_disconnect`): recorded, not failed;
 - `discord-addressing`: a graded message reached the agent as it was sent.
-  The scene's pings and the message a reply answers are recorded when the
-  stand-in sends it, and compared with the trigger in the turn the scripted
-  agent or participant was handed (`mentioned_actor_ids`,
-  `reply_to_event_id`): the direct question and the thumbs-up request must
-  ping the agent and every ping must arrive, and the reply must be sent to
-  the agent's own last post on the wire and arrive as a reply to it. A
-  transport or reference that drops a mention or a reply reference fails
+  The scene's pings, the message a reply answers and the thread a message was
+  said in are recorded when the stand-in sends it, and compared with the
+  trigger in the turn the scripted agent or participant was handed
+  (`mentioned_actor_ids`, `reply_to_event_id`, `thread_root_event_id`): the
+  direct question, the thumbs-up request and the question in the thread must
+  ping the agent and every ping must arrive, the reply must be sent to the
+  agent's own last post on the wire and arrive as a reply to it, and the
+  question must arrive as a message in the thread it was sent in. A transport
+  or reference that drops a mention, a reply reference or a thread fails
   here. Scripted attention wakes on a phrase and the scripted agent answers
   it, so no other check would notice.
 
 With `--scripted`, each graded moment is checked against the script, and
 each pin holds: `TRANSPORT_PINS` for the shared transport, `REFERENCE_PINS`
-for the reference. A pin fails when its moment reads otherwise, a fix
-included ("update the pin and its docs"). What the runs here showed
-(2026-10-09):
+for the reference. A pin fails when its moment reads otherwise, a fix or a
+regression included ("update the pin and its docs"). The thread question is
+graded, not pinned: the scripted agent replies to it, and the reply must have
+landed in the thread (`checks.discord_moment_outcome`, read from the wire).
+What the runs showed:
 
-- **A reconnect loses nothing.** The message posted right after op 7 went
-  out on the old connection behind the op 7 frame, so no client read it
-  there. The transport and discord.py both resumed, and the stand-in
+- **A reconnect loses nothing** (2026-10-09). The message posted right after
+  op 7 went out on the old connection behind the op 7 frame, so no client
+  read it there. The transport and discord.py both resumed, and the stand-in
   replayed it. The transport marked no gap.
-- **The shared transport has two gaps**, pinned `not delivered` and
-  documented in `integrations/mcp-discord/README.md`: it drops a message in
-  a thread under a routed channel, and it replaces the first routed event
-  after it starts with a continuity gap, so a person's first message after
-  a start never reaches the agent. Closing either is library work.
-- **The reference refuses thread messages too.** Its delivery audit reads
-  `route-rejected`: a thread's id is not the bound channel. Pinned `not
-  delivered`, with the first message pinned `reached`.
-- **A notification sent before the runner's stream is open is lost**, and
-  the transport's journal says it was delivered (found reading the MCP SDK,
-  then reproduced inside the launcher; `integrations/mcp-discord/README.md`).
-  The lanes wait for the stream before the first moment, so they do not
-  show it.
+- **Three gaps of the shared transport were found here and closed**
+  (2026-10-10; pins flipped to `reached`;
+  `integrations/mcp-discord/README.md`, "What reaches the participant").
+  First, the first routed event after a start was replaced by the continuity
+  gap the transport declares then, so a person's first message never reached
+  the agent: now it arrives behind the gap. Second, a message in a thread
+  under a routed channel was dropped: now it is part of the room, and the
+  agent's reply goes into the thread (`binding.threads_in_room`, default
+  `true`). Third, a notification sent before the runner's stream was open was
+  lost while the journal said it was delivered: the runner now opens its
+  stream before it registers, and the transport records a delivery only while
+  the session's stream is open. The lanes no longer wait after registration:
+  the first moment starts at once, and the run record
+  (`discord.runner.order`) shows `connect`, `open_stream`, `register`.
+- **The reference refused thread messages too** (`route-rejected`: a
+  thread's id is not the bound channel); it now maps a thread to its parent
+  channel and answers in the thread. Its first message was always `reached`.
 
 It writes `world.json`, `discord-wire.jsonl` and `discord-standin.json` (the
 stand-in's), `discord/<process>.log`, and a `discord` section in `run.json`:
@@ -451,7 +461,9 @@ it.
 
 The two transport lanes come after their job's in-process probe, and the
 `mcp` install comes just before the lane, so the in-process steps run as
-before. Each step prints `pip freeze`. The Claude Code and Codex lanes pass
+before. The same step runs `tests.v2.test_mcp_discord_gaps` first, since
+its tests on the real MCP SDK (the connect race, a stream that dies, the SDK's
+drop of a notification) need the extra and skip without it. Each step prints `pip freeze`. The Claude Code and Codex lanes pass
 `--require-bwrap`, since both harnesses' sandboxes use bubblewrap (Codex's
 uses the one on `PATH` and falls back to a copy it bundles), so those jobs
 install it and lift Ubuntu's AppArmor limit on user namespaces; the

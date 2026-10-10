@@ -65,7 +65,7 @@ class ScriptTest(unittest.TestCase):
     def test_each_graded_message_wakes_scripted_attention_only_where_it_should_and_gets_its_move(self):
         attention = standin.ScriptedAttention(spec.wake_phrase for spec in discord_room.MOMENTS if spec.wake_phrase)
         self.addCleanup(attention.close)
-        moves = {"post": "send", "reply": "send", "reaction": "react"}
+        moves = {"post": "send", "reply": "send", "reaction": "react", "thread-reply": "send"}
         for spec in discord_room.MOMENTS:
             scene = load_scene(spec.scene)
             for event in scene.events:
@@ -81,13 +81,20 @@ class ScriptTest(unittest.TestCase):
             self.assertEqual(moves[spec.expect], role, spec.name)
             if spec.expect == "reply":
                 self.assertEqual({"text": discord_room.SCRIPTED_REPLY, "reply_to_event_id": "discord:message:7"}, arguments)
+            elif spec.expect == "thread-reply":
+                self.assertEqual({"text": discord_room.SCRIPTED_THREAD_REPLY, "reply_to_event_id": "discord:message:7"}, arguments)
             elif spec.expect == "reaction":
                 self.assertEqual({"target_event_id": "discord:message:7", "reaction": discord_room.REACTION}, arguments)
             else:
                 self.assertEqual({"text": probe.SCRIPTED_ANSWER}, arguments)
 
     def test_every_scripted_action_is_one_a_plain_call_participant_may_return(self):
-        for text in ("what's a sensible default timeout?", f"should we {discord_room.REPLY_PHRASE}?", f"a {discord_room.REACTION_PHRASE}"):
+        for text in (
+            "what's a sensible default timeout?",
+            f"should we {discord_room.REPLY_PHRASE}?",
+            f"a {discord_room.REACTION_PHRASE}",
+            f"{discord_room.THREAD_PHRASE} before it gives up?",
+        ):
             with self.subTest(text=text):
                 action = SCRIPT.action(_turn("discord:message:7", text))
                 self.assertEqual(action, _validate_inner_action(action))
@@ -120,21 +127,28 @@ class ScriptTest(unittest.TestCase):
         self.assertEqual({"protocol": turn["protocol"], "binding": {"request_id": "req-1"}}, {k: envelope[k] for k in ("protocol", "binding")})
         self.assertEqual("reaction", envelope["action"]["kind"])
         self.assertEqual([("req-1", "discord:message:9", "WAKE")], [(a["request_id"], a["trigger"], a["source"]) for a in participant.answers])
-        self.assertEqual({"trigger": "discord:message:9", "mentioned_actor_ids": [], "reply_to_event_id": None}, participant.answers[0]["received"])
+        self.assertEqual(
+            {"trigger": "discord:message:9", "mentioned_actor_ids": [], "reply_to_event_id": None, "thread_root_event_id": None},
+            participant.answers[0]["received"],
+        )
 
     def test_what_a_turn_showed_of_its_trigger_is_read_from_the_requests_an_agent_was_asked(self):
         ping, reply = "discord:actor:5", "discord:message:3"
         woken = _turn("discord:message:7", "q", mentioned_actor_ids=[ping], reply_to_event_id=reply)
+        in_thread = _turn("discord:message:8", "q2", thread_root_event_id="discord:message:3")
         earlier = _turn("discord:message:6", "e")
         requests = [{"input": [{"content": [{"text": _tagged(earlier)}]}]},
                     {"body": {"messages": [{"content": [{"type": "text", "text": _tagged(woken)}]}]}, "headers": {}},
                     {"input": [{"content": [{"text": _tagged(woken)}, {"output": "ok"}]}]},  # the call after the tool's result
                     {"input": [{"content": [{"text": "no turn here"}]}]}]
         self.assertEqual(
-            {"discord:message:6": {"trigger": "discord:message:6", "mentioned_actor_ids": [], "reply_to_event_id": None},
-             "discord:message:7": {"trigger": "discord:message:7", "mentioned_actor_ids": [ping], "reply_to_event_id": reply}},
+            {"discord:message:6": {"trigger": "discord:message:6", "mentioned_actor_ids": [], "reply_to_event_id": None,
+                                   "thread_root_event_id": None},
+             "discord:message:7": {"trigger": "discord:message:7", "mentioned_actor_ids": [ping], "reply_to_event_id": reply,
+                                   "thread_root_event_id": None}},
             standin.received_triggers(requests),
         )
+        self.assertEqual("discord:message:3", standin.RoomScript.received(in_thread)["thread_root_event_id"])
         self.assertIsNone(standin.RoomScript.received(None))
         self.assertIsNone(standin.RoomScript.received({"wake": {"trigger_event_id": "x", "events": []}}))
 
@@ -176,37 +190,49 @@ class DiscordChecksTest(unittest.TestCase):
         self.assertEqual(checks.NOT_DELIVERED, outcome("reaction", reached=False, graded_turns=0, actions=[], graded_event="e2"))
         self.assertEqual(checks.FITS, outcome("post", reached=True, graded_turns=1, actions=[{"kind": "message"}], graded_event="e2"))
         self.assertEqual(checks.FITS, outcome("no-turn", reached=True, graded_turns=0, actions=[], graded_event="e2"))
+        # The reply to a question in a thread must land in the thread, not in the channel.
+        landed = {**reply, "where": "retry details"}
+        self.assertEqual(checks.FITS, outcome("thread-reply", reached=True, graded_turns=1, actions=[landed], graded_event="e2", thread="retry details"))
+        self.assertEqual(checks.MISSES, outcome("thread-reply", reached=True, graded_turns=1, actions=[{**reply, "where": "codex"}], graded_event="e2", thread="retry details"))
+        self.assertEqual(checks.MISSES, outcome("thread-reply", reached=True, graded_turns=1, actions=[reply], graded_event="e2", thread="retry details"))
+        self.assertEqual(checks.MISSES, outcome("thread-reply", reached=True, graded_turns=1, actions=[landed], graded_event="e2"))
+        self.assertEqual(checks.MISSES, outcome("thread-reply", reached=True, graded_turns=1, actions=[{**landed, "kind": "message"}], graded_event="e2", thread="retry details"))
+        self.assertEqual(checks.NOT_DELIVERED, outcome("thread-reply", reached=False, graded_turns=0, actions=[], graded_event="e2", thread="retry details"))
         self.assertEqual(checks.REACHED, outcome("report", reached=True, graded_turns=0, actions=[], graded_event="e2"))
         self.assertEqual(checks.NOT_DELIVERED, outcome("report", reached=False, graded_turns=0, actions=[], graded_event="e2"))
 
     def test_scripted_outcomes_hold_the_script_and_the_pins(self):
         moments = [
+            {"name": "first-message", "expect": "report", "outcome": "reached"},
             {"name": "direct-question", "expect": "post", "outcome": "fits", "actions": [{"kind": "message", "text": probe.SCRIPTED_ANSWER}]},
             {"name": "reply", "expect": "reply", "outcome": "fits", "actions": [{"kind": "reply", "text": discord_room.SCRIPTED_REPLY}]},
             {"name": "reaction", "expect": "reaction", "outcome": "fits", "actions": [{"kind": "reaction", "reaction": discord_room.REACTION}]},
-            {"name": "thread", "expect": "report", "outcome": "not delivered", "actions": []},
+            {"name": "thread", "expect": "report", "outcome": "reached", "actions": []},
+            {"name": "thread-question", "expect": "thread-reply", "outcome": "fits",
+             "actions": [{"kind": "reply", "text": discord_room.SCRIPTED_THREAD_REPLY}]},
         ]
-        pins = discord_room.TRANSPORT_PINS
         check = checks.discord_scripted_outcomes
-        self.assertTrue(check(moments, discord_room.EXPECTED, pins=pins).ok)
-        # Not pinned (the reference): a report moment reads whatever happened.
-        flipped = [*moments[:3], {**moments[3], "outcome": "reached"}]
-        self.assertTrue(check(flipped, discord_room.EXPECTED, pins={}).ok)
-        failed = check(flipped, discord_room.EXPECTED, pins=pins)
-        self.assertFalse(failed.ok)
-        self.assertIn("not the pinned 'not delivered'", failed.detail)
-        # The reference is pinned too: its first message reaches Nunchi, and a thread's message does not.
-        reference = [{"name": "first-message", "expect": "report", "outcome": "reached"}, *moments, ]
-        reference_pins = discord_room.REFERENCE_PINS
-        self.assertTrue(check(reference, discord_room.EXPECTED, pins=reference_pins).ok)
-        for name, outcome in (("first-message", "not delivered"), ("thread", "reached")):
-            changed = [{**moment, "outcome": outcome} if moment["name"] == name else moment for moment in reference]
-            failed = check(changed, discord_room.EXPECTED, pins=reference_pins)
-            self.assertFalse(failed.ok, name)
-            self.assertIn(f"{name} reads {outcome!r}, not the pinned", failed.detail)
-        wrong = [{**moments[2], "actions": [{"kind": "reaction", "reaction": "ok"}]}]
+        # Both columns hold both gaps closed: the first message after a start, and a thread under the room, reach Nunchi.
+        for pins in (discord_room.TRANSPORT_PINS, discord_room.REFERENCE_PINS):
+            self.assertEqual({"first-message": checks.REACHED, "thread": checks.REACHED}, pins)
+            self.assertTrue(check(moments, discord_room.EXPECTED, pins=pins).ok, check(moments, discord_room.EXPECTED, pins=pins).detail)
+            # A regression of either gap fails the lane, and says to update the pin and its docs.
+            for name in ("first-message", "thread"):
+                dropped = [{**moment, "outcome": "not delivered"} if moment["name"] == name else moment for moment in moments]
+                failed = check(dropped, discord_room.EXPECTED, pins=pins)
+                self.assertFalse(failed.ok, name)
+                self.assertIn(f"{name} reads 'not delivered', not the pinned 'reached'", failed.detail)
+        # Not pinned: a report moment reads whatever happened.
+        dropped = [{**moment, "outcome": "not delivered"} if moment["expect"] == "report" else moment for moment in moments]
+        self.assertTrue(check(dropped, discord_room.EXPECTED, pins={}).ok)
+        # The thread question is graded: its reply must be the scripted one, and land in the thread.
+        missed = [{**moment, "outcome": "misses"} if moment["name"] == "thread-question" else moment for moment in moments]
+        self.assertIn("thread-question reads 'misses', not 'fits'", check(missed, discord_room.EXPECTED).detail)
+        wrong = [{**moment, "actions": [{"kind": "reply", "text": "elsewhere"}]} if moment["name"] == "thread-question" else moment for moment in moments]
+        self.assertIn("thread-question's text is 'elsewhere', not the scripted one", check(wrong, discord_room.EXPECTED).detail)
+        wrong = [{**moments[3], "actions": [{"kind": "reaction", "reaction": "ok"}]}]
         self.assertIn("reaction is 'ok'", check(wrong, discord_room.EXPECTED).detail)
-        self.assertIn("1 turn(s) on other messages", check([{**moments[0], "other_turns": 1}], discord_room.EXPECTED).detail)
+        self.assertIn("1 turn(s) on other messages", check([{**moments[1], "other_turns": 1}], discord_room.EXPECTED).detail)
         self.assertFalse(check(moments, discord_room.EXPECTED, room_tool_called=False).ok)
 
     def test_preflight_and_processes(self):
@@ -276,6 +302,11 @@ class DiscordChecksTest(unittest.TestCase):
                 {"event_id": "discord:message:400", "message_id": "400", "mentioned_actor_ids": [agent], "reply_to": None,
                  "received": {"trigger": "discord:message:400", "mentioned_actor_ids": [agent], "reply_to_event_id": None}}]},
             {"name": "thread", "expect": "report", "graded_event": "discord:message:500", "deliveries": [{"event_id": "discord:message:500"}]},
+            {"name": "thread-question", "expect": "thread-reply", "graded_event": "discord:message:600", "deliveries": [
+                {"event_id": "discord:message:600", "message_id": "600", "mentioned_actor_ids": [agent], "reply_to": None,
+                 "thread": "discord:message:550",
+                 "received": {"trigger": "discord:message:600", "mentioned_actor_ids": [agent], "reply_to_event_id": None,
+                              "thread_root_event_id": "discord:message:550"}}]},
         ]
         check = checks.discord_addressing
         self.assertTrue(check(moments, agent=agent, writes=writes).ok, check(moments, agent=agent, writes=writes).detail)
@@ -302,6 +333,13 @@ class DiscordChecksTest(unittest.TestCase):
         self.assertIn("not sent as a reply to the agent's own last message", check(changed(2, reply_to=None), agent=agent, writes=writes).detail)
         also = [*writes, {"kind": "message", "message_id": "220"}]  # a later post of the agent's: the reply was to an older one
         self.assertIn("not sent as a reply", check(moments, agent=agent, writes=also).detail)
+        # The question in a thread must ping the agent, and reach it as a message in the thread it was sent in.
+        self.assertIn("did not ping the agent", check(changed(5, mentioned_actor_ids=[]), agent=agent, writes=writes).detail)
+        self.assertIn("sent pinging", check(lost_received(5, mentioned_actor_ids=[]), agent=agent, writes=writes).detail)
+        failed = check(lost_received(5, thread_root_event_id=None), agent=agent, writes=writes)
+        self.assertIn("sent in the thread discord:message:550, but Nunchi saw thread_root_event_id=None", failed.detail)
+        self.assertFalse(check(lost_received(5, thread_root_event_id="discord:message:1"), agent=agent, writes=writes).ok)
+        self.assertIn("not sent in a thread", check(changed(5, thread=None), agent=agent, writes=writes).detail)
         self.assertIn("no turn showed", check(changed(0, received=None), agent=agent, writes=writes).detail)
         self.assertIn("never posted", check([{**moments[0], "graded_event": "discord:message:1"}], agent=agent, writes=writes).detail)
         self.assertFalse(check([moments[1], moments[4]], agent=agent, writes=writes).ok)
@@ -349,11 +387,16 @@ class WorldTest(unittest.TestCase):
 
     def test_the_moments_go_in_order_with_the_reconnect_before_the_reaction(self):
         names = [spec.name for spec in discord_room.MOMENTS]
-        self.assertEqual(["first-message", "bot-status-report", "direct-question", "reply", "reaction", "thread"], names)
+        self.assertEqual(
+            ["first-message", "bot-status-report", "direct-question", "reply", "reaction", "thread", "thread-question"], names
+        )
         self.assertEqual(["reaction"], [spec.name for spec in discord_room.MOMENTS if spec.reconnect_before])
         self.assertEqual(["reply"], [spec.name for spec in discord_room.MOMENTS if spec.reply_to_agent])
-        self.assertEqual({"first-message", "thread"}, set(discord_room.TRANSPORT_PINS))
-        self.assertEqual({"first-message": checks.REACHED, "thread": checks.NOT_DELIVERED}, discord_room.REFERENCE_PINS)
+        # The remark and the question are in the same thread, which the first of them opens.
+        self.assertEqual(["thread", "thread-question"], [spec.name for spec in discord_room.MOMENTS if spec.thread == discord_room.THREAD])
+        self.assertEqual("thread-reply", next(spec.expect for spec in discord_room.MOMENTS if spec.name == "thread-question"))
+        self.assertEqual({"first-message": checks.REACHED, "thread": checks.REACHED}, discord_room.TRANSPORT_PINS)
+        self.assertEqual({"first-message": checks.REACHED, "thread": checks.REACHED}, discord_room.REFERENCE_PINS)
         self.assertIs(discord_room.REFERENCE_PINS, discord_room.ReferenceLeg.pins)
         self.assertIs(discord_room.TRANSPORT_PINS, discord_room.OnTheTransport.pins)
 
@@ -424,6 +467,16 @@ class RoomTest(_StandIn, unittest.TestCase):
             self.assertEqual((discord_room.THREAD, discord_room.THREAD), (first["channel"], again["channel"]))
             self.assertEqual(fd.world.channel("codex").id, thread.parent_id)
             self.assertEqual({thread.id}, {fd.world.messages[item["message_id"]]["channel_id"] for item in (first, again)})
+            # What the scene sent in a thread names the thread as an event does, for discord-addressing; the room's own names none.
+            self.assertEqual(f"discord:message:{thread.id}", first["thread"])
+            self.assertIsNone(delivery["thread"])
+            # The question comes in the thread the remark opened, and pings the agent.
+            moment, scene = scenes["thread-question"]
+            question = room.post(scene.events[0], datetime_now(), scene, moment)
+            self.assertEqual((discord_room.THREAD, f"discord:message:{thread.id}"), (question["channel"], question["thread"]))
+            self.assertEqual(thread.id, fd.world.messages[question["message_id"]]["channel_id"])
+            self.assertEqual([f"discord:actor:{fd.world.member('Vigil').id}"], question["mentioned_actor_ids"])
+            self.assertIn(discord_room.THREAD_PHRASE, fd.world.messages[question["message_id"]]["content"])
 
     def test_a_process_is_stopped_with_sigint_and_harder_only_when_it_ignores_it(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -575,6 +628,38 @@ class AuditTest(unittest.TestCase):
 
 
 class JudgeTest(unittest.TestCase):
+    def test_where_an_action_landed_is_read_from_what_the_bot_wrote_on_the_wire(self):
+        effects = [
+            {"kind": "message", "where": "codex", "text": "an answer", "reply_to": None},
+            {"kind": "message", "where": discord_room.THREAD, "text": "a reply", "reply_to": "7"},
+            {"kind": "message", "where": "codex", "text": "a reply", "reply_to": "8"},
+            {"kind": "reaction", "where": discord_room.THREAD, "reaction": "x", "message_id": "7"},
+        ]
+        landed = discord_room.landed
+        self.assertEqual("codex", landed({"kind": "message", "text": "an answer"}, effects))
+        self.assertEqual(discord_room.THREAD, landed({"kind": "reply", "text": "a reply", "target_event_id": "discord:message:7"}, effects))
+        self.assertEqual("codex", landed({"kind": "reply", "text": "a reply", "target_event_id": "discord:message:8"}, effects))
+        self.assertEqual(discord_room.THREAD, landed({"kind": "reaction", "reaction": "x", "target_event_id": "discord:message:7"}, effects))
+        self.assertIsNone(landed({"kind": "reply", "text": "a reply", "target_event_id": "discord:message:9"}, effects))
+        self.assertIsNone(landed({"kind": "message", "text": "a reply"}, effects), "a reply is not a plain post")
+
+    def test_a_reply_to_a_question_in_a_thread_fits_only_when_it_landed_in_the_thread(self):
+        for where, outcome in ((discord_room.THREAD, "fits"), ("codex", "misses")):
+            with self.subTest(where=where):
+                leg = SimpleNamespace(
+                    committed=[{"request_id": "r1", "kind": "reply", "text": discord_room.SCRIPTED_THREAD_REPLY,
+                                "target_event_id": "discord:message:600", "delivery": "sent"}],
+                    room_effects=lambda where=where: [
+                        {"kind": "message", "where": where, "text": discord_room.SCRIPTED_THREAD_REPLY, "reply_to": "600"}
+                    ],
+                )
+                moments = [{"name": "thread-question", "expect": "thread-reply", "thread": discord_room.THREAD, "reached": True,
+                            "graded_turns": 1, "graded_event": "discord:message:600",
+                            "turns": [{"request_id": "r1", "trigger": "discord:message:600"}], "deliveries": []}]
+                discord_room.judge_discord_moments(leg, moments, {})
+                self.assertEqual(where, moments[0]["actions"][0]["where"])
+                self.assertEqual(outcome, moments[0]["outcome"])
+
     def test_each_moment_reads_its_graded_turns_delivered_actions(self):
         leg = SimpleNamespace(
             committed=[

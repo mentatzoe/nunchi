@@ -50,6 +50,7 @@ class GatewayRunner:
         allowed_channel_ids: frozenset[str] | None = None,
         membership_room_ids: tuple[str, ...] = (),
         on_source_gap: Callable[[], None] | None = None,
+        thread_parent: Callable[[str], Awaitable[str | None]] | None = None,
         connect: Callable[[str], Awaitable] | None = None,
         rng: Callable[[], float] = random.random,
         initial_backoff: float = 1.0,
@@ -62,6 +63,9 @@ class GatewayRunner:
         self._allowed_channel_ids = allowed_channel_ids or frozenset()
         self._membership_room_ids = membership_room_ids
         self._on_source_gap = on_source_gap
+        # Answers, for a channel that is not routed, the routed channel it is a
+        # thread of (None if none); raises when it cannot say.
+        self._thread_parent = thread_parent
         self._initial_gap_declared = False
 
     async def run(self, shutdown: asyncio.Event) -> None:
@@ -140,7 +144,26 @@ class GatewayRunner:
                             "MESSAGE_REACTION_REMOVE",
                         }:
                             channel_id = str(action.data.get("channel_id") or "")
-                            if channel_id in self._allowed_channel_ids:
+                            room_id, thread_id = channel_id, None
+                            if (
+                                channel_id not in self._allowed_channel_ids
+                                and self._thread_parent is not None
+                            ):
+                                try:
+                                    parent = await self._thread_parent(channel_id)
+                                except Exception as exc:  # noqa: BLE001
+                                    # Cannot tell whether this is a thread of the
+                                    # room: say so, never drop it quietly.
+                                    logger.warning(
+                                        "could not tell whether a channel is a thread of a routed one (%s); declaring a gap",
+                                        type(exc).__name__,
+                                    )
+                                    if self._on_source_gap is not None:
+                                        self._on_source_gap()
+                                    continue
+                                if parent:
+                                    room_id, thread_id = parent, channel_id
+                            if room_id in self._allowed_channel_ids:
                                 if (
                                     self._protocol.own_user_id is None
                                     or self._protocol.session_id is None
@@ -148,17 +171,21 @@ class GatewayRunner:
                                     raise GatewayFatalError(
                                         "gateway dispatch arrived before authenticated session identity"
                                     )
-                                self._on_event(
-                                    v2_notification_from_dispatch(
-                                        action.event,
-                                        action.data,
-                                        sequence=self._protocol.seq,
-                                        delivery_epoch=self._protocol.session_id,
-                                        transport_self_actor_id=(
-                                            f"discord:actor:{self._protocol.own_user_id}"
-                                        ),
-                                    )
+                                notification = v2_notification_from_dispatch(
+                                    action.event,
+                                    action.data,
+                                    sequence=self._protocol.seq,
+                                    delivery_epoch=self._protocol.session_id,
+                                    transport_self_actor_id=(
+                                        f"discord:actor:{self._protocol.own_user_id}"
+                                    ),
+                                    room_id=room_id if thread_id else None,
+                                    thread_id=thread_id,
                                 )
+                                if thread_id is None:
+                                    self._on_event(notification)
+                                else:
+                                    self._on_event(notification, in_thread=True)
                         elif action.event in {"GUILD_MEMBER_ADD", "GUILD_MEMBER_REMOVE"}:
                             for room_id in self._membership_room_ids:
                                 if (

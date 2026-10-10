@@ -188,7 +188,8 @@ class MomentSpec:
     name: str
     scene: Path
     # "post": a wake, a bound turn, one room post. "no-turn": no harness turn. The Discord room
-    # adds "reply", "reaction" and "report" (reported, never graded; `discord_room.py`).
+    # adds "reply", "reaction", "thread-reply" (a reply that must land in the moment's
+    # thread) and "report" (reported, never graded; `discord_room.py`).
     expect: str
     # Scripted attention wakes for a message holding this phrase.
     wake_phrase: str | None = None

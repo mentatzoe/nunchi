@@ -66,6 +66,10 @@ class ParticipantBinding:
     room_name: str | None = None
     room_kind: Literal["group", "direct", "unknown"] = "unknown"
     provenance: str = "trusted-installation"
+    # Whether a thread opened under the room (a message carrying
+    # ``thread_root_event_id``) is part of the room: heard, and answered in the
+    # thread. The same key in every harness's ``binding``.
+    threads_in_room: bool = True
 
     def __post_init__(self) -> None:
         for name in (
@@ -81,6 +85,8 @@ class ParticipantBinding:
                 raise ValueError(f"{name} must be a non-empty trusted value")
         if self.room_kind not in ("group", "direct", "unknown"):
             raise ValueError("room_kind must be group, direct, or unknown")
+        if not isinstance(self.threads_in_room, bool):
+            raise ValueError("threads_in_room must be true or false")
         if any(not isinstance(name, str) for name in self.names):
             raise ValueError("names must be strings")
 
@@ -738,6 +744,17 @@ class ObservationProvider:
                 self._record_audit(audit)
             return ObservationResult(audit, False)
         checked = validate_canonical_event(event)
+        if checked.get("thread_root_event_id") and not self.binding.threads_in_room:
+            # The binding keeps threads out of the room: a message in one is not
+            # this participant's room, however the harness delivered it.
+            audit = DeliveryAudit(
+                delivery_id,
+                "route-rejected",
+                "message in a thread, and the binding keeps threads out of the room",
+            )
+            with self._lock:
+                self._record_audit(audit)
+            return ObservationResult(audit, False)
         checked_actors = deepcopy(dict(actors or {}))
         refs = _actor_refs(checked)
         if not refs.issubset(set(checked_actors) | set(self._actors)):

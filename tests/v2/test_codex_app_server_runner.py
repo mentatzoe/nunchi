@@ -42,24 +42,49 @@ class _PassModel:
         }
 
 
+class _Stream:
+    """The notification stream `open_stream` returns."""
+
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
 class _Client:
-    """The shared transport's client, as the connection uses it."""
+    """The shared transport's client, as the connection uses it.
+
+    ``steps`` is what the connection did, in order: ``connect``, ``open_stream``,
+    ``register`` (the registration call) and ``read`` (the first notification
+    asked for).
+    """
 
     def __init__(self, notifications=(), attestation=None):
         self.notifications_to_send = list(notifications)
         self.attestation = attestation
         self.calls = []
         self.connected = 0
+        self.steps = []
+        self.streams = []
 
     def connect(self):
         self.connected += 1
+        self.steps.append("connect")
         return "session"
+
+    def open_stream(self):
+        self.steps.append("open_stream")
+        self.streams.append(_Stream())
+        return self.streams[-1]
 
     def call_tool(self, name, arguments):
         self.calls.append((name, arguments))
+        self.steps.append("register" if name == "register_participant" else name)
         return {"content": [{"type": "text", "text": json.dumps(self.attestation)}]}
 
-    def notifications(self):
+    def notifications(self, stream=None):
+        self.steps.append("read")
         yield from self.notifications_to_send
 
 
@@ -200,7 +225,7 @@ class CodexRoomRunnerTest(unittest.TestCase):
         stop = threading.Event()
 
         class Stopping(_Client):
-            def notifications(self):
+            def notifications(self, stream=None):
                 yield NOTIFICATION_METHOD, _notification("discord:message:5")
                 yield "notifications/other", {}
                 stop.set()
@@ -212,6 +237,40 @@ class CodexRoomRunnerTest(unittest.TestCase):
         self.assertEqual(1, client.connected)
         retained = [event["id"] for event in runner.room.observation.retained_events()]
         self.assertEqual(["discord:message:5", "discord:message:6"], retained)
+
+    def test_serve_opens_the_stream_and_marks_the_gap_before_it_registers(self):
+        """The MCP SDK drops a notification sent before the stream is open; the order is the client rule."""
+        stop = threading.Event()
+        marks = []
+
+        class Stopping(_Client):
+            def notifications(self, stream=None):
+                self.steps.append("read")
+                stop.set()
+                yield NOTIFICATION_METHOD, _notification("discord:message:7")
+
+        client = Stopping(attestation=ATTESTATION)
+        runner = self._runner(client)
+        interrupted = runner.connection.interrupted
+        runner.connection.interrupted = lambda: (marks.append(list(client.steps)), interrupted())[1]
+        runner.connection.serve(stop=stop, sleep=lambda _: None)
+        self.assertEqual(["connect", "open_stream", "register", "read"], client.steps)
+        # The first gap is marked once the stream is open, before registration.
+        self.assertEqual(["connect", "open_stream"], marks[0])
+        # The stream the connection read is the one it opened.
+        self.assertEqual(1, len(client.streams))
+
+    def test_a_connection_that_fails_closes_the_stream_it_opened(self):
+        class Refusing(_Client):
+            def call_tool(self, name, arguments):
+                raise RuntimeError("the transport refused the registration")
+
+        stop = threading.Event()
+        client = Refusing(attestation=ATTESTATION)
+        runner = self._runner(client)
+        runner.connection.serve(stop=stop, sleep=lambda _: stop.set())
+        self.assertEqual(["connect", "open_stream"], client.steps)
+        self.assertTrue(all(stream.closed for stream in client.streams))
 
     def test_probe_says_what_is_configured(self):
         probe = self._runner().probe()

@@ -761,6 +761,14 @@ def _load_room(value: Any, *, index: int) -> HermesRoomConfig:
         optional={"ack"},
         label=f"rooms[{index}]",
     )
+    if isinstance(room["binding"], Mapping) and "threads_in_room" in room["binding"]:
+        # The one per-room setting every other integration takes; this one cannot
+        # honor it, so it says so by name rather than as an unexpected field.
+        raise ValidationError(
+            f"rooms[{index}].binding.threads_in_room is not supported by this integration: "
+            "a thread under the room is not part of the room here. Remove the key, or use "
+            "the Hermes plugin (integrations/hermes-plugin), which takes it."
+        )
     binding_raw = _closed(
         room["binding"],
         required={

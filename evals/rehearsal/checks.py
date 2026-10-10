@@ -415,10 +415,9 @@ def scripted_outcomes(moments: Sequence[Mapping[str, Any]], answer: str, *, room
 #
 # With ``--scripted``, `discord_scripted_outcomes` checks each moment of the
 # Discord room. A moment that expects ``report`` is reported, not graded,
-# unless the column pins it (the shared transport drops thread messages and
-# the first message after it starts: both read ``not delivered``; the
-# reference's first message reads ``reached`` and its thread message ``not
-# delivered``).
+# unless the column pins it: both columns pin the first message after a start
+# and the remark in a thread under the room ``reached`` (the shared transport
+# once dropped both, and the reference refused the thread's as another room).
 
 REACHED = "reached"
 
@@ -430,13 +429,16 @@ def discord_moment_outcome(
     graded_turns: int,
     actions: Sequence[Mapping[str, Any]],
     graded_event: str | None,
+    thread: str | None = None,
 ) -> str:
     """How a moment of the Discord room went against what it expects.
 
     ``actions`` are the delivered committed actions of the moment's graded
     turns. ``post`` and ``no-turn`` read as `moment_outcome`. ``reply`` fits
-    one reply to the graded message, ``reaction`` one reaction on it.
-    ``report`` reads `NOT_DELIVERED` or `REACHED`: it is never graded.
+    one reply to the graded message, ``reaction`` one reaction on it, and
+    ``thread-reply`` one reply to it that landed in the thread named
+    ``thread`` (the action's ``where``, read from the wire), not in the
+    channel. ``report`` reads `NOT_DELIVERED` or `REACHED`: it is never graded.
     """
 
     if expect in ("post", "no-turn"):
@@ -446,13 +448,15 @@ def discord_moment_outcome(
         return REACHED if reached else NOT_DELIVERED
     if not reached:
         return NOT_DELIVERED
-    if expect == "reply":
+    if expect in ("reply", "thread-reply"):
         wanted = "reply"
     elif expect == "reaction":
         wanted = "reaction"
     else:
         raise ValueError(f"unknown expectation {expect!r}")
     fits = len(actions) == 1 and actions[0].get("kind") == wanted and actions[0].get("target_event_id") == graded_event
+    if fits and expect == "thread-reply":
+        fits = bool(thread) and actions[0].get("where") == thread
     return FITS if fits else MISSES
 
 
@@ -466,7 +470,7 @@ def discord_scripted_outcomes(
     """With the model and attention scripted, every graded moment of the Discord room is known: check it.
 
     ``script`` gives, for each expectation (``post``, ``reply``,
-    ``reaction``), the one delivered action the scripted agent makes: its
+    ``reaction``, ``thread-reply``), the one delivered action the scripted agent makes: its
     ``kind`` and its ``text`` or ``reaction``. Each graded moment must fit,
     with exactly that action, and no other message may start a turn. A
     ``report`` moment is checked only where ``pins`` names it, against the
@@ -697,9 +701,13 @@ def discord_addressing(moments: Sequence[Mapping[str, Any]], *, agent: str, writ
     must ping ``agent`` (its actor id), and every ping sent must have
     arrived; the reply must have been sent as a reply to the agent's own
     last message on the wire (``writes``, the bot's 2xx writes) and arrive
-    as one. A transport or reference that drops a ping or a reply
-    reference fails here: the scripted agent answers a phrase either way,
-    but a participant reading the room would not know it had been addressed.
+    as one. The question in a thread (``thread-reply``) must ping the
+    agent too, and arrive as a message in the thread it was sent in
+    (``thread``, the thread's event id, against the trigger's
+    ``thread_root_event_id``). A transport or reference that drops a ping, a
+    reply reference or a thread fails here: the scripted agent answers a
+    phrase either way, but a participant reading the room would not know it
+    had been addressed.
     """
 
     problems: list[str] = []
@@ -707,7 +715,7 @@ def discord_addressing(moments: Sequence[Mapping[str, Any]], *, agent: str, writ
     graded: list[str] = []
     for moment in moments:
         expect, name = moment.get("expect"), moment.get("name")
-        if expect not in ("post", "reply", "reaction"):
+        if expect not in ("post", "reply", "reaction", "thread-reply"):
             continue
         delivery = next((item for item in moment.get("deliveries", ()) if item.get("event_id") == moment.get("graded_event")), None)
         if delivery is None:
@@ -719,7 +727,7 @@ def discord_addressing(moments: Sequence[Mapping[str, Any]], *, agent: str, writ
             continue
         sent = list(delivery.get("mentioned_actor_ids") or ())
         seen = list(received.get("mentioned_actor_ids") or ())
-        if expect in ("post", "reaction") and agent not in sent:
+        if expect in ("post", "reaction", "thread-reply") and agent not in sent:
             problems.append(f"{name}: the scene did not ping the agent")
         lost = [actor for actor in sent if actor not in seen]
         if lost:
@@ -731,6 +739,14 @@ def discord_addressing(moments: Sequence[Mapping[str, Any]], *, agent: str, writ
                 problems.append(f"{name}: it was not sent as a reply to the agent's own last message (reply_to {reply_to})")
             elif received.get("reply_to_event_id") != f"discord:message:{reply_to}":
                 problems.append(f"{name}: sent as a reply to {reply_to}, but Nunchi saw reply_to_event_id={received.get('reply_to_event_id')}")
+        if expect == "thread-reply":
+            thread = delivery.get("thread")
+            if not thread:
+                problems.append(f"{name}: it was not sent in a thread")
+            elif received.get("thread_root_event_id") != thread:
+                problems.append(
+                    f"{name}: sent in the thread {thread}, but Nunchi saw thread_root_event_id={received.get('thread_root_event_id')}"
+                )
         graded.append(f"{name} {'replied to the agent' if expect == 'reply' else 'pinged the agent'}")
     if not graded and not problems:
         problems.append("no graded message was played")

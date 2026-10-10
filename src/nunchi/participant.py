@@ -272,6 +272,10 @@ class Transport(Protocol):
 
     The room's host refuses an action that carries either, so it never
     reaches ``dispatch``.
+
+    ``dispatch`` gets the turn's wake with ``events`` widened to every message
+    the turn showed the participant (look-again, steering, history), so a
+    transport can read the facts of the message a move is about.
     """
 
     def dispatch(
@@ -523,6 +527,9 @@ class RoomView:
         self.new_checks = 0
         self._limit_noted = False
         self.seen_event_ids: set[str] = shown_event_ids(wake)
+        # The events the turn's pages showed, kept whole: the wake holds the
+        # rest, and a transport needs a message's own facts (its thread, say).
+        self.seen_events: dict[str, dict[str, Any]] = {}
 
     def fork(self) -> "RoomView":
         """A fresh view of the same turn, as if nothing had been read yet.
@@ -590,13 +597,31 @@ class RoomView:
                 max_bytes=max_bytes,
             )
         )
-        self.seen_event_ids.update(
-            event["id"]
-            for event in page.get("events", ())
-            if isinstance(event, Mapping) and isinstance(event.get("id"), str)
-        )
+        for event in page.get("events", ()):
+            if isinstance(event, Mapping) and isinstance(event.get("id"), str):
+                self.seen_event_ids.add(event["id"])
+                self.seen_events[event["id"]] = deepcopy(dict(event))
         page["request_id"] = self._wake["request_id"]
         return page
+
+    def shown_events(self, *about: str | None) -> list[dict[str, Any]]:
+        """Every message this turn has shown the participant, whole: the wake's, then each page's.
+
+        ``about`` names the messages a move is about. One that only the wake's
+        memory points at has no body here, so it is read from the room's log.
+        A transport reads each message's own facts from these, such as the
+        thread it was said in, so a move lands where its message was said.
+        """
+
+        events = {event["id"]: dict(event) for event in self._wake["events"]}
+        for event_id, event in list(self.seen_events.items()):
+            events.setdefault(event_id, event)
+        for event_id in about:
+            if event_id in self.seen_event_ids and event_id not in events:
+                event = self._observation.resolve_event(event_id)
+                if event is not None:
+                    events[event_id] = event
+        return list(events.values())
 
 
 class ParticipantTurnHost:
@@ -1042,7 +1067,14 @@ class ParticipantTurnHost:
                                 deadline=effective_deadline,
                             )
                     else:
-                        result = self.transport.dispatch(action=action, wake=wake)
+                        # The wake, with every message the turn showed: a move
+                        # may be about one the participant read mid-turn.
+                        shown = view.shown_events(
+                            action.get("target_event_id"), action.get("origin_event_id")
+                        )
+                        result = self.transport.dispatch(
+                            action=action, wake={**wake, "events": shown}
+                        )
                 except BaseException as exc:
                     dispatch_queue.put_nowait(("error", exc))
                 else:

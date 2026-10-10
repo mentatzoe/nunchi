@@ -48,3 +48,7 @@ nunchi-codex-room-runner \
 The config contains exactly: `schema_version`, `binding`, pinned `profile`,
 `attention`, `limits`, `state_directory`, shared MCP `transport`, and `codex`.
 See `docs/platform-v2.md` for the shared ownership and conformance boundary.
+The optional `binding.threads_in_room` (`true` by default) says whether the
+threads opened under the room's channel are part of the room, as in every
+harness: the agent hears them and answers in them, or, with `false`, neither
+([harness guide](../../docs/harness-guide.md), step 1).

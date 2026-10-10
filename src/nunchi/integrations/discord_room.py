@@ -137,10 +137,14 @@ class DiscordRoomConnection:
     def register(self) -> None:
         """Register the participant with the transport and check its attestation."""
 
-        arguments = {
+        arguments: dict[str, Any] = {
             "participant_id": self.binding.participant_id,
             "channel_id": self.binding.room_id,
         }
+        if not self.binding.threads_in_room:
+            # The binding's setting, told to the transport so it sends nothing
+            # from threads (the default, threads in the room, needs no word).
+            arguments["threads_in_room"] = False
         supplied = {
             **arguments,
             "_nunchi_authorization": make_tool_authorization(
@@ -190,17 +194,28 @@ class DiscordRoomConnection:
         stop: threading.Event | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
-        """Connect, register and hand every event to the room; reconnect on errors.
+        """Connect, open the stream, register, and hand every event to the room; reconnect on errors.
 
+        The order is the client rule (``docs/harness-guide.md``): open the
+        notification stream before registering, never the other way round.
         Runs until ``stop`` is set (checked between connections), or forever.
         """
 
         delay = 1.0
         while stop is None or not stop.is_set():
+            stream = None
             try:
                 self.client.connect()
+                # The stream first: the transport's MCP server drops, without
+                # telling anyone, a notification sent to a session whose stream is
+                # not open. A fresh listener cannot know what it missed before it
+                # was listening, so it says so (as the Hermes plugin and the
+                # reference adapter do at start); then it registers, so nothing
+                # is sent to it before it can hear.
+                stream = self.client.open_stream()
+                self.interrupted()
                 self.register()
-                for method, params in self.client.notifications():
+                for method, params in self.client.notifications(stream):
                     if method == NOTIFICATION_METHOD:
                         self.handle(params)
                     if stop is not None and stop.is_set():
@@ -208,6 +223,8 @@ class DiscordRoomConnection:
                 self.interrupted()
                 delay = 1.0
             except (urllib.error.URLError, RuntimeError, OSError):
+                if stream is not None:
+                    stream.close()
                 self.interrupted()
                 print(
                     f"{self.label} shared transport reconnect after operational error",

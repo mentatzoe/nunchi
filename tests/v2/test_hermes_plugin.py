@@ -309,6 +309,49 @@ class IngressTest(unittest.TestCase):
         self.assertEqual("777", plugin.chat_of("2002"))
         self.assertEqual(DISCORD_ROOM, plugin.chat_of("2001"))
 
+    def _thread_message(self, plugin, message_id):
+        source = SimpleNamespace(platform=SimpleNamespace(value="discord"), chat_id="777", thread_id="777",
+                                 parent_chat_id=DISCORD_ROOM)
+        raw = SimpleNamespace(mentions=[], mention_everyone=False, author=SimpleNamespace(bot=False))
+        plugin.on_dispatch(event=SimpleNamespace(source=source, message_id=message_id, raw_message=raw))
+        return self._admit(plugin, platform="discord",
+                           source={"chat_id": "777", "thread_id": "777", "parent_chat_id": DISCORD_ROOM,
+                                   "chat_type": "thread", "user_id": "42", "user_name": "Sam"},
+                           message_id=message_id, text="is the rollback done?")
+
+    def test_threads_are_part_of_the_room_by_default_and_the_room_hears_them(self):
+        with tempfile.TemporaryDirectory() as directory:
+            plugin = HermesRoomPlugin(
+                profile=DISCORD_PROFILE, guard=SecretGuard([]), route=DISCORD_ROUTE,
+                room_factory=_room_factory(Path(directory), binding=DISCORD_BINDING, profile=DISCORD_PROFILE),
+            )
+            self.assertEqual({"action": "handled"}, self._thread_message(plugin, "2002"))
+            room = plugin.room
+            self.assertTrue(room.drain(5))
+            (event,) = room.observation.retained_events()
+            self.assertEqual(("discord:message:2002", "discord:message:777"), (event["id"], event["thread_root_event_id"]))
+
+    def test_a_binding_that_keeps_threads_out_of_the_room_consumes_their_messages_and_the_room_never_hears_them(self):
+        # Hermes would answer a thread itself if the plugin left it: the plugin
+        # still takes the message, and the library keeps it out of the room.
+        with tempfile.TemporaryDirectory() as directory:
+            binding = ParticipantBinding(**{**vars(DISCORD_BINDING), "threads_in_room": False})
+            plugin = HermesRoomPlugin(
+                profile=DISCORD_PROFILE, guard=SecretGuard([]), route=DISCORD_ROUTE,
+                room_factory=_room_factory(Path(directory), binding=binding, profile=DISCORD_PROFILE),
+            )
+            self.assertEqual({"action": "handled"}, self._thread_message(plugin, "2002"))
+            self.assertEqual({"action": "handled"}, self._admit(
+                plugin, platform="discord", source={"chat_id": DISCORD_ROOM, "thread_id": None, "user_id": "42"},
+                message_id="2003", text="anyone around?"))
+            room = plugin.room
+            self.assertTrue(room.drain(5))
+            self.assertEqual(["discord:message:2003"], [event["id"] for event in room.observation.retained_events()])
+            audits = {audit.outcome for audit in room.observation.delivery_audits()}
+            self.assertEqual({"route-rejected", "recorded"}, audits)
+            (refused,) = [audit for audit in room.observation.delivery_audits() if audit.outcome == "route-rejected"]
+            self.assertIn("threads out of the room", refused.detail)
+
     def test_a_message_hermes_admits_without_dispatch_keeps_only_its_discord_time(self):
         # Hermes runs a message it rescues from its busy queue without
         # pre_gateway_dispatch (README, Known gaps): it reaches the room with
@@ -690,6 +733,55 @@ class HostModelAttentionTest(unittest.TestCase):
         with self.assertRaises(HostAttentionPermissionError) as raised:
             room.attention.model.judge(instructions="i", projection={}, timeout_seconds=5)
         self.assertIn("plugins.entries.nunchi-room.llm", str(raised.exception))
+
+
+class ThreadSettingTest(unittest.TestCase):
+    """`binding.threads_in_room` in the plugin's config reaches the room the plugin builds."""
+
+    def _plugin(self, **binding):
+        from nunchi.integrations.hermes_plugin import build_plugin
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        config = HostModelAttentionTest._config(self, Path(directory.name))
+        config["attention"] = {"policy": {"preattention_enabled": False}, "model": None}
+        config["binding"].update(binding)
+        plugin = build_plugin(config)
+        plugin.register(_StubContext())
+        return plugin
+
+    def _topic_and_general(self, plugin):
+        for message_id, thread in (("300", "5"), ("302", None)):
+            answer = asyncio.run(plugin.on_admission(
+                platform="telegram", source={"chat_id": ROOM, "thread_id": thread, "chat_type": "forum", "user_id": "u1"},
+                message_id=message_id, text="hi"))
+            self.assertEqual({"action": "handled"}, answer, "Hermes runs no agent of its own on either")
+        room = plugin._ensure_room()
+        deadline = time.monotonic() + 10
+        while len(room.observation.delivery_audits()) < 2 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        # The stub never ends the turn the second message starts, so the room's
+        # worker would still write under state/ while the directory is removed
+        # ("Directory not empty"). Stop it first.
+        room.cancel()
+        self.assertTrue(room.drain(5))
+        return room
+
+    def test_the_default_is_that_a_topic_is_part_of_the_room(self):
+        room = self._topic_and_general(self._plugin())
+        self.assertTrue(room.observation.binding.threads_in_room)
+        self.assertEqual(["telegram:message:300", "telegram:message:302"], [event["id"] for event in room.observation.retained_events()])
+
+    def test_false_keeps_it_out_and_the_plugin_still_consumes_it(self):
+        room = self._topic_and_general(self._plugin(threads_in_room=False))
+        self.assertFalse(room.observation.binding.threads_in_room)
+        self.assertEqual(["telegram:message:302"], [event["id"] for event in room.observation.retained_events()])
+
+    def test_a_setting_that_is_not_true_or_false_stops_the_plugin_loading(self):
+        from nunchi.errors import ValidationError
+
+        with self.assertRaises(ValidationError):
+            self._plugin(threads_in_room="no")
 
 
 class PluginGuardTest(unittest.TestCase):

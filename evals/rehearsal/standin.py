@@ -416,17 +416,31 @@ class RoomScript:
     """What the scripted agent does at each moment of the Discord room, read from the turn's trigger.
 
     A trigger that holds ``reaction_phrase`` gets ``reaction`` on it; one
-    that holds ``reply_phrase`` gets ``reply`` as a reply to it; anything else
-    gets ``answer`` as a plain post. `move` says it as a room tool call
-    (role and arguments), `action` as a plain-call participant's action.
+    that holds ``reply_phrase`` gets ``reply`` as a reply to it, and one that
+    holds ``thread_phrase`` (where given) gets ``thread_reply`` the same way;
+    anything else gets ``answer`` as a plain post. `move` says it as a room
+    tool call (role and arguments), `action` as a plain-call participant's
+    action.
     """
 
-    def __init__(self, *, answer: str, reply: str, reply_phrase: str, reaction: str, reaction_phrase: str) -> None:
+    def __init__(
+        self,
+        *,
+        answer: str,
+        reply: str,
+        reply_phrase: str,
+        reaction: str,
+        reaction_phrase: str,
+        thread_reply: str | None = None,
+        thread_phrase: str | None = None,
+    ) -> None:
         self.answer = answer
         self.reply = reply
         self.reply_phrase = reply_phrase
         self.reaction = reaction
         self.reaction_phrase = reaction_phrase
+        self.thread_reply = thread_reply
+        self.thread_phrase = thread_phrase
 
     @staticmethod
     def trigger(turn: Mapping[str, Any]) -> tuple[str, str]:
@@ -437,7 +451,7 @@ class RoomScript:
 
     @staticmethod
     def received(turn: Mapping[str, Any] | None) -> dict[str, Any] | None:
-        """How the turn showed its trigger was addressed: whom it pings and which message it replies to; None without a trigger."""
+        """How the turn showed its trigger was addressed: whom it pings, which message it replies to and which thread it is in; None without a trigger."""
 
         wake = (turn or {}).get("wake") or {}
         trigger = str(wake.get("trigger_event_id") or "")
@@ -448,12 +462,15 @@ class RoomScript:
             "trigger": trigger,
             "mentioned_actor_ids": list(event.get("mentioned_actor_ids") or ()),
             "reply_to_event_id": event.get("reply_to_event_id"),
+            "thread_root_event_id": event.get("thread_root_event_id"),
         }
 
     def move(self, turn: Mapping[str, Any] | None) -> tuple[str, dict[str, Any]]:
         trigger, text = self.trigger(turn or {})
         if trigger and self.reaction_phrase in text:
             return "react", {"target_event_id": trigger, "reaction": self.reaction}
+        if trigger and self.thread_phrase and self.thread_phrase in text:
+            return "send", {"text": self.thread_reply, "reply_to_event_id": trigger}
         if trigger and self.reply_phrase in text:
             return "send", {"text": self.reply, "reply_to_event_id": trigger}
         return "send", {"text": self.answer}

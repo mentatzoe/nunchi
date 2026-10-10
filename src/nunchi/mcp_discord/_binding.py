@@ -16,6 +16,13 @@ Session tracking: the low-level Server exposes sessions only inside request
 handlers. Standard MCP clients send ``tools/list`` right after ``initialize``,
 which registers them here; notifications start after a client's first
 request. Documented in integrations/mcp-discord/README.md.
+
+Stream tracking: the SDK drops, without an error, a notification sent to a
+session whose notification stream (``GET /mcp``) is not open. The ASGI wrapper
+:func:`track_streams` sees each such request begin and end, so the registry
+knows whether a notification sent now would reach anyone: when it would not,
+the delivery fails (and the participant is told, with a gap) instead of being
+journaled as delivered, and a stream that ends marks its route uncertain.
 """
 
 from __future__ import annotations
@@ -43,6 +50,7 @@ from .gateway import GatewayProtocol
 from .ratelimit import SendBackstop
 from .rest import DiscordRestClient
 from .runner import GatewayFatalError, GatewayRunner
+from .threads import ThreadDirectory
 from .server import (
     AuthenticatedSessionRegistry,
     GapAwareEnqueuer,
@@ -70,6 +78,68 @@ async def broadcast(registry: SessionRegistry, params: dict) -> bool:
     """Push a targeted V2 Discord notification to its authenticated session."""
     notification = _VendorNotification(method=NOTIFICATION_METHOD, params=params)
     return await deliver_targeted(registry, params, notification)
+
+
+_STREAM_HEADER = b"mcp-session-id"
+
+
+def track_streams(
+    app,
+    registry: SessionRegistry,
+    on_closed: Callable[[str, str], None] | None = None,
+):
+    """Wrap the MCP ASGI app so *registry* knows which sessions have a notification stream open.
+
+    A ``GET`` that carries an ``mcp-session-id`` is that session's stream; it
+    is open until the request ends. ``on_closed(participant_id, room_id)`` is
+    called for each route still registered on a stream that ended.
+    """
+
+    async def tracked(scope, receive, send):
+        stream_id = None
+        if scope.get("type") == "http" and scope.get("method") == "GET":
+            for name, value in scope.get("headers", ()):
+                if name.lower() == _STREAM_HEADER:
+                    stream_id = value.decode("latin-1")
+                    break
+        if stream_id is None:
+            await app(scope, receive, send)
+            return
+        registry.stream_opened(stream_id)
+        try:
+            await app(scope, receive, send)
+        finally:
+            for participant_id, room_id in registry.stream_closed(stream_id):
+                if on_closed is not None:
+                    on_closed(participant_id, room_id)
+
+    return tracked
+
+
+_request_hidden = False
+
+
+def _stream_id(server: Server) -> str | None:
+    """The calling session's id (``mcp-session-id``), from the HTTP request that carries the call.
+
+    ``None`` when the SDK gives the call no request (``mcp`` before 1.10 has no
+    ``request`` on the context). Then the stream guard is blind: every session
+    counts as having a stream open, and a notification nobody can receive is
+    journaled as delivered. Say so once, loudly, instead of failing silently.
+    """
+
+    global _request_hidden
+    request = getattr(server.request_context, "request", None)
+    if request is None and not _request_hidden:
+        _request_hidden = True
+        logger.error(
+            "the mcp SDK gave a tool call no HTTP request, so the transport cannot tell which "
+            "notification stream belongs to a session: a message for a session with no stream "
+            "would be journaled as delivered. Install mcp>=1.10,<2 (nunchi[mcp-discord])"
+        )
+    headers = getattr(request, "headers", None)
+    value = headers.get("mcp-session-id") if headers is not None else None
+    return value if isinstance(value, str) and value else None
 
 
 def build_server(
@@ -106,6 +176,9 @@ def build_server(
                 raise RuntimeError("Discord transport self identity is not ready")
             participant_id = unsigned.get("participant_id")
             room_id = unsigned.get("channel_id")
+            threads_in_room = unsigned.get("threads_in_room", True)
+            if not isinstance(threads_in_room, bool):
+                raise RuntimeError("threads_in_room must be true or false")
             ok, detail = authorizer.verify(
                 authorization=authorization,
                 tool=name,
@@ -122,6 +195,8 @@ def build_server(
                 participant_id=participant_id,
                 room_id=room_id,
                 transport_self_actor_id=actor_id,
+                threads_in_room=threads_in_room,
+                stream_id=_stream_id(server),
             )
             return [
                 types.TextContent(
@@ -163,6 +238,7 @@ def serve(config: Config) -> int:
     in_flight = InFlight()
     backstop = SendBackstop(config.backstop_max_sends, config.backstop_window_seconds)
     rest = DiscordRestClient(config.token)
+    threads = ThreadDirectory(rest, frozenset(config.allowed_channel_ids))
     authorizer = ToolAuthorizer(
         secret=config.output_hmac_key,
         participant_routes={
@@ -170,6 +246,7 @@ def serve(config: Config) -> int:
             for participant, rooms in config.participant_routes
         },
         journal_path=Path(config.state_directory) / "output-authorizations.jsonl",
+        threads=threads,
     )
     executor = ToolExecutor(
         rest,
@@ -189,6 +266,13 @@ def serve(config: Config) -> int:
         ),
     )
     session_manager = StreamableHTTPSessionManager(app=server, event_store=None)
+    lifecycle: dict[str, Callable[[str, str], None]] = {}
+
+    def stream_ended(participant_id: str, room_id: str) -> None:
+        # The enqueuer exists once the lifespan runs; no stream ends before.
+        declare = lifecycle.get("declare_stream_gap")
+        if declare is not None:
+            declare(participant_id, room_id)
 
     @contextlib.asynccontextmanager
     async def lifespan(_app):
@@ -204,13 +288,23 @@ def serve(config: Config) -> int:
                 Path(config.state_directory) / "transport-delivery-audit.jsonl"
             ),
             route_map,
+            wants_threads=registry.threads_in_room,
         )
+        lifecycle["declare_stream_gap"] = enqueuer.declare_stream_gap
+
+        async def thread_parent(channel_id: str) -> str | None:
+            # Nobody's room includes threads: nothing to look up.
+            if not registry.threads_wanted(route_map):
+                return None
+            return await threads.parent_within(channel_id)
+
         runner = GatewayRunner(
             protocol,
             enqueuer,
             allowed_channel_ids=frozenset(config.allowed_channel_ids),
             membership_room_ids=config.membership_room_ids,
             on_source_gap=enqueuer.declare_source_gap,
+            thread_parent=thread_parent,
         )
         gateway_task = asyncio.create_task(runner.run(shutdown), name="discord-gateway")
         pump_task = asyncio.create_task(
@@ -220,6 +314,7 @@ def serve(config: Config) -> int:
                 shutdown=shutdown,
                 on_delivery_gap=enqueuer.declare_delivery_gap,
                 on_delivery_success=enqueuer.record_delivery,
+                hold=enqueuer.behind_a_failed_gap,
             ),
             name="notification-pump",
         )
@@ -269,7 +364,14 @@ def serve(config: Config) -> int:
                 logger.info("transport shut down cleanly")
 
     app = Starlette(
-        routes=[Mount("/mcp", app=session_manager.handle_request)],
+        routes=[
+            Mount(
+                "/mcp",
+                app=track_streams(
+                    session_manager.handle_request, registry, stream_ended
+                ),
+            )
+        ],
         lifespan=lifespan,
     )
 

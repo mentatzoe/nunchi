@@ -37,6 +37,13 @@ TOOL_SCHEMAS: list[dict] = [
             "properties": {
                 "participant_id": {"type": "string"},
                 "channel_id": {"type": "string"},
+                "threads_in_room": {
+                    "type": "boolean",
+                    "description": (
+                        "The participant's binding: whether threads under the "
+                        "channel are part of its room (default true)."
+                    ),
+                },
                 "_nunchi_authorization": {"type": "object"},
             },
             "required": [

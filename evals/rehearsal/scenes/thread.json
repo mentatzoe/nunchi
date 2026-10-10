@@ -2,7 +2,7 @@
   "id": "rehearsal-thread",
   "title": "A person posts in a thread under the room",
   "source": "docs/behavior.md",
-  "review": "draft: written for the step 9f Discord room (PR 3b). The probe opens a thread under the room and posts t1 in it. Reported per column, not graded.",
+  "review": "draft: written for the step 9f Discord room (PR 3b). The probe opens a thread under the room and posts t1 in it. Reported per column, not graded, and pinned reached: a thread under the room is part of it. The `thread-question` scene then asks the agent something in the same thread.",
   "platform": "discord",
   "participants": ["vigil"],
   "actors": {

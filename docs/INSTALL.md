@@ -229,11 +229,14 @@ NUNCHI_DISCORD_STATE_DIRECTORY
 `{"codex":["123456789"]}`. It defines exact participant/room pairs, never a
 participant-by-room cross product.
 
-The shared transport does not deliver everything yet: a message in a thread
-under a routed channel, the first routed message after it starts (the
-participant gets only a continuity gap), and a notification sent before the
-runner's stream is open. See
-[What it does not deliver yet](../integrations/mcp-discord/README.md#what-it-does-not-deliver-yet).
+Every message reaches the participant, or the participant is told with a
+continuity gap that something may have been missed. A thread under a routed
+channel is part of the room unless the participant's `binding` says
+`"threads_in_room": false` (the same key in every harness; the
+[harness guide](harness-guide.md), step 1, says which honor it), and the agent
+answers in the thread. A participant's runner opens its notification stream before it
+registers. See
+[What reaches the participant](../integrations/mcp-discord/README.md#what-reaches-the-participant).
 
 `NUNCHI_DISCORD_OUTPUT_HMAC_KEY` must be at least 32 bytes and shared only
 between the host-owned participant runner and transport. Output/history tool

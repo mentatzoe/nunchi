@@ -123,10 +123,13 @@ what reaches its hook. List what the harness does to a message before then:
   some without its dispatch hook.
 
 Places nested in the room, such as the threads under a channel or the
-topics in a group, belong to the room. Consume their messages too, with
+topics in a group, belong to the room unless its binding says
+`threads_in_room: false` (step 1). Consume their messages too, with
 the thread each is in (`thread_root_event_id`, step 7); a harness left to
-answer them bypasses the room. A setting that opens the room's channel may
-open its threads too, as Hermes's Discord `free_response_channels` does: the
+answer them bypasses the room. With the setting off, still consume them: it
+only keeps them out of the room, so the harness does not answer them itself.
+A setting that opens the room's channel may open its threads too, as
+Hermes's Discord `free_response_channels` does: the
 plugin that holds them must ship with that setting or before it, never
 after. Test the harness's defaults and the room's setting through its real
 ingress, as the Hermes kit's Discord lane does with Hermes's stock Discord
@@ -179,6 +182,35 @@ An integration's config has the shared sections and one section of its own:
 
 - `binding.actor_id` is the agent's own identity on the platform, exactly as
   room events name it. The library never guesses who the agent is from names.
+- `binding.threads_in_room` (optional, `true` or `false`, default `true`) says
+  whether the threads opened under the room's channel, and the topics of a
+  forum group, are part of the room. This is the one setting, with the same
+  name and meaning in every harness, so each README only points here:
+  - **`true`:** the agent hears them (their messages carry
+    `thread_root_event_id`, step 7), and its reply, post or reaction about a
+    message in a thread lands in the thread, where the harness can place it.
+  - **`false`:** their messages are not part of the room. The library keeps
+    them out of the room's observation whichever way a harness delivers
+    them, as long as the delivery names the thread (`thread_root_event_id`,
+    step 7; the delivery audit reads `route-rejected`), so an integration
+    that names the thread and does nothing else still honors it. An
+    integration that can should also not fetch or deliver them, which saves
+    the work: the shared Discord transport takes the setting at registration
+    and sends nothing from threads, the reference adapter does not place a
+    thread in its parent channel, and the Hermes plugin consumes the message
+    so Hermes does not answer it itself.
+  A harness-hosted plugin still consumes thread messages when the setting is
+  `false` (step 7).
+  **Who honors it today.** The Discord reference adapter (`nunchi-discord`),
+  the shared Discord transport (the Claude Code, Codex and Codex app-server
+  integrations) and the Hermes plugin (Discord threads and Telegram topics)
+  name a message's thread and honor the key. The Telegram and Matrix
+  reference adapters accept it and ignore it: they carry no thread facts, so a
+  topic or thread message reaches the agent as an ordinary message of the
+  room, and its reply goes to the room, with either setting. The channel
+  adapter (`nunchi-channel`) takes its events as given, so the key works only
+  for a producer that sets `thread_root_event_id`. The older
+  `integrations/hermes` integration rejects the key at load, naming it.
 - `profile` is pinned by its hash, and must name the same participant and
   actor. The file is JSON with exactly five fields: `profile_id`,
   `participant_id`, `actor_id`, `instructions` (who the agent is in this
@@ -578,13 +610,20 @@ room.deliver(
   room, and its silence marker may turn into a visible warning on a person's
   turn.
 - The room includes the places nested in it: a thread under the channel, a
-  topic in the group. Consume their messages and set `thread_root_event_id`
-  to the thread's root: the message that started it, or the platform's own
-  id for the thread when no message did. A message the harness itself moved
-  into a new thread is that thread's start and stays where it was posted.
-  A harness-hosted plugin starts every turn in the room's main chat, so
-  until the library places answers in threads, the agent's answer to a
-  thread message is posted there.
+  topic in the group (unless `binding.threads_in_room` is `false`, step 1).
+  Consume their messages and set `thread_root_event_id` to the thread's root:
+  the message that started it, or the platform's own id for the thread when no
+  message did. A message the harness itself moved into a new thread is that
+  thread's start and stays where it was posted. Answer in the thread where the
+  harness lets you: a library-hosted integration puts a reply, post or
+  reaction about a message in a thread into that thread
+  (`nunchi.integrations.discord_participant_transport.thread_of` for
+  Discord). `dispatch` gets the turn's wake with `events` widened to every
+  message the turn showed the agent (a look-again, steering, a history page,
+  its memory), so a transport reads the thread of the message a move is about
+  however the agent saw it. A harness-hosted plugin starts every turn in the room's main chat,
+  so there the agent's answer to a thread message is posted in the main chat,
+  not in the thread; record that in the integration's known gaps.
 - Other chats and direct messages are not this participant's room. A
   harness-hosted plugin leaves them to the harness. A library-hosted
   transport that sees another channel delivers it with
@@ -693,6 +732,20 @@ attestation, validates each event, marks a continuity gap after each
 (re)connect, hands events to `room.deliver`, and reconnects. Build the `Room`
 with `connection.transport`, `attach` the room, and call `serve`. The Claude
 Code runtime and the Codex runner (`codex_app_server.runner`) both do.
+
+**The client rule: open the stream before registering.** The transport's MCP
+server keeps no event store, so a notification sent to a session whose
+notification stream is not open is dropped. A client that talks to the shared
+transport itself (not through `DiscordRoomConnection`) therefore does, in this
+order, on every (re)connect: connect (`StreamableMCPClient.connect`), open the
+notification stream (`open_stream`, which returns once the server has it),
+mark a continuity gap (a fresh listener cannot know what it missed before it
+was listening), register the participant, then read the stream
+(`notifications(stream)`). It also treats the end of the stream, or an error
+reading it, as an interruption: it marks a gap and reconnects. A client that
+registers first is not silently dropped on a current transport, which fails
+those deliveries and tells the next listener with a gap, but it still loses
+the message.
 
 `nunchi.integrations.codex_app_server` is the protocol-harness example: its
 driver starts each run with `turn/start` and binds it from the answer, the
@@ -946,7 +999,8 @@ Each is tracked in [#135](https://github.com/mentatzoe/nunchi/issues/135).
   showed in the scenarios the kit plays.
 - [ ] Everything the harness drops or does before your ingress hook is open
   or off for the room, tested through the harness's real ingress; threads
-  and topics inside the room are consumed as the room's.
+  and topics inside the room are consumed as the room's, and
+  `binding.threads_in_room` is honored.
 - [ ] No decision about whether or what the agent says.
 - [ ] Every room event delivered, the agent's own included.
 - [ ] Every run bound when it starts, and its end reported once, also when

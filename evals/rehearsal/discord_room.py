@@ -29,11 +29,10 @@ scan covers them; the bots' per-run tokens are among the values it looks for.
 
 The moments, in one channel named after the column:
 
-1. ``first-message``: a person greets the room. Reported, not graded. The
-   shared transport replaces the first routed event after it starts with a
-   continuity gap, so for Claude Code and Codex it is pinned ``not
-   delivered``; the gap itself must reach the participant
-   (``discord-continuity``). The reference is pinned ``reached``.
+1. ``first-message``: a person greets the room. Reported, not graded, and pinned
+   ``reached``: a fresh transport declares a continuity gap when it starts
+   (``discord-continuity`` requires that the participant sees it), and the
+   message arrives behind it. The reference is pinned ``reached`` too.
 2. ``bot-status-report``: a scripted bot posts; no turn.
 3. ``direct-question``: one post.
 4. ``reply``: the person replies to the agent's post; the agent replies to it.
@@ -41,13 +40,17 @@ The moments, in one channel named after the column:
    once, so it crosses the reconnect; the person asks for a thumbs up and the
    agent reacts. The transport must resume with no gap; the reference marks
    a stream gap on any disconnect, which is recorded, not failed.
-6. ``thread``: the person posts in a thread under the room. Reported, not
-   graded: the shared transport drops thread messages and the reference
-   refuses them as another room (both pinned ``not delivered``).
+6. ``thread``: the person opens a thread under the room and posts in it.
+   Reported, not graded, and pinned ``reached``: a thread under the room is
+   part of the room.
+7. ``thread-question``: the person asks the agent a question in that thread.
+   The agent replies to it, and the reply must land in the thread (not in the
+   channel): the wire shows where it was posted.
 
 Each graded message must reach the agent as it was sent
-(``discord-addressing``): the pings it carried, and for the reply the agent's
-own last post as the message it answers.
+(``discord-addressing``): the pings it carried, for the reply the agent's
+own last post as the message it answers, and for the thread question the
+thread it was said in.
 """
 
 from __future__ import annotations
@@ -71,7 +74,7 @@ from typing import Any
 from evals.behavior.scene import SCENES as BEHAVIOR_SCENES, Scene, load_scene
 
 from . import checks as checks_module
-from .checks import NOT_DELIVERED, REACHED, Check
+from .checks import REACHED, Check
 from .discord_net import ENV as NET_ENV
 from .fake_discord.control import FakeDiscord
 from .probe import (
@@ -99,14 +102,23 @@ REPLY_PHRASE = "back off exponentially"
 SCRIPTED_REPLY = "Exponentially, with jitter, and a cap of about a minute between tries."
 REACTION_PHRASE = "thumbs up if that works"
 REACTION = "\N{THUMBS UP SIGN}"
+THREAD_PHRASE = "how many tries"
+SCRIPTED_THREAD_REPLY = "Five tries, then it stops and reports the failure."
 SCRIPT = RoomScript(
-    answer=SCRIPTED_ANSWER, reply=SCRIPTED_REPLY, reply_phrase=REPLY_PHRASE, reaction=REACTION, reaction_phrase=REACTION_PHRASE
+    answer=SCRIPTED_ANSWER,
+    reply=SCRIPTED_REPLY,
+    reply_phrase=REPLY_PHRASE,
+    reaction=REACTION,
+    reaction_phrase=REACTION_PHRASE,
+    thread_reply=SCRIPTED_THREAD_REPLY,
+    thread_phrase=THREAD_PHRASE,
 )
 # The one delivered action each graded moment expects (`checks.discord_scripted_outcomes`).
 EXPECTED = {
     "post": {"kind": "message", "text": SCRIPTED_ANSWER},
     "reply": {"kind": "reply", "text": SCRIPTED_REPLY},
     "reaction": {"kind": "reaction", "reaction": REACTION},
+    "thread-reply": {"kind": "reply", "text": SCRIPTED_THREAD_REPLY},
 }
 THREAD = "retry details"
 
@@ -117,16 +129,16 @@ MOMENTS = (
     MomentSpec("reply", SCENES / "reply.json", "reply", REPLY_PHRASE, reply_to_agent=True),
     MomentSpec("reaction", SCENES / "reaction.json", "reaction", REACTION_PHRASE, reconnect_before=True),
     MomentSpec("thread", SCENES / "thread.json", "report", thread=THREAD),
+    MomentSpec("thread-question", SCENES / "thread-question.json", "thread-reply", THREAD_PHRASE, thread=THREAD),
 )
 
-# The shared transport's two known gaps, pinned until the library closes them: it drops a
-# message in a thread under a routed channel (`nunchi.mcp_discord.runner`), and it replaces the
-# first routed event after it starts with a continuity gap (`nunchi.mcp_discord.server.GapAwareEnqueuer`).
-TRANSPORT_PINS = {"first-message": NOT_DELIVERED, "thread": NOT_DELIVERED}
-# The reference, the control column, takes the first message, and refuses a thread message as `route-rejected`
-# (a thread's id is not the bound channel). Pinned so that a regression, or a fix, fails the lane: update the
-# pin and its docs.
-REFERENCE_PINS = {"first-message": REACHED, "thread": NOT_DELIVERED}
+# The two gaps the shared transport and the reference had, closed: a person's first message after a
+# start reaches the participant (behind the continuity gap the process declares), and a message in
+# a thread under the room is part of the room. Pinned `reached` so that a regression fails the lane
+# (update the pin and its docs). The thread question is graded, not pinned: its reply must land in
+# the thread.
+TRANSPORT_PINS = {"first-message": REACHED, "thread": REACHED}
+REFERENCE_PINS = {"first-message": REACHED, "thread": REACHED}
 
 # The reference runs discord.py; the stand-in's shape pin is discord.py 2.7.1's.
 REFERENCE_PIN = "discord.py 2.7.1"
@@ -633,6 +645,8 @@ class DiscordRoom:
             "reply_to": reply_to,
             "dispatched_to": answer["dispatched_to"],
             "message_id": answer["id"],
+            # The thread it was said in, as an event names it (`thread_root_event_id`); None in the room itself.
+            "thread": f"discord:message:{self.threads[spec.thread]}" if spec.thread else None,
         }
         if note:
             delivery["note"] = note
@@ -753,11 +767,34 @@ class DiscordRoom:
         ]
 
 
+def landed(action: Mapping[str, Any], effects: Sequence[Mapping[str, Any]]) -> str | None:
+    """The channel an action of the agent's reached, by name, read from what the bot wrote on the wire (``effects``)."""
+
+    target = str(action.get("target_event_id") or "").removeprefix("discord:message:")
+    for effect in effects:
+        if action.get("kind") in ("message", "reply"):
+            if (
+                effect.get("kind") == "message"
+                and effect.get("text") == action.get("text")
+                and (effect.get("reply_to") or None) == (target if action.get("kind") == "reply" else None)
+            ):
+                return effect.get("where")
+        elif (
+            action.get("kind") == "reaction"
+            and effect.get("kind") == "reaction"
+            and effect.get("reaction") == action.get("reaction")
+            and effect.get("message_id") == target
+        ):
+            return effect.get("where")
+    return None
+
+
 def judge_discord_moments(leg: Leg, moments: Sequence[dict[str, Any]], received: Mapping[str, Mapping[str, Any]]) -> None:
     """Mark each committed action delivered or not, then each moment's actions and outcome (`checks.discord_moment_outcome`).
 
     ``received`` is how the agent's turns showed each trigger was addressed; it goes beside what was sent, in
-    each delivery (`checks.discord_addressing`).
+    each delivery (`checks.discord_addressing`). Each action also records ``where`` it landed, by channel name,
+    from the wire.
     """
 
     for moment in moments:
@@ -766,6 +803,7 @@ def judge_discord_moments(leg: Leg, moments: Sequence[dict[str, Any]], received:
     flags = checks_module.delivered(leg.committed, leg.room_effects(), harness_posts=False)
     for item, ok in zip(leg.committed, flags):
         item["delivered"] = ok
+    effects = leg.room_effects()
     for moment in moments:
         graded = {turn["request_id"] for turn in moment["turns"] if turn.get("trigger") == moment["graded_event"]}
         actions = [
@@ -773,6 +811,8 @@ def judge_discord_moments(leg: Leg, moments: Sequence[dict[str, Any]], received:
             for item in leg.committed
             if item.get("request_id") in graded
         ]
+        for action in actions:
+            action["where"] = landed(action, effects)
         moment["actions"] = actions
         moment["posts"] = [
             {"text": action.get("text"), "delivery": action.get("delivery"), "delivered": action["delivered"]}
@@ -785,6 +825,7 @@ def judge_discord_moments(leg: Leg, moments: Sequence[dict[str, Any]], received:
             graded_turns=moment["graded_turns"],
             actions=[action for action in actions if action.get("delivered")],
             graded_event=moment["graded_event"],
+            thread=moment.get("thread"),
         )
 
 
@@ -844,20 +885,26 @@ class OnTheTransport:
     def attach(self, connection: Any) -> None:
         """Serve the room over MCP, as the CLI's ``main`` does, on a thread the probe can stop; wait until it registered."""
 
-        register = connection.register
+        client = connection.client
+        order = self.runner_calls.setdefault("order", [])
+        register, connect, open_stream = connection.register, client.connect, client.open_stream
 
         def registered() -> None:
+            order.append("register")
             register()
             self._registered.set()
 
-        connection.register = registered
-        notifications = connection.client.notifications
+        def connected() -> Any:
+            order.append("connect")
+            return connect()
 
-        def streamed():
+        def streamed() -> Any:
+            stream = open_stream()
+            order.append("open_stream")
             self._streaming.set()
-            yield from notifications()
+            return stream
 
-        connection.client.notifications = streamed
+        connection.register, client.connect, client.open_stream = registered, connected, streamed
 
         def serve() -> None:
             try:
@@ -872,16 +919,18 @@ class OnTheTransport:
                 "the runner never registered with nunchi-mcp-discord: "
                 + ("; ".join(self.serve_errors) or (self.transport_process.tail() if self.transport_process else ""))
             )
-        # The notification stream opens right after the registration; a notification sent
-        # before it is open would be lost, so give the GET a moment.
-        self._streaming.wait(10)
-        time.sleep(1.0)
+        # The runner opens the notification stream before it registers, so nothing posted from
+        # here on can be lost to a stream that is not open yet: the first moment starts at once.
+        if not self._streaming.is_set():
+            raise RuntimeError("the runner registered with nunchi-mcp-discord before it opened its notification stream")
 
     def play(self, spec: MomentSpec, *, settle_seconds: float) -> dict[str, Any]:
         self._spec = spec
         if spec.reconnect_before:
             self.discord.reconnect()
         moment = play_moment(self, spec, settle_seconds=settle_seconds)  # type: ignore[arg-type]
+        if spec.thread:
+            moment["thread"] = spec.thread
         if spec.reconnect_before:
             self.discord.reconnected(moment)
         if spec.name == "first-message":
@@ -889,7 +938,7 @@ class OnTheTransport:
             self.discord.start_gap = {
                 "process": "nunchi-mcp-discord",
                 "gap": gaps[0]["delivery_id"] if gaps else None,
-                "detail": "the transport replaced the first routed event after it started with a continuity gap",
+                "detail": "the transport put a continuity gap ahead of the first routed event after it started",
                 "journal": [record.get("outcome") for record in self.discord.transport_journal()],
             }
         return moment
@@ -1041,6 +1090,8 @@ class ReferenceLeg(Leg):
         if spec.reconnect_before:
             self.discord.reconnect()
         moment = play_moment(self, spec, settle_seconds=settle_seconds)
+        if spec.thread:
+            moment["thread"] = spec.thread
         if spec.reconnect_before:
             self.discord.reconnected(moment)
         # The reference runs in its own process: its turns are read from outside it after each moment.
