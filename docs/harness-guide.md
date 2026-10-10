@@ -10,6 +10,16 @@ guide alone. Where the guide falls short, the guide is fixed. Two tests so
 far: separate agents built the Hermes plugin and the Codex app-server
 integration from it, and this version carries what they found.
 
+**The Hermes plugin is parked** (Zoe and Claude as lead engineer, 2026-10-10):
+the code and its CI lanes stay, and there is no new Hermes work until it is
+unparked. It consumes each message and injects a turn of its own, so Hermes's
+native settings never apply to Nunchi's turns
+([`integrations/hermes-plugin/README.md`](../integrations/hermes-plugin/README.md#parked-2026-10-10)).
+Where this guide uses it as an example, it describes the plugin as it last ran.
+An integration follows the harness's own plugin rules and defers to its
+behavior and configuration; it never rewrites or reimplements the harness
+(`AGENTS.md`, "Stock harnesses").
+
 Read first:
 
 - [`AGENTS.md`](../AGENTS.md), "One library, every harness": why the library
@@ -60,7 +70,7 @@ Answer two questions about the harness.
 | Room connection | Nunchi's transport (the shared Discord transport, the reference adapters) | The harness's own gateway |
 | Who starts the agent's turns | The library calls your driver | Your plugin, when the library says so |
 | Room events reach the library | From Nunchi's transport | From your plugin's ingress hook |
-| Examples | Claude Code, Codex | Hermes |
+| Examples | Claude Code, Codex | Hermes (plugin parked) |
 
 A harness-hosted integration must **consume and start**: it takes every room
 message before the harness runs its agent on it, hands it to the library, and
@@ -103,6 +113,15 @@ can stop goes into the integration's known gaps. Hermes's list is in
 The conformance kit counts what the harness shows in the scenarios it
 plays (Prove it); what it shows on people's messages, its prompts and
 command replies belong in your own tests.
+
+A harness's built-in commands stay the harness's, and so do its replies to
+them: an integration never drops or rewrites them (decision D4, Zoe and Claude
+as lead engineer, 2026-10-10). Point operators to the harness's own way of
+limiting who can run them (for Hermes, `group_allow_admin_from`), and record
+that the agent's memory misses the command and the reply. A raw platform
+listener, or any wrapper around the harness's own message handling, is not an
+extension point (see "Public extension points only", under The rules):
+not allowed.
 
 **Whatever the harness drops or does before your ingress hook.** The room
 should hear the whole conversation, and a harness-hosted plugin hears only
@@ -203,8 +222,8 @@ An integration's config has the shared sections and one section of its own:
   `false` (step 7).
   **Who honors it today.** The Discord reference adapter (`nunchi-discord`),
   the shared Discord transport (the Claude Code, Codex and Codex app-server
-  integrations) and the Hermes plugin (Discord threads and Telegram topics)
-  name a message's thread and honor the key. The Telegram and Matrix
+  integrations) and the Hermes plugin (parked; Discord threads and Telegram
+  topics) name a message's thread and honor the key. The Telegram and Matrix
   reference adapters accept it and ignore it: they carry no thread facts, so a
   topic or thread message reaches the agent as an ordinary message of the
   room, and its reply goes to the room, with either setting. The channel
@@ -602,7 +621,11 @@ room.deliver(
   way. If the harness hides its agent's own messages from you, say so with
   `HarnessDelivery(room_shows_own_messages=False)`: the library then records
   each message it committed for the harness in the room log itself, with an
-  id of its own, as a reply to the message the turn was about.
+  id of its own, as a reply to the message the turn was about. The same goes
+  for its reactions: if the harness reports none back, and its reaction call
+  says only that it worked, say so with `room_shows_own_reactions=False`, and
+  the library records each reaction `native` reports sent as the agent's own
+  reaction event, again with an id of its own.
 - **Harness-hosted: consume every message in the participant's room,** so
   the harness never runs its agent on one by itself. The harness then sees
   only the turns your driver starts. Consume the message even when handing it
@@ -664,8 +687,9 @@ room = Room(
   The harness posts messages. In final-answer posting the answer is a
   message, never a reply to a chosen message. `room_shows_own_messages` says
   whether the room events you deliver include the agent's own messages (step
-  7). `native` is optional; give it if the harness lets a plugin react. It
-  has three methods:
+  7), and `room_shows_own_reactions` (true unless you say otherwise) whether
+  they include its own reactions. `native` is optional; give it if the harness
+  lets a plugin react. It has three methods:
   - `dispatch(action=..., wake=...) -> TransportResult` for a reaction:
     `{"kind": "reaction", "origin_event_id": …, "target_event_id": …,
     "reaction": …, "operation": "add"}` (or `"remove"`);
@@ -757,7 +781,8 @@ steering goes in with `turn/steer`, and `turn/completed` ends the run.
 The consume-and-start shape, with hook names generic. The contract's parity
 table names the Hermes hooks for each step.
 
-`nunchi.integrations.hermes_plugin` is the worked example.
+`nunchi.integrations.hermes_plugin` is the worked example (the plugin is
+parked since 2026-10-10; it stays the worked example of this shape).
 
 1. **Load.** The plugin reads its config into `RoomSettings` and builds a
    `TurnParticipant` with the harness's silence marker, its other silent

@@ -404,17 +404,18 @@ def scripted_outcomes(moments: Sequence[Mapping[str, Any]], answer: str, *, room
 # 13. **discord-continuity**: the continuity gap the column's process
 #     declares when it starts reached the participant; after op 7, every bot
 #     resumed its session (no new IDENTIFY) and the message posted meanwhile
-#     reached Nunchi. On the shared transport, also no continuity gap: not in
-#     the transport's journal, not in the participant's observations. The
-#     reference marks a stream gap on any disconnect; that is recorded, not
-#     failed.
+#     reached Nunchi. On the shared transport and in Hermes, also no
+#     continuity gap after op 7: not in the transport's journal, not in the
+#     participant's observations. The reference marks a stream gap on any
+#     disconnect; that is recorded, not failed.
 # 14. **discord-addressing**: a graded message reached the agent as it was
 #     sent: the pings it carried (the direct question and the thumbs-up
 #     request ping the agent, and the reply pings its target's author) and,
 #     for the reply, the agent's own last message as the one it replies to.
-#     Two things the room log must give the agent are pinned per column: the
-#     reply's target resolves to the agent's own post, and the next turn
-#     after its reaction holds that reaction in memory.
+#     Two things the room log must give the agent are checked: the next turn
+#     after its reaction holds that reaction in memory, and the reply's
+#     target resolves to the agent's own post (pinned the other way for
+#     Hermes, a known gap).
 #
 # With ``--scripted``, `discord_scripted_outcomes` checks each moment of the
 # Discord room. A moment that expects ``report`` is reported, not graded,
@@ -682,36 +683,27 @@ def discord_writes_reconciled(committed: Sequence[Mapping[str, Any]], writes: Se
     return Check("discord-writes-reconciled", not problems, detail)
 
 
-def discord_continuity(
-    start: Mapping[str, Any], reconnects: Sequence[Mapping[str, Any]], *, gaps_fail: bool, start_required: bool | None = True
-) -> Check:
+def discord_continuity(start: Mapping[str, Any], reconnects: Sequence[Mapping[str, Any]], *, gaps_fail: bool) -> Check:
     """The gap a fresh process declares reached the participant, and a reconnect lost nothing.
 
     ``start`` is the continuity gap the column's process declares when it
     starts (``gap``, its delivery id, or None when the participant never
     saw one): it cannot know what happened before it connected, and says so.
+    Every column declares one: the shared transport, the reference and the
+    Hermes plugin (when its room starts).
+
     Each of ``reconnects`` is one bot's op 7: ``resumed`` (RESUME sent and
     RESUMED answered), ``identified_again``, ``message_reached`` (the
     message posted meanwhile), and the gaps marked after it, in the
     transport's journal (``transport_gaps``) and in the participant's
     observations (``participant_gaps``). ``gaps_fail`` is False for the
     reference, which marks a stream gap on any disconnect by design: those
-    are recorded, not failed. ``start_required`` is False for a column whose
-    process declares no gap when it starts: the start is then recorded, and a
-    gap it did declare is still shown. It is None for a column pinned to
-    declare none (Hermes's plugin, a known gap): a gap it starts declaring
-    fails, so the pin and its docs are updated, and then the gap is required.
+    are recorded, not failed.
     """
 
     problems: list[str] = []
     recorded: list[str] = []
-    if start_required is None:
-        if start.get("gap"):
-            problems.append(
-                f"the {start.get('process', 'process')} now declares a gap when it starts ({start['gap']}): update the pin, "
-                "docs/rehearsal.md, the CHANGELOG and the plugin README's Known gaps, then require the gap"
-            )
-    elif start_required and not start.get("gap"):
+    if not start.get("gap"):
         problems.append(f"the participant never saw the gap its {start.get('process', 'process')} declares when it starts")
     for item in reconnects:
         bot = item.get("bot")
@@ -729,8 +721,7 @@ def discord_continuity(
     if not reconnects:
         problems.append("no reconnect was played")
     detail = "; ".join(problems) or (
-        ("the start gap reached the participant" if start.get("gap") else "the process declares no start gap")
-        + f"; {len(reconnects)} bot(s) resumed after op 7 and the message posted meanwhile "
+        f"the start gap reached the participant; {len(reconnects)} bot(s) resumed after op 7 and the message posted meanwhile "
         "reached Nunchi" + ("; " + "; ".join(recorded) if recorded else ", with no continuity gap")
     )
     return Check("discord-continuity", not problems, detail)
@@ -742,7 +733,6 @@ def discord_addressing(
     agent: str,
     writes: Sequence[Mapping[str, Any]],
     reply_resolves: bool = True,
-    own_reaction_remembered: bool = True,
 ) -> Check:
     """A graded message reached the agent as it was sent, and the agent can find its own part in the room log.
 
@@ -763,13 +753,13 @@ def discord_addressing(
     fails here: the scripted agent answers a phrase either way, but a
     participant reading the room would not know it had been addressed.
 
-    Two facts are pinned either way, because a harness may not give the
-    library what it needs (``reply_resolves`` and ``own_reaction_remembered``
-    are True for every column but Hermes, whose gaps they pin until the plugin
-    or Hermes closes them): the reply's target must resolve to the agent's own
-    post in the room log (``reply_resolves`` on the delivery), and the next
-    turn after the agent's reaction must hold that reaction in its
-    ``own_moves``. A pin that no longer holds fails and says to update it.
+    Two facts about the agent's own part in the room log are checked: the
+    next turn after the agent's reaction must hold that reaction in its
+    ``own_moves``, and the reply's target must resolve to the agent's own post
+    (``reply_resolves`` on the delivery). The second is pinned either way,
+    because a harness may not give the library what it needs: it is True for
+    every column but Hermes, whose gap it pins until Hermes closes it, and a
+    pin that no longer holds fails and says to update it.
     """
 
     problems: list[str] = []
@@ -832,23 +822,12 @@ def discord_addressing(
             )
             if after is None:
                 problems.append(f"{name}: no later turn showed whether the agent remembers its reaction")
-            elif any(move.get("kind") == "reaction" and move.get("about_event_id") == target for move in after["own_moves"]) != own_reaction_remembered:
-                problems.append(
-                    f"{name}: the next turn ({after.get('trigger')}) "
-                    + (
-                        f"does not hold the agent's reaction to {target} in memory.own_moves"
-                        if own_reaction_remembered
-                        else f"now holds the agent's reaction to {target} in memory.own_moves: update the pin, docs/rehearsal.md, "
-                        "the CHANGELOG and the plugin README's Known gaps (The agent's own reaction is not remembered), then require it"
-                    )
-                )
+            elif not any(move.get("kind") == "reaction" and move.get("about_event_id") == target for move in after["own_moves"]):
+                problems.append(f"{name}: the next turn ({after.get('trigger')}) does not hold the agent's reaction to {target} in memory.own_moves")
         graded.append(f"{name} {'replied to the agent' if expect == 'reply' else 'pinged the agent'}")
     if not graded and not problems:
         problems.append("no graded message was played")
-    pinned = [
-        *([] if reply_resolves else ["the reply's target does not resolve to the agent's post"]),
-        *([] if own_reaction_remembered else ["the agent's own reaction is not remembered"]),
-    ]
+    pinned = [] if reply_resolves else ["the reply's target does not resolve to the agent's post"]
     detail = "; ".join(problems) or (
         f"each graded message reached the agent as sent: {', '.join(graded)}" + (f"; pinned: {', '.join(pinned)}" if pinned else "")
     )

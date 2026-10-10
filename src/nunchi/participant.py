@@ -234,6 +234,9 @@ HARNESS_DELIVERS = "the harness delivers it"
 # The room log's id for a message the harness posted but never shows back:
 # the library's own, never the platform's (#94 step 9e).
 DELIVERED_EVENT_PREFIX = "nunchi:delivered:"
+# The same for a reaction the participant added through a transport that
+# reports it sent and whose room never shows it back (``room_shows_own_reactions``).
+SENT_REACTION_EVENT_PREFIX = "nunchi:reaction:"
 
 
 @dataclass(frozen=True)
@@ -272,6 +275,17 @@ class Transport(Protocol):
 
     The room's host refuses an action that carries either, so it never
     reaches ``dispatch``.
+
+    Two optional attributes say what the room events the integration delivers
+    leave out, both true unless the transport says otherwise:
+
+    - ``room_shows_own_messages``: false when the participant's own messages
+      never come back as room events. A message the harness posts itself
+      (`HARNESS_DELIVERS`) then goes into the room log, as the participant's
+      own event, with an id of the library's own (`DELIVERED_EVENT_PREFIX`);
+    - ``room_shows_own_reactions``: false when its own reactions never come
+      back. A reaction ``dispatch`` reports ``sent`` then goes into the room
+      log the same way (`SENT_REACTION_EVENT_PREFIX`).
 
     ``dispatch`` gets the turn's wake with ``events`` widened to every message
     the turn showed the participant (look-again, steering, history), so a
@@ -1136,6 +1150,15 @@ class ParticipantTurnHost:
             shows = getattr(self.transport, "room_shows_own_messages", True)
             if shows or not self._record_delivered_message(wake, action, why):
                 self.memory.record_delivered(action, why=why)
+        elif (
+            result.delivery == "sent"
+            and action.get("kind") == "reaction"
+            and not getattr(self.transport, "room_shows_own_reactions", True)
+        ):
+            # The transport added the reaction, and the room never shows it
+            # back: it goes into the room log now, so the participant's next
+            # turn holds it among its own moves.
+            self._record_sent_reaction(wake, action)
         return result
 
     def _record_delivered_message(
@@ -1176,6 +1199,46 @@ class ParticipantTurnHost:
         # The reason joins the move as the room log now shows it.
         self.memory.record_reason({"kind": "reply", "target_event_id": origin, "text": text}, why)
         return True
+
+    def _record_sent_reaction(self, wake: Mapping[str, Any], action: Mapping[str, Any]) -> bool:
+        """Put a reaction the transport added, and the room never shows back, into the room log.
+
+        It is the participant's own reaction event, with an id of the
+        library's own, on the message the move was about. Memory then shows it
+        among the participant's own moves, with the reason it gave, as it does
+        for a room that shows the reaction itself.
+        """
+
+        target = action.get("target_event_id")
+        reaction = action.get("reaction")
+        operation = action.get("operation", "add")
+        if (
+            not isinstance(target, str)
+            or not target
+            or not isinstance(reaction, str)
+            or not reaction
+            or operation not in ("add", "remove")
+        ):
+            return False
+        event_id = SENT_REACTION_EVENT_PREFIX + str(wake["request_id"])
+        moment = self.observation.clock().astimezone(timezone.utc)
+        try:
+            observed = self.observation.observe(
+                delivery_id=event_id,
+                event={
+                    "id": event_id,
+                    "type": "reaction",
+                    "author_id": self.observation.binding.actor_id,
+                    "target_event_id": target,
+                    "reaction": reaction,
+                    "operation": operation,
+                    "timestamp": moment.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                },
+                actors={},
+            )
+        except NunchiError:
+            return False
+        return observed.audit.outcome in ("recorded", "exact-self-context")
 
     def _append_transport_receipt(
         self,

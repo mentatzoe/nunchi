@@ -40,7 +40,8 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   a producer that sets `thread_root_event_id`). The older `integrations/hermes`
   integration rejects the key at load, with an error that names it and points
   to the Hermes plugin. Remaining gap, not fixed: the Hermes plugin posts the
-  agent's final answer in the main channel, not in the thread.
+  agent's final answer in the main channel, not in the thread (the plugin is
+  parked, see Changed).
 - The Discord room's rehearsal grades a question asked in a thread
   (`thread-question`, expectation `thread-reply`): the scripted agent replies
   to it, and the reply must land in the thread, read from the wire. The pins
@@ -62,9 +63,8 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   at Discord's real names. The plugin runs inside Hermes's process, so the
   evidence comes from outside it: the participant's receipts, the library's
   record of the message Hermes delivered (without one, a hard problem: the
-  scripted model's words are never put in its place), and the stand-in's wire,
-  which also gives a reaction's emoji and target, since the receipt names
-  neither and the library records no reaction. Hermes's `state.db` is copied
+  scripted model's words are never put in its place), the library's record of
+  the reaction Hermes added, and the stand-in's wire. Hermes's `state.db` is copied
   for reading and no check reads it. What it cannot show is whether a turn was
   bound to its wake (inferred from the receipts, and said so in the record), or
   a restart of Hermes, or the invoking of a registered command. The stand-in
@@ -75,25 +75,52 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   message; the application flags now say which privileged intents are enabled
   for the bot, as an unverified bot in fewer than 100 servers has them (the
   "limited" bits; a world option `verified` sets the full ones). Known Hermes
-  gaps, pinned and not fixed, so that a change in either direction fails the
-  lane until the pin and the docs follow: the answer to a question asked in a
-  thread lands in the main channel; Hermes posts its final answer as a plain
-  message, never a Discord reply (read from the wire); the plugin declares no
-  continuity gap when it starts, nor after a reconnect (the transport and the
-  reference declare one at the start); a person's reply to the agent's answer
-  has a reply target the room log does not hold, because the library files the
-  answer under an id of its own; and the agent's own reaction is not in its
-  memory on the next turn (Hermes gives plugins no reaction events). Every
-  other column holds the last two closed. `discord-addressing` now compares a
-  reply's own ping too. Hermes's typing on a fresh run and its roughly 70
+  gaps, pinned so that a change in either direction fails the lane until the
+  pin and the docs follow (the lane found five; the plugin closes two, see
+  the next entry): the answer to a question asked in a thread lands in the
+  main channel; Hermes posts its final answer as a plain message, never a
+  Discord reply (read from the wire); and a person's reply to the agent's
+  answer has a reply target the room log does not hold, because the library
+  files the answer under an id of its own. Every other column holds the last
+  closed. The plugin marks no gap after a reconnect either, so one that
+  appears fails the lane. `discord-addressing` now compares a reply's own ping
+  too. Hermes's typing on a fresh run and its roughly 70
   registered slash commands are not pinned: typing is counted from the request
   on the wire (it fails `discord-standin-clean`, since the stand-in serves no
   typing route), and no scripted moment starts a fresh run or invokes a command.
   Each of these is in the plugin README's Known gaps (new entries: Registered
-  slash commands, No continuity gap when it starts, The agent's own reaction is
-  not remembered; and the reply link under No delivered message id). CI runs it
+  slash commands, and the plain message; and the reply link under No delivered
+  message id). CI runs it
   as the last step of the `hermes-plugin` job, without bubblewrap (Hermes's
   sandboxes use none).
+- `HarnessDelivery` takes `room_shows_own_reactions` (true unless said
+  otherwise), and `Transport` documents it beside `room_shows_own_messages`:
+  any transport may carry the attribute. When it is false, the host records a
+  reaction the transport reports sent as the participant's own reaction event
+  in the room log (`nunchi:reaction:<request id>`, on the message the turn was
+  about), as it records a message the harness delivered, so memory shows it in
+  `memory.own_moves` with the reason the agent gave. A room that never shows
+  the agent's own reactions is the case for it: the Hermes plugin sets it,
+  since Hermes gives plugins no reaction events and `add_reaction` returns only
+  `ok`. **Implemented, unverified** (offline tests: `test_conversation_memory`,
+  the turn conformance kit, and the Hermes lane in the launcher, against Hermes
+  `a50406d9`).
+- The Hermes plugin closes two of the gaps the Hermes column pinned
+  (**implemented, unverified**, same checks). The plugin's room declares a
+  continuity gap when it starts (`hermes:startup-gap:<ns>`, before its first
+  message), so the agent's first turn is told it may have missed messages, as
+  on the shared Discord transport and in the reference. And the agent's own
+  reaction is remembered, through the attribute above. The Discord room's lane
+  no longer pins those two: every column must meet them, and it reads the
+  committed reaction from the library's record, so `discord-writes-reconciled`
+  compares it with the wire. Still pinned, not fixed and not the library's to
+  fix, with the missing Hermes extension points and the alternatives in the
+  plugin README's Known gaps: the answer is a plain message, never a Discord
+  reply (no setting helps: the injected turn has no message to anchor on;
+  `reply_to_mode: all` and an `origin` with the trigger's `message_id` were
+  tried); a person's reply to the answer does not link to it (no hook, send
+  result or state gives a plugin the id of what Hermes sent); and the answer
+  to a thread message lands in the main channel.
 - The Discord room for the rehearsals (step 9f, PR 3b;
   [docs/rehearsal.md](docs/rehearsal.md)): **implemented, unverified** in
   CI, run here offline for Claude Code, Codex and the reference. The probe's
@@ -570,6 +597,32 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- **The Hermes plugin is parked (Zoe and Claude as lead engineer, 2026-10-10).**
+  The code stays and its CI lanes keep running; there is no new Hermes work
+  until it is unparked. Nunchi is a library that decides whether an agent takes
+  a turn in a live room and gives it the room's reading; integrations are thin
+  adapters on a harness's public extension points, and the harness owns
+  delivery (Zoe: an integration always complies with the harness's own plugin
+  rules and never rewrites or reimplements the harness; where the harness has
+  native configuration, the plugin points the user to it). The Hermes plugin
+  does not ride Hermes's native message flow: it consumes each message and
+  injects a turn of its own, so Hermes's native settings (threads, sessions,
+  identity) never apply to Nunchi's turns, and complying with Hermes's plugin
+  rules for listing would cost the agent its mentions. A proper fix is a
+  redesign (gate Hermes's own native turn instead of injecting one), which the
+  internal test track does not need. What it takes to unpark is in
+  `integrations/hermes-plugin/README.md`, "Before unparking". Codex stays
+  active, and every behavior stays in the core. A thread-placement change
+  made for the plugin (starting a turn in the thread through
+  `inject_message`'s `origin`) was reverted: injected turns use the bound
+  room's origin, so the answer to a thread message lands in the main channel,
+  as before (README, Known gaps).
+- **Decision D4 is made: Hermes's built-in commands stay Hermes's.** The
+  plugin never drops or rewrites them; operators restrict who can run them
+  with `group_allow_admin_from`. Dropping or rewriting built-in commands, and
+  a raw platform listener (`register_platform_handler`), are not allowed: they
+  would rewrite the harness (`AGENTS.md`, "Stock harnesses";
+  `docs/harness-contract.md`, gaps 2, 11 and 12). The documents say so.
 - The rules of a turn for agents that act through tools live in the core,
   in `nunchi.turn` (#94 step 9c): binding a model turn to its wake, one room
   action per turn, looking again before the first post, steering, silence

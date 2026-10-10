@@ -78,12 +78,26 @@ one vendor, the core needs a neutral interface instead.
 - **Stock harnesses.** Integrations use each harness's public extension
   points (plugins, hooks, configuration, protocols) and work with a stock
   install of a supported version. They do not patch the harness. Users keep
-  their own setup, models, tools, and customizations.
+  their own setup, models, tools, and customizations. Integrations follow each
+  harness's own plugin rules and defer to its behavior and configuration,
+  pointing users to the harness's own settings; they never reimplement it
+  (Zoe, 2026-10-10).
 - **Missing extension points.** When a harness lacks one we need, open an
   issue here first, with the gap and the alternatives considered. Zoe decides
   whether to ask the harness's maintainers.
 - **Independent evidence.** Tests, evaluations, and benchmarks run on clean,
   pinned installs of each harness, never on anyone's own setup.
+- **The Hermes plugin is parked** (Zoe and Claude as lead engineer,
+  2026-10-10). It injects a turn of its own instead of riding Hermes's native
+  flow, so Hermes's thread, session and identity settings never apply to
+  Nunchi's turns, and following Hermes's rules for listing a plugin would cost
+  the agent its mentions. The code and its CI lanes stay; there is no new
+  Hermes work until it is unparked
+  ([README, Parked](integrations/hermes-plugin/README.md#parked-2026-10-10)).
+  Codex stays active.
+- **D4, decided** (2026-10-10): Hermes's built-in commands stay Hermes's. The
+  plugin never drops or rewrites them; operators can restrict them with
+  `group_allow_admin_from`.
 
 ## Read first
 

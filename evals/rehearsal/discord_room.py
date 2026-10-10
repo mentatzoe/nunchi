@@ -26,9 +26,8 @@ launcher's certificate, and each column runs at Discord's real names:
   too (`HermesGatewayLeg`), and Hermes posts the agent's final answer itself:
   a plain message, in the main channel also for a thread question. The lane
   pins what Hermes and its plugin do not do (README, Known gaps), so that a
-  change either way fails it until the pins and docs follow: those two, no
-  gap declared at the start, a person's reply to the agent's answer has no
-  target in the room log, and the agent's own reaction is not remembered.
+  change either way fails it until the pins and docs follow: those two, and a
+  person's reply to the agent's answer has no target in the room log.
 
 Each Discord process starts as its console script does (``main`` from the
 same module), and only after the preflight (`preflight.py`) reached this
@@ -816,9 +815,7 @@ class DiscordRoom:
         expected: Mapping[str, Mapping[str, Any]],
         gaps_fail: bool,
         moments: Sequence[Mapping[str, Any]],
-        start_required: bool | None = True,
         reply_resolves: bool = True,
-        own_reaction_remembered: bool = True,
     ) -> list[Check]:
         verdict = self.verdict or {"clean": False, "unknown": [{"what": "no verdict: the stand-in never stopped"}]}
         records = self.records
@@ -831,13 +828,12 @@ class DiscordRoom:
                 verdict.get("bots", {}), expected, {bot: wire_calls(records, bot) for bot in expected}
             ),
             checks_module.discord_writes_reconciled(committed, wire_writes(records, self.agent)),
-            checks_module.discord_continuity(self.start_gap, self.reconnects, gaps_fail=gaps_fail, start_required=start_required),
+            checks_module.discord_continuity(self.start_gap, self.reconnects, gaps_fail=gaps_fail),
             checks_module.discord_addressing(
                 moments,
                 agent=f"{self.actor}:{self.agent_id}",
                 writes=wire_writes(records, self.agent),
                 reply_resolves=reply_resolves,
-                own_reaction_remembered=own_reaction_remembered,
             ),
         ]
 
@@ -1419,6 +1415,8 @@ def hermes_argv(python: str) -> list[str]:
 
 # `nunchi.participant.DELIVERED_EVENT_PREFIX`, as the room log spells it.
 DELIVERED_PREFIX = "nunchi:delivered:"
+# `nunchi.participant.SENT_REACTION_EVENT_PREFIX`: the same for a reaction Hermes added.
+SENT_REACTION_PREFIX = "nunchi:reaction:"
 
 
 def delivered_messages(state: Path) -> dict[str, dict[str, Any]]:
@@ -1433,14 +1431,30 @@ def delivered_messages(state: Path) -> dict[str, dict[str, Any]]:
     return {event_id[len(DELIVERED_PREFIX):]: event for event_id, event in room_events(state).items() if event_id.startswith(DELIVERED_PREFIX)}
 
 
+def sent_reactions(state: Path) -> dict[str, dict[str, Any]]:
+    """The reactions the harness added that the library put in the room log, by the turn's request id.
+
+    Hermes reports no reaction events, and its reaction call returns only that it worked, so the library
+    records each reaction the plugin reports sent as a reaction of the participant's own
+    (``nunchi:reaction:<request_id>``, `nunchi.participant.SENT_REACTION_EVENT_PREFIX`), on the message
+    the turn was about: with the emoji and target the turn committed.
+    """
+
+    return {
+        event_id[len(SENT_REACTION_PREFIX):]: event
+        for event_id, event in room_events(state).items()
+        if event_id.startswith(SENT_REACTION_PREFIX)
+    }
+
+
 class HermesGatewayLeg(Leg):
     """Hermes's real gateway process, unmodified, with the Nunchi plugin, on the Discord stand-in.
 
     The plugin runs inside Hermes's process, so the probe sees none of its objects: its evidence is
     outside it. The turns, their wake and their end come from the participant's receipts, the committed
-    text from the library's own record of the message Hermes delivered (none is a hard problem), a
-    reaction's emoji and target from the wire (the library records none), and what landed in the room
-    from the stand-in's wire. The scripted endpoint says what the model was asked and only counts its
+    text from the library's own record of the message Hermes delivered and a reaction's emoji and
+    target from its record of the reaction Hermes added (none is a hard problem), and what landed in
+    the room from the stand-in's wire. The scripted endpoint says what the model was asked and only counts its
     calls. Whether a turn was bound to its wake cannot be seen from outside: a turn counts as bound when
     the plugin's hooks brought it to its result (a delivery or a silence), which only a bound run can do.
     """
@@ -1623,8 +1637,9 @@ class HermesGatewayLeg(Leg):
     def start_facts(self) -> dict[str, Any]:
         """What the plugin said of its start: a continuity gap in the participant's audit, or the coverage of its first snapshot.
 
-        The shared transport and the reference declare a gap when they start. The plugin does not: its room is
-        built on the first admitted message, and the first snapshot reports the participant's own log as
+        The shared transport, the reference and the plugin declare a gap when they start. The plugin's room is
+        built on the first admitted message, and the gap is declared before that message reaches it. A plugin that
+        declared none would show in the first snapshot, which would then report the participant's own log as
         restart-safe, with no restart gap.
         """
 
@@ -1637,7 +1652,7 @@ class HermesGatewayLeg(Leg):
             "declared": bool(gaps),
             "detail": (
                 "the plugin declared a continuity gap when it started" if gaps
-                else "the plugin declares no gap when it starts: its first snapshot reports continuity "
+                else "the plugin declared no gap when it started: its first snapshot reports continuity "
                 f"{coverage.get('continuity')!r}, has_gaps {coverage.get('has_gaps')}, has_restart_gap {coverage.get('has_restart_gap')}"
             ),
         }
@@ -1698,20 +1713,20 @@ class HermesGatewayLeg(Leg):
         A turn is a request the host invoked the harness for. Its result is a silence (the host's outcome), a
         message (the transport receipt says the harness delivers it; the text is what the library recorded
         as delivered, and with no record it is missing: a hard problem, never the scripted model's text) or a
-        reaction (Hermes's other transport, which adds it). A reaction's emoji and target are in neither the
-        receipt nor the library's record, which keeps none (README, Known gaps), so they are what Hermes put on
-        the wire, the nth reaction for the nth reaction turn; the scripted model's arguments are never used.
-        Each action's delivery is the transport receipt's.
+        reaction (Hermes's other transport, which adds it). A reaction's emoji and target are in no receipt:
+        they are the library's record of the reaction it sent (`sent_reactions`), and with none the reaction is
+        missing, a hard problem when the transport receipt says it was added; the wire is where
+        `discord-writes-reconciled` checks them, and the scripted model's arguments are never used. Each
+        action's delivery is the transport receipt's.
         """
 
         from nunchi.participant import HARNESS_DELIVERS
 
         stages = self.stages()
         delivered = delivered_messages(self.discord.state)
-        reactions = [write for write in wire_writes(self.discord.records, self.discord.agent) if write["kind"] == "reaction" and not write["removed"]]
+        reacted = sent_reactions(self.discord.state)
         known = {turn["request_id"]: turn for turn in self.invocations}
         committed = {item["request_id"]: item for item in self.committed}
-        reacted = 0
         for request_id, stage in stages.items():
             host = stage.get("participant-host")
             if host is None or not host.get("invoked"):
@@ -1729,14 +1744,13 @@ class HermesGatewayLeg(Leg):
                     "text_from": "the library's record of the delivered message" if event else "missing: the library holds no record of it",
                 }
             elif transport is not None:
-                write = reactions[reacted] if reacted < len(reactions) else {}
-                reacted += 1
+                event = reacted.get(request_id)
                 item = {
                     "kind": "reaction",
-                    "reaction": write.get("emoji"),
-                    "target_event_id": f"discord:message:{write['message_id']}" if write else None,
-                    "operation": "add",
-                    "reaction_from": "the wire: neither the receipt nor the library's record names it" if write else "missing: no reaction on the wire",
+                    "reaction": event.get("reaction") if event else None,
+                    "target_event_id": event.get("target_event_id") if event else None,
+                    "operation": (event or {}).get("operation", "add"),
+                    "reaction_from": "the library's record of the reaction" if event else "missing: the library holds no record of it",
                 }
             if item is not None:
                 result = {key: item[key] for key in ("kind", "text", "reaction", "target_event_id") if key in item}
@@ -1771,6 +1785,11 @@ class HermesGatewayLeg(Leg):
             f"holds no record of it ({DELIVERED_PREFIX}{item['request_id']})"
             for item in self.committed
             if item.get("kind") == "message" and item.get("text") is None
+        ] + [
+            f"turn {item['request_id']}: the transport receipt says Hermes added the reaction, but the library's room log "
+            f"holds no record of it ({SENT_REACTION_PREFIX}{item['request_id']})"
+            for item in self.committed
+            if item.get("kind") == "reaction" and item.get("delivery") == "sent" and item.get("reaction") is None
         ]
         self.attention_calls = []
         for request_id, stage in stages.items():
@@ -1871,18 +1890,17 @@ class HermesGatewayLeg(Leg):
 
     def room_checks(self, document: Mapping[str, Any]) -> list[Check]:
         expected = {self.discord.agent: {"chunk": True, "calls": self.expected_calls}}
-        # The known gaps of the plugin and Hermes, pinned as they are (README, Known gaps): the plugin declares no gap
-        # when it starts, a reply to the agent's answer has no target in the room log, and the agent's own reaction is
-        # not remembered. It marks no gap after a reconnect either, so one that appears fails. Each fails the lane
-        # when it changes, until the pin and its docs are updated.
+        # The known gaps of Hermes and the plugin, pinned as they are (README, Known gaps): a reply to the agent's
+        # answer has no target in the room log (and the answer to a thread question lands in the main channel, see
+        # `HERMES_NOTES`). The plugin declares a gap when its room starts, like the other columns, and marks none
+        # after a reconnect, so one that appears fails. Each pin fails the lane when it changes, until the pin and
+        # its docs are updated.
         return self.discord.checks(
             self.committed,
             expected=expected,
             gaps_fail=True,
             moments=document["moments"],
-            start_required=None,
             reply_resolves=False,
-            own_reaction_remembered=False,
         )
 
     def room_record(self) -> dict[str, Any]:

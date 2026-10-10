@@ -732,12 +732,24 @@ class HarnessDelivery:
     ``room_shows_own_messages`` says whether the room events the integration
     delivers include the agent's own messages. When they do not (some
     harnesses hide them from plugins), the host puts each delivered message
-    into the room log itself.
+    into the room log itself. ``room_shows_own_reactions`` says the same of
+    the agent's own reactions, which ``native`` adds: when the room never
+    shows them (the harness reports no reaction events, and its reaction call
+    returns only that it worked), the host puts each reaction ``native``
+    reports sent into the room log itself, so the agent's memory holds it.
+    It is true unless the integration says otherwise.
     """
 
-    def __init__(self, native: Any = None, *, room_shows_own_messages: bool) -> None:
+    def __init__(
+        self,
+        native: Any = None,
+        *,
+        room_shows_own_messages: bool,
+        room_shows_own_reactions: bool = True,
+    ) -> None:
         self.native = native
         self.room_shows_own_messages = bool(room_shows_own_messages)
+        self.room_shows_own_reactions = bool(room_shows_own_reactions)
 
     def dispatch(self, *, action: Mapping[str, Any], wake: Mapping[str, Any]) -> TransportResult:
         if action.get("kind") == "message":
