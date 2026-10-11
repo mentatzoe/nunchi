@@ -51,6 +51,53 @@ behavior of the core, Claude Code, Codex or the plugin.
 
 ### Added
 
+- **The behavior eval can take the agent's turn through tools**
+  (`--agent-posting tools` and `tools-coding`; the `agent_posting` input of the
+  manual `behavior-eval` workflow; **implemented, unverified**, offline tests
+  only, no live run). The tool turn's wording from #170 had only been
+  measured in live rehearsal. The rehearsal of 2026-10-11 (3 passes, run
+  38147284411) showed two problems in every column: on the fourth message of a
+  story someone is still telling (`story-across-messages`) the agent spoke in
+  2 of 3 passes instead of nodding or staying quiet, and asked to "watch the
+  nightly and tell me" (`said-it-would-check`) Claude Code asked where to look
+  and Codex said it cannot monitor CI or asked where, where the plain call
+  simply promised.
+  The eval's `envelope` and `final-answer` styles are neither a tool turn, so
+  core wording changes can now be measured there, cheaply, before a rehearsal.
+  - **`tools`.** The agent gets exactly the core's tool turn: the text of
+    `participant_tool_turn_text` as its one user message (no system message)
+    and the room tools the turn offers (`PARTICIPANT_TOOL_SPECS`) as
+    OpenAI-style function tools, named `room_send`, `room_react`, `room_quiet`
+    and `room_context`, the names both integrations register (Claude Code adds
+    an `mcp__nunchi__` prefix the eval leaves off). A loop of at most
+    6 model calls runs the turn as a harness would, with the core deciding:
+    the eval drives the core's own `TurnParticipant` (as the conformance kit's
+    reference does), so each tool call goes through `Turn.call`. A word for a
+    reaction, a malformed call or a second room action returns the core's tool
+    error and the agent may try again; the first post or reaction is held when
+    others posted meanwhile; steering adds what arrived after each call. The
+    turn ends at its one room action, at the quiet tool, or when the model
+    answers with no tool call (silence, with its last words as the reason).
+    A turn that uses every step with neither ends in silence, recorded as
+    `step-bound`. The move the room sees is graded as in the other arms, and
+    each record keeps the turn under `agent.tool_turn`.
+  - **`tools-coding`.** The same, plus a short coding-agent system prompt of
+    our own wording and two generic tools, `shell` and `read_file`, whose every
+    call returns "Not available in this evaluation." and lets the turn go on.
+    **An approximation** of a coding harness's framing: not any vendor's
+    prompt or tool set, and far shorter than a real one.
+  - **Summaries.** *The tool turn*: per moment, how many turns ended at the
+    quiet tool, with a no-call silence, with a reaction, with a post or at the
+    step bound, and how many room tool calls the core refused. The leak count
+    names the room tools (`room_send` and the rest) and counts each `send`
+    call's text as what the model wrote for the room.
+  - No change to `src/nunchi`: the eval reuses `TurnParticipant`, `Turn`,
+    `PARTICIPANT_TOOL_SPECS` and `participant_tool_turn_text`, and the existing
+    chat request (`RecordingParticipant`, now with the endpoint call split out
+    as `_request`); `tools` travel in the request through the core's
+    `extra_body`. Tests: a scripted provider on loopback in
+    `tests/v2/test_behavior_eval.py` (`ToolTurnTests`).
+
 - **Staying quiet and the "mhm" are named choices in a tool turn** (lead
   engineer's decision after the first live rehearsal; **implemented,
   unverified**, offline tests only; no live run since). The rehearsal (one

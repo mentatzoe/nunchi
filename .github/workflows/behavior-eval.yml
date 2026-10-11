@@ -29,13 +29,15 @@ on:
         required: false
         default: anthropic/claude-haiku-4.5
       agent_posting:
-        description: How the agent posts, one JSON envelope per reply or its plain final answer (as in harnesses like Hermes)
+        description: How the agent posts. envelope is one JSON envelope per reply; final-answer is its plain final answer (as in harnesses like Hermes); tools takes the turn through the room tools, as Claude Code and Codex do; tools-coding adds a coding agent's system prompt and two coding tools that do nothing (an approximation of a coding harness)
         required: true
         default: envelope
         type: choice
         options:
           - envelope
           - final-answer
+          - tools
+          - tools-coding
       paired:
         description: Also play each agent turn that carried a reading without it, when the reading is what changed (needs agent_model; doubles the agent's cost)
         required: true
