@@ -949,6 +949,87 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- **A reaction is exactly one emoji, and the core refuses anything else before
+  it commits it** (every harness; after the first live rehearsal, run
+  38135715452; **implemented, unverified**: offline tests, the turn conformance
+  kit on every driver, the eleven scripted scenes and the plain lanes on the
+  reference, Claude Code and Codex, and one scripted case of a refused word; no
+  live run since). On the fourth message of a story Codex nodded with the
+  reaction "yikes", a word. The react tool asked for "for example one emoji",
+  the core committed the word, Discord refused it, and the turn's one room
+  action was spent on a nod that never landed (the run failed
+  `one-room-action-per-turn`, correctly). Now:
+  - **The react tool asks for exactly one emoji, for example a thumbs up, and
+    says a word is not a reaction.** The same in its `reaction` field, in the
+    plain call's action schema and instructions, and in the tool turn's choices
+    ("To nod, ... The reaction is exactly one emoji; a word is not a
+    reaction.").
+  - **The rule lives once, in the core, in tables of its own:**
+    `nunchi.reactions.is_one_emoji` and `reaction_refusal`, standard library
+    only, naming no platform. The standard library has no emoji data and each
+    Python's `unicodedata` is a different Unicode version, so the rule does not
+    ask it: it carries Unicode 16.0's tables (Emoji, Emoji_Modifier_Base, the
+    unassigned code points of the emoji blocks, the emoji that follow a joiner,
+    the 259 flag regions, the three subdivision flags), and the answer is the
+    same on every Python. A reaction is one emoji: one emoji, with its
+    emoji-style mark and, where it takes one, a skin tone; a joined sequence of
+    up to four parts (a family, a person at a laptop) whose second and later
+    parts are among those that follow a joiner in RGI; a flag of a region RGI
+    has, or a lone regional indicator; England, Scotland or Wales; a keycap.
+    All 3,790 RGI emoji of Unicode 16.0 pass (a test plays each, from
+    `tests/v2/data/rgi-emoji.json`, on every Python). A word, a `:name:` code, a
+    letter or digit alone, a symbol that is no emoji (a check mark, a star, a
+    degree sign, a note, braille), two emoji, two skin tones, two emoji merely
+    joined, a tag-encoded word and a pair of regional indicators that is no
+    flag are not. An emoji a later Unicode adds lands in the emoji blocks'
+    unassigned code points and passes alone; a later joined sequence or flag is
+    refused, and the agent can pick another. **Shortcode names (`:+1:`) and
+    custom `name:id` reactions are no longer dispatched**, nor are bare words.
+  - **Every way a participant acts is held to it, before anything is
+    committed, for adding and for removing, and after the permissions and the
+    target** (so a turn that may not react, or names a message it was never
+    shown, is told that and not to "react again"): a tool turn (`Turn.call`,
+    the local socket's `/v1/turn/call` too) answers with a tool error
+    ("Refused: The reaction must be exactly one emoji, for example 👍. ...
+    Nothing was committed and your turn is not spent: react again with one
+    emoji, or take one of your other choices"), so the agent can still nod
+    properly, speak or stay quiet; the one-reply style
+    (`ParticipantTurnProtocol.consume`) shows the model that refusal in its
+    next page, once, and a second refused reaction in the turn fails it; a
+    plain participant the host runs (`_validate_action`) has the action
+    refused as invalid and nothing dispatched. A missing or empty reaction is a
+    word that is no emoji, and `Turn.call` now answers any malformed call with
+    a tool error: an empty or missing reaction or target used to raise a
+    `ValidationError` it did not catch, which dropped the connection over the
+    socket. `ReactionRefused` is the error, a `ParticipantModelError`.
+  - **Interfaces.** `I-040A ParticipantTurnHostV2` is `@5` (a narrowing of the
+    participant action's `reaction`; the schemas are unchanged), and
+    `I-040D LocalTurnProtocolV2@3` keeps its shape (its `react` call answers
+    the refusal). The turn conformance kit has `mhm-word` and `final-mhm-word`,
+    one for each posting style: the react call is refused with a reason the
+    agent can read, nothing is committed, and the emoji that follows is the
+    turn's one action. They pass on the reference (both styles), the Claude Code
+    gate, the Codex app-server (the pinned Codex) and the Hermes plugin
+    (Telegram and Discord, stock Hermes on Python 3.14).
+  - **The adapters take everything the rule passes:** the shared Discord
+    transport's tool (a bounded string, percent-encoded whole), the discord.py
+    transport, and the Matrix transport (the annotation key) carry it as
+    written (a test sends each shape of emoji through each); the Telegram
+    reference adapter makes no reaction call (its capability says reactions are
+    unsupported), and a Telegram adapter that did would name the few emoji
+    Telegram takes in `reaction_capability().reactions`, which the host already
+    checks before dispatch. The Discord stand-in (`fake_discord.world.emoji_ok`)
+    is the core's rule now, not an approximation of its own: on Python 3.12 it
+    had refused 12 emoji the core commits, which a live run would have read as
+    the agent's fault.
+  - **One scripted case on all three columns:** `--nod-with-a-word-first` plays
+    a scene (`story-across-messages` in CI) with the scripted agent nodding
+    first with the word "yikes", being refused (in the tool's answer for Claude
+    Code and Codex, in the turn's next page for the reference), and nodding
+    with the emoji in the same turn. A hard check, `word-nod-refused`, holds
+    that every word was refused and told to the agent, and none was committed;
+    the scene's own checks hold the nod and the one room action.
+
 - **The behavior suite's turn text and attention input change on purpose** (the
   two items above). Compared on all 82 moments in three prompt styles before and
   after (the render probe): the turn text changes on every turn, in the social
@@ -1320,6 +1401,39 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   `tests/v2/test_agnostic_core.py` guards the boundary.
 
 ### Fixed
+
+- **The live rehearsal's play step ended at its first failed run** (run
+  38135715452; **implemented, unverified**: the workflow tests run the step as
+  the runner does, with stand-ins for the launcher and the probe; no dispatch
+  since). GitHub runs a `shell: bash` step as `bash --noprofile --norc -eo
+  pipefail`, and the script's own `set -uo pipefail` does not clear `-e`. The
+  probe call was unguarded, so the first run to exit non-zero ended the step
+  before its status row, its stderr tail, its `::error::` line, `failed=1` and
+  the spend and budget check: 3 of the 18 runs played, and the 15 not started
+  were never marked `skipped`. Now the run is guarded by name (`code=0` before
+  it, `|| code=$?` after), so a failing run is recorded and the next one plays;
+  the step still fails after the last. `-e` stays on for everything else, on
+  purpose: a first version turned it off for the whole loop, and then a failed
+  `mktemp` played the next run with `HOME=""` and a status row that could not be
+  written went unnoticed. Now both end the step. The other steps of the job
+  (stop, scan, summary) were run under the same shell and have no such flaw;
+  tests pin that. The tests ran the steps with `bash -c`, which has no `-e`, and
+  so could not see it: they now use the runner's shell, and a stub probe that
+  fails on one run must leave every later run played, with its row, its
+  `::error::` line, the spend read after it and a budget halt still marking the
+  rest `skipped`; a failing `mktemp` and an unwritable status row must end the
+  step.
+- **The rehearsal's grade matrix printed a cell its legend did not list, and a
+  Moments row said `misses` over cells with no `!`** (same run; **implemented,
+  unverified**). `E` (the agent's action never reached the room, printed beside
+  the visible grade `agent-decides`) is in the legend now, and the legend is one
+  text, `record.CELL_CODES`, for each run's summary and the dispatch's matrix,
+  with `W` corrected to what it is (woken, no turn began on it). The recorded
+  `outcome` `misses` means the moment did not fit its draft, which covers more
+  than a clear miss; the Moments table now says `misses` only where a cell
+  carries `!`, and otherwise `did not fit:` with the cells' own words (a turn
+  that did not deliver, an unlisted move, a step 1 the draft does not expect, a
+  hold that did not hold). A test checks the two against every combination.
 
 - The shared Discord transport hid a person's message from the agent in
   three ways, and the reference shared one; every message now reaches the

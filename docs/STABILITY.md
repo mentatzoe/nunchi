@@ -67,6 +67,8 @@ is stable or executable.
   there is no default endpoint, and a configuration without one fails
   validation. Operator profiles accept `kind` and an optional
   `credential_env` per model.
+- A reaction is exactly one emoji (`I-040A@5`): a participant's reaction that is a word, a shortcode name or a custom `name:id`
+  is refused before anything is committed, whichever way the participant acts.
 - Receipt ownership and ordering are immutable.
 - Continuation authority is host-only, bound, bounded, expiring, and discarded
   on restart.

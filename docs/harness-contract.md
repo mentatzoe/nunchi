@@ -243,6 +243,15 @@ class Room:                                        # harness-hosted entry point
   composed. The agent then sends it as is, changes it, or drops it.
 - The turn names three normal choices, in this order: stay quiet, nod (the
   react tool, the agent's "mhm"), speak (the send tool).
+- A reaction is exactly one emoji (`nunchi.reactions.is_one_emoji`, `I-040A@5`:
+  an emoji of Unicode 16.0, by the core's own tables, with its emoji-style mark
+  and skin tone, a joined sequence, a flag or a keycap). Anything else (a word,
+  a `:+1:` shortcode, a custom `name:id`, a symbol that is no emoji, two emoji)
+  is refused before it is committed, with a tool error ("Refused: The reaction
+  must be exactly one emoji...") and the turn is not spent. The one-reply style
+  is told once in the turn's next page and a second one fails the turn; a plain
+  participant's action is held to the same rule by the host. Which emoji a room
+  has is still the room's to say.
 - Staying quiet is the `quiet` tool with a required `why`, or ending the turn
   without an action. The tool is the deliberate form: it ends the turn in
   silence with that reason, the equivalent of the plain call's
@@ -454,6 +463,7 @@ all):
 | quiet: the agent stays quiet on purpose through its quiet tool: nothing is posted, its reason is remembered, and no room action follows | pass | n/a | pass | n/a | n/a | pass |
 | quiet-reason: the quiet tool needs the agent's reason, and the agent can give it in a second call | pass | n/a | pass | n/a | n/a | pass |
 | mhm: the agent's own mhm is one reaction on the message, through its react tool | pass | n/a | pass | n/a | n/a | pass |
+| mhm-word: a nod made of a word is refused before anything is committed, and the emoji that follows is the turn's one action | pass | n/a | pass | n/a | n/a | pass |
 | unbound-failure: a turn never bound to its wake is a failure, not silence | pass | n/a | pass | n/a | n/a | pass |
 | look-again: the first post is held once when someone posted meanwhile | pass | n/a | pass | n/a | n/a | pass |
 | steering: a message that arrives mid-turn is shown once after a tool call, and can be answered | pass | n/a | pass | n/a | n/a | pass |
@@ -471,6 +481,7 @@ all):
 | final-deliver: the final answer is the post, committed for the harness to deliver, and remembered | n/a | pass | n/a | pass | pass | n/a |
 | final-silence: the silence marker is silence, and the agent's thinking is its reason | n/a | pass | n/a | pass | pass | n/a |
 | final-mhm: the agent's own mhm is one reaction through its react tool, and the answer after it posts nothing | n/a | pass | n/a | pass | pass | n/a |
+| final-mhm-word: a nod made of a word is refused before anything is committed, and the emoji that follows is the turn's one action | n/a | pass | n/a | pass | pass | n/a |
 | final-look-again: the final answer is held once when someone posted meanwhile | n/a | pass | n/a | gap | gap | n/a |
 | final-thinking: thinking is never posted | n/a | pass | n/a | pass | pass | n/a |
 | final-secret: a withheld secret is refused once, and the agent answers again | n/a | pass | n/a | gap | gap | n/a |
@@ -530,7 +541,10 @@ that only looks like silence ("No reply from Bob yet. Want me to ping
 him?"). The reference lists `NO_REPLY`; Hermes's first is `SILENT`.
 
 The kit's room offers one reaction, the agent's own "mhm", so the `mhm`
-scenarios check it through each integration's react tool. Through Hermes,
+scenarios check it through each integration's react tool. `mhm-word` and
+`final-mhm-word` play the nod that spent a live turn ("yikes", run
+38135715452): the react call is refused with a reason the agent can read,
+nothing is committed, and the emoji that follows is the turn's one action. Through Hermes,
 the kit's room takes the reaction itself; the plugin's own path, Hermes's
 `platform_actions`, is checked by `tests/v2/test_hermes_plugin.py`, as are
 steering and the room view, which the final-answer scenarios do not use.

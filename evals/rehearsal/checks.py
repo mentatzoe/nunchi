@@ -694,6 +694,31 @@ def directed_outcomes(moments: Sequence[Mapping[str, Any]], *, room_tool_calls: 
     return Check("directed-outcomes", not problems, detail)
 
 
+def word_nod_refused(*, tried: int, refused: int, committed: Sequence[Mapping[str, Any]], word: str) -> Check:
+    """In a scene played with the agent's nod first a word (``--nod-with-a-word-first``), each word was refused and then no word reached the room.
+
+    The scripted agent reacts with ``word`` at each nod (``tried``), and nods
+    with the emoji only once the core has refused the word and said so
+    (``refused``, counted when the script sees the refusal in the tool's
+    answer or the turn's next page). So the two must be equal and not none: a
+    word that was never refused, or a refusal the agent was never shown, would
+    make the case prove nothing. And the word must never have been committed,
+    which is what the refusal is for (the nod itself is held to the script by
+    `directed_outcomes`, as in every scene).
+    """
+
+    problems: list[str] = []
+    if tried < 1:
+        problems.append("the scripted agent never reacted with the word, so no refusal was tried")
+    elif refused != tried:
+        problems.append(f"the word was tried {tried} time(s) but the agent was shown its refusal {refused} time(s)")
+    reached = [action for action in committed if action.get("kind") == "reaction" and action.get("reaction") == word]
+    if reached:
+        problems.append(f"the word {word!r} was committed {len(reached)} time(s): the core did not refuse it before the turn took it")
+    detail = "; ".join(problems) or f"the word {word!r} was refused {refused} time(s), each time before anything was committed, and the nod was then made"
+    return Check("word-nod-refused", not problems, detail)
+
+
 def live_scene_plumbing(
     moments: Sequence[Mapping[str, Any]],
     *,

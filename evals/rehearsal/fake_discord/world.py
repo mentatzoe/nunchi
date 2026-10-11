@@ -16,8 +16,9 @@ from datetime import datetime, timezone
 import re
 import secrets
 import time
-import unicodedata
 from typing import Any, Callable
+
+from nunchi.reactions import is_one_emoji
 
 EPOCH_MS = 1_420_070_400_000  # Discord's epoch: a snowflake's time is milliseconds since it, above bit 22
 
@@ -96,30 +97,14 @@ def id_ms(snowflake: str) -> int:
     return (int(snowflake) >> 22) + EPOCH_MS
 
 
-# Emoji whose base character is not a Unicode "So" symbol.
-OTHER_EMOJI = set("\u203c\u2049\u2139\u2194\u2934\u2935\u3030\u303d\u25fb\u25fc\u25fd\u25fe")
-
-
 def emoji_ok(emoji: str) -> bool:
-    """An approximate check that a reaction is exactly one Unicode emoji, never a word or two emoji (custom emoji: the world has none).
+    """Whether a reaction is exactly one Unicode emoji, never a word, a symbol that is no emoji or two emoji (custom emoji: the world has none).
 
-    It counts bases: a symbol (or one of OTHER_EMOJI) not joined to the one before by a zero-width
-    joiner, a pair of regional indicators (a flag), or a keycap's digit, # or
-    *. Skin tones, variation selectors, joiners and the keycap mark are not.
+    It is the core's own rule (`nunchi.reactions.is_one_emoji`), not a second approximation of it: a stand-in that refused
+    an emoji the core commits would lose the agent's nod and read as the agent's fault, as one that took a word would hide
+    the core letting it through (run 38135715452). Whether Discord's own list is the same is unverified (`wire.FIDELITY`).
     """
-    if not emoji or ":" in emoji:
-        return False
-    keycap = "\u20e3" in emoji
-    bases, previous, half_flag = 0, "", False
-    for ch in emoji:
-        if "\U0001f1e6" <= ch <= "\U0001f1ff":
-            bases, half_flag = bases + (not half_flag), not half_flag
-        elif unicodedata.category(ch) == "So" or ch in OTHER_EMOJI or (keycap and ch in "0123456789#*"):
-            bases += previous != "\u200d"
-        elif unicodedata.category(ch) not in ("Sk", "Me", "Mn", "Cf"):
-            return False
-        previous = ch
-    return bases == 1
+    return is_one_emoji(emoji)
 
 
 @dataclass

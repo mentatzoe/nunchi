@@ -119,6 +119,9 @@ SILENCE_FORMS = (
 NEAR_SILENCE = "No reply from Bob yet. Want me to ping him?"
 # The agent's own "mhm" (docs/behavior.md): one reaction the kit's room offers.
 MHM = "👂"
+# What an agent nods with when it makes a word of it (run 38135715452): a reaction is exactly one emoji, so the library
+# refuses this before it commits anything, and the agent, told so, nods with the emoji in the same turn.
+NOD_WORD = "yikes"
 # The start of the library's sentence for a gap, and its advice.
 GAP_TOLD = "Messages may be missing before "
 GAP_ADVICE = "read the history if it matters."
@@ -876,6 +879,28 @@ def _check_final_mhm(played: Played) -> list[str]:
     return failures
 
 
+def _check_word_nod(played: Played, *, word: int) -> list[str]:
+    """A nod made of a word is refused with a reason the agent can read, nothing is committed, and the emoji that follows is the turn's action."""
+
+    failures: list[str] = []
+    refused = played.answer(word)
+    _expect(refused[0] is False, f"the word {NOD_WORD!r} was not refused: {refused}", failures)
+    _expect(
+        "exactly one emoji" in str(refused[1]) and "not spent" in str(refused[1]),
+        f"the refusal does not tell the agent a reaction is one emoji and its turn is not spent: {refused}",
+        failures,
+    )
+    # The nod that follows is accepted and is the only thing the room is sent: the word was never committed.
+    failures += _check_mhm(played, reacted=word + 1)
+    return failures
+
+
+def _check_final_word_nod(played: Played) -> list[str]:
+    failures = _check_word_nod(played, word=1)
+    _expect(played.answer(3)[0] == "silent", f"the reaction was the turn's action, yet saw {played.answer(3)}", failures)
+    return failures
+
+
 def _check_final_deliver(played: Played) -> list[str]:
     failures: list[str] = []
     _expect(played.answer(1) == ("deliver", "On it."), f"expected delivery, saw {played.answer(1)}", failures)
@@ -1089,6 +1114,17 @@ SCENARIOS: dict[str, Scenario] = {
         (("bind",), ("call", "react", {"target_event_id": TRIGGER, "reaction": MHM}), ("end", True)),
         lambda played: _check_mhm(played, reacted=1),
     ),
+    "mhm-word": Scenario(
+        "tools",
+        "a nod made of a word is refused before anything is committed, and the emoji that follows is the turn's one action",
+        (
+            ("bind",),
+            ("call", "react", {"target_event_id": TRIGGER, "reaction": NOD_WORD}),
+            ("call", "react", {"target_event_id": TRIGGER, "reaction": MHM}),
+            ("end", True),
+        ),
+        lambda played: _check_word_nod(played, word=1),
+    ),
     "unbound-failure": Scenario(
         "tools",
         "a turn never bound to its wake is a failure, not silence",
@@ -1235,6 +1271,18 @@ SCENARIOS: dict[str, Scenario] = {
             ("end", True),
         ),
         _check_final_mhm,
+    ),
+    "final-mhm-word": Scenario(
+        "final-answer",
+        "a nod made of a word is refused before anything is committed, and the emoji that follows is the turn's one action",
+        (
+            ("bind",),
+            ("call", "react", {"target_event_id": TRIGGER, "reaction": NOD_WORD}),
+            ("call", "react", {"target_event_id": TRIGGER, "reaction": MHM}),
+            ("finish", SILENCE),
+            ("end", True),
+        ),
+        _check_final_word_nod,
     ),
     "final-look-again": Scenario(
         "final-answer",

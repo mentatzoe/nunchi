@@ -882,7 +882,7 @@ class ParticipantTransportThreadTests(unittest.TestCase):
         for action, tool in (
             ({"kind": "reply", "origin_event_id": "discord:message:2", "target_event_id": "discord:message:2", "text": "an answer"}, "reply_message"),
             ({"kind": "message", "origin_event_id": "discord:message:2", "text": "an answer"}, "send_message"),
-            ({"kind": "reaction", "origin_event_id": "discord:message:2", "target_event_id": "discord:message:2", "reaction": "x", "operation": "add"}, "add_reaction"),
+            ({"kind": "reaction", "origin_event_id": "discord:message:2", "target_event_id": "discord:message:2", "reaction": "\N{THUMBS UP SIGN}", "operation": "add"}, "add_reaction"),
         ):
             with self.subTest(tool=tool):
                 transport, client = self.transport()
@@ -984,7 +984,7 @@ class ThreadMoveFromTheTurnTests(unittest.TestCase):
             return {"kind": "message", "text": "an answer", **about}
         if kind == "reply":
             return {"kind": "reply", "target_event_id": self.IN_THREAD, "text": "an answer", **about}
-        return {"kind": "reaction", "target_event_id": self.IN_THREAD, "reaction": "x", "operation": "add", **about}
+        return {"kind": "reaction", "target_event_id": self.IN_THREAD, "reaction": "\N{THUMBS UP SIGN}", "operation": "add", **about}
 
     def play(self, make_transport, how: str, kind: str):
         transport, moves = make_transport()

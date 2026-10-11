@@ -138,6 +138,15 @@ jobs:
               --scene "$scene" --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-directed/$scene" \
               || { echo "::error::the scene $scene failed"; failed=1; }
           done
+          # The story once more, with the agent's nod first a word that the core refuses before it commits anything (a tool error, or
+          # the turn's next page), and then the emoji, in the same turn: the lane's one case of a refused reaction (run 38135715452).
+          LANE_HOME="$(mktemp -d)"
+          LANE_TMP="$(mktemp -d)"
+          sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline -- \
+            /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness reference --scripted --room discord \
+            --scene story-across-messages --nod-with-a-word-first --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" \
+            --out "$RUNNER_TEMP/rehearsal-directed/story-across-messages-word-first" \
+            || { echo "::error::the scene story-across-messages with a word first failed"; failed=1; }
           exit "$failed"
       - name: Scan the failed scene runs' records for the key and the canary
         # As for the lane above: only after a failure, and the record is uploaded
@@ -435,6 +444,15 @@ jobs:
               --scene "$scene" --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-directed/$scene" \
               || { echo "::error::the scene $scene failed"; failed=1; }
           done
+          # The story once more, with the agent's nod first a word that the core refuses before it commits anything (a tool error, or
+          # the turn's next page), and then the emoji, in the same turn: the lane's one case of a refused reaction (run 38135715452).
+          LANE_HOME="$(mktemp -d)"
+          LANE_TMP="$(mktemp -d)"
+          sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline --require-bwrap -- \
+            /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness codex --scripted --room discord \
+            --scene story-across-messages --nod-with-a-word-first --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" \
+            --out "$RUNNER_TEMP/rehearsal-directed/story-across-messages-word-first" \
+            || { echo "::error::the scene story-across-messages with a word first failed"; failed=1; }
           exit "$failed"
       - name: Scan the failed scene runs' records for the key and the canary
         # As for the lane above: only after a failure, and the record is uploaded
@@ -642,6 +660,15 @@ jobs:
               --scene "$scene" --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-directed/$scene" \
               || { echo "::error::the scene $scene failed"; failed=1; }
           done
+          # The story once more, with the agent's nod first a word that the core refuses before it commits anything (a tool error, or
+          # the turn's next page), and then the emoji, in the same turn: the lane's one case of a refused reaction (run 38135715452).
+          LANE_HOME="$(mktemp -d)"
+          LANE_TMP="$(mktemp -d)"
+          sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline --require-bwrap -- \
+            /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness claude-code --scripted --room discord \
+            --scene story-across-messages --nod-with-a-word-first --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" \
+            --out "$RUNNER_TEMP/rehearsal-directed/story-across-messages-word-first" \
+            || { echo "::error::the scene story-across-messages with a word first failed"; failed=1; }
           exit "$failed"
       - name: Scan the failed scene runs' records for the key and the canary
         # As for the lane above: only after a failure, and the record is uploaded

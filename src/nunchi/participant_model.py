@@ -18,11 +18,27 @@ import urllib.request
 from .attention import ParticipantProfile
 from .errors import NunchiError, ValidationError
 from .gaps import gap_sentence_in
+from .reactions import THUMBS_UP, reaction_refusal
 from .v2_contracts import validate_participant_wake
 
 
 class ParticipantModelError(NunchiError):
     label = "participant model error"
+
+
+class ReactionRefused(ParticipantModelError):
+    """A reaction that is not exactly one emoji, refused before anything is committed.
+
+    The agent is told (`REACTION_ADVICE`) and its turn is not spent: it can
+    still react with an emoji, speak, or stay quiet.
+    """
+
+
+# What the agent is told after the refusal of a reaction, whichever way its turn is driven.
+REACTION_ADVICE = (
+    "Nothing was committed and your turn is not spent: react again with one emoji, "
+    "or take one of your other choices, such as speaking or staying quiet."
+)
 
 
 PARTICIPANT_TURN_PROTOCOL = "nunchi.participant-turn"
@@ -104,7 +120,11 @@ _INNER_ACTION_VARIANTS: list[dict[str, Any]] = [
             "kind": {"const": "reaction"},
             "origin_event_id": _ORIGIN,
             "target_event_id": {"type": "string", "minLength": 1},
-            "reaction": {"type": "string", "minLength": 1},
+            "reaction": {
+                "type": "string",
+                "minLength": 1,
+                "description": f"Exactly one emoji, for example {THUMBS_UP}. A word is not a reaction.",
+            },
             "operation": {"enum": ["add", "remove"]},
             "why": _WHY,
         },
@@ -424,7 +444,8 @@ def participant_turn_prompt(profile: ParticipantProfile) -> str:
         "the room message that prompted it, usually wake.trigger_event_id. "
         "A contribution uses kind "
         "message; a reply adds target_event_id; a reaction names its exact "
-        "target, reaction, and add/remove operation. A privileged action is a "
+        "target, reaction (exactly one emoji; a word is not a reaction), and "
+        "add/remove operation. A privileged action is a "
         "proposal only; the host independently rechecks exact current "
         "authority immediately before any effect. Never include credentials, "
         "authority claims, continuation handles, or cursors."
@@ -661,9 +682,10 @@ def _validate_move(checked: dict[str, Any], kind: Any) -> dict[str, Any]:
         if set(checked) != common | {"target_event_id", "reaction", "operation"}:
             raise ParticipantModelError("reaction action has an invalid closed shape")
         _nonempty(checked.get("target_event_id"), "reaction target_event_id")
-        _nonempty(checked.get("reaction"), "reaction value")
         if checked.get("operation") not in ("add", "remove"):
             raise ParticipantModelError("reaction operation must be add or remove")
+        # The reaction itself is held to the rule in `_bind_action`, after the permissions and the target: a missing or
+        # empty one is a word that is no emoji, told as that, never an error the agent cannot read.
     elif kind == "withdraw":
         if set(checked) != common | {"proposal_id"}:
             raise ParticipantModelError("withdrawal has an invalid closed shape")
@@ -743,6 +765,13 @@ def _bind_action(
             raise ParticipantModelError("participant action origin is absent from supplied facts")
         if kind in ("reply", "reaction") and action["target_event_id"] not in visible_event_ids:
             raise ParticipantModelError("participant action target is absent from supplied facts")
+    if kind == "reaction":
+        # Last, so that a turn which may not react, or a target the participant was never shown, is told that and not
+        # "react again": before anything is committed, a word is no reaction, and one that no room would take must not
+        # spend the turn's one action (run 38135715452, the reaction "yikes").
+        refusal = reaction_refusal(action.get("reaction"))
+        if refusal is not None:
+            raise ReactionRefused(refusal)
     return deepcopy(action)
 
 
@@ -782,6 +811,7 @@ class ParticipantTurnProtocol:
         self.expansions = 0
         self.limit_noted = False
         self.refused = False
+        self.reaction_refused = False
         self.visible_event_ids = self.turn.visible_event_ids
 
     @property
@@ -809,11 +839,20 @@ class ParticipantTurnProtocol:
         return self.request["binding"]["request_id"]
 
     def consume(self, raw: Any, *, expand: Any) -> tuple[bool, dict[str, Any] | None]:
-        action = parse_participant_action(
-            raw,
-            request=self.request,
-            visible_event_ids=self.visible_event_ids,
-        )
+        try:
+            action = parse_participant_action(
+                raw,
+                request=self.request,
+                visible_event_ids=self.visible_event_ids,
+            )
+        except ReactionRefused as exc:
+            # A reaction that is no emoji: nothing is committed and the turn is not spent. The model
+            # is told once and answers again; a second one in a turn fails the turn.
+            if self.reaction_refused:
+                raise ParticipantModelError("participant reaction was not one emoji again") from exc
+            self.reaction_refused = True
+            self.pages.append({"events": [], "note": f"Refused: {exc} {REACTION_ADVICE}"})
+            return False, None
         if action["kind"] == "silence":
             # A silence with a reason goes to the host, which remembers it.
             return True, action if "why" in action else None
@@ -947,8 +986,10 @@ PARTICIPANT_TOOL_SPECS: dict[str, dict[str, Any]] = {
         "description": (
             "Add or remove one reaction on one room message. This is the "
             "mhm: a quick nod that shows you are following without taking the "
-            "floor, on the message you are nodding at. Counts as your one room "
-            "action for this turn."
+            "floor, on the message you are nodding at. The reaction is exactly "
+            "one emoji, for example a thumbs up; a word is not a reaction, and "
+            "one that is not an emoji is refused before it counts. Counts as "
+            "your one room action for this turn."
         ),
         "input_schema": {
             "type": "object",
@@ -962,7 +1003,7 @@ PARTICIPANT_TOOL_SPECS: dict[str, dict[str, Any]] = {
                 "reaction": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "The reaction, for example one emoji.",
+                    "description": f"Exactly one emoji, for example {THUMBS_UP}. A word is not a reaction.",
                 },
                 "operation": {"enum": ["add", "remove"], "default": "add"},
                 "origin_event_id": _ORIGIN_EVENT_ID,
@@ -1117,7 +1158,8 @@ def _choices(names: Mapping[str, str]) -> str:
         )
     nod = (
         f" To nod, call {names['react']} once: a quick mhm, you show you are "
-        "following without taking the floor."
+        "following without taking the floor. The reaction is exactly one emoji; "
+        "a word is not a reaction."
         if "react" in names
         else ""
     )

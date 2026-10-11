@@ -26,7 +26,9 @@ a `SceneScript` instead, which attention and the participant both follow: at
 each graded moment it does what the scene's first fitting move says: the
 reference answers it as a plain-call action, and Claude Code and Codex follow
 it through their scripted endpoints, as a room tool call or, where the scene
-is quiet, none. A scene (PR 4c) may also give the agent lines of its own
+is quiet, none. With ``word_first`` the agent's nod is first a word, which the core
+refuses before anything is committed (`nunchi.reactions`); told so, in the tool's answer or
+the turn's next page, it nods with the emoji in the same turn. A scene (PR 4c) may also give the agent lines of its own
 earlier (`Line`, played as its scripted move on a message) and hold a turn
 (`Gate`) so that a message lands while the agent is composing. Only
 ``--scripted`` runs use these.
@@ -526,6 +528,10 @@ def received_triggers(requests: Iterable[Any]) -> dict[str, dict[str, Any]]:
 # write to an action by its content.
 SCENE_SAY = "Here is what I would add, scripted ({event})."
 SCENE_NOD = "\N{EAR}"
+# What a scripted agent that nods with a word first reacts with, before the emoji (`SceneScript.word_first`): the word that spent
+# a live turn (run 38135715452). The core refuses it, and tells the agent so with these words, in a tool's answer and in a page.
+SCENE_WORD = "yikes"
+REFUSAL_MARK = "must be exactly one emoji"
 # Why the agent stays quiet at a graded moment that fits quiet or a wait: an agent that acts through
 # tools says it with the quiet tool, so its reason is its own (`SceneScript.move`). A turn on a message no
 # moment grades ends without any call, the other way to stay quiet.
@@ -554,6 +560,25 @@ def _strings(value: Any) -> Iterator[str]:
     elif isinstance(value, list):
         for item in value:
             yield from _strings(item)
+
+
+def refusal_shown(body: Any) -> str | None:
+    """The refusal of a reaction that is no emoji, as the newest message of a model request carries it; None if it carries none.
+
+    The core refuses a reaction that is not exactly one emoji before it commits
+    anything, and tells the agent: a tool-turn agent in the room tool's result,
+    a plain-call participant in the next page of its turn
+    (`nunchi.participant_model.REACTION_ADVICE`). Read as `news_shown` reads
+    its page: only the newest message or input item counts.
+    """
+
+    if not isinstance(body, Mapping):
+        return None
+    items = body.get("messages") if isinstance(body.get("messages"), list) else body.get("input")
+    if not isinstance(items, list) or not items:
+        return None
+    found = [text for text in _strings(items[-1]) if REFUSAL_MARK in text]
+    return "\n".join(found) if found else None
 
 
 def news_shown(body: Any) -> str | None:
@@ -712,10 +737,16 @@ class SceneScript:
     where the scene fits one). A held line is said both times.
     """
 
-    def __init__(self, moments: Mapping[str, Any], lines: Iterable[Line] = (), holds: Iterable[str] = ()) -> None:
+    def __init__(
+        self, moments: Mapping[str, Any], lines: Iterable[Line] = (), holds: Iterable[str] = (), *, word_first: bool = False
+    ) -> None:
         self.moments = dict(moments)
         self.lines = {line.trigger: line for line in lines}
         self.gates = {event: Gate(event) for event in holds}
+        # The agent's nod at a graded moment is first `SCENE_WORD`, which the core refuses; told so, it nods with `SCENE_NOD`.
+        self.word_first = word_first
+        self.words_tried = 0
+        self.words_refused = 0
         self._events: dict[str, str] = {}
         self._lock = threading.Lock()
 
@@ -763,12 +794,15 @@ class SceneScript:
             return "SUPPRESS"
         return {"speak": "WAKE", "mhm": "mhm"}.get(self.intended(moment), "DEFER")
 
-    def action(self, turn: Mapping[str, Any], news: str | None = None) -> dict[str, Any]:
+    def action(self, turn: Mapping[str, Any], news: str | None = None, refused: str | None = None) -> dict[str, Any]:
         """The agent's action at this turn, as a plain-call participant returns it.
 
         ``news`` is the page the core's look before posting showed the turn
         (`news_shown`), None on the turn's first model call. A held turn
         waits here, on its first call, for the director (`Gate.pause`).
+        ``refused`` is the core's refusal of the word it nodded with
+        (`refusal_shown`), None before one: with ``word_first`` the nod is the
+        word until it is refused, and then the emoji.
         """
 
         trigger, text = RoomScript.trigger(turn)
@@ -784,13 +818,21 @@ class SceneScript:
             if move == "speak":
                 return {"kind": "message", "origin_event_id": trigger, "text": SCENE_SAY.format(event=event)}
             if move == "mhm":
+                reaction = SCENE_NOD
+                if self.word_first:
+                    with self._lock:
+                        if refused is None:
+                            reaction = SCENE_WORD
+                            self.words_tried += 1
+                        else:
+                            self.words_refused += 1
                 return {"kind": "reaction", "origin_event_id": trigger, "target_event_id": trigger,
-                        "reaction": SCENE_NOD, "operation": "add"}
+                        "reaction": reaction, "operation": "add"}
             return {"kind": "silence"}
         line = self.line(text) if trigger else None
         return line.action(trigger) if line is not None else {"kind": "silence"}
 
-    def move(self, turn: Mapping[str, Any] | None, news: str | None = None) -> tuple[str, dict[str, Any]]:
+    def move(self, turn: Mapping[str, Any] | None, news: str | None = None, refused: str | None = None) -> tuple[str, dict[str, Any]]:
         """The same move as a room tool call, for an agent that acts through the room's tools: its role and arguments.
 
         The role is ``send`` or ``react``; or, where the agent says nothing,
@@ -804,7 +846,7 @@ class SceneScript:
         """
 
         turn = turn or {}
-        action = self.action(turn, news)
+        action = self.action(turn, news, refused)
         if action["kind"] == "message":
             return "send", {"text": action["text"]}
         if action["kind"] == "reply":
@@ -819,16 +861,16 @@ class SceneScript:
         return "silence", {}
 
 
-def scripted(script: Any, turn: Mapping[str, Any] | None, news: str | None) -> dict[str, Any]:
-    """The script's action on a turn, with the page the look before posting showed it where the script reads one (a scene's)."""
+def scripted(script: Any, turn: Mapping[str, Any] | None, news: str | None, refused: str | None = None) -> dict[str, Any]:
+    """The script's action on a turn, with the page the look before posting showed it and the refusal of a reaction, where the script reads them (a scene's)."""
 
-    return script.action(turn, news) if isinstance(script, SceneScript) else script.action(turn)
+    return script.action(turn, news, refused) if isinstance(script, SceneScript) else script.action(turn)
 
 
-def scripted_move(script: Any, turn: Mapping[str, Any] | None, news: str | None) -> tuple[str, dict[str, Any]]:
+def scripted_move(script: Any, turn: Mapping[str, Any] | None, news: str | None, refused: str | None = None) -> tuple[str, dict[str, Any]]:
     """The same as a room tool call (`SceneScript.move`)."""
 
-    return script.move(turn, news) if isinstance(script, SceneScript) else script.move(turn)
+    return script.move(turn, news, refused) if isinstance(script, SceneScript) else script.move(turn)
 
 
 class ScriptedParticipant:
@@ -867,7 +909,7 @@ class ScriptedParticipant:
         envelope = {
             "protocol": dict(turn["protocol"]),
             "binding": {"request_id": turn["binding"]["request_id"]},
-            "action": scripted(self.script, turn, news_shown(body)),
+            "action": scripted(self.script, turn, news_shown(body), refusal_shown(body)),
         }
         wake = turn.get("wake") or {}
         answered = {
@@ -959,15 +1001,18 @@ class ScriptedCodexAgent:
     def _next(self) -> None:
         request = self.model.latest()
         items = [item for item in request.get("input", ()) if isinstance(item, Mapping)]
-        news = None
+        news = refused = None
         if items and items[-1].get("type") == "function_call_output":
             # The room tool's result. Where it is the core's look before posting (a scene's held turn), the agent decides again.
             news = news_shown(request) if isinstance(self.script, SceneScript) else None
-            if news is None:
+            refused = refusal_shown(request) if isinstance(self.script, SceneScript) else None
+            if news is None and refused is None:
                 quiet = items[-1].get("call_id") in self.quiet_calls
                 self.model.reply({"text": "Staying quiet." if quiet else "Posted my answer."})
                 return
-        role, arguments = ("send", {"text": self.answer}) if self.script is None else scripted_move(self.script, turn_document(request), news)
+        role, arguments = (
+            ("send", {"text": self.answer}) if self.script is None else scripted_move(self.script, turn_document(request), news, refused)
+        )
         if role == "quiet" and "quiet" not in self.tools:
             role = "silence"
         if role == "silence":
@@ -1130,17 +1175,21 @@ class ScriptedClaudeAgent:
         messages = body.get("messages") or []
         last = messages[-1] if messages and isinstance(messages[-1], Mapping) else {}
         content = last.get("content")
-        news = None
+        news = refused = None
         if isinstance(content, list) and any(isinstance(block, Mapping) and block.get("type") == "tool_result" for block in content):
-            # The room tool's result. Where it is the core's look before posting (a scene's held turn), the agent decides again.
+            # The room tool's result. Where it is the core's look before posting (a scene's held turn) or its refusal of a
+            # reaction that is no emoji, the agent decides again.
             news = news_shown(body) if isinstance(self.script, SceneScript) else None
-            if news is None:
+            refused = refusal_shown(body) if isinstance(self.script, SceneScript) else None
+            if news is None and refused is None:
                 quiet = any(
                     isinstance(block, Mapping) and block.get("type") == "tool_result" and block.get("tool_use_id") in self.quiet_calls
                     for block in content
                 )
                 return "agent", [{"type": "text", "text": "Staying quiet." if quiet else "Posted my answer."}], "end_turn"
-        role, arguments = ("send", {"text": self.answer}) if self.script is None else scripted_move(self.script, turn_document(body), news)
+        role, arguments = (
+            ("send", {"text": self.answer}) if self.script is None else scripted_move(self.script, turn_document(body), news, refused)
+        )
         if role == "quiet" and "quiet" not in self.tools:
             role = "silence"
         if role == "silence":

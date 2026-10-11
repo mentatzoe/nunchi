@@ -461,6 +461,173 @@ class EndpointTest(unittest.TestCase):
         self.assertEqual(2, len(participant.answers))
 
 
+# -- the scripted case of a reaction the core refuses --------------------------------------------------------------------
+
+
+REFUSED = (
+    "Refused: The reaction must be exactly one emoji, for example \N{THUMBS UP SIGN}. A word, a :name: code or more than one emoji is not a "
+    "reaction. Nothing was committed and your turn is not spent: react again with one emoji, or take one of your other choices."
+)
+
+
+def _nod_moment(item):
+    """The first graded moment of a scene whose scripted move is a nod, its text registered, and the turn about it."""
+
+    moment = next(moment for moment in item.plan.scene.moments if standin.SceneScript.intended(moment) == "mhm")
+    text = next(event["text"] for event in item.plan.scene.events if event["id"] == moment.event)
+    item.script.register(text, moment.event)
+    return moment, _turn("discord:message:7", text)
+
+
+class WordFirstTest(unittest.TestCase):
+    """`--nod-with-a-word-first`: the one scripted case of a reaction the core refuses (run 38135715452), on the three columns' endpoints."""
+
+    SCENE = "story-across-messages"
+
+    def test_the_mark_the_endpoints_look_for_is_in_the_refusal_the_core_gives_in_a_tool_result_and_in_a_page(self):
+        from nunchi.reactions import REACTION_RULE
+
+        self.assertIn(standin.REFUSAL_MARK, REACTION_RULE)
+        self.assertTrue(standin.REFUSAL_MARK.isascii(), "found whatever way the request escapes the text")
+        self.assertIn(standin.REFUSAL_MARK, REFUSED)
+
+    def test_the_refusal_is_found_in_the_newest_message_of_each_columns_request_and_only_there(self):
+        turn = _turn("discord:message:4", "q")
+        claude = {"messages": [{"role": "user", "content": [{"type": "text", "text": _tagged(turn)}]},
+                               {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": REFUSED, "is_error": True}]}]}
+        codex = {"input": [{"type": "message", "content": [{"type": "input_text", "text": _tagged(turn)}]},
+                           {"type": "function_call_output", "call_id": "c", "output": REFUSED}]}
+        plain = {"messages": [{"role": "user", "content": json.dumps({"participant_turn": turn, "context_pages": [{"note": REFUSED, "events": []}]}, ensure_ascii=False)}]}
+        for name, body in (("claude", claude), ("codex", codex), ("plain", plain)):
+            with self.subTest(column=name):
+                self.assertIn(standin.REFUSAL_MARK, standin.refusal_shown(body))
+                self.assertIsNone(standin.news_shown(body), "a refusal is not the page of news")
+        later = copy.deepcopy(claude)
+        later["messages"].append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t2", "content": "Done: the room accepted this action."}]})
+        for body in (later, {"messages": []}, {"input": []}, {}, "text", None):
+            self.assertIsNone(standin.refusal_shown(body))
+
+    def test_the_script_nods_with_the_word_until_it_is_refused_and_then_with_the_emoji(self):
+        item = directed.spec(self.SCENE, word_first=True)
+        self.assertTrue(item.script.word_first)
+        moment, turn = _nod_moment(item)
+        first = item.script.action(turn)
+        self.assertEqual(("reaction", standin.SCENE_WORD), (first["kind"], first["reaction"]))
+        self.assertEqual((1, 0), (item.script.words_tried, item.script.words_refused))
+        second = item.script.action(turn, refused=REFUSED)
+        self.assertEqual(("reaction", standin.SCENE_NOD), (second["kind"], second["reaction"]))
+        self.assertEqual((1, 1), (item.script.words_tried, item.script.words_refused))
+        # The same as a room tool call, and the word is one the core refuses where the emoji is one it takes.
+        self.assertEqual(("react", standin.SCENE_WORD), (lambda m: (m[0], m[1]["reaction"]))(item.script.move(turn)))
+        self.assertEqual(("react", standin.SCENE_NOD), (lambda m: (m[0], m[1]["reaction"]))(item.script.move(turn, refused=REFUSED)))
+        from nunchi.reactions import is_one_emoji
+
+        self.assertFalse(is_one_emoji(standin.SCENE_WORD))
+        self.assertTrue(is_one_emoji(standin.SCENE_NOD))
+
+    def test_without_the_flag_and_at_a_moment_that_is_not_a_nod_the_script_is_what_it_was(self):
+        item = directed.spec(self.SCENE)
+        self.assertFalse(item.script.word_first)
+        moment, turn = _nod_moment(item)
+        self.assertEqual(standin.SCENE_NOD, item.script.action(turn)["reaction"])
+        self.assertEqual((0, 0), (item.script.words_tried, item.script.words_refused))
+        # A scene that speaks or stays quiet does not stumble: only a nod can be refused.
+        for scene_id in ("said-it-would-check", "bot-status-report"):
+            spoken = directed.spec(scene_id, word_first=True)
+            for moment in spoken.plan.scene.moments:
+                text = next(event["text"] for event in spoken.plan.scene.events if event["id"] == moment.event)
+                spoken.script.register(text, moment.event)
+                action = spoken.script.action(_turn("discord:message:7", text))
+                self.assertNotEqual(standin.SCENE_WORD, action.get("reaction"), (scene_id, moment.label))
+            self.assertEqual(0, spoken.script.words_tried)
+
+    def test_the_claude_endpoint_reacts_with_the_word_then_with_the_emoji_on_the_tools_refusal_and_then_ends_the_turn(self):
+        item = directed.spec(self.SCENE, word_first=True)
+        moment, turn = _nod_moment(item)
+        agent = standin.ScriptedClaudeAgent("unused", SEND, script=item.script, tools={"react": REACT, "quiet": QUIET})
+        self.addCleanup(agent.close)
+        first = {"tools": [{"name": SEND}, {"name": REACT}, {"name": QUIET}], "messages": [{"role": "user", "content": [{"type": "text", "text": _tagged(turn)}]}]}
+        kind, blocks, stop = agent.reply(first)
+        self.assertEqual(("agent-tool-call", "tool_use", REACT, standin.SCENE_WORD), (kind, stop, blocks[0]["name"], blocks[0]["input"]["reaction"]))
+        second = copy.deepcopy(first)
+        second["messages"] += [{"role": "assistant", "content": blocks},
+                               {"role": "user", "content": [{"type": "tool_result", "tool_use_id": blocks[0]["id"], "content": REFUSED, "is_error": True}]}]
+        kind, blocks, stop = agent.reply(second)
+        self.assertEqual(("agent-tool-call", "tool_use", REACT, standin.SCENE_NOD), (kind, stop, blocks[0]["name"], blocks[0]["input"]["reaction"]))
+        third = copy.deepcopy(second)
+        third["messages"] += [{"role": "assistant", "content": blocks},
+                              {"role": "user", "content": [{"type": "tool_result", "tool_use_id": blocks[0]["id"], "content": "Done: the room accepted this action."}]}]
+        self.assertEqual(("agent", "end_turn"), agent.reply(third)[::2])
+        self.assertEqual((1, 1), (item.script.words_tried, item.script.words_refused))
+
+    def test_the_codex_endpoint_does_the_same_on_the_tool_answer_of_an_item(self):
+        item = directed.spec(self.SCENE, word_first=True)
+        moment, turn = _nod_moment(item)
+        agent = standin.ScriptedCodexAgent("unused", script=item.script)
+        self.addCleanup(agent.close)
+        message = {"type": "message", "content": [{"type": "input_text", "text": _tagged(turn)}]}
+        replies: list[dict] = []
+        requests = {"input": [message]}
+        with mock.patch.object(agent.model, "latest", side_effect=lambda: requests), mock.patch.object(agent.model, "reply", replies.append):
+            agent._next()
+            requests = {"input": [message, {"type": "function_call_output", "call_id": "c1", "output": REFUSED}]}
+            agent._next()
+            requests = {"input": [message, {"type": "function_call_output", "call_id": "c2", "output": "Done: the room accepted this action."}]}
+            agent._next()
+        self.assertEqual(
+            [("room_react", standin.SCENE_WORD), ("room_react", standin.SCENE_NOD)], [(r["tool"], r["arguments"]["reaction"]) for r in replies[:2]]
+        )
+        self.assertEqual({"text": "Posted my answer."}, replies[2])
+        self.assertEqual((1, 1), (item.script.words_tried, item.script.words_refused))
+
+    def test_the_scripted_participant_answers_the_word_and_then_the_emoji_on_the_next_page(self):
+        item = directed.spec(self.SCENE, word_first=True)
+        moment, turn = _nod_moment(item)
+        participant = standin.ScriptedParticipant(item.script)
+        self.addCleanup(participant.close)
+
+        def body(pages):
+            return {"messages": [{"role": "user", "content": json.dumps({"participant_turn": turn, "context_pages": pages}, ensure_ascii=False)}]}
+
+        self.assertEqual(standin.SCENE_WORD, participant.answer(body([]))["action"]["reaction"])
+        again = participant.answer(body([{"events": [], "note": REFUSED}]))
+        self.assertEqual(standin.SCENE_NOD, again["action"]["reaction"])
+        self.assertEqual(["req-1", "req-1"], [answer["request_id"] for answer in participant.answers], "two answers to one turn, the last the one that counts")
+        self.assertEqual((1, 1), (item.script.words_tried, item.script.words_refused))
+
+    def test_the_hard_check_holds_that_each_word_was_refused_then_no_word_was_committed(self):
+        word = standin.SCENE_WORD
+        nod = {"kind": "reaction", "reaction": standin.SCENE_NOD, "delivered": True}
+        ok = checks.word_nod_refused(tried=2, refused=2, committed=[nod, nod], word=word)
+        self.assertTrue(ok.ok, ok.detail)
+        self.assertEqual("word-nod-refused", ok.name)
+        for what, args in {
+            "no word was ever tried": dict(tried=0, refused=0, committed=[nod]),
+            "a refusal the agent was never shown": dict(tried=2, refused=1, committed=[nod, nod]),
+            "a word that was committed": dict(tried=1, refused=1, committed=[{"kind": "reaction", "reaction": word, "delivered": False}, nod]),
+        }.items():
+            with self.subTest(what):
+                bad = checks.word_nod_refused(word=word, **args)
+                self.assertFalse(bad.ok)
+
+    def test_the_flag_needs_a_scripted_scene_reaches_the_spec_and_is_in_the_command(self):
+        import io
+        import tempfile
+        from contextlib import redirect_stderr
+
+        from evals.rehearsal import probe
+
+        for argv in (["--harness", "codex", "--room", "discord", "--scripted"], ["--harness", "codex", "--room", "discord", "--scene", self.SCENE]):
+            with self.subTest(argv=argv), tempfile.TemporaryDirectory() as out, redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(probe.EXIT_USAGE, probe.main([*argv, "--out", out, "--nod-with-a-word-first"]))
+                self.assertIn("--nod-with-a-word-first scripts the agent's nod", err.getvalue())
+        options = probe.Options(harness="codex", out=Path("/tmp/x"), scripted=True, room="discord", scene=self.SCENE, word_first=True)
+        _, specs, _ = probe._room_parts(options)
+        self.assertTrue(specs[0].script.word_first)
+        _, specs, _ = probe._room_parts(probe.Options(harness="codex", out=Path("/tmp/x"), scripted=True, room="discord", scene=self.SCENE))
+        self.assertFalse(specs[0].script.word_first)
+
+
 # -- the director ---------------------------------------------------------------------------------------------
 
 

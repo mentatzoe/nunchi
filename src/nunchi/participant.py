@@ -21,6 +21,7 @@ from .reactions import (
     ReactionCapability,
     UNAVAILABLE_REACTION_CAPABILITY,
     reaction_capability,
+    reaction_refusal,
 )
 from .memory import ConversationMemory
 from .observation import ObservationProvider
@@ -390,6 +391,10 @@ def _validate_action(action: Any) -> dict[str, Any]:
                 raise ParticipantError(f"reaction {name} must be non-empty")
         if action["operation"] not in ("add", "remove"):
             raise ParticipantError("reaction operation must be add or remove")
+        # Every way a participant answers is held to the same rule, before anything is committed.
+        refusal = reaction_refusal(action["reaction"])
+        if refusal is not None:
+            raise ParticipantError(f"reaction is not one emoji: {refusal}")
     elif kind == "withdraw":
         if set(action) != common | {"proposal_id"}:
             raise ParticipantError("withdrawal has an invalid closed shape")
