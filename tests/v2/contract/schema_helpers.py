@@ -97,11 +97,11 @@ SCHEMA_FILES = {
 }
 
 INTERFACE_VERSIONS = {
-    "attention-request": ("I-010A", "AttentionRequestV2", 7),
+    "attention-request": ("I-010A", "AttentionRequestV2", 8),
     "attention-decision": ("I-010B", "AttentionDecisionV2", 9),
-    "participant-wake": ("I-010C", "ParticipantWakeV2", 14),
-    "context-continuation": ("I-010D", "ContextContinuationV2", 1),
-    "attention-receipt": ("I-010E", "AttentionReceiptV2", 5),
+    "participant-wake": ("I-010C", "ParticipantWakeV2", 15),
+    "context-continuation": ("I-010D", "ContextContinuationV2", 2),
+    "attention-receipt": ("I-010E", "AttentionReceiptV2", 6),
     "privileged-action-authorization": (
         "I-010F",
         "PrivilegedActionAuthorizationV2",
@@ -810,9 +810,18 @@ def _check_coverage(errors: _Errors, path: str, value: Any) -> None:
         "has_more_before", "has_more_after", "has_gaps",
         "truncated_by", "continuity", "has_restart_gap",
     )
-    allowed = required + ("max_events", "max_bytes", "max_age_seconds", "event_visibility")
+    allowed = required + ("max_events", "max_bytes", "max_age_seconds", "event_visibility", "gaps")
     if not _check_closed_object(errors, path, value, required, allowed):
         return
+    if "gaps" in value:
+        # I-010A@8 / I-010C@15: where the reading reaches or crosses a gap still news.
+        gaps = value["gaps"]
+        if not isinstance(gaps, list) or not gaps:
+            errors.add(f"{path}.gaps", "must be a non-empty array")
+        else:
+            for index, gap in enumerate(gaps):
+                if _check_closed_object(errors, f"{path}.gaps[{index}]", gap, ("at",), ("at",)):
+                    _check_nes(errors, f"{path}.gaps[{index}].at", gap.get("at"))
     for name in ("max_events", "max_bytes", "max_age_seconds"):
         if name in value:
             amount = value[name]

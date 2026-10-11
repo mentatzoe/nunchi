@@ -9,6 +9,7 @@ from unittest import mock
 from nunchi import pipeline, turn, turn_conformance as kit
 from nunchi.integrations import claude_code_conformance
 from nunchi.integrations.claude_code_conformance import ClaudeCodeKitIntegration
+from nunchi.observation import ObservationProvider
 
 
 def _run(integrations):
@@ -170,6 +171,31 @@ class TurnConformanceTests(unittest.TestCase):
         ):
             results = run_later()
         self.assertEqual(later, {name for name, r in results.items() if r["status"] == "fail"})
+
+    def test_the_gap_scenarios_need_the_sentence_once_and_not_again_after_the_turn(self):
+        # An integration declares a gap before its first message; its agent must be told once.
+        names = ("gap", "final-gap")
+
+        def run_gap():
+            return {name: kit.run_scenario(name, kit.ReferenceIntegration(kit.SCENARIOS[name].posting)) for name in names}
+
+        results = run_gap()
+        self.assertEqual({"gap": "pass", "final-gap": "pass"}, {name: r["status"] for name, r in results.items()})
+        self.assertEqual("pass", kit.run_scenario("gap", ClaudeCodeKitIntegration())["status"])
+        # A library that never says it.
+        with mock.patch("nunchi.participant_model.gap_turn_note", lambda request: ""):
+            results = run_gap()
+        self.assertEqual({"gap": "fail", "final-gap": "fail"}, {name: r["status"] for name, r in results.items()})
+        self.assertIn("was not told of it", results["gap"]["failures"][0])
+        # A library that says it again to a turn after the agent took one past the gap.
+        with mock.patch.object(ObservationProvider, "gaps_told", lambda self, times: None):
+            results = run_gap()
+        self.assertEqual({"gap": "fail", "final-gap": "fail"}, {name: r["status"] for name, r in results.items()})
+        self.assertIn("was told of it again", " ".join(results["gap"]["failures"]))
+        # A room whose integration declared no gap has nothing to say, and says nothing.
+        with mock.patch.object(ObservationProvider, "mark_continuity_gap", lambda self, **kwargs: None):
+            results = run_gap()
+        self.assertEqual({"gap": "fail", "final-gap": "fail"}, {name: r["status"] for name, r in results.items()})
 
     def test_a_room_without_reactions_fails_the_mhm_scenarios(self):
         from nunchi.reactions import UNAVAILABLE_REACTION_CAPABILITY

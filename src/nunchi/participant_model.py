@@ -17,6 +17,7 @@ import urllib.request
 
 from .attention import ParticipantProfile
 from .errors import NunchiError, ValidationError
+from .gaps import gap_sentence_in
 from .v2_contracts import validate_participant_wake
 
 
@@ -477,6 +478,21 @@ def unattended_turn_note(request: Mapping[str, Any]) -> str:
     )
 
 
+def gap_turn_note(request: Mapping[str, Any]) -> str:
+    """When the turn's view reaches or crosses a gap, say so in one plain sentence; else ''.
+
+    Zoe, 2026-10-10: a gap is a point in the room's timeline, not a lifetime
+    flag. The wake carries only the gaps its view reaches or crosses that the
+    participant has not been told about (`coverage.gaps`), so the sentence is
+    in this turn and, once the participant has taken it, in none after. The
+    library writes the words, so every harness gives the same ones
+    (`nunchi.gaps`).
+    """
+
+    sentence = gap_sentence_in(request["wake"])
+    return f"\n\n{sentence}" if sentence else ""
+
+
 def participant_turn_instructions(
     profile: ParticipantProfile,
     request: Mapping[str, Any],
@@ -508,6 +524,7 @@ def participant_turn_instructions(
         + proposals
         + outcome_turn_note(request)
         + unattended_turn_note(request)
+        + gap_turn_note(request)
         + "\n\nAction schema for this turn (JSON Schema; the protocol and "
         "binding values are fixed):\n"
         + schema
@@ -1144,6 +1161,7 @@ def participant_tool_turn_text(
         participant_tool_turn_prompt(profile, tools=tools, silence_marker=silence_marker)
         + outcome_turn_note(request)
         + unattended_turn_note(request)
+        + gap_turn_note(request)
         + f"\n\n<nunchi_participant_turn_v1>{document}</nunchi_participant_turn_v1>"
     )
 

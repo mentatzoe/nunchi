@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections import deque
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -16,7 +17,8 @@ from typing import Any, Literal
 from uuid import uuid4
 
 from .errors import NunchiError, ValidationError
-from .pace import pace_facts
+from .gaps import gap_sentence, moment_of, not_listening_note
+from .pace import iso, pace_facts
 from .receipts import PersistenceError, ReceiptJournal
 from .v2_contracts import (
     UNATTENDED_MAX,
@@ -134,6 +136,49 @@ class DeliveryAudit:
 class ObservationResult:
     audit: DeliveryAudit
     wake_eligible: bool
+
+
+@dataclass(frozen=True)
+class _Gap:
+    """A point in the room's timeline where continuity was lost (Zoe, 2026-10-10).
+
+    ``at`` is the room's time when it was declared, to the millisecond, and
+    is what names the gap in coverage and in the sentence. ``arrival`` is the
+    arrival position then: events that had arrived are before the gap, later
+    ones after it. ``after`` is the newest retained event at that position,
+    which is how a restart finds the point again: arrival positions belong to
+    one process, and a restart counts the restored events afresh, in the
+    order they are stored.
+    """
+
+    at: datetime
+    arrival: int
+    after: str | None
+
+
+# Distinct gaps that are still news are bounded: past this many, the oldest
+# two merge, into the newer position.
+MAX_GAPS = 16
+
+
+def _with_gap(gaps: Sequence[_Gap], new: _Gap) -> list[_Gap]:
+    """``gaps`` with ``new`` added, in arrival order.
+
+    A gap at the same position as another is the same point in the timeline,
+    so the two merge and keep the later time: messages may be missing before
+    it. Past ``MAX_GAPS`` the oldest two merge the same way.
+    """
+
+    same = next((gap for gap in gaps if gap.arrival == new.arrival), None)
+    if same is not None and same.at > new.at:
+        new = _Gap(same.at, new.arrival, new.after)
+    kept = [gap for gap in gaps if gap.arrival != new.arrival]
+    kept.append(new)
+    kept.sort(key=lambda gap: (gap.arrival, gap.at))
+    while len(kept) > MAX_GAPS:
+        oldest, next_oldest = kept[0], kept[1]
+        kept[:2] = [_Gap(max(oldest.at, next_oldest.at), next_oldest.arrival, next_oldest.after)]
+    return kept
 
 
 @dataclass
@@ -323,35 +368,28 @@ class ObservationProvider:
         # what arrived after it began even when timestamps put an event earlier.
         self._arrival_seq = 0
         self._arrival_by_id: dict[str, int] = {}
-        self._restart_gap = False
+        # The gaps in the room's timeline that the agent has not been told
+        # about yet (Zoe, 2026-10-10). A gap is a point, not a lifetime flag:
+        # it is news until the agent takes a turn whose reading included it
+        # (`gaps_told`). ``self._continuity`` is the integration's declared
+        # continuity; it is what coverage reports when no gap is in view.
+        self._gaps: list[_Gap] = []
+        # Reservations whose gap a durable record already accounts for.
+        self._accounted_replays: set[tuple[str, str]] = set()
         self._retention_evicted_before = False
         self._lock = threading.RLock()
         if self._path is not None:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            if self._continuity_path is not None and self._continuity_path.exists():
-                try:
-                    state = json.loads(self._continuity_path.read_text())
-                except (OSError, json.JSONDecodeError) as exc:
-                    raise PersistenceError(
-                        f"observation continuity state is untrustworthy: {exc}"
-                    ) from exc
-                if state != {"schema_version": 2, "has_gap": True}:
-                    raise PersistenceError(
-                        "observation continuity state has an invalid closed shape"
-                    )
-                self._restart_gap = True
-                self._continuity = "unknown"
+            stored, old_flag = self._read_gaps()
             if self._replay_path is not None and self._replay_path.exists():
                 self._load_replay_index()
             if self._audit_path is not None and self._audit_path.exists():
                 self._load_audit_index()
             if self._path.exists():
                 self._load()
-            if self._reserved_replays - self._committed_replays:
-                self._restart_gap = True
-                self._continuity = "unknown"
             if len(self._accepted_event_ids) > len(self._events):
                 self._retention_evicted_before = True
+            self._restore_gaps(stored, old_flag)
 
     def _load_replay_index(self) -> None:
         """Restore reservations written before mutable observation content."""
@@ -440,6 +478,12 @@ class ObservationProvider:
                             self._committed_replays.add(
                                 (record["delivery_id"], record["event_id"])
                             )
+                        elif record["outcome"] == "continuity-gap":
+                            # A reservation that never committed, once a gap
+                            # was declared for it: it is not found again.
+                            self._accounted_replays.add(
+                                (record["delivery_id"], record["event_id"])
+                            )
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             raise PersistenceError(
                 f"observation delivery audit is untrustworthy: {exc}"
@@ -461,8 +505,6 @@ class ObservationProvider:
                         raise ValueError(f"line {line_number} actors must be an object")
                     self._append_memory(entry["delivery_id"], event, actors)
         except (OSError, ValueError, json.JSONDecodeError, ValidationError) as exc:
-            self._restart_gap = True
-            self._continuity = "unknown"
             raise PersistenceError(
                 f"observation store {self._path} is not trustworthy: {exc}"
             ) from exc
@@ -602,24 +644,159 @@ class ObservationProvider:
             self._delivery_ids.add(delivery_id)
             self._event_ids.add(event_id)
 
-    def _mark_persistence_uncertain(self) -> None:
-        self._restart_gap = True
-        self._continuity = "unknown"
+    def _mark_persistence_uncertain(self, delivery_id: str, event_id: str) -> None:
+        """A write for this delivery failed midway: declare the gap it leaves.
+
+        The gap is declared here, in this process, so it accounts for the
+        delivery's reservation: the agent is told once, and a restart does not
+        find the same loss and declare another.
+        """
+
+        gaps = self._with_gap_here()
+        self._gaps = gaps
         self._continuations.clear()
         try:
-            self._persist_gap_state()
+            self._persist_gaps(gaps)
         except (OSError, PersistenceError):
             # The durable replay reservation still prevents a stale wake after
-            # restart even if the separate coverage marker cannot be replaced.
-            pass
+            # restart even if the separate gap record cannot be replaced; the
+            # restart declares the gap then (`_restore_gaps`).
+            return
+        self._account_for_gap(delivery_id, event_id)
 
-    def _persist_gap_state(self) -> None:
+    def _account_for_gap(self, delivery_id: str, event_id: str) -> bool:
+        """Record that a gap was declared for a reservation that never committed.
+
+        A restart finds a reservation without a commit and declares a gap for
+        it; the audit row says that one was declared already, so it does not.
+        Only a reservation counts: a delivery that was never reserved is not
+        made a duplicate of itself. Returns False when the row could not be
+        written, which leaves the reservation unaccounted: a restart declares
+        the gap again, the safe direction.
+        """
+
+        pair = (delivery_id, event_id)
+        if pair not in self._reserved_replays:
+            return False
+        if pair in self._accounted_replays:
+            return True
+        try:
+            self._record_audit(
+                DeliveryAudit(
+                    delivery_id,
+                    "continuity-gap",
+                    "a delivery was reserved and never recorded; the gap is declared",
+                    event_id,
+                )
+            )
+        except (OSError, PersistenceError):
+            return False
+        self._accounted_replays.add(pair)
+        return True
+
+    # -- gaps: points in the room's timeline (Zoe, 2026-10-10) -----------------
+
+    def _with_gap_here(self) -> list[_Gap]:
+        """The gaps that are news, with one added where the room is now."""
+
+        at = self.clock().astimezone(timezone.utc)
+        at = at.replace(microsecond=at.microsecond // 1000 * 1000)
+        # A gap is named by its time, so no two points share one: the second
+        # is a millisecond later (`gaps_told` tells them apart by it).
+        taken = {gap.at for gap in self._gaps if gap.arrival != self._arrival_seq}
+        while at in taken:
+            at += timedelta(milliseconds=1)
+        arrivals = self._retained_arrivals()
+        newest = max(arrivals, key=arrivals.__getitem__, default=None)
+        return _with_gap(self._gaps, _Gap(at, self._arrival_seq, newest))
+
+    def _retained_arrivals(self) -> dict[str, int]:
+        """The arrival position of each retained event."""
+
+        return {
+            event["id"]: self._arrival_by_id[event["id"]]
+            for event in self._events
+            if event["id"] in self._arrival_by_id
+        }
+
+    def _read_gaps(self) -> tuple[list[tuple[datetime, str | None]], bool]:
+        """The stored gaps, and whether the file is the old flag.
+
+        The old file (schema 2) says only that some gap happened, never when
+        or where: it becomes one gap where the room is at load.
+        """
+
+        if self._continuity_path is None or not self._continuity_path.exists():
+            return [], False
+        try:
+            state = json.loads(self._continuity_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise PersistenceError(
+                f"observation continuity state is untrustworthy: {exc}"
+            ) from exc
+        if state == {"schema_version": 2, "has_gap": True}:
+            return [], True
+        stored: list[tuple[datetime, str | None]] = []
+        if (
+            isinstance(state, dict)
+            and set(state) == {"schema_version", "gaps"}
+            and state["schema_version"] == 3
+            and isinstance(state["gaps"], list)
+        ):
+            for gap in state["gaps"]:
+                at = moment_of(gap.get("at")) if isinstance(gap, dict) else None
+                if (
+                    at is None
+                    or set(gap) != {"at", "after"}
+                    or not (gap["after"] is None or (isinstance(gap["after"], str) and gap["after"]))
+                ):
+                    break
+                stored.append((at, gap["after"]))
+            else:
+                return stored, False
+        raise PersistenceError("observation continuity state has an invalid closed shape")
+
+    def _restore_gaps(
+        self, stored: Sequence[tuple[datetime, str | None]], old_flag: bool
+    ) -> None:
+        """Put the stored gaps back on this process's arrival positions.
+
+        A gap is found by the event it came after, in the order the restored
+        events are stored; one whose event is gone is before everything
+        retained. The old flag, and deliveries that were reserved but never
+        recorded (a write that failed midway), are gaps too, at the point
+        the room is now, and are recorded as gaps once: after the agent has
+        been told, a restart does not find them again.
+        """
+
+        for at, after in stored:
+            position = self._arrival_by_id.get(after, 0) if after is not None else 0
+            self._gaps = _with_gap(self._gaps, _Gap(at, position, after))
+        unaccounted = self._reserved_replays - self._committed_replays - self._accounted_replays
+        if not (old_flag or unaccounted):
+            return
+        self._gaps = self._with_gap_here()
+        try:
+            self._persist_gaps(self._gaps)
+        except (OSError, PersistenceError):
+            # Still news, and found again at the next load: the safe direction.
+            return
+        for delivery_id, event_id in sorted(unaccounted):
+            if not self._account_for_gap(delivery_id, event_id):
+                break
+
+    def _persist_gaps(self, gaps: Sequence[_Gap]) -> None:
         if self._continuity_path is None:
             return
         temporary = self._continuity_path.with_name(
             self._continuity_path.name + ".tmp"
         )
-        payload = b'{"has_gap":true,"schema_version":2}'
+        payload = _canonical_bytes(
+            {
+                "schema_version": 3,
+                "gaps": [{"at": iso(gap.at), "after": gap.after} for gap in gaps],
+            }
+        )
         fd = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
         try:
             if os.write(fd, payload) != len(payload):
@@ -638,6 +815,78 @@ class ObservationProvider:
             raise PersistenceError(
                 f"observation continuity state is uncertain: {exc}"
             ) from exc
+
+    def _gaps_in_view(self, shown: Iterable[str]) -> list[_Gap]:
+        """The gaps that are news and that a reading of ``shown`` reaches or crosses.
+
+        The reading reaches a gap when it holds the retained event right
+        before it or right after it, and crosses it when it holds events on
+        both sides. Positions are arrival positions, so a late message with
+        an early timestamp is still after the gap it arrived behind.
+        """
+
+        if not self._gaps:
+            return []
+        arrivals = self._retained_arrivals()
+        seen = {arrivals[event_id] for event_id in shown if event_id in arrivals}
+        if not seen:
+            return []
+        retained = sorted(arrivals.values())
+        found: list[_Gap] = []
+        for gap in self._gaps:
+            cut = bisect_right(retained, gap.arrival)
+            if (
+                (cut > 0 and retained[cut - 1] in seen)
+                or (cut < len(retained) and retained[cut] in seen)
+                or min(seen) <= gap.arrival < max(seen)
+            ):
+                found.append(gap)
+        return found
+
+    def _gap_coverage(self, shown: Iterable[str]) -> dict[str, Any]:
+        """The coverage facts about gaps for a reading of ``shown``: only those still news.
+
+        ``has_gaps``, ``has_restart_gap`` and ``continuity`` describe the
+        reading; ``gaps`` names where, when any is in view.
+        """
+
+        return self._coverage_of(self._gaps_in_view(shown))
+
+    def _coverage_of(self, in_view: Sequence[_Gap]) -> dict[str, Any]:
+        facts: dict[str, Any] = {
+            "has_gaps": bool(in_view),
+            "has_restart_gap": bool(in_view),
+            "continuity": "unknown" if in_view else self._continuity,
+        }
+        if in_view:
+            facts["gaps"] = [{"at": iso(gap.at)} for gap in in_view]
+        return facts
+
+    def gaps_told(self, times: Iterable[str]) -> None:
+        """The agent took a turn whose reading included these gaps: they are no longer news.
+
+        ``times`` are the ``at`` of the entries in ``coverage.gaps`` it was
+        shown. A gap declared since, or one the reading did not include,
+        stays news. If the record cannot be replaced, it stays on disk and is
+        found again after a restart: the safe direction.
+        """
+
+        told = {time for time in times if isinstance(time, str)}
+        with self._lock:
+            kept = [gap for gap in self._gaps if iso(gap.at) not in told]
+            if len(kept) == len(self._gaps):
+                return
+            self._gaps = kept
+            try:
+                self._persist_gaps(kept)
+            except (OSError, PersistenceError):
+                pass
+
+    def gaps_pending(self) -> tuple[str, ...]:
+        """When each gap that is still news was declared, oldest position first."""
+
+        with self._lock:
+            return tuple(iso(gap.at) for gap in self._gaps)
 
     def _append_memory(
         self,
@@ -780,7 +1029,7 @@ class ObservationProvider:
             try:
                 self._reserve_replay(delivery_id, checked["id"])
             except BaseException:
-                self._mark_persistence_uncertain()
+                self._mark_persistence_uncertain(delivery_id, checked["id"])
                 raise
             self._append_memory(delivery_id, checked, checked_actors)
             try:
@@ -793,7 +1042,7 @@ class ObservationProvider:
                     self._delivery_by_event,
                     self._retention_evicted_before,
                 ) = previous
-                self._mark_persistence_uncertain()
+                self._mark_persistence_uncertain(delivery_id, checked["id"])
                 raise
             if (
                 checked.get("author_id") == self.binding.actor_id
@@ -813,7 +1062,7 @@ class ObservationProvider:
             try:
                 self._record_audit(audit)
             except BaseException:
-                self._mark_persistence_uncertain()
+                self._mark_persistence_uncertain(delivery_id, checked["id"])
                 raise
             return ObservationResult(audit, eligible)
 
@@ -966,6 +1215,9 @@ class ObservationProvider:
             if missing:
                 raise SnapshotUnavailable("retained event actor metadata is incomplete")
             actors = deepcopy(raw_actors)
+            # The gaps this window reaches or crosses that the agent has not
+            # been told about (Zoe, 2026-10-10).
+            gap_facts = self._gap_coverage(event["id"] for event in events)
             coverage: dict[str, Any] = {
                 "max_events": self.limits.snapshot_events,
                 "max_bytes": self.limits.snapshot_bytes,
@@ -974,14 +1226,16 @@ class ObservationProvider:
                     retained_more_before or self._retention_evicted_before
                 ),
                 "has_more_after": retained_more_after,
-                "has_gaps": self._restart_gap or any(
+                "has_gaps": gap_facts["has_gaps"] or any(
                     b - a > 1 for a, b in zip(indices, indices[1:])
                 ),
                 "truncated_by": sorted(truncated),
-                "continuity": self._continuity,
-                "has_restart_gap": self._restart_gap,
+                "continuity": gap_facts["continuity"],
+                "has_restart_gap": gap_facts["has_restart_gap"],
                 "event_visibility": deepcopy(self._visibility),
             }
+            if "gaps" in gap_facts:
+                coverage["gaps"] = gap_facts["gaps"]
             rid = request_id or f"{self.binding.platform}:{self.binding.room_id}:{uuid4()}"
             request: dict[str, Any] = {
                 "schema_version": 2,
@@ -1277,10 +1531,8 @@ class ObservationProvider:
                 "coverage": {
                     "has_more_before": not exhausted if direction == "before" else None,
                     "has_more_after": not exhausted if direction == "after" else None,
-                    "has_gaps": self._restart_gap,
                     "truncated_by": sorted(truncated_by),
-                    "continuity": self._continuity,
-                    "has_restart_gap": self._restart_gap,
+                    **self._gap_coverage(event["id"] for event in selected),
                 },
             }
             if next_cursor is not None:
@@ -1362,18 +1614,20 @@ class ObservationProvider:
             page_events = [deepcopy(events[index]) for index in sorted(selected)]
             page_actors, _ = _context_actors(page_events, self._actors)
             more = len(selected) < len(candidates)
+            # The page's view of the room is its events and the message it
+            # starts from: a page that stops at the edge of a gap, or has
+            # nothing to show past it, still reaches the gap.
+            shown = [event["id"] for event in page_events]
+            if anchor_event_id is not None:
+                shown.append(anchor_event_id)
+            in_view = self._gaps_in_view(shown)
             page: dict[str, Any] = {
                 "room_id": self.binding.room_id,
                 "direction": direction,
                 "actors": deepcopy(page_actors),
                 "events": page_events,
                 "has_next_page": more,
-                "coverage": {
-                    "truncated_by": sorted(truncated_by),
-                    "has_gaps": self._restart_gap,
-                    "has_restart_gap": self._restart_gap,
-                    "continuity": self._continuity,
-                },
+                "coverage": {"truncated_by": sorted(truncated_by), **self._coverage_of(in_view)},
             }
             if direction != "new":
                 page["anchor_event_id"] = anchor_event_id
@@ -1390,6 +1644,20 @@ class ObservationProvider:
                 }[direction]
             elif direction == "before" and not more and self._retention_evicted_before:
                 page["note"] = "Older messages than these are no longer retained."
+            # A page that reaches or crosses a gap says so in the same words
+            # as the turn does. Where the older side ends at a gap with nothing
+            # of the room before it, Nunchi was not listening: there is no
+            # history to go and read, and the page says that instead.
+            now = iso(self.clock())
+            edge: list[_Gap] = []
+            if direction == "before" and not more and not self._retention_evicted_before:
+                retained = sorted(self._retained_arrivals().values())
+                edge = [gap for gap in in_view if bisect_right(retained, gap.arrival) == 0]
+            if edge:
+                page["note"] = not_listening_note([iso(gap.at) for gap in edge], now)
+            sentence = gap_sentence([iso(gap.at) for gap in in_view if gap not in edge], now)
+            if sentence:
+                page["note"] = f"{page['note']} {sentence}" if "note" in page else sentence
             return page
 
     def _room_note(
@@ -1432,16 +1700,21 @@ class ObservationProvider:
         delivery_id: str,
         detail: str,
     ) -> ObservationResult:
-        """Persist a transport-declared gap without fabricating an event."""
+        """Persist a transport-declared gap without fabricating an event.
+
+        The gap is a point in the room's timeline: the time and the arrival
+        position where continuity was lost. It is news until the agent takes
+        a turn whose reading included it (`gaps_told`).
+        """
         if not isinstance(delivery_id, str) or not delivery_id:
             raise ValidationError("gap delivery_id must be non-empty")
         if not isinstance(detail, str) or not detail:
             raise ValidationError("gap detail must be non-empty")
         audit = DeliveryAudit(delivery_id, "continuity-gap", detail)
         with self._lock:
-            self._persist_gap_state()
-            self._restart_gap = True
-            self._continuity = "unknown"
+            gaps = self._with_gap_here()
+            self._persist_gaps(gaps)
+            self._gaps = gaps
             self._continuations.clear()
             self._record_audit(audit)
         return ObservationResult(audit, False)

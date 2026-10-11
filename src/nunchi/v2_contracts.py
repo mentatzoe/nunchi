@@ -23,11 +23,11 @@ DISPOSITIONS = ("SUPPRESS", "WAKE", "DEFER")
 WAKE_SOURCES = ("WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS")
 # The portable interfaces and their versions, as `nunchi probe` reports them.
 INTERFACE_VERSIONS = {
-    "I-010A": 7,
+    "I-010A": 8,
     "I-010B": 9,
-    "I-010C": 14,
-    "I-010D": 1,
-    "I-010E": 5,
+    "I-010C": 15,
+    "I-010D": 2,
+    "I-010E": 6,
     "I-010F": 1,
     "I-020A": 1,
     "I-030A": 3,
@@ -148,8 +148,19 @@ def _coverage(value: Any, path: str = "coverage") -> Mapping[str, Any]:
             "continuity",
             "has_restart_gap",
         ),
-        optional=("max_events", "max_bytes", "max_age_seconds", "event_visibility"),
+        optional=("max_events", "max_bytes", "max_age_seconds", "event_visibility", "gaps"),
     )
+    if "gaps" in doc:
+        # Since I-010A@8 / I-010C@15: where this reading reaches or crosses a
+        # gap the participant has not been told about (Zoe, 2026-10-10).
+        gaps = doc["gaps"]
+        if not isinstance(gaps, list) or not gaps:
+            _fail(f"{path}.gaps", "must be a non-empty array")
+        for index, gap in enumerate(gaps):
+            item = _closed(gap, f"{path}.gaps[{index}]", required=("at",))
+            _nes(item["at"], f"{path}.gaps[{index}].at")
+            if _timestamp(item["at"]) is None:
+                _fail(f"{path}.gaps[{index}].at", "must be an ISO 8601 timestamp")
     for name in ("has_more_before", "has_more_after", "has_restart_gap"):
         if doc[name] is not None and not isinstance(doc[name], bool):
             _fail(f"{path}.{name}", "must be a boolean or null")

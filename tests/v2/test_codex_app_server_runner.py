@@ -212,6 +212,25 @@ class CodexRoomRunnerTest(unittest.TestCase):
         with self.assertRaises(ValidationError):
             runner.connection.handle(_notification("discord:message:4", continuity_gap=True))
 
+    def test_a_gap_the_transport_declares_is_a_point_the_agents_reading_reaches_until_it_is_told(self):
+        """The shared connection declares it to the core, which is where it is told (Zoe, 2026-10-10)."""
+        runner = self._runner()
+        runner.connection.handle(_notification("discord:message:1", text="before the loss"))
+        runner.connection.handle(_notification("discord:message:2", continuity_gap=True, event=None, actors={}))
+        runner.connection.handle(_notification("discord:message:3", text="after the loss"))
+        self.assertTrue(runner.room.drain(10))
+        observation = runner.room.observation
+        self.assertEqual(1, len(observation.gaps_pending()))
+        coverage = observation.build_snapshot("discord:message:3")["coverage"]
+        self.assertEqual(1, len(coverage["gaps"]))
+        self.assertEqual((True, True, "unknown"), (coverage["has_gaps"], coverage["has_restart_gap"], coverage["continuity"]))
+        # Attention let every message pass, so Codex took no turn: the gap is still news.
+        self.assertIsNone(runner.integration.thread_id)
+        # Once a turn has been taken past it, it is not.
+        observation.gaps_told(gap["at"] for gap in coverage["gaps"])
+        clean = observation.build_snapshot("discord:message:3")["coverage"]
+        self.assertEqual((False, False, "restart-safe"), (clean["has_gaps"], clean["has_restart_gap"], clean["continuity"]))
+
     def test_registration_checks_the_transports_attestation(self):
         runner = self._runner(_Client(attestation=ATTESTATION))
         runner.connection.register()

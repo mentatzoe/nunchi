@@ -1,6 +1,10 @@
 # Codex V2 room presence
 
-`nunchi-codex-room-runner` is the only executable Codex integration.
+`nunchi-codex-room-runner` is the older Codex integration: it runs Codex with
+its tools turned off, once per wake. The newer one, through `codex app-server`
+([`integrations/codex-app-server/`](../codex-app-server/README.md), runner
+`nunchi-codex-app-server-runner`), is meant to replace it; this one stays until
+that one has passed live checks.
 
 It consumes `notifications/nunchi/v2/discord-event`, retains exact self and
 peer events, runs the participant-bound attention model once, and wakes a

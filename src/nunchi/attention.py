@@ -20,6 +20,7 @@ import urllib.error
 import urllib.request
 
 from .errors import NunchiError, ValidationError
+from .gaps import gap_sentence_in
 from .attention_questions import (
     ADDRESSEES,
     MOVES,
@@ -346,6 +347,16 @@ _UNATTENDED_PROMPT = (
 )
 
 
+# A gap the window reaches or crosses (Zoe, 2026-10-10), said to a judgment
+# that has one in the same words the participant's turn carries. It states the
+# fact and Nunchi's words for it; it does not promise what the host will say,
+# since a host that gives the agent no library turn says nothing.
+_GAP_PROMPT = (
+    " The window reaches a gap in what Nunchi heard of this room "
+    "(observation.coverage.gaps). Nunchi's words for it are: \"{sentence}\""
+)
+
+
 # What a judgment without a new message means (#94 step 6). Only that
 # judgment hears it, so ordinary judgments are not nudged by it.
 _OCCASION_PROMPTS = {
@@ -389,6 +400,7 @@ def participant_attention_prompt(
     occasion: str | None = None,
     memory: bool = False,
     unattended: bool = False,
+    gap: str = "",
 ) -> str:
     """Return the shared instructions for a participant's chat-model attention.
 
@@ -403,7 +415,9 @@ def participant_attention_prompt(
     means, only to that judgment (#94 step 6); ``memory`` explains the
     participant's memory, only to a judgment that carries one; ``unattended``
     adds the messages that arrived while it was busy, and the question about
-    them, only to a judgment that has some.
+    them, only to a judgment that has some; ``gap`` is the sentence for a gap
+    the window reaches or crosses (`nunchi.gaps`), only for a judgment that
+    has one.
     """
 
     called = name or profile.participant_id
@@ -452,6 +466,7 @@ def participant_attention_prompt(
         + _OCCASION_PROMPTS.get(occasion or "", "").format(called=called)
         + (_MEMORY_PROMPT.format(called=called) if memory else "")
         + (_UNATTENDED_PROMPT.format(called=called) if unattended else "")
+        + (_GAP_PROMPT.format(sentence=gap) if gap else "")
         + "\n\n"
         "Participant instructions (trusted host profile):\n"
         f"{profile.instructions}\n\n"
@@ -1015,6 +1030,7 @@ class AttentionEngine:
                             occasion=projection.get("occasion"),
                             memory=bool(projection.get("memory")),
                             unattended=bool(projection.get("unattended_event_ids")),
+                            gap=gap_sentence_in(projection),
                         ),
                         projection=projection,
                         timeout_seconds=provider_timeout,

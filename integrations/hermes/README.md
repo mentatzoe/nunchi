@@ -351,6 +351,19 @@ The probe reports `complete_v2_lifecycle: false`,
 typing, Discord voice input, and detached participant commands. Those disabled
 features remain product gaps; restoring tools does not accept them.
 
+### Known gap: continuity gaps are never told
+
+This integration declares a continuity gap at every start, but it gives the
+agent no library turn and never tells observation that a turn was taken past
+a gap (`ObservationProvider.gaps_told`). The agent is told nothing in words,
+and a gap stays news for the life of the state directory: each start adds one
+(at most 16 are kept), attention's judgment is told whenever its window
+reaches one ("Nunchi's words for it are: ..."), and the wake JSON that
+Hermes's `pre_llm_call` hook adds carries `coverage.gaps`. The behavior in
+[`docs/behavior.md`](../../docs/behavior.md) ("A gap is told once, at the gap")
+is not met here. Closing it is library work for when this integration is
+reworked, not built while Hermes work is parked; the other harnesses have it.
+
 ## Verify
 
 In an authorized chat, run:

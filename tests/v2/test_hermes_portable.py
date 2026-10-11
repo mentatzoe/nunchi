@@ -25,6 +25,7 @@ from nunchi.attention import (
     participant_attention_prompt,
 )
 from nunchi.errors import ValidationError
+from nunchi.gaps import gap_sentence_in
 from nunchi.integrations import hermes_v2
 from nunchi.observation import (
     ObservationLimits,
@@ -447,12 +448,21 @@ class HermesPortableTests(unittest.TestCase):
             self.assertTrue(handled)
             self.assertEqual(["500"], calls)
             self.assertEqual(1, len(llm.calls))
+            # The integration declares a gap when it starts (nothing was heard
+            # before), so the first judgment's window reaches it and attention
+            # is told, in the library's words. The older integration gives the
+            # agent no library turn, so only attention is: the prompt states the
+            # fact and the words, and promises nothing about the turn.
+            observed = json.loads(llm.calls[0]["input"][0]["text"])["observation"]
+            sentence = gap_sentence_in(observed)
+            self.assertIn("Messages may be missing before", sentence)
             self.assertEqual(
                 participant_attention_prompt(
-                    plugin.config.rooms[0].profile
+                    plugin.config.rooms[0].profile, gap=sentence
                 ),
                 llm.calls[0]["instructions"],
             )
+            self.assertNotIn("in its turn", llm.calls[0]["instructions"])
 
     def test_suppress_is_silent_before_stock_hermes(self):
         llm = FakeLlm(

@@ -13,6 +13,57 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- A continuity gap is a point in the room's timeline, told once in one plain
+  sentence (Zoe, 2026-10-10: "A plain sentence at the gap"; **implemented,
+  unverified**, offline tests only). Before, a restart, a lost connection or
+  a failed delivery set a flag that never cleared and reached the agent only
+  as a field in the turn's JSON (`coverage.has_restart_gap`), so after one
+  restart a room read "gap" for the life of its state directory. Now
+  observation records each gap as a point, with the time and the arrival
+  position where continuity was lost, and persists it (`*.continuity.json`,
+  schema 3; the old `{"schema_version": 2, "has_gap": true}` becomes one gap
+  at load). When what the agent reads, its window or a page it asks for, runs
+  up to or across a gap it has not been told about, the turn adds one sentence,
+  the same one on every harness: "Messages may be missing before 14:02 UTC;
+  read the history if it matters." (UTC, like the events' timestamps; the date
+  is added for a gap from another day, and several gaps are one sentence).
+  Attention's judgment gets the same words (the chat route's instructions,
+  `observation.coverage.gaps`, which state the fact and "Nunchi's words for
+  it" without promising what the host will say; a typed model's state, as
+  `gap`). The facts are in the contract: `coverage.gaps`, a list of `{at}` of
+  the shared coverage shape (I-010A@8, I-010C@15, and I-010D@2 and I-010E@6,
+  whose pages and observation receipts carry the same coverage). A history page
+  that ends at a gap with nothing of the room before it does not send the agent
+  to read what is not there: it says "Nunchi has no older messages: it was not
+  listening before 14:00 UTC." Gaps within one minute are said once.
+  Once the agent has taken a turn whose reading included the gap, the host
+  tells observation (`ObservationProvider.gaps_told`) and it is no longer
+  news: no later turn repeats it and no restart brings it back, also when the
+  gap came from a write that failed midway in this process. A turn that
+  failed, was cancelled or answered with an action the host refused leaves it
+  to be told again, and so does a gap only a page of new messages reached
+  (steering and the look before posting read those and show them only when
+  they hold a message): the next turn's reading tells it. The turn
+  conformance kit has two
+  scenarios, `gap` and `final-gap`, which declare a gap first, as an
+  integration must, and check what the agent reads in the turn and in the one
+  after. The behavior suite's scenes have no gaps; their attention input and
+  turn text are byte-identical to what they were before (compared on all 82
+  moments, in three prompt styles). The integrator's duty, declaring a gap at
+  every start before the first event and cancelling and declaring one on
+  every loss, and which of `cancel` and `restart` to call on a reconnect, are
+  in the harness guide (step 8). **Known gap of the older Hermes integration
+  (`integrations/hermes`):** it gives the agent no library turn and never tells
+  observation that one was taken, so its agent is told nothing in words, and a
+  gap there stays news for the life of the state directory. Each start adds
+  one (at most 16 are kept), attention's judgment is told whenever its
+  window reaches one, and the wake's JSON carries `coverage.gaps`. Not built:
+  Hermes work is parked, and the fix is library work for when that integration
+  is reworked ([README](integrations/hermes/README.md#known-gap-continuity-gaps-are-never-told)).
+  **Downgrade:** a state directory written by this version cannot be read by
+  the previous one. Its continuity file is schema 3, and the previous version
+  refuses it ("invalid closed shape") and does not start the room until
+  `*.continuity.json` is deleted.
 - Directed behavior scenes on the Discord stand-in (step 9f, PR 4a;
   [docs/rehearsal.md](docs/rehearsal.md), "Directed scenes"): **implemented,
   unverified** in CI; run here offline inside the launcher, every hard check
@@ -624,6 +675,25 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- `coverage.has_gaps`, `has_restart_gap` and `continuity` now describe the
+  gaps that are still news in the window (or page) they come with, not the
+  life of the state directory: with no such gap in view, `has_restart_gap` is
+  false and `continuity` is the declared one (`restart-safe`, `session-only`
+  or `unknown`) again; `has_gaps` is also true when the window skips events
+  inside it, as before. A gap that is news but outside the window changes
+  nothing until a reading reaches it. `tests/v2/test_runtime_hardening.py`'s
+  durable-gap test, which pinned the sticky flag, now pins the rule (Zoe,
+  2026-10-10). A delivery that was reserved and never recorded is a gap once,
+  too: it is recorded as one in the delivery audit and no later restart finds
+  it again. `docs/behavior.md` records the rule in one line.
+- Docs say what the code does. The harness guide, the contract and
+  `docs/integration.md` call consume-and-start the shape the parked Hermes
+  plugin used, and gating the harness's own native turn the open redesign;
+  the contract's "patches Hermes internals" line is in the past tense, since it
+  describes the older `integrations/hermes`;
+  `integrations/codex/README.md` no longer calls the older runner the only
+  executable Codex integration. `tests/v2/test_turn.py` no longer imports the
+  parked plugin.
 - **The Hermes plugin is parked (Zoe and Claude as lead engineer, 2026-10-10).**
   The code stays and its CI lanes keep running; there is no new Hermes work
   until it is unparked. Nunchi is a library that decides whether an agent takes

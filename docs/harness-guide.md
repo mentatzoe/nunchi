@@ -72,10 +72,16 @@ Answer two questions about the harness.
 | Room events reach the library | From Nunchi's transport | From your plugin's ingress hook |
 | Examples | Claude Code, Codex | Hermes (plugin parked) |
 
-A harness-hosted integration must **consume and start**: it takes every room
-message before the harness runs its agent on it, hands it to the library, and
-starts the agent's turn itself when the library decides. Gating the harness's
-own runs loses silence and looking again (see the contract's "Topologies").
+Harness-hosted integrations have so far had one shape, **consume and start**:
+the integration takes every room message before the harness runs its agent on
+it, hands it to the library, and starts the agent's turn itself when the
+library decides. That is the shape the parked Hermes plugin used, and it is
+what cost the plugin Hermes's own thread, session and identity settings.
+**Gating the harness's own native turn** (the harness starts its run, and the
+integration lets it go, holds it, or adds the library's text) is the open
+redesign ([the plugin's README, "Before unparking"](../integrations/hermes-plugin/README.md#before-unparking)),
+not a settled shape. Gating alone loses silence and looking again (see the
+contract's "Topologies"), so the redesign has to say how it gets them back.
 
 **How does the agent act in the room?**
 
@@ -626,8 +632,9 @@ room.deliver(
   says only that it worked, say so with `room_shows_own_reactions=False`, and
   the library records each reaction `native` reports sent as the agent's own
   reaction event, again with an id of its own.
-- **Harness-hosted: consume every message in the participant's room,** so
-  the harness never runs its agent on one by itself. The harness then sees
+- **Harness-hosted, consume and start: consume every message in the
+  participant's room,** so the harness never runs its agent on one by itself.
+  The harness then sees
   only the turns your driver starts. Consume the message even when handing it
   to the library fails: a harness that answers a person directly bypasses the
   room, and its silence marker may turn into a visible warning on a person's
@@ -709,9 +716,55 @@ room = Room(
 - `privileged_executors` are the native privileged actions your harness can
   perform, used only with `authorization`.
 - `participant_timeout_seconds` bounds one turn.
-- `room.cancel()` cancels the running turn; `room.restart()` starts over
-  after the room connection restarts; `room.drain(timeout)` waits until no
-  turn runs.
+- `room.cancel()` cancels the running turn; for a lost room connection, call
+  it and declare a gap (below). `room.restart()` also drops what only the host
+  knew and declares no gap, so call it only when the process lost what the
+  host knew. `room.drain(timeout)` waits until no turn runs.
+- **Declare a gap at every start, and on every loss.** The library cannot
+  know what happened while no one was listening, so the integration says so
+  with `room.observation.mark_continuity_gap(delivery_id=..., detail=...)`
+  (a fresh `delivery_id` each time; no event is made up for it):
+  - **At every start,** before the first event is delivered: a fresh process
+    cannot know what the room said while it was away, and what it retained
+    from before ends where it stopped listening.
+  - **On every loss:** `room.cancel()`, then a gap, whenever the stream is
+    uncertain (it ended or failed, a delivery could not be handed over, a
+    message could not be routed). The next event then arrives behind the gap.
+  `Room` declares none itself; an integration that declares none tells its
+  agent nothing. The shared Discord connection does this in
+  `DiscordRoomConnection.interrupted` (`discord_room.py`) and the transport
+  does it for a route that may have missed something.
+
+  The library turns the gap into words (Zoe, 2026-10-10: "A plain sentence at
+  the gap"). A gap is a point in the room's timeline, with the time and the
+  arrival position where continuity was lost, not a flag for the life of the
+  room. When what the agent reads (its window, or a page it asks for) runs up
+  to or across a gap it has not been told about, the turn adds one sentence,
+  the same one for every harness, for example: "Messages may be missing before
+  14:02 UTC; read the history if it matters." Attention's judgment is shown
+  the same sentence, and `coverage.gaps` names the time in the wake's facts.
+  Once the agent has taken a turn whose reading included the gap, it is no
+  longer news: no later turn repeats it, and a restart does not bring it back.
+  A turn that failed, was cancelled, or answered with an action the host
+  refused leaves the gap to be told again, and so does a gap only a page of
+  new messages reached (steering and the look before posting show such a page
+  only when it holds a message), which the next turn's reading tells. A
+  history page that ends at a gap with nothing of the room before it says
+  that Nunchi was not listening there: "Nunchi has no older messages: it was
+  not listening before 14:00 UTC." Nothing about this is the integration's to
+  write or to check except the declaring; the turn
+  conformance kit's `gap` and `final-gap` scenarios declare a gap first, as an
+  integration must, and check what the agent reads.
+- **On a reconnect, call `room.cancel()` and declare a gap.** That is what the
+  shared connection does, and it keeps the agent's memory of its own moves
+  and reasons. `room.restart()` also cancels, and then drops what only the
+  host knew: the agent's remembered silences and the reasons it gave for
+  them, the messages it delivered that the room has not shown back, and the
+  judgments attention made about messages (`ConversationMemory.restart`), as
+  well as continuation authority and a pending look again. It declares no gap
+  itself, so a restart needs one declared as well. Use `restart()` only when
+  the process lost what the host knew; for a lost connection, `cancel()` and
+  a gap lose less of the room.
 - **Harness-hosted: build the `Room` in the process that owns the room
   connection, on first use.** Harnesses often load plugins in every process
   (Hermes loads them in its command line too), and only the gateway should
@@ -781,15 +834,18 @@ steering goes in with `turn/steer`, and `turn/completed` ends the run.
 The consume-and-start shape, with hook names generic. The contract's parity
 table names the Hermes hooks for each step.
 
-`nunchi.integrations.hermes_plugin` is the worked example (the plugin is
-parked since 2026-10-10; it stays the worked example of this shape).
+`nunchi.integrations.hermes_plugin` is the worked example of this shape. The
+plugin is parked since 2026-10-10, and consume-and-start is the shape it was
+parked for: read it as the library's side shown whole, not as a settled way
+to host a harness (gating the harness's native turn is the open redesign).
 
 1. **Load.** The plugin reads its config into `RoomSettings` and builds a
    `TurnParticipant` with the harness's silence marker, its other silent
    answers (`also_silent`) and `model_text=True`. It registers the
    reaction and room-view tools from `participant.attach()`, and forwards
    their calls to `call_tool`. It builds the `Room`, with `HarnessDelivery`,
-   on the first message the gateway admits.
+   on the first message the gateway admits, and declares a start gap before
+   it delivers that message (step 8).
 2. **Ingress.** Every message in the room, and in the threads inside it,
    reaches the plugin's ingress hook, once the harness's own gates are open
    for the room (on Discord, Hermes's `free_response_channels` and its
@@ -1028,6 +1084,10 @@ Each is tracked in [#135](https://github.com/mentatzoe/nunchi/issues/135).
   `binding.threads_in_room` is honored.
 - [ ] No decision about whether or what the agent says.
 - [ ] Every room event delivered, the agent's own included.
+- [ ] A gap declared at every start, before the first event, and on every
+  loss (`room.cancel()`, then `mark_continuity_gap`; `restart()` only when the
+  process lost what the host knew). The kit's `gap` and `final-gap` scenarios
+  check what the agent reads.
 - [ ] Every run bound when it starts, and its end reported once, also when
   the harness drops the run without an end hook.
 - [ ] Final-answer posting: every silent answer of the harness in

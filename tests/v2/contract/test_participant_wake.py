@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010C ParticipantWakeV2@14`` (slice 010, T004; @12 the unattended messages; @13 no ACK source; @14 a message the harness posted).
+"""Contract tests for ``I-010C ParticipantWakeV2@15`` (slice 010, T004; @12 the unattended messages; @13 no ACK source; @14 a message the harness posted; @15 the gaps the view reaches).
 
 Red cases cover the wake sources, advice-free ``PREATTENTION_BYPASS``
 (010-Preattention-bypass), the FR-013 advice-source violations (advice on
@@ -300,6 +300,24 @@ class WakeBudgetCases(unittest.TestCase):
         del doc["coverage"]["max_events"]
         del doc["coverage"]["max_bytes"]
         assert_schema_verdict(self, "participant-wake", doc, "valid")
+
+
+class WakeGapCases(unittest.TestCase):
+    """@15 (Zoe, 2026-10-10): the wake carries the gaps its view reaches that the participant has not been told about."""
+
+    def wake(self, gaps):
+        doc = make_wake("WAKE")
+        doc["coverage"].update(has_gaps=True, has_restart_gap=True, continuity="unknown", gaps=gaps)
+        return doc
+
+    def test_gaps_validate_and_are_optional(self):
+        assert_schema_verdict(self, "participant-wake", make_wake("WAKE"), "valid")
+        assert_schema_verdict(self, "participant-wake", self.wake([{"at": "2026-10-10T14:02:00.000Z"}]), "valid")
+
+    def test_a_malformed_gap_rejects(self):
+        for bad in ([], [{}], [{"at": ""}], [{"at": "2026-10-10T14:02:00.000Z", "detail": "restart"}]):
+            with self.subTest(bad=bad):
+                assert_schema_verdict(self, "participant-wake", self.wake(bad), "invalid")
 
 
 class WakeLedgerRejectionCases(unittest.TestCase):

@@ -11,7 +11,7 @@ live, integrated, or released status.
 `docs/architecture/v2-selected-design.md` preserve the field inventory selected
 from Aleph Vault at `c834e8c`; the external path is provenance, not a
 contributor dependency. The program-canonical interface names and versions
-(`I-010D`, `I-010F` at `@1`; `I-010A` at `@6`; `I-010E` at `@5`; `I-010C` at `@13`; `I-010B` at `@9`) are this
+(`I-010F` at `@1`; `I-010D` at `@2`; `I-010A` at `@8`; `I-010E` at `@6`; `I-010C` at `@15`; `I-010B` at `@9`) are this
 slice's vocabulary layered over that inventory. A document the selected design
 declares valid that either validator rejects is a contract defect, never
 resolved by narrowing the corpus.
@@ -20,11 +20,11 @@ resolved by narrowing the corpus.
 
 | Interface | Version | Schema path |
 |---|---|---|
-| `I-010A AttentionRequestV2` | `@6` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
+| `I-010A AttentionRequestV2` | `@8` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
 | `I-010B AttentionDecisionV2` | `@9` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
-| `I-010C ParticipantWakeV2` | `@13` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
-| `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
-| `I-010E AttentionReceiptV2` | `@5` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
+| `I-010C ParticipantWakeV2` | `@15` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
+| `I-010D ContextContinuationV2` | `@2` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
+| `I-010E AttentionReceiptV2` | `@6` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
 | `I-010F PrivilegedActionAuthorizationV2` | `@1` | [`schemas/v2/privileged-action-authorization.schema.json`](../../schemas/v2/privileged-action-authorization.schema.json) |
 
 ### Privileged-action boundary
@@ -111,7 +111,7 @@ python3 -m unittest tests.v2.contract.test_privileged_action_authorization
 uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
 ```
 
-## I-010A AttentionRequestV2@7
+## I-010A AttentionRequestV2@8
 
 A truthful attention request represents:
 
@@ -155,9 +155,25 @@ A truthful attention request represents:
   `null` when unknowable), `has_gaps`, `truncated_by` (subset of
   `events`/`bytes`/`age`), `continuity` (`restart-safe`/`session-only`/
   `unknown`), `has_restart_gap`, optional `max_events`/`max_bytes`/
-  `max_age_seconds` budgets (each a positive integer, S15), and optional
-  per-event-type `event_visibility`. `session-only` continuity and unknown
-  visibility are never upgraded by inference.
+  `max_age_seconds` budgets (each a positive integer, S15), optional
+  per-event-type `event_visibility`, and since @8 optional `gaps`.
+  `session-only` continuity and unknown visibility are never upgraded by
+  inference.
+- **Gaps in view (@8, Zoe, 2026-10-10)** — a continuity gap is a point in the
+  room's timeline (the time and arrival position where the observation may
+  have missed messages), not a lifetime flag. `has_gaps`, `has_restart_gap`
+  and `continuity` describe the gaps that are still news *in this window*, and
+  `gaps` (a non-empty array of `{at}`, UTC, one per gap) names them; the
+  window is in view of a gap when it holds the retained event right before it
+  or right after it, or events on both sides. Without such a gap in view,
+  `has_restart_gap` is false, `gaps` is absent, and `continuity` is the
+  declared one. `has_gaps` is also true when the window skips events inside
+  it. A gap stops being news once the participant has taken a turn whose
+  reading included it, so it is told once, and it appears in no later
+  request. The attention prompt (and a typed model's state, as `gap`) says it
+  in the sentence the turn carries: "Messages may be missing before 14:02
+  UTC; read the history if it matters." Which gaps are news is observation's
+  to decide; attention and the participant only read them.
 - **Relational byte closure** — when `coverage.max_bytes` is present, the
   canonical `actors` plus `events` context must fit that budget; actor IDs and
   actor metadata are not free side channels. The stdlib runtime enforces this
@@ -325,7 +341,7 @@ A tagged host-facing union on `status`:
   occur before a request ID is assignable); an optional `classifier` audit is
   present only when the error occurred after classifier invocation.
 
-## I-010C ParticipantWakeV2@14
+## I-010C ParticipantWakeV2@15
 
 The normal-turn input materializes `self`, `room`, `actors`, `events`,
 `trigger_event_id`, `coverage`, and optional `continuation` directly —
@@ -435,7 +451,28 @@ participant's own reactions (Hermes gives plugins no reaction events) gets the
 host-attested `reaction` event in the same way, so the move is a `reaction`
 with that event's id.
 
-## I-010D ContextContinuationV2@1
+Since @15 (Zoe, 2026-10-10) the wake's `coverage` carries `gaps` as the
+attention request's does (I-010A@8), computed for the fresh view the turn is
+built from: the continuity gaps still news that the view reaches or crosses.
+The turn then says it once, in one plain sentence after its notes, for every
+harness: "Messages may be missing before 14:02 UTC; read the history if it
+matters." (the date is added for a gap from another day, and several gaps are
+one sentence). A page of the room that the participant asks for says the same
+sentence in its `note` and carries `gaps` in its own `coverage` (a page's view
+is its events and the message it starts from); where the older side of the
+room ends at a gap with nothing of the room before it, the page says "Nunchi
+has no older messages: it was not listening before 14:00 UTC." instead, since
+there is no history to read. When the participant's turn is taken, the host
+tells observation which gaps the turn's wake and the pages returned to the
+participant showed, and they are no longer news. A turn is taken when the
+participant answers with silence or with an action the host accepts; a turn
+that fails, is cancelled, or answers with an action the host refuses leaves
+them to be told again. Gaps only a page of new messages reached (`direction`
+`new` or `news`) also stay news, because the turn's own reads for steering and
+the look before posting use those and reach the participant only when they hold
+a message; the next turn's reading tells them.
+
+## I-010D ContextContinuationV2@2
 
 The continuation capability itself lives on `I-010A`/`I-010C`'s
 `continuation` field; this interface covers only the fetch request/page
@@ -452,6 +489,10 @@ pair that capability authorizes — a `oneOf` over two bare shapes with no
   `coverage`, and optional opaque `next_cursor` (absent means the binding
   is exhausted).
 
+Since @2 (Zoe, 2026-10-10) the page's `coverage` is the shared coverage shape of
+`I-010A@8`, so a page that reaches or crosses a continuity gap the participant
+has not been told about carries its optional `gaps`.
+
 Since 2026-10-05 (#94 step 3) the participant's own turn no longer fetches
 through this interface: it reads the live room through the host's view
 (see `docs/platform-v2.md`, "The participant's view of the room"), and the
@@ -466,7 +507,7 @@ independently against the issuing continuation capability's exact
 does not establish correct binding or bounded authorization — see the
 runtime-adapter-only rules below.
 
-## I-010E AttentionReceiptV2@5
+## I-010E AttentionReceiptV2@6
 
 Immutable, append-only stage records correlated by `request_id`, in the
 canonical order `observation -> attention -> participant-host ->
@@ -504,7 +545,10 @@ receipts. `@4` (#94 step 6) lets the attention stage record the I-010B@7
 `outcome-turn` widening. `@5` (#94 step 7) removes Nunchi's own nod: no new
 record carries an ACK disposition, ACK widening, `ack` audit, or ACK
 participant-host source. A record written before `@5` with those facts still
-validates, read-only, so an older journal loads.
+validates, read-only, so an older journal loads. `@6` (Zoe, 2026-10-10): the
+observation stage's `coverage` is the shared coverage shape of `I-010A@8`, so
+a record written while a continuity gap is in view carries its optional `gaps`;
+a record written before `@6` still validates.
 
 The stage-to-writer binding is part of the public per-record contract
 (FR-010): each stage names its single directly observing owner per the
@@ -747,7 +791,10 @@ A participant-silence receipt record (the S07 stream ends at this stage):
 ## Versioning and change control
 
 `@1` is the first V2 execution version. A breaking edit requires a version
-bump and re-verification of every consumer. `I-010B@5` replaced the
+bump and re-verification of every consumer. A shape that several interfaces
+carry is bumped in each of them when it changes: `coverage` is carried by
+`I-010A`, `I-010C`, `I-010D` and `I-010E`, so its optional `gaps` (2026-10-10)
+is `I-010A@8`, `I-010C@15`, `I-010D@2` and `I-010E@6`. `I-010B@5` replaced the
 `legacy_verdict_confidences` vector, fixed for `@1` through `@4` (FR-007),
 with the required typed `answers`, and `@6` made `asks` a required answer; margin retirement still flips only the
 reported `margin_status`, never the schema. Each runtime must pass its adapter against the same contract corpus

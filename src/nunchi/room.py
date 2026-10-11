@@ -365,7 +365,13 @@ class Room:
         self.lane.cancel()
 
     def restart(self) -> None:
-        """The room connection restarted: nothing pending carries over."""
+        """The process lost what the host knew: nothing pending carries over.
+
+        It also drops the agent's remembered silences and reasons and the
+        judgments made about messages, and it declares no gap. For a lost
+        room connection, call ``cancel()`` and declare a gap instead; that
+        loses less of the room (`docs/harness-guide.md`, step 8).
+        """
 
         self.lane.restart()
 

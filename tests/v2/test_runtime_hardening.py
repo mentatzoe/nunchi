@@ -321,7 +321,7 @@ class BoundedPersistenceTests(unittest.TestCase):
             self.assertEqual([], model.calls)
             self.assertEqual((), pipeline.observation.retained_events())
 
-    def test_durable_gap_survives_restart_and_invalidates_continuation(self):
+    def test_durable_gap_survives_restart_until_told_and_invalidates_continuation(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "observations.jsonl"
             first, _, _, _ = foundation(persistence_path=path)
@@ -352,6 +352,17 @@ class BoundedPersistenceTests(unittest.TestCase):
             self.assertTrue(snapshot["coverage"]["has_gaps"])
             self.assertTrue(snapshot["coverage"]["has_restart_gap"])
             self.assertEqual("unknown", snapshot["coverage"]["continuity"])
+            # Zoe, 2026-10-10: a gap is a point in the room's timeline, not a
+            # lifetime flag. It is news until the agent has taken a turn whose
+            # reading included it, and no restart finds it after that.
+            self.assertEqual(1, len(snapshot["coverage"]["gaps"]))
+            restored.observation.gaps_told(gap["at"] for gap in snapshot["coverage"]["gaps"])
+            told = restored.observation.build_snapshot("e1")["coverage"]
+            self.assertEqual((False, False, "restart-safe"), (told["has_gaps"], told["has_restart_gap"], told["continuity"]))
+            later, _, _, _ = foundation(persistence_path=path)
+            clean = later.observation.build_snapshot("e1")["coverage"]
+            self.assertEqual((False, False, "restart-safe"), (clean["has_gaps"], clean["has_restart_gap"], clean["continuity"]))
+            self.assertNotIn("gaps", clean)
 
     def test_continuation_is_request_bound_truthful_and_nonoverlapping(self):
         limits = ObservationLimits(

@@ -10,6 +10,12 @@ the library starts itself, with no new message: after a pause, when it looks
 again at a moment it waited on, and after an operator approves an action the
 agent proposed, when it gives the agent a turn about the outcome.
 
+Two scenarios, ``gap`` and ``final-gap``, start the room the way an
+integration must (`docs/harness-guide.md`): with a continuity gap declared
+before the first message. The turn that reads the room across it must say so
+in the library's one plain sentence, and the turn after the agent has taken
+one past it must not (Zoe, 2026-10-10).
+
 One scenario, ``launch-secret``, needs a secret the harness itself holds: the
 per-launch secret an integration's room tools call the library with. An
 integration without one reports it as not applicable.
@@ -107,6 +113,9 @@ SILENCE_FORMS = (
 NEAR_SILENCE = "No reply from Bob yet. Want me to ping him?"
 # The agent's own "mhm" (docs/behavior.md): one reaction the kit's room offers.
 MHM = "👂"
+# The start of the library's sentence for a gap, and its advice.
+GAP_TOLD = "Messages may be missing before "
+GAP_ADVICE = "read the history if it matters."
 # Why the agent waits, what it posts after the pause, and its outcome report.
 WAITED = "Castor was asked, not me."
 LOOKED_AGAIN = "Still stuck? I can take a look."
@@ -187,6 +196,10 @@ class Scenario:
     ``meant``: the agent's post in each play is its form, a real post that
     names machinery on purpose (it discusses it). The check requires it
     committed exactly as written, so what it names is not counted as a leak.
+
+    ``gap``: the room declares a continuity gap before its first message, as
+    an integration must at every start; the scenario checks what the agent's
+    turns are told of it.
     """
 
     posting: str
@@ -200,6 +213,7 @@ class Scenario:
     forms: tuple[str, ...] = ()
     model_failure: bool = False
     meant: bool = False
+    gap: bool = False
 
 
 @dataclass
@@ -772,6 +786,31 @@ def _check_final_outcome(played: Played) -> list[str]:
     return failures
 
 
+def _check_gap(played: Played, *, first: int, second: int, after: int) -> list[str]:
+    """The turn that read across the gap was told once, in the library's words; the turn after was not."""
+
+    failures: list[str] = []
+    told, later = played.answer(first), played.answer(second)
+    _expect(isinstance(told, str) and GAP_TOLD in told, "the turn that read across the gap was not told of it", failures)
+    _expect(
+        isinstance(told, str) and GAP_ADVICE in told and '"gaps":[{"at":' in told,
+        "the turn does not say to read the history, or its facts do not carry the gap's time",
+        failures,
+    )
+    _expect(
+        isinstance(told, str) and told.count(GAP_TOLD) == 1,
+        "the turn says the gap more than once",
+        failures,
+    )
+    _later_turn(played, failures, occasion="pause", bound=after, shown=second)
+    _expect(
+        isinstance(later, str) and GAP_TOLD not in later and '"gaps"' not in later,
+        "the turn after the agent had taken one past the gap was told of it again",
+        failures,
+    )
+    return failures
+
+
 def _check_mhm(played: Played, *, reacted: int) -> list[str]:
     failures: list[str] = []
     _expect(played.answer(reacted)[0] is True, f"the reaction was refused: {played.answer(reacted)}", failures)
@@ -1056,6 +1095,15 @@ SCENARIOS: dict[str, Scenario] = {
         next_occasion="pause",
         next_steps=(("bind",), ("read",), ("call", "send", {"text": LOOKED_AGAIN}), ("end", True)),
     ),
+    "gap": Scenario(
+        "tools",
+        "a gap declared at the start is told in the turn that reads across it, once, and not in the turn after",
+        (("bind",), ("read",), ("end", True, WAITED)),
+        lambda played: _check_gap(played, first=1, second=4, after=3),
+        next_occasion="pause",
+        next_steps=(("bind",), ("read",), ("end", True)),
+        gap=True,
+    ),
     "outcome": Scenario(
         "tools",
         "an approved action's outcome starts a turn, and the agent reports it",
@@ -1161,6 +1209,15 @@ SCENARIOS: dict[str, Scenario] = {
         _check_final_pause,
         next_occasion="pause",
         next_steps=(("bind",), ("read",), ("finish", LOOKED_AGAIN), ("end", True)),
+    ),
+    "final-gap": Scenario(
+        "final-answer",
+        "a gap declared at the start is told in the turn that reads across it, once, and not in the turn after",
+        (("bind",), ("read",), ("finish", f"<thinking>{WAITED}</thinking>\n{SILENCE}"), ("end", True)),
+        lambda played: _check_gap(played, first=1, second=5, after=4),
+        next_occasion="pause",
+        next_steps=(("bind",), ("read",), ("finish", SILENCE), ("end", True)),
+        gap=True,
     ),
     "final-outcome": Scenario(
         "final-answer",
@@ -1582,6 +1639,12 @@ def _play(
         host = room.host
         pipeline = room.pipeline
         try:
+            if scenario.gap:
+                # What an integration does at every start, before the first
+                # event: it cannot know what happened while it was away.
+                room.observation.mark_continuity_gap(
+                    delivery_id="conformance:gap:start", detail="conformance: the room started"
+                )
             outcome = pipeline.handle_delivery(
                 delivery_id="conformance:delivery:1",
                 event={

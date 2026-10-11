@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010A AttentionRequestV2@7`` (slice 010, T002; #94 step 6: @2 adds the pace, @3 the pause occasion, @4 the outcome one, @5 the memory, @6 the unattended messages; #94 step 9d: @7 a message the harness posted).
+"""Contract tests for ``I-010A AttentionRequestV2@8`` (slice 010, T002; #94 step 6: @2 adds the pace, @3 the pause occasion, @4 the outcome one, @5 the memory, @6 the unattended messages; #94 step 9d: @7 a message the harness posted; Zoe, 2026-10-10: @8 the gaps a window reaches).
 
 Red cases cover exact identity (S01), actor mentions versus
 ``mentions_room`` (S02), the runtime-adapter-only relational classes
@@ -117,6 +117,30 @@ class UnattendedCases(unittest.TestCase):
         for bad in ([], ["e1", "e1"], ["e1", "e2", "e3", "e4"], [""], None):
             with self.subTest(bad=bad):
                 assert_schema_verdict(self, "attention-request", dict(make_request(), unattended_event_ids=bad), "invalid")
+
+
+class GapCases(unittest.TestCase):
+    """@8 (Zoe, 2026-10-10): coverage names the gaps in view that are still news, by when each was declared."""
+
+    def request(self, gaps):
+        doc = make_request()
+        doc["coverage"].update(has_gaps=True, has_restart_gap=True, continuity="unknown", gaps=gaps)
+        return doc
+
+    def test_gaps_validate_and_are_optional(self):
+        assert_schema_verdict(self, "attention-request", make_request(), "valid")
+        assert_schema_verdict(self, "attention-request", self.request([{"at": "2026-10-10T14:02:00.000Z"}]), "valid")
+        assert_schema_verdict(
+            self,
+            "attention-request",
+            self.request([{"at": "2026-10-10T13:10:00.000Z"}, {"at": "2026-10-10T14:02:00.000Z"}]),
+            "valid",
+        )
+
+    def test_a_malformed_gap_rejects(self):
+        for bad in ([], {}, "2026-10-10T14:02:00.000Z", [{}], [{"at": ""}], [{"at": 7}], [{"at": "x", "why": "restart"}], [None]):
+            with self.subTest(bad=bad):
+                assert_schema_verdict(self, "attention-request", self.request(bad), "invalid")
 
 
 class ExactIdentityRedCases(unittest.TestCase):
