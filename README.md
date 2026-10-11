@@ -134,7 +134,8 @@ effect commit point.
 ## Current state
 
 V2 is on `main` and is partial: **merged, unverified**. Deterministic tests and
-installed stock-Hermes checks pass in CI. No surface has passed a live
+the clean-install lanes for Claude Code, Codex and the parked Hermes plugin
+pass in CI. No surface has passed a live
 real-room check since the shared core was replaced in
 [PR #67](https://github.com/mentatzoe/nunchi/pull/67). V2 is not release-ready
 or complete, and there is no V2 release tag. Combined acceptance is tracked in
@@ -142,8 +143,8 @@ or complete, and there is no V2 release tag. Combined acceptance is tracked in
 
 `main` contains the shared core; the operator CLI, dashboard, and service
 supervisor; packaging; generic/Discord/Matrix/Telegram reference adapters; the
-shared Discord MCP transport; and incomplete Hermes, Codex, and Claude Code
-integrations.
+shared Discord MCP transport; the incomplete Codex and Claude Code
+integrations; and the parked Hermes plugin.
 
 The shared core has one versioned participant protocol. A judgment that leans
 to a "mhm" gives the agent a turn, and any "mhm" is the agent's own reaction;
@@ -151,37 +152,17 @@ Nunchi never reacts for it (step 7 of the plan removed Nunchi's own nod). The at
 model is chosen by configuration (`kind`), so the core names no agent host,
 chat platform, or model vendor.
 
-**Hermes.** The Hermes integration reuses Nunchi's shared observation,
-attention, scheduling, wake, and receipt behavior around the stock participant.
-It supports Hermes 0.19.0 or newer when its checked host capability contract
-passes, for configured Discord or Telegram rooms. Other Hermes platforms remain
-outside Nunchi and keep stock behavior; attempts to add them to a Nunchi config
-are rejected.
-
-On configured Hermes rooms, ordinary tools run through the stock Hermes
-registry and native approval flow, with plugin-owned guards at native invocation.
-Hermes remains authoritative for tools and approvals. This boundary does not
-claim atomic, universal authority over external effects: a journal `finish`
-records the callback result, not independent confirmation of the external effect.
-Hermes auto-title is disabled there because its background work can
-outlive the turn. Native typing, voice input, `/thread`, detached participant
-commands, and handoff into configured rooms are also disabled where Hermes
-0.19.0 cannot keep them inside the admitted opportunity. Hermes's stock
-processing reactions run only after the participant starts. These are explicit
-product gaps, not supported behavior.
-
-On every push to `main` and every PR into it, CI installs stock Hermes 0.19.0,
-0.21.5, and current Hermes `main`. It runs the host-contract lane for Discord
-and Telegram, and normal-attention and startup lanes for Discord. The
-normal-attention lane covers normal turns, ordinary tools, native approval,
-a mhm as the agent's own turn, and attention setup. These lanes use a loopback model and captured
-platform output, so they are installed-runtime checks, not live ones. Live
-platforms, Telegram normal turns, release, and running-profile adoption remain
-unverified. Historical Hermes evidence is not current proof. See the
-[verification record](docs/v2-verification.md). Remaining Hermes gaps are
-tracked in [issues #38](https://github.com/mentatzoe/nunchi/issues/38) and
-[#42](https://github.com/mentatzoe/nunchi/issues/42), with supported-surface
-parity tracked in [#44](https://github.com/mentatzoe/nunchi/issues/44).
+**Hermes.** Hermes has no supported path today. The old Hermes integration
+was removed on 2026-10-11 (Zoe: "delete, for now"). It patched Hermes at
+runtime, which breaks the rule that an integration follows each harness's own
+plugin rules and never patches or reimplements the harness
+([`AGENTS.md`](AGENTS.md), One library, every harness). The Hermes plugin
+([`integrations/hermes-plugin/README.md`](integrations/hermes-plugin/README.md))
+is parked, not removed (2026-10-10): its code and CI lane stay, it has run
+offline only, and there is no new Hermes work until it is unparked. CI runs
+that plugin's turn conformance kit and tests inside a clean install of a pinned
+stock Hermes, with the model scripted; these are installed-runtime checks, not
+live ones. Historical Hermes evidence is not current proof.
 
 **Codex.** `nunchi-codex-room-runner` runs a Codex participant in a Discord
 room in a reduced mode: Codex shell, browser, plugin, app, skill, and MCP
@@ -236,13 +217,9 @@ nunchi-codex-room-runner --probe
 nunchi-claude-code-room-runner --probe
 ```
 
-The package metadata exposes a `nunchi` Hermes plugin without adding Hermes as
-a Nunchi dependency. When Hermes loads it, the plugin installs its
-authenticated dashboard tab automatically for room configuration and V2
-receipts without changing Hermes package files. First-time room setup and
-private profile-config creation happen in that tab; no separate setup command
-is required. Package and installed-runtime acceptance remain separate gates.
-See [`integrations/hermes/README.md`](integrations/hermes/README.md).
+Hermes is not installed by the package. The parked Hermes plugin is installed
+by hand, as its own README says
+([`integrations/hermes-plugin/README.md`](integrations/hermes-plugin/README.md#install)).
 
 The guided operator path creates and updates exact SHA-256 pins automatically;
 operators do not calculate hashes or hand-write JSON. Credentials are named

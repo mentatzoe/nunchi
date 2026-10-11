@@ -62,7 +62,7 @@ clean install or supported upgrade:
 | CLI, packaging, and operator paths | Installation, supported V1 upgrade, configuration, diagnostics, restart, and rollback work from committed documentation. |
 | Shared transport and Discord | Native facts, identity, authority, ordering, and delivery closure are preserved through the common transport and Discord path. |
 | Codex | The installed Codex integration implements the complete V2 lifecycle. |
-| Hermes | The installed Hermes integration implements the complete V2 lifecycle. |
+| Hermes | The installed Hermes integration implements the complete V2 lifecycle. (The Hermes plugin is parked since 2026-10-10 and the old integration was removed on 2026-10-11, Zoe, "delete, for now"; whether this row stays a release requirement is Zoe's decision.) |
 | Claude Code | The installed Claude Code integration implements the complete V2 lifecycle. |
 | Reference adapters | Generic channel, Matrix, Telegram, and standalone Discord implement the applicable V2 contract and represent unavailable platform facts honestly. |
 

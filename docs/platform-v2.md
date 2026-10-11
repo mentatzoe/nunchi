@@ -1,8 +1,9 @@
 # V2 platform interface and conformance
 
-This is the current downstream interface for Hermes and Claude Code, and for
-reference platform integrations. Both platform implementations consume the
-shared owners but have not completed installed and live acceptance.
+This is the current downstream interface for Claude Code and Codex, for the
+parked Hermes plugin, and for reference platform integrations. These
+implementations consume the shared owners but have not completed live
+acceptance.
 The normal participant-turn protocol is a shared interface; platform code
 does not redefine it. Nunchi never reacts on the participant's behalf: a "mhm"
 is the participant's own reaction in its own turn (#94 step 7).
@@ -98,9 +99,9 @@ names. Host- and vendor-specific behavior enters through these seams:
   signals a refused model; such errors become `HostAttentionPermissionError`
   carrying the integration's `denied_detail` repair text, and anything else
   is a provider failure. With `require_attestation` (the default) the host
-  must report the provider and model it actually served. Hermes supplies its
-  denial check and repair text from
-  `src/nunchi/integrations/hermes_attention_trust.py`.
+  must report the provider and model it actually served. The Hermes plugin
+  supplies its denial check and repair text (`_hermes_refused`,
+  `HOST_MODEL_REFUSED`) in `src/nunchi/integrations/hermes_plugin/plugin.py`.
 - An attention model's `provider` and `model_id` are opaque audit labels.
   `None` means the host does not report them, and the audit omits them.
 - A participant that acts through tools inside its own agent loop uses the
@@ -122,48 +123,32 @@ names. Host- and vendor-specific behavior enters through these seams:
 
 ### Host-owned participant pipelines
 
-Hermes owns the participant execution pipeline. Its Nunchi integration uses
-the shared observation, attention, opportunity preparation, scheduler, wake
-builder, and participant-receipt formation as a gate around that pipeline:
+A host that owns the participant execution pipeline does not use
+`ParticipantTurnHost`. The shape for it is a gate around that pipeline, built
+from the shared observation, attention, opportunity preparation, scheduler,
+wake builder, and participant-receipt formation:
 
-1. Nunchi decides before Hermes starts visible processing.
+1. Nunchi decides before the host starts visible processing.
 2. `SUPPRESS` stops there.
-3. An admitted turn receives the shared bounded wake facts through Hermes's
+3. An admitted turn receives the shared bounded wake facts through the host's
    context hook.
-4. Hermes runs its participant prompt, main model, memory, reactions,
+4. The host runs its participant prompt, main model, memory, reactions,
    cancellation, delivery, and platform adapter behind Nunchi's guards.
-5. Nunchi observes completion and writes only the lifecycle facts exposed by
-   Hermes.
+5. Nunchi observes completion and writes only the lifecycle facts the host
+   exposes.
 
-Configured-room tools use a durable invocation claim at the stock middleware
-handoff. Hermes keeps its approvals and guards; Nunchi checks the opportunity
-before dispatch, propagates cancellation through native thread interrupts,
-and rechecks native approval waits on return. Invocation outcomes remain
-unknown as effects, even when a tool returns text; claims are never retried
-automatically after restart. Already-committed handlers that do not poll native
-interrupts can continue after cancellation. This is cooperative cancellation,
-not a sandbox or a zero-syscall guarantee. See
-[`verification/2026-10-02-native-tools.md`](verification/2026-10-02-native-tools.md).
-
-Auto-title is disabled because it can outlive the turn. Native typing, Discord voice
-input, `/thread`, detached participant commands, and handoff into configured
-rooms are disabled for the same lifecycle reason. A judgment that leans to a
-"mhm" runs the normal participant path like any `DEFER`; Nunchi no longer
+No integration implements this shape today. The only one that did, the old
+Hermes integration, was removed on 2026-10-11 (Zoe, "delete, for now")
+because it patched Hermes at runtime; the Hermes plugin that replaced it
+consumes each message and injects a turn of its own instead, and is parked
+(2026-10-10). Gating Hermes's own native turn through its public hooks is the
+open redesign (plugin README,
+[Before unparking](../integrations/hermes-plugin/README.md#before-unparking)).
+A "mhm" runs the normal participant path like any `DEFER`; Nunchi no longer
 adds its own reaction or probes reaction permission before attention (#94
-step 7; the earlier nod is recorded in
-[`verification/2026-10-02-hermes-ack.md`](verification/2026-10-02-hermes-ack.md)).
-These exclusions are not a complete V2 lifecycle.
+step 7).
 
-The plugin requires Hermes 0.19.0 or newer. It checks the host capability
-contract and installs its compatibility shim transactionally on every
-activation. A changed required interface fails closed until Nunchi evolves its
-shim; a new package version alone is not an incompatibility.
-
-This is the current Hermes participant implementation, not the intended one:
-it misses the behaviors the shared turn carries, and it patches Hermes
-internals through a compatibility shim. Step 9 of
-[#94](https://github.com/mentatzoe/nunchi/issues/94) replaces it with a plugin
-on Hermes's public hooks. Either way, the plugin must not recreate shared
+Whatever the host, an integration on this shape must not recreate shared
 Nunchi behavior with a second attention model call, copied prompt, copied
 model selection, copied opportunity lifecycle, or direct send path.
 
@@ -479,7 +464,8 @@ runs only when the lane is idle, so it never displaces a newer message, and
 it happens once per quiet stretch: a look again never arms another. Every
 integration built on `nunchi.room` looks again, since a `Room` delivers
 through the lane: Claude Code, the Codex app-server integration, the Hermes
-plugin, and the generic runtime. The older Hermes integration does not. The
+plugin, and the generic runtime. (The older Hermes integration, which did not,
+was removed on 2026-10-11.) The
 turn conformance kit checks that the pause turn and the outcome turn reach
 the agent through each integration.
 

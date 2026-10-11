@@ -95,6 +95,9 @@ one vendor, the core needs a neutral interface instead.
   Hermes work until it is unparked
   ([README, Parked](integrations/hermes-plugin/README.md#parked-2026-10-10)).
   Codex stays active.
+- **The old Hermes integration is removed** (Zoe, 2026-10-11, "delete, for
+  now"). It patched Hermes at runtime, which this rule forbids. Hermes has no
+  supported path until the plugin is unparked.
 - **D4, decided** (2026-10-10): Hermes's built-in commands stay Hermes's. The
   plugin never drops or rewrites them; operators can restrict them with
   `group_allow_admin_from`.

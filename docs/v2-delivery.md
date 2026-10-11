@@ -29,23 +29,22 @@ Nothing below is **verified**.
 |---|---|---|---|
 | Shared core, operator CLI/dashboard/services, packaging | **merged, unverified** (PR #67, plus #88, #89, #90, #91) | CI: offline suite and contract corpus on Python 3.11–3.13, clean wheel install with entry-point probes; local: 11/11 lifecycle scenarios | live proof; combined acceptance ([#41](https://github.com/mentatzoe/nunchi/issues/41)); agnostic-core follow-up ([#85](https://github.com/mentatzoe/nunchi/issues/85)) |
 | Reference adapters (generic channel, Discord, Matrix, Telegram) and shared Discord MCP transport | **merged, unverified** | offline tests; clean-install probes | live proof per platform |
-| Hermes | **merged, unverified** (PRs #36, #83, #84) | offline tests; installed stock-Hermes CI on 0.19.0, 0.21.5, and current Hermes `main`: contract lanes for Discord and Telegram, normal-attention and startup lanes for Discord | live acceptance ([#38](https://github.com/mentatzoe/nunchi/issues/38)); receipt/deadline/restart boundaries ([#42](https://github.com/mentatzoe/nunchi/issues/42)); supported-surface parity ([#44](https://github.com/mentatzoe/nunchi/issues/44)) |
+| Hermes plugin (parked 2026-10-10; the old integration was removed 2026-10-11) | **merged, unverified**, parked | offline: the turn conformance kit and the plugin's tests inside a clean install of pinned stock Hermes, the Discord stand-in lane and the scripted rehearsal probe, all in the `hermes-plugin` CI job | live proof; unparking ([plugin README, Before unparking](../integrations/hermes-plugin/README.md#before-unparking)) |
 | Codex | **merged, unverified**, reduced: Discord only, Codex tools, skills, plugins, and MCP disabled | offline tests; clean-install probe | continuity binding and other adapters in draft PR [#71](https://github.com/mentatzoe/nunchi/pull/71) (**implemented, unverified**); parity gaps #59–#65; live proof |
 | Claude Code | **merged, unverified**: per-room gate, dedicated session, and Nunchi mod ([#43](https://github.com/mentatzoe/nunchi/issues/43)); Discord only | offline tests, including a stub session over the real gate socket; `claude plugin validate --strict` and `claude plugin test` on Claude Code 2.1.289; clean-install probe | every adapter ([#57](https://github.com/mentatzoe/nunchi/issues/57)); install and supervision ([#58](https://github.com/mentatzoe/nunchi/issues/58)); live acceptance ([#39](https://github.com/mentatzoe/nunchi/issues/39)) |
 
 No unverified platform (Hermes, Codex, or Claude Code) may be described as
 done, live, or parity-ready until its open gates pass.
 
-Hermes reuses Nunchi's shared observation, attention, scheduling, wake, and
-receipt behavior around the stock Hermes participant. Ordinary tools run
-through the stock Hermes registry and approval flow with plugin-owned guards;
-Hermes stays authoritative, and a journal `finish` records the callback result,
-not confirmation of an external effect. Auto-title, stock typing, voice input,
-native `/thread`, detached commands, and handoff into configured rooms stay
-disabled; media and reaction ingress and other platforms are incomplete. The
-stopped profile lifecycle archives V1 and V2 state and supports guarded
-restoration; it does not convert V1 social history. See the
-[verification record](v2-verification.md) for exact runs.
+Hermes has no supported path today. Zoe removed the old Hermes integration on
+2026-10-11 ("delete, for now"): it patched Hermes at runtime, which breaks the
+rule that an integration follows each harness's own plugin rules and never
+patches or reimplements the harness. The Hermes plugin stays parked, with its
+code and CI lane, until it is unparked; its README says what it does and what
+it lacks. The Hermes issues [#38](https://github.com/mentatzoe/nunchi/issues/38),
+[#42](https://github.com/mentatzoe/nunchi/issues/42) and
+[#44](https://github.com/mentatzoe/nunchi/issues/44) tracked the removed
+integration's gates and gate nothing here until the plugin is unparked.
 
 Claude Code follows the design Zoe selected (#43): one Python gate per room,
 a dedicated Claude Code session per room that keeps the user's configuration,
@@ -55,12 +54,9 @@ superseded. `nunchi-claude-code-room-runner` now starts the gate.
 
 Open gates:
 
-- [#38 Hermes live-platform acceptance](https://github.com/mentatzoe/nunchi/issues/38);
 - [#39 Claude Code live and release acceptance](https://github.com/mentatzoe/nunchi/issues/39);
 - [#41 combined V2 final acceptance](https://github.com/mentatzoe/nunchi/issues/41);
-- [#42 Hermes receipt, deadline, and restart boundaries](https://github.com/mentatzoe/nunchi/issues/42);
 - [#43 Claude Code mod and dedicated session](https://github.com/mentatzoe/nunchi/issues/43);
-- [#44 Hermes supported-surface parity](https://github.com/mentatzoe/nunchi/issues/44);
 - [#57 Claude Code on every Nunchi adapter](https://github.com/mentatzoe/nunchi/issues/57);
 - [#58 Claude Code install and supervision](https://github.com/mentatzoe/nunchi/issues/58);
 - [#66 freeze one exact release candidate](https://github.com/mentatzoe/nunchi/issues/66);

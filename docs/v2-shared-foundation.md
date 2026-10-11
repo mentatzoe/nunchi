@@ -42,9 +42,10 @@ continuity, cancellation, and result extraction. The Claude Code gate supplies
 its dedicated session and the mod that turns room tool calls into actions
 through the core's tool-turn helpers. Reference platform transports supply authenticated
 capability facts and native effects. They do not own a prompt, parser,
-expansion policy, social decision, or participant turn protocol. Hermes
-consumes the same attention decision and runs its stock participant turn for
-`WAKE` and `DEFER`.
+expansion policy, social decision, or participant turn protocol. The parked
+Hermes plugin takes the room's messages and starts the agent's turns through
+Hermes's public hooks, on the same `Room` and attention decision. (The old
+Hermes integration was removed on 2026-10-11.)
 
 ## Attention model selection
 
@@ -164,7 +165,7 @@ and an explicit state-purge boundary.
 | Telegram | shared protocol; no attested reaction capability, so the participant cannot react | native reactions only if a future verified adapter supplies them |
 | Codex | shared protocol and operator schema; the merged runner is reduced to Discord with Codex tools disabled | draft PR #71; parity issues #59–#65; live proof |
 | Claude Code | the per-room gate, dedicated session, and mod (issue #43) use the shared host and the core tool-turn helpers | Discord only; #57, #58, and live proof in #39 |
-| Hermes | shared attention; `WAKE` and `DEFER` run the stock participant turn | issues #38, #42, and #44 platform closure |
+| Hermes plugin (parked) | the shared `Room`, attention and `Turn`; the plugin injects the agent's turn | unparking ([plugin README](../integrations/hermes-plugin/README.md#before-unparking)); the old integration was removed on 2026-10-11 |
 
 Issue #41 remains the combined acceptance gate. Security assurance, release
 work, final acceptance, and platform-specific live proof remain separate. Being

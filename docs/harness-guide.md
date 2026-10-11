@@ -239,8 +239,7 @@ An integration's config has the shared sections and one section of its own:
   topic or thread message reaches the agent as an ordinary message of the
   room, and its reply goes to the room, with either setting. The channel
   adapter (`nunchi-channel`) takes its events as given, so the key works only
-  for a producer that sets `thread_root_event_id`. The older
-  `integrations/hermes` integration rejects the key at load, naming it.
+  for a producer that sets `thread_root_event_id`.
 - `profile` is pinned by its hash, and must name the same participant and
   actor. The file is JSON with exactly five fields: `profile_id`,
   `participant_id`, `actor_id`, `instructions` (who the agent is in this

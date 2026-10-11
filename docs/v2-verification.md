@@ -6,6 +6,13 @@ reproduced.
 
 ## Current state (2026-10-04)
 
+**Update, 2026-10-11:** Zoe removed the old Hermes integration ("delete, for
+now"). Its `Hermes host contract` workflow (the contract, normal-attention and
+startup lanes), `scripts/verify_stock_hermes.py`, the Hermes profile lifecycle
+and the `nunchi-hermes-*` commands named in this record are gone from the tree,
+so every Hermes row here is history, not a current check. The parked Hermes
+plugin is checked by the `hermes-plugin` job in `.github/workflows/ci.yml`.
+
 **Subject:** `main` at `41cb79c` (merge of PR
 [#91](https://github.com/mentatzoe/nunchi/pull/91)).
 
@@ -107,7 +114,7 @@ Installed proof is no longer absent. The combined PR84 record supersedes the
 historical contract-only main limitation above. Live first-save/restart, native
 platform acceptance, remaining surfaces, release, running-profile adoption and
 complete V2 acceptance remain open. The
-[profile lifecycle guide](hermes-profile-lifecycle.md) covers stopped cutover,
+profile lifecycle guide (`docs/hermes-profile-lifecycle.md`, removed 2026-10-11) covered stopped cutover,
 quarantine, retirement and guarded restoration. Archives remain private and
 retained; no V1 social state is converted and package uninstall is not data purge.
 
