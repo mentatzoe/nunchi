@@ -60,6 +60,10 @@ Each graded message must reach the agent as it was sent
 (``discord-addressing``): the pings it carried (a reply pings the author of the
 message it answers), for the reply the agent's own last post as the message it
 answers, and for the thread question the thread it was said in.
+
+With ``--scene`` (PR 4a, the reference only) the moments above give way to one
+behavior scene, played by the director (`directed.py`) and graded from its own
+expectations; see `ReferenceLeg`.
 """
 
 from __future__ import annotations
@@ -84,6 +88,7 @@ from typing import Any
 from evals.behavior.scene import SCENES as BEHAVIOR_SCENES, Scene, load_scene
 
 from . import checks as checks_module
+from . import directed
 from .checks import PROBE_SCENARIO, REACHED, Check
 from .discord_net import ENV as NET_ENV
 from .fake_discord.control import FakeDiscord
@@ -192,6 +197,14 @@ POST = "POST /channels/{channel}/messages"
 REACT = "PUT /channels/{channel}/messages/{message}/reactions/{emoji}/@me"
 TRANSPORT_CALLS = (POST, REACT, "GET /channels/{channel}", "GET /guilds/{guild}/members/{user}", "GET /guilds/{guild}/roles")
 REFERENCE_CALLS = ("GET /users/@me", POST, REACT)
+
+
+def directed_calls(moments: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
+    """The calls the reference must make in a directed scene: its login, and a post or a reaction where the script makes one."""
+
+    scripted = {item.get("scripted") for moment in moments if moment.get("expect") == "directed" for item in moment.get("graded", ())}
+    return ("GET /users/@me", *((POST,) if "speak" in scripted else ()), *((REACT,) if "mhm" in scripted else ()))
+
 
 # The transport journal's outcomes that mean a gap (`nunchi.mcp_discord.server.TransportAuditJournal`).
 TRANSPORT_GAP_OUTCOMES = ("source-gap", "gap-signal", "queue-rejected", "client-delivery-lost", "shutdown-lost")
@@ -505,8 +518,11 @@ class DiscordRoom:
 
     # -- the stand-in --------------------------------------------------------------------------------
 
-    def start(self) -> None:
-        scenes = [load_scene(spec.scene) for spec in MOMENTS]
+    def start(self, scenes: Sequence[Scene] | None = None) -> None:
+        """Start the stand-in with a world for ``scenes``: the moments' scenes unless given (a directed scene's)."""
+
+        if scenes is None:
+            scenes = [load_scene(spec.scene) for spec in MOMENTS]
         spec, self.members = world_spec(self.column, scenes, agent=self.agent)
         tls = self.net["tls"]
         self.fd = FakeDiscord(spec, self.ctx.out, port=443, tls=(tls["cert"], tls["key"])).start()
@@ -707,6 +723,12 @@ class DiscordRoom:
             # The thread it was said in, as an event names it (`thread_root_event_id`); None in the room itself.
             "thread": f"discord:message:{self.threads[spec.thread]}" if spec.thread else None,
         }
+        if getattr(spec, "expect", None) == "directed":
+            # The pings the scene meant, from the scene and not from the text sent (as actor ids): the director's check that
+            # the stand-in sent them and that Nunchi saw them (`checks.discord_addressing`). The moments' records are as before.
+            delivery["meant_actor_ids"] = [
+                f"{self.actor}:{self.fd.world.member(self.members[name]).id}" for name in raw.get("mentions", ())
+            ]
         if note:
             delivery["note"] = note
         return delivery
@@ -816,6 +838,7 @@ class DiscordRoom:
         gaps_fail: bool,
         moments: Sequence[Mapping[str, Any]],
         reply_resolves: bool = True,
+        reconnects_required: bool = True,
     ) -> list[Check]:
         verdict = self.verdict or {"clean": False, "unknown": [{"what": "no verdict: the stand-in never stopped"}]}
         records = self.records
@@ -828,7 +851,9 @@ class DiscordRoom:
                 verdict.get("bots", {}), expected, {bot: wire_calls(records, bot) for bot in expected}
             ),
             checks_module.discord_writes_reconciled(committed, wire_writes(records, self.agent)),
-            checks_module.discord_continuity(self.start_gap, self.reconnects, gaps_fail=gaps_fail),
+            checks_module.discord_continuity(
+                self.start_gap, self.reconnects, gaps_fail=gaps_fail, reconnects_required=reconnects_required
+            ),
             checks_module.discord_addressing(
                 moments,
                 agent=f"{self.actor}:{self.agent_id}",
@@ -890,6 +915,8 @@ def judge_discord_moments(leg: Leg, moments: Sequence[dict[str, Any]], received:
         item["delivered"] = ok
     effects = leg.room_effects()
     for moment in moments:
+        if moment.get("expect") == "directed":
+            continue  # a scene has many graded messages: `directed.judge_scene` grades each
         graded = {turn["request_id"] for turn in moment["turns"] if turn.get("trigger") == moment["graded_event"]}
         actions = [
             {
@@ -1092,7 +1119,14 @@ class DiscordCodexLeg(OnTheTransport, CodexLeg):
 
 
 class ReferenceLeg(Leg):
-    """`nunchi-discord` in its own process, with a scripted plain-call participant: the evidence comes from outside it."""
+    """`nunchi-discord` in its own process, with a scripted plain-call participant: the evidence comes from outside it.
+
+    With ``--scene`` (``ctx.directed``) it plays one behavior scene instead of
+    the moments: the world holds that scene's people and bots, attention and
+    the participant follow its `SceneScript`, the director (`directed.py`)
+    posts the scene, and each graded moment is graded from the scene's own
+    expectations (`directed.judge_scene`).
+    """
 
     harness = REFERENCE
     script = SCRIPT
@@ -1104,14 +1138,17 @@ class ReferenceLeg(Leg):
         self.discord = DiscordRoom(ctx, self.harness)
         self.participant_endpoint: ScriptedParticipant | None = None
         self.process: DiscordProcess | None = None
-        self._spec: MomentSpec | None = None
+        self._spec: MomentSpec | directed.DirectedSpec | None = None
+        self.directed: directed.DirectedSpec | None = ctx.directed
+        if self.directed is not None:
+            self.script = self.directed.script
 
     @property
     def room(self) -> Any:
         return None
 
     def prepare(self) -> None:
-        self.discord.start()
+        self.discord.start([self.directed.plan.scene] if self.directed is not None else None)
         self.room_id = self.discord.channel_id
         self.actor_id = f"discord:actor:{self.discord.agent_id}"
         self.scope = f"discord:channel:{self.room_id}"
@@ -1178,8 +1215,14 @@ class ReferenceLeg(Leg):
         assert self._spec is not None
         return self.discord.reach(self.discord.post(raw, at, scene, self._spec))
 
-    def play(self, spec: MomentSpec, *, settle_seconds: float) -> dict[str, Any]:
+    def play(self, spec: MomentSpec | directed.DirectedSpec, *, settle_seconds: float) -> dict[str, Any]:
         self._spec = spec
+        if isinstance(spec, directed.DirectedSpec):
+            moment = directed.play_scene(self, spec.plan, settle_seconds)
+            self.read_turns()
+            for turn in self.invocations:
+                turn["moment"] = spec.name
+            return moment
         if spec.reconnect_before:
             self.discord.reconnect()
         moment = play_moment(self, spec, settle_seconds=settle_seconds)
@@ -1263,6 +1306,8 @@ class ReferenceLeg(Leg):
                     "result": _summarize_action(given[-1]["action"]),
                 }
             )
+            if given[-1].get("unattended"):
+                turn["unattended"] = given[-1]["unattended"]
             if host is not None:
                 turn["ended"] = given[-1]["at"]
         committed = {item["request_id"] for item in self.committed}
@@ -1270,8 +1315,12 @@ class ReferenceLeg(Leg):
             transport = stage.get("transport")
             if transport is None or request_id in committed or request_id not in answers:
                 continue
-            action = _summarize_action(answers[request_id][-1]["action"])
+            given = answers[request_id][-1]["action"]
+            action = _summarize_action(given)
             action.pop("why", None)
+            if self.directed is not None and isinstance(given, Mapping) and "origin_event_id" in given:
+                # A scene holds each action to the message it was about; a plain message names it only by its origin.
+                action["origin_event_id"] = given["origin_event_id"]
             self.committed.append({"request_id": request_id, **action, "delivery": transport.get("delivery"), "detail": transport.get("detail")})
         self.attention_calls = []
         for request_id, stage in stages.items():
@@ -1282,9 +1331,13 @@ class ReferenceLeg(Leg):
             entry: dict[str, Any] = {"request_id": request_id, "trigger": trigger, "model": (self.ctx.attention or {}).get("model")}
             if "error" in attention:
                 entry["error"] = f"{attention['error'].get('code')}: {attention['error'].get('detail')}"
+                if attention.get("wake_action"):
+                    entry["wake_action"] = attention["wake_action"]
             else:
                 entry["disposition"] = attention.get("effective_disposition")
                 entry["served"] = {"provider": "scripted"}
+                if self.directed is not None:
+                    entry["evidence"] = list(attention.get("evidence_event_ids") or ())
             self.attention_calls.append(entry)
 
     def collect(self) -> None:
@@ -1315,13 +1368,32 @@ class ReferenceLeg(Leg):
         answers = self.participant_endpoint.answers if self.participant_endpoint else ()
         received = {answer["received"]["trigger"]: answer["received"] for answer in answers if answer.get("received")}
         judge_discord_moments(self, moments, received)
+        if self.directed is not None:
+            logged = room_events(self.discord.state)
+            for moment in moments:
+                if moment.get("expect") == "directed":
+                    for delivery in moment.get("deliveries", ()):
+                        # What Nunchi's own room log holds of the message: it saw every message it took in, a turn only some.
+                        event = logged.get(delivery.get("event_id"))
+                        if event is not None:
+                            delivery["logged"] = {
+                                "mentioned_actor_ids": list(event.get("mentioned_actor_ids") or ()),
+                                "reply_to_event_id": event.get("reply_to_event_id"),
+                            }
+                    directed.judge_scene(self, moment, self.directed.plan.scene)
 
     def scripted_check(self, moments: Sequence[Mapping[str, Any]]) -> Check:
+        if self.directed is not None:
+            return checks_module.directed_outcomes(moments)
         return checks_module.discord_scripted_outcomes(moments, EXPECTED, pins=self.pins)
 
     def room_checks(self, document: Mapping[str, Any]) -> list[Check]:
-        expected = {self.discord.agent: {"chunk": True, "calls": self.expected_calls}}
-        return self.discord.checks(self.committed, expected=expected, gaps_fail=False, moments=document["moments"])
+        # A scene has no reconnect, and the calls it needs are the ones its script makes.
+        calls = directed_calls(document["moments"]) if self.directed is not None else self.expected_calls
+        expected = {self.discord.agent: {"chunk": True, "calls": calls}}
+        return self.discord.checks(
+            self.committed, expected=expected, gaps_fail=False, moments=document["moments"], reconnects_required=self.directed is None
+        )
 
     def room_record(self) -> dict[str, Any]:
         return {"discord": self.discord.record()}

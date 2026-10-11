@@ -13,6 +13,33 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- Directed behavior scenes on the Discord stand-in (step 9f, PR 4a;
+  [docs/rehearsal.md](docs/rehearsal.md), "Directed scenes"): **implemented,
+  unverified** in CI; run here offline inside the launcher, every hard check
+  holding. `--scene ID` (the reference column, `--room discord --scripted`,
+  one scene per run) plays a scene from the behavior suite as a conversation:
+  a director (`evals/rehearsal/directed.py`) posts its people and bots to
+  the stand-in, backdating history and posting the rest live, and the
+  graded moments are graded from each scene's own `fitting`, `misses` and
+  `step1` with the suite's `score.grade` (`agent_move` moved to
+  `evals/behavior/score.py`), so a result reads like a cell of the suite's
+  matrix, with a grade matrix in `summary.md`. The agent and attention follow
+  a `SceneScript` (`standin.py`), so there is no model and no key. A new hard
+  check, `directed-outcomes`, fails a script that plays a listed miss and
+  names the moment. It grades the room, not the attention receipt or only the
+  kind of move: a turn that ran on a message attention suppressed is graded on
+  what it did; the delivered actions must be exactly the one the scene's first
+  fitting move scripts, about the graded message, and the agent may do nothing
+  outside the graded turns; every message the director posts must reach Nunchi
+  and every ping the scene meant must be sent and seen (`discord-addressing`).
+  A wait for a quiet room that timed out now fails a scripted record, in the
+  scenes and in the plain moments alike, and flags a live one. The director never posts as the agent, so four of the 17
+  scenes can be played (`bot-status-report`, `story-across-messages`,
+  `said-it-would-check`, `mention-in-busy-room`); a test pins why each of
+  the others cannot. The scenes are drafts, so results say "draft
+  expectations". CI plays the four after the reference's lane. Hermes plays
+  none; its lane is unchanged. No live run, and no Claude Code or Codex column
+  yet.
 - `binding.threads_in_room`, one per-room setting with the same name and
   meaning in every harness (Zoe, 2026-10-10: "This should be configurable by
   the user"): whether the threads opened under the room's channel are part of

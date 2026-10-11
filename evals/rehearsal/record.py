@@ -36,6 +36,8 @@ import subprocess
 import sys
 from typing import Any
 
+from evals.behavior.score import cell as grade_cell
+
 from .standin import JsonLines
 
 SCHEMA = "nunchi-rehearsal-probe/1"
@@ -391,6 +393,36 @@ def _facts(value: Mapping[str, Any], prefix: str = "") -> Iterable[tuple[str, An
             yield f"{prefix}{key}", item
 
 
+def _matrix_lines(run: Mapping[str, Any]) -> list[str]:
+    """The grade matrix of a directed scene: each graded moment against the column, as the suite's matrix shows a cell.
+
+    A cell holds the suite's letter for the move (`score.cell`), then the
+    visible grade and step 1: ``S`` fits/ok. The scenes are drafts.
+    """
+
+    rows = [(moment, item) for moment in run.get("moments", ()) for item in moment.get("graded", ()) if item.get("grade")]
+    if not rows:
+        return []
+    return [
+        "## Grade matrix (draft expectations)",
+        "",
+        "The scenes are drafts awaiting Zoe's review (`evals/behavior/README.md`): a grade compares the move with the draft's "
+        "fitting moves and clear misses, and is not a finding about the model. Cell: `Q` quiet by attention, `q` quiet by the "
+        "agent's choice, `m` its own mhm, `S` it spoke, `O` another action, `W` woken (the turn did not deliver), `-` not "
+        "judged; `!` marks a clear miss, `?` an unlisted move. Then the visible grade and step 1, and `off script` where "
+        "the delivered action was not exactly the one the script makes.",
+        "",
+        f"| Scene | Moment | Fitting (step 1) | {run.get('harness')} |",
+        "|---|---|---|---|",
+        *(
+            f"| {moment.get('name')} | {_cell(item.get('label'), 80)} | {', '.join(item.get('fitting', ()))} ({item.get('step1')}) | "
+            f"`{grade_cell([item])}` {item['grade']['visible']}/{item['grade']['step1']}{' off script' if item.get('off_script') else ''} |"
+            for moment, item in rows
+        ),
+        "",
+    ]
+
+
 def _discord_lines(discord: Mapping[str, Any]) -> list[str]:
     """The Discord room in a few lines: the launcher, each process, the stand-in's verdict, continuity."""
 
@@ -442,7 +474,15 @@ def summary_markdown(run: Mapping[str, Any]) -> str:
     arm = f", {run['arm']}" if run.get("arm") else ""
     lines = [f"# Rehearsal probe: {harness} ({mode}{arm})", ""]
     delivered = sum(1 for moment in run.get("moments", ()) for post in moment.get("posts", ()) if post.get("delivered"))
-    if status == "pass" and not delivered:
+    scene = any(moment.get("expect") == "directed" for moment in run.get("moments", ()))
+    if status == "pass" and scene:
+        # A scene's moves may all be silences or nods; what a pass shows is the director and the grader.
+        headline = (
+            "**Passed (draft expectations):** every hard check held: the director played the scene on Discord, the agent "
+            "and attention were scripted, and each graded moment fit what the scene expects. This checks the director and "
+            "the grader, not a model."
+        )
+    elif status == "pass" and not delivered:
         # Every check held, but the agent never posted: the room tools were not exercised.
         headline = (
             "**Passed, without a room action:** every hard check held and the harness reached its model, "
@@ -469,6 +509,15 @@ def summary_markdown(run: Mapping[str, Any]) -> str:
         lines.append(f"- **{check['name']}:** {_cell(check.get('detail', ''), 1500)}")
     for error in run.get("errors", ()):
         lines.append(f"- Error: {error}")
+    for moment in run.get("moments", ()):
+        if moment.get("unsettled"):
+            # A wait for a quiet room ran out (`checks.unsettled`): a scripted run fails on it, a live run only flags it.
+            late = moment["unsettled"]
+            events = ", ".join(map(str, late[:6])) + (f" and {len(late) - 6} more" if len(late) > 6 else "")
+            lines.append(
+                f"- Not settled ({'fails the run' if mode == 'scripted' else 'flagged, not failed'}): {moment.get('name')}: "
+                f"the wait after {events} timed out, so the room had not gone quiet and a late turn or post may be missing from this record."
+            )
     stopped = (run.get("spend") or {}).get("stopped_before")
     if stopped:
         # A stop before the direct question usually leaves no wake, so the run reads as failed: say why.
@@ -528,6 +577,7 @@ def summary_markdown(run: Mapping[str, Any]) -> str:
                 if delivery.get("note"):
                     lines.append(f"- {moment.get('name')}, {delivery.get('scene_event')}: {delivery['note']}")
         lines.append("")
+    lines += _matrix_lines(run)
     discord = run.get("discord")
     if isinstance(discord, Mapping):
         lines += ["## The Discord room", "", *_discord_lines(discord), ""]

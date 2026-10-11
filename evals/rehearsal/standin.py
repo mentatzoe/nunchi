@@ -21,7 +21,10 @@ endpoint, for the real ``claude -p``, and `RefusingProxy` refuses, and names,
 whatever else Claude Code tries to reach. In the Discord room (``--room
 discord``) the agents follow a `RoomScript` (answer, reply, react), and
 `ScriptedParticipant` is the same agent as a plain-call participant, for the
-reference column. Only ``--scripted`` runs use these.
+reference column. A directed scene (``--scene``, `directed.py`) is played with
+a `SceneScript` instead, which attention and the participant both follow: at
+each graded moment it does what the scene's first fitting move says. Only
+``--scripted`` runs use these.
 """
 
 from __future__ import annotations
@@ -301,11 +304,13 @@ class ScriptedAttention:
 
     It wakes for a message whose text holds one of ``wake_phrases`` and lets
     every other message pass, with the typed answers the conformance checks
-    use (`answers_leaning`). Each judgment is kept in ``judged``.
+    use (`answers_leaning`). Each judgment is kept in ``judged``. Given a
+    `SceneScript`, it leans as the script says for each message instead.
     """
 
-    def __init__(self, wake_phrases: Iterable[str] = ()) -> None:
+    def __init__(self, wake_phrases: Iterable[str] = (), *, script: SceneScript | None = None) -> None:
         self.wake_phrases = list(wake_phrases)
+        self.script = script
         self.judged: list[dict[str, Any]] = []
         self._lock = threading.Lock()
         self._server = _Server(self._handler())
@@ -324,6 +329,8 @@ class ScriptedAttention:
             text = next(event.get("text", "") for event in observation["events"] if event["id"] == trigger)
         except (KeyError, IndexError, TypeError, ValueError, StopIteration):
             return "WAKE", None  # uncertainty wakes
+        if self.script is not None:
+            return self.script.lean(text or ""), trigger
         wake = any(phrase in (text or "") for phrase in self.wake_phrases)
         return ("WAKE" if wake else "SUPPRESS"), trigger
 
@@ -508,6 +515,85 @@ def received_triggers(requests: Iterable[Any]) -> dict[str, dict[str, Any]]:
     return found
 
 
+# What the scripted agent says and reacts with at a directed scene's graded moments (`SceneScript`). Each
+# post names its moment's event, so that no two posts are alike: `discord-writes-reconciled` matches a
+# write to an action by its content.
+SCENE_SAY = "Here is what I would add, scripted ({event})."
+SCENE_NOD = "\N{EAR}"
+
+
+class SceneScript:
+    """What attention and the scripted agent do in a directed scene (`directed.py`), read from the turn's trigger.
+
+    ``moments`` maps a scene event to the moment that grades it. The
+    director ``register``s the text of each message just before it posts
+    it, since the script sees only the text the room holds (a ping reads
+    ``<@id>`` there). A message no moment grades is the scene's chatter:
+    attention passes it (DEFER) and the agent says nothing.
+
+    At a graded moment the script does the first of its ``fitting`` moves, as
+    the room would see it (waiting shows nothing, so it is silence):
+    attention suppresses a moment whose step 1 is ``suppress``, wakes for a
+    ``speak``, leans to a mhm for a ``mhm`` and otherwise defers; the agent
+    then posts `SCENE_SAY` (naming the moment's event) as a plain message,
+    reacts with `SCENE_NOD` on the trigger, or says nothing. The move is the
+    agent's own, as in every room; the director never makes it.
+    """
+
+    def __init__(self, moments: Mapping[str, Any]) -> None:
+        self.moments = dict(moments)
+        self._events: dict[str, str] = {}
+        self._lock = threading.Lock()
+
+    def register(self, text: str, event: str) -> None:
+        """The message about to be posted with ``text`` is the scene's ``event``."""
+
+        with self._lock:
+            self._events.setdefault(text, event)
+
+    def event(self, text: str) -> str | None:
+        """The scene event of the message posted with ``text``, if the director told the script of it."""
+
+        with self._lock:
+            return self._events.get(text)
+
+    def moment(self, text: str) -> Any:
+        """The moment that grades the message posted with ``text``; None for chatter."""
+
+        event = self.event(text)
+        return self.moments.get(event) if event is not None else None
+
+    @staticmethod
+    def intended(moment: Any) -> str:
+        """The move the room sees from the script at ``moment``: speak, mhm or stay_quiet."""
+
+        first = moment.fitting[0]
+        return first if first in ("speak", "mhm") else "stay_quiet"
+
+    def lean(self, text: str) -> str:
+        """How scripted attention leans on a message: SUPPRESS, WAKE, mhm or DEFER (`answers_leaning`)."""
+
+        moment = self.moment(text)
+        if moment is None:
+            return "DEFER"
+        if moment.step1 == "suppress":
+            return "SUPPRESS"
+        return {"speak": "WAKE", "mhm": "mhm"}.get(self.intended(moment), "DEFER")
+
+    def action(self, turn: Mapping[str, Any]) -> dict[str, Any]:
+        """The agent's action at this turn, as a plain-call participant returns it."""
+
+        trigger, text = RoomScript.trigger(turn)
+        moment = self.moment(text) if trigger else None
+        move = self.intended(moment) if moment is not None else "stay_quiet"
+        if move == "speak":
+            return {"kind": "message", "origin_event_id": trigger, "text": SCENE_SAY.format(event=self.event(text))}
+        if move == "mhm":
+            return {"kind": "reaction", "origin_event_id": trigger, "target_event_id": trigger,
+                    "reaction": SCENE_NOD, "operation": "add"}
+        return {"kind": "silence"}
+
+
 class ScriptedParticipant:
     """A plain-call participant for a scripted run: an OpenAI-compatible chat endpoint on localhost.
 
@@ -520,7 +606,7 @@ class ScriptedParticipant:
     committed.
     """
 
-    def __init__(self, script: RoomScript) -> None:
+    def __init__(self, script: RoomScript | SceneScript) -> None:
         self.script = script
         self.answers: list[dict[str, Any]] = []
         self._lock = threading.Lock()
@@ -547,17 +633,19 @@ class ScriptedParticipant:
             "action": self.script.action(turn),
         }
         wake = turn.get("wake") or {}
+        answered = {
+            "request_id": turn["binding"]["request_id"],
+            "trigger": wake.get("trigger_event_id"),
+            "source": (wake.get("attention") or {}).get("source"),
+            "at": timestamp(datetime.now(timezone.utc)),
+            "received": RoomScript.received(turn),
+            "action": envelope["action"],
+        }
+        if wake.get("unattended_event_ids"):
+            # Messages that came while the agent was busy and were judged with this one as a single moment.
+            answered["unattended"] = list(wake["unattended_event_ids"])
         with self._lock:
-            self.answers.append(
-                {
-                    "request_id": turn["binding"]["request_id"],
-                    "trigger": wake.get("trigger_event_id"),
-                    "source": (wake.get("attention") or {}).get("source"),
-                    "at": timestamp(datetime.now(timezone.utc)),
-                    "received": RoomScript.received(turn),
-                    "action": envelope["action"],
-                }
-            )
+            self.answers.append(answered)
         return envelope
 
     def _handler(self) -> type[BaseHTTPRequestHandler]:

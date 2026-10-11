@@ -62,7 +62,7 @@ from nunchi.turn import is_silence, machinery_in, without_taught_thinking
 from nunchi.receipts import ReceiptJournal
 
 from .scene import SCENES, Moment, Scene, load_scenes, parse_offset, profile_sha256
-from .score import cell, collective_silence, grade, pile_on, top_move_grade, visible_result
+from .score import agent_move, cell, collective_silence, grade, pile_on, top_move_grade, visible_result
 
 
 DEFAULT_MODELS = (
@@ -364,19 +364,6 @@ class EvalTransport:
             reactions=("*",),
             permissions_revision="behavior-eval",
         )
-
-
-def agent_move(calls: list[Mapping[str, Any]]) -> str:
-    """The move the room saw from the agent's own actions."""
-
-    kinds = {call.get("kind") for call in calls} - {"silence"}
-    if kinds & {"message", "reply"}:
-        return "speak"
-    if "reaction" in kinds:
-        return "mhm"
-    if kinds:
-        return "other"
-    return "stay_quiet"
 
 
 def _attention_summary(attention: Mapping[str, Any] | None) -> dict[str, Any] | None:
