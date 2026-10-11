@@ -13,6 +13,131 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- **Staying quiet and the "mhm" are named choices in a tool turn** (lead
+  engineer's decision after the first live rehearsal; **implemented,
+  unverified**, offline tests only; no live run since). The rehearsal (one
+  pass, draft expectations, the same model in every column) showed Claude Code
+  and Codex speaking on the fourth message of a story someone was still
+  telling, and failing a promise: asked to watch the nightly and report, they
+  answered with a question or ran a local check instead of promising, then
+  stayed quiet when asked for news after the build passed; the plain-call
+  reference got both right. An offline comparison found the wake document the
+  same in every column, and four things in the tool turn: silence was the
+  absence of a call under a long coding prompt, where the plain call names it
+  (`{"kind": "silence"}`, with a reason); the react tool never said it is the
+  "mhm"; "say you will check" read to a tool agent as "go run something"; and
+  a posted message was stored without the message it answered (below). Now:
+  - **A `quiet` role.** `room_quiet` in Claude Code and Codex (core role
+    `quiet`; `PARTICIPANT_TOOL_SPECS`, `participant_tool_roles`, `TURN_ROLES`,
+    `Turn.call`). It takes a required `why` (one short sentence), ends the turn
+    in silence with that reason, posts nothing and is not a room action, so
+    there is no look again before it. The host hears the silence at once,
+    without waiting for the harness to report the run's end. Once called, the
+    turn takes no room call: every later send, react, propose, withdraw or
+    context call is refused ("You chose to stay quiet in this turn"), steering
+    stops, and the session's last words do not replace the reason. A second
+    quiet call is answered as already quiet, a call without a reason is
+    refused so the agent can give one, and so is a reason that holds a
+    withheld secret. Ending the turn without
+    any room call is still silence, with the last words as the reason (#135
+    H), and `quiet` is always offered, whatever the permissions. A
+    final-answer participant has none: its silence marker is its quiet.
+  - **The turn names the three normal choices in this order:** stay quiet
+    (call the quiet tool with `why`, or end the turn without a room call and
+    say why), nod ("call react once: a quick mhm, you show you are following
+    without taking the floor"), speak (call send once; if the words answer a
+    message other than the one the turn is about, name it in
+    `origin_event_id`, whose description on the send tool says the same, so a
+    catch-up answer to an older ask links that ask's thread, not the newest
+    message's). A choice whose tool
+    the turn does not offer is left out; staying quiet never is. The react
+    tool's description says it is the mhm.
+  - **The social guide** (both turn prompts, the plain call's too) says, after
+    "...still mid-thought.": "While someone is telling something across several
+    messages, let them finish: a nod or silence while they go on. When they
+    stop, you may reply or stay quiet." (as `docs/behavior.md` has it: the
+    agent is not told to give a view it already has). And "If you have not
+    checked something, say so, ask, or say you will check;" becomes: "If you do
+    not know something, say so or ask. The people here cannot see your tools,
+    files, commands or machine, so answer as a person in the room would and do
+    not narrate what you ran. Nunchi reads what is posted in this room as it
+    arrives, a bot's status line included, and brings it to you when it bears
+    on something you said you would do; so for anything that will be said here,
+    "I'll tell you when it finishes" is a promise you can make. For anything
+    you cannot see from here, say so." The "not yet" sentence stays. The
+    wording says what the core does and no more: it does not promise that
+    every status line reaches the agent. The typed decision route is not given
+    the agent's memory (`attention_questions.py`, run 37), so it can pass over
+    a status line the agent promised to report on; while the agent is busy only
+    the newest message gets the next turn; and the parked Hermes plugin gets
+    the same wording but drops other bots' messages by default
+    (`discord.allow_bots: none`, [its README](integrations/hermes-plugin/README.md)).
+    The typed route is unchanged here; `docs/behavior.md` lists the gap.
+  - **Interfaces.** `I-040D LocalTurnProtocolV2` is `@3` (additive: the tools
+    `attach` lists may include `quiet`; a harness that registers what attach
+    lists, as the Claude Code mod and the Codex bridge do, gets it with no
+    change, and one that registers a fixed list keeps working, since ending the
+    turn without a call is silence too). `TurnParticipant` offers, without
+    `roles`, every role its integration names a tool for, so an integration
+    that names none for `quiet` is unchanged. Claude Code (`room_quiet`) and
+    Codex (`ROOM_ROLES`, `TOOL_NAMES`) name it. `nunchi-mcp-discord` exposes
+    the transport's tools (send, reply, reactions, history), which the host
+    calls for an action it has committed and the agent never sees: `quiet`
+    posts nothing and is not a platform action, so it has none there
+    ([README](integrations/mcp-discord/README.md#tools)). The older Hermes
+    integration and the parked plugin are unchanged (final-answer posting).
+  - **The turn conformance kit** has two scenarios, `quiet` (the reason is the
+    silence's reason in memory, nothing is posted, no room action follows,
+    the last words do not replace it) and `quiet-reason` (a call without a
+    reason is refused; the agent gives one), on every tool-posting driver:
+    the reference, the Claude Code gate, and Codex through a real
+    `codex app-server`. They are not applicable to final-answer posting
+    (`final-silence` covers its marker). The scripted Claude Code and Codex
+    endpoints of the directed scenes learned the tool: where a scene grades a
+    moment whose first fitting move is a stay_quiet or a wait, the agent calls
+    `room_quiet` with a reason, and everywhere else it still ends its turn
+    without a call, so both ways to stay quiet are played in the scenes (the
+    chatter), and unit-tested.
+  - **Docs:** the harness guide (roles, the `quiet` rules, "Prove it"), the
+    contract (posting styles, parity), the Claude Code, Codex and
+    `nunchi-mcp-discord` READMEs, `docs/rehearsal.md`,
+    `docs/claude-code-live-run.md`, `docs/behavior.md` (two rows).
+- **A message the agent posts remembers the message it answered** (the same
+  rehearsal; **implemented, unverified**, offline tests only). A posted
+  message was stored in memory without the message it answered:
+  `ConversationMemory` gave `about_event_id` only to a reply, a reaction and a
+  silence, so a later turn saw the promise's words but not that they answered
+  Zoe, and the ask's thread read unanswered. This contradicted the memory row
+  of `docs/behavior.md` on every column. Now the host keeps the origin
+  (`origin_event_id`) of each message and reply it commits that went out
+  (`ConversationMemory.record_origin`, at the commit point in
+  `participant.py`, beside the reasons) and joins it to the room's copy: by the
+  id the transport attested for what it sent when that is the id of one of the
+  agent's own events (the Discord transport's `discord:message:<id>`), else by
+  kind, target and words, oldest post first, each taking the newest origin kept
+  for those words whose ask came before it in the log and was committed no
+  later than the post's timestamp, each origin once. So an identical post still
+  in flight, or one whose post the room never showed, no longer shifts the
+  pairing of the posts that are there. The origin is the message the agent
+  named in `origin_event_id` (default: the message the turn is about). The
+  post then points at its ask in `memory.own_moves`
+  (`about_event_id`, and the existing `about_author_id` and `about_text`, which
+  show the ask beside the promise even after it left the window), and counts as
+  a response on the ask's thread in `memory.threads`, whether or not the
+  platform tied the two. A message the harness posted that the room has not
+  shown yet points at its ask too. Bounded like the reasons (16), forgotten on
+  restart (the reasons are not persisted either), left out when the ask is no
+  longer retained, never kept for a post that did not go out. A reply keeps
+  pointing at its target. Attention's judgment carries the same memory, so it
+  can cite the ask. Contract, additive: `I-010C ParticipantWakeV2@16` and
+  `I-010A AttentionRequestV2@9` (a `message` own move may carry
+  `about_event_id`, with `about_author_id` and `about_text` together and only
+  with it); a wake without the pointer validates as before. The memory guide
+  says a thread's responses may be the agent's own ("yours among them").
+  Known limit: where the transport attests no id, a post the platform shows
+  with other words than the agent wrote has no match and points at nothing;
+  and two identical posts answering asks that both came before either, with no
+  timestamps on the room's events, can swap.
 - Directed scenes played live on the Discord stand-in (step 9f, PR 4d;
   [docs/rehearsal.md](docs/rehearsal.md), "Live scenes"): **implemented,
   unverified**. No live run has been made, and nothing in this PR's checks
@@ -824,6 +949,26 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Changed
 
+- **The behavior suite's turn text and attention input change on purpose** (the
+  two items above). Compared on all 82 moments in three prompt styles before and
+  after (the render probe): the turn text changes on every turn, in the social
+  guide (the let-them-finish sentence is new; the "have not checked" sentence is
+  replaced by the do-not-know, cannot-see-your-machine and what-is-posted
+  sentences, with "not yet" kept), in the memory guide ("yours among them"),
+  and, in a tool turn only, in the choices (the "To contribute..." and "To stay
+  silent..." sentences become the three choices, in order); the final-answer
+  style and the plain call change only in the first two. Their facts documents
+  are byte-identical but for five turns, and attention's instructions and
+  typed-model state are byte-identical, but attention's input differs on ten
+  records: four moments (in `addressee-never-answers`, `said-it-would-check`
+  and `story-across-messages`) that play an earlier moment in full, where the stand-in agent's own post now points at the
+  message it answered and counts as a response on its thread. No moment's
+  expectations changed. `tests/v2/test_participant_tool_turn.py` pinned "end
+  your turn without calling it", which pointed at the one send tool; the
+  choices are now named in order, so it pins "end your turn without a room
+  call" and that no quiet tool is named when none is offered.
+  `tests/v2/test_conversation_memory.py` pinned that a harness-delivered message
+  has no pointer, and now expects the one the memory gives it.
 - `coverage.has_gaps`, `has_restart_gap` and `continuity` now describe the
   gaps that are still news in the window (or page) they come with, not the
   life of the state directory: with no such gap in view, `has_restart_gap` is

@@ -125,6 +125,14 @@ Limits that remain:
 - `remove_reaction`
 - `read_history`
 
+These are the transport's tools: the participant host calls them to carry out
+an action it has committed, each with a one-use authorization, and the agent
+never sees them. The agent's own room tools (`room_send`, `room_react`,
+`room_quiet`, ...) belong to its integration. The `quiet` role posts nothing
+and is not a platform action, so the transport has no tool for it and nothing
+about it reaches Discord: the agent's silence, and its reason, live in the
+participant's memory.
+
 The registration call is mandatory before notifications or any other tool.
 It takes the participant, its channel and, optionally, `threads_in_room` (a
 boolean; see "Threads" below).

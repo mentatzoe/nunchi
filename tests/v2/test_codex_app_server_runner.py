@@ -294,7 +294,7 @@ class CodexRoomRunnerTest(unittest.TestCase):
     def test_probe_says_what_is_configured(self):
         probe = self._runner().probe()
         self.assertEqual(("codex-app-server", True, "untrusted"), (probe["surface"], probe["configured"], probe["project_trust_level"]))
-        self.assertEqual(["room_send", "room_react", "room_context"], probe["room_tools"])
+        self.assertEqual(["room_send", "room_react", "room_quiet", "room_context"], probe["room_tools"])
 
     def test_the_runner_reports_codex_s_sandbox_once_codex_ran(self):
         runner = self._runner()

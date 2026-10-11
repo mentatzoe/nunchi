@@ -106,7 +106,9 @@ names. Host- and vendor-specific behavior enters through these seams:
 - A participant that acts through tools inside its own agent loop uses the
   core tool-turn helpers in `nunchi.participant_model`.
   `participant_tool_roles(request)` lists the roles this turn's permissions
-  allow (`send`, `react`, `propose`, `context`); `PARTICIPANT_TOOL_SPECS`
+  allow (`send`, `react`, `quiet`, `propose`, `withdraw`, `context`; `quiet`
+  is staying quiet on purpose, with a reason, and is always offered because
+  it is not a room action); `PARTICIPANT_TOOL_SPECS`
   holds each role's description and closed input schema;
   `participant_tool_turn_text(profile, request, tools=...)` renders the turn
   with the names the host registered; `participant_tool_action` turns one
@@ -364,14 +366,14 @@ harness's other silent answers (`also_silent`), and there is no send tool:
 
 A harness outside Python makes the same calls as versioned JSON over a
 private Unix socket (`nunchi.turn_server`, interface `I-040D
-LocalTurnProtocolV2@2`). Every request carries the per-launch session secret
+LocalTurnProtocolV2@3`). Every request carries the per-launch session secret
 the integration was given. The harness holds that secret, so the server adds
 it to its participant's guard, and a room action that carries it is refused.
 A secret shorter than 16 characters is refused at start.
 
 | Route | Body | Answer |
 |---|---|---|
-| `/v1/attach` | `{}` | `protocol` (`nunchi.turn-session`), `version` (2), `posting` (`tools` or `final-answer`), `silence_marker`, `model_text`, `tools` |
+| `/v1/attach` | `{}` | `protocol` (`nunchi.turn-session`), `version` (3), `posting` (`tools` or `final-answer`), `silence_marker`, `model_text`, `tools` |
 | `/v1/turn/bind` | `turn_id`, `wake_id` | `bound` |
 | `/v1/turn/call` | `turn_id`, `tool`, `input` | `ok` with `text`, or `error` |
 | `/v1/turn/after-tool` | `turn_id` | `text` or null |

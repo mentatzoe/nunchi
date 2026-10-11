@@ -88,10 +88,15 @@ contract's "Topologies"), so the redesign has to say how it gets them back.
 | | Tool posting | Final-answer posting |
 |---|---|---|
 | The agent posts by | Calling a room tool | Its final answer |
-| Silence | Ending a bound turn without an action | The harness's silence marker, such as `[SILENT]` |
+| Silence | The `quiet` tool with the agent's reason, or ending a bound turn without an action | The harness's silence marker, such as `[SILENT]` |
 | Choose it when | The harness lets an integration add tools and does not post the final answer itself | The harness always posts the agent's final answer |
 
 Reactions, the room view, and privileged actions are tools in both styles.
+In tool posting, staying quiet is a tool too, the `quiet` role: the agent
+chooses silence and says why, as a plain call does with
+`{"kind": "silence"}`. It posts nothing and is not a room action. In
+final-answer posting the silence marker is the quiet, so that style offers no
+`quiet` tool.
 
 **Whatever else the harness posts.** People in the room should see only what
 the agent chose to do. In final-answer posting the library sees only what
@@ -269,8 +274,10 @@ participant = TurnParticipant(
     profile=settings.profile,
     driver=MyDriver(),
     guard=guard,
-    tool_names={"send": "room_send", "react": "room_react", "context": "room_context"},
-    roles=("send", "react", "context"),
+    tool_names={
+        "send": "room_send", "react": "room_react", "quiet": "room_quiet", "context": "room_context",
+    },
+    roles=("send", "react", "quiet", "context"),
     silence_marker=None,  # or your harness's marker, for final-answer posting
     also_silent=(),       # final-answer posting: your harness's other silent answers
     model_text=False,     # final-answer posting: True when you report what the model wrote
@@ -278,11 +285,12 @@ participant = TurnParticipant(
 ```
 
 - `tool_names` maps each room role to the name the agent sees. Choose names
-  that fit your harness's conventions. Roles: `send`, `react`, `context`
-  (the room view), `propose` and `withdraw` (privileged actions, only with
-  `authorization`).
+  that fit your harness's conventions. Roles: `send`, `react` (the agent's
+  "mhm"), `quiet` (staying quiet on purpose, with a reason; see below),
+  `context` (the room view), `propose` and `withdraw` (privileged actions,
+  only with `authorization`).
 - With a `silence_marker`, the participant uses final-answer posting and
-  offers no `send` tool. The agent is taught that marker.
+  offers no `send` tool and no `quiet` tool. The agent is taught that marker.
 - `also_silent` lists the other whole answers your harness treats as
   silence, such as `NO_REPLY`. Set it whenever your harness has any, or the
   library remembers a reply the room never saw. Only with a
@@ -290,8 +298,10 @@ participant = TurnParticipant(
 - `model_text=True` says your integration reports what the model wrote
   (step 4). Set it whenever your harness can put its own text in place of a
   missing answer. Only with a `silence_marker`.
-- `tool_names` needs a name for every role in `roles`. The default roles are
-  all five.
+- `tool_names` needs a name for every role in `roles`. Without `roles`, the
+  participant offers every role you name a tool for, so an integration that
+  names no `quiet` tool keeps working (the agent then stays quiet by ending
+  its turn without a call). Name one: it is the agent's deliberate silence.
 - `room_guard` builds the secret guard. Give the `Room` the participant's
   guard (`Room(..., guard=participant.guard)`, step 8); the room's host then
   checks every action again. The participant's guard must hold at least what
@@ -430,6 +440,17 @@ ok, text = participant.call_tool(turn_id=harness_run_id, tool=name, arguments=ar
 The library applies the turn's rules inside `call_tool`:
 
 - one room action per turn;
+- the `quiet` tool takes a required `why`, ends the turn in silence with that
+  reason (the same silence, and the same reason in the agent's memory, as
+  ending the turn without a call and saying why in its last words), posts
+  nothing and is not a room action. The host hears the silence at once, so
+  your integration does not have to wait for the run to end, and the turn
+  takes no room call after it: every later room call, the room view
+  included, is refused (a second `quiet` call is answered as already quiet),
+  the room's news no longer rides on its results, and the last words after it
+  do not replace the reason. A reason that holds a withheld secret is refused so the
+  agent can give another. Pass the answer through unchanged, as for any
+  room tool. It needs no look again, since a silence never goes stale;
 - the first post is held once if others posted meanwhile, and the agent
   decides again;
 - each wake marker that stands whole on one line is taken out of a post,
@@ -632,6 +653,23 @@ room.deliver(
   says only that it worked, say so with `room_shows_own_reactions=False`, and
   the library records each reaction `native` reports sent as the agent's own
   reaction event, again with an id of its own.
+  The room shows the agent's own message back with no trace of the message
+  that prompted it, which only the library knows (the action's
+  `origin_event_id`). It keeps that for each message and reply it commits, so
+  the message points at the one it answered in the agent's memory
+  (`about_event_id`, with who wrote it and what it said), and counts as a
+  response on that message's thread: a promise is remembered beside the
+  request it was made for, even after the request has left the window. It
+  pairs a posted message with the room's copy by the id the transport
+  attested for what it sent, when that is the id of one of the agent's own
+  events (`TransportResult.detail`, for a `sent` message; the Discord
+  transport's `discord:message:<id>` is the room's id), and otherwise by its
+  kind, target and words, with an ask that came before it in the log and
+  committed no later than the room's timestamp for it, newest origin first.
+  So give the room's events the platform's own ids and timestamps. The origin
+  is the message the agent named in `origin_event_id` (the send tool asks it
+  to name the message its words answer, and defaults to the message the turn
+  is about). A restart forgets it, as it forgets the reasons.
 - **Harness-hosted, consume and start: consume every message in the
   participant's room,** so the harness never runs its agent on one by itself.
   The harness then sees
@@ -759,7 +797,8 @@ room = Room(
   shared connection does, and it keeps the agent's memory of its own moves
   and reasons. `room.restart()` also cancels, and then drops what only the
   host knew: the agent's remembered silences and the reasons it gave for
-  them, the messages it delivered that the room has not shown back, and the
+  them, which message each of its posts answered, the messages it delivered
+  that the room has not shown back, and the
   judgments attention made about messages (`ConversationMemory.restart`), as
   well as continuation authority and a pending look again. It declares no gap
   itself, so a restart needs one declared as well. Use `restart()` only when
@@ -894,7 +933,7 @@ README lists this and its other known gaps.
 
 `nunchi.turn_server.TurnServer(participant, socket_path=..., session_secret=...)`
 serves the same calls as JSON over a Unix socket (`I-040D
-LocalTurnProtocolV2@2`):
+LocalTurnProtocolV2@3`):
 
 | Route | Body | Answer |
 |---|---|---|
@@ -906,6 +945,10 @@ LocalTurnProtocolV2@2`):
 | `/v1/turn/finish` | `turn_id`, `answer` | `finish` (`deliver`, `continue`, `silent`) and `text`; `failed` when the answer was not the model's |
 | `/v1/turn/end` | `turn_id` (optional), `ok`, `detail`, `note` (optional) | `ended` |
 
+- Since @3 the tools `attach` lists may include the `quiet` tool (additive).
+  Register whatever `attach` lists, as the Claude Code mod and the Codex
+  bridge do: a harness that registers a fixed list keeps working, since
+  ending the turn without a call is silence too.
 - When `attach` answers `model_text: true`, send each model response to
   `/v1/turn/model-text` before `/v1/turn/finish` (step 4, "Report what the
   model wrote"), and its reasoning in a report of its own with
@@ -953,6 +996,13 @@ Every integration joins the turn conformance kit before it replaces anything.
    - With `privileged=True` the kit's room authorizes privileged actions:
      offer `propose` and `withdraw`, as you would with an `authorization`
      section.
+   - A tool-posting integration names a `quiet` tool: the `quiet` and
+     `quiet-reason` scenarios call it by role through your surface's `call`
+     (`call(turn_id, "quiet", {"why": ...})`) and check that nothing is
+     posted, that the agent's reason is the silence's reason in its memory,
+     that no room action follows, and that a call without a reason is
+     refused. They are not applicable to final-answer posting, whose silence
+     marker is covered by `final-silence`.
    - If your harness holds a launch secret (you serve `TurnServer`), set
      `launch_secret` on your `KitIntegration` in `participant`. The
      `launch-secret` scenario then has the agent post it. Without one, that

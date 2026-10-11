@@ -526,6 +526,13 @@ def received_triggers(requests: Iterable[Any]) -> dict[str, dict[str, Any]]:
 # write to an action by its content.
 SCENE_SAY = "Here is what I would add, scripted ({event})."
 SCENE_NOD = "\N{EAR}"
+# Why the agent stays quiet at a graded moment that fits quiet or a wait: an agent that acts through
+# tools says it with the quiet tool, so its reason is its own (`SceneScript.move`). A turn on a message no
+# moment grades ends without any call, the other way to stay quiet.
+SCENE_QUIET = {
+    "stay_quiet": "Nothing of mine to add, scripted ({event}).",
+    "wait": "Waiting a beat, scripted ({event}).",
+}
 # What a held turn composes first (`Gate`): the post the look before posting holds back once a message has
 # landed meanwhile. It names its moment too, so that if it ever reaches the room the wire matches it to its
 # action, and the grade shows the agent spoke where the script is quiet.
@@ -786,8 +793,11 @@ class SceneScript:
     def move(self, turn: Mapping[str, Any] | None, news: str | None = None) -> tuple[str, dict[str, Any]]:
         """The same move as a room tool call, for an agent that acts through the room's tools: its role and arguments.
 
-        The role is ``send`` or ``react``, or ``silence`` where the agent says
-        nothing: it makes no room tool call and its turn ends, which is how
+        The role is ``send`` or ``react``; or, where the agent says nothing,
+        ``quiet`` with its reason when the scene grades the moment (the scene
+        fits a stay_quiet or a wait there, and the agent says so with the
+        quiet tool, as the turn teaches), or ``silence`` where no moment is
+        graded: it makes no room tool call and its turn ends, the other way
         Claude Code and Codex stay quiet (a woken turn with no room action).
         It is `action`'s move, worked out once, so a column that acts through
         tools and one that answers with an action play the scene alike.
@@ -801,6 +811,11 @@ class SceneScript:
             return "send", {"text": action["text"], "reply_to_event_id": action["target_event_id"]}
         if action["kind"] == "reaction":
             return "react", {"target_event_id": action["target_event_id"], "reaction": action["reaction"]}
+        trigger, text = RoomScript.trigger(turn)
+        moment = self.moment(text) if trigger else None
+        if moment is not None:
+            first = moment.fitting[0]
+            return "quiet", {"why": SCENE_QUIET["wait" if first == "wait" else "stay_quiet"].format(event=self.event(text))}
         return "silence", {}
 
 
@@ -932,6 +947,8 @@ class ScriptedCodexAgent:
         self.script = script
         self.tools = dict(TOOL_NAMES)
         self.tool = TOOL_NAMES["send"]
+        # The calls of the quiet tool, so the closing message after one is not "Posted".
+        self.quiet_calls: set[str] = set()
         self.model = ScriptedModel()
         self.model.on_request = self._next
 
@@ -947,14 +964,20 @@ class ScriptedCodexAgent:
             # The room tool's result. Where it is the core's look before posting (a scene's held turn), the agent decides again.
             news = news_shown(request) if isinstance(self.script, SceneScript) else None
             if news is None:
-                self.model.reply({"text": "Posted my answer."})
+                quiet = items[-1].get("call_id") in self.quiet_calls
+                self.model.reply({"text": "Staying quiet." if quiet else "Posted my answer."})
                 return
         role, arguments = ("send", {"text": self.answer}) if self.script is None else scripted_move(self.script, turn_document(request), news)
+        if role == "quiet" and "quiet" not in self.tools:
+            role = "silence"
         if role == "silence":
-            # A scene's quiet moment: no room tool call, and the turn ends on a message that is not posted anywhere.
+            # A scene's quiet moment that no moment grades: no room tool call, and the turn ends on a message that is not posted anywhere.
             self.model.reply({"text": "Nothing to add."})
             return
-        self.model.reply({"tool": self.tools[role], "arguments": arguments, "call_id": f"call-{secrets.token_hex(6)}"})
+        call_id = f"call-{secrets.token_hex(6)}"
+        if role == "quiet":
+            self.quiet_calls.add(call_id)
+        self.model.reply({"tool": self.tools[role], "arguments": arguments, "call_id": call_id})
 
     def requests(self) -> list[dict[str, Any]]:
         return [*self.model.requests, *self.model.other_requests]
@@ -1080,6 +1103,8 @@ class ScriptedClaudeAgent:
         self.script = script
         # The room tools by role, for the script's moves; the send tool is ``tool``.
         self.tools = {"send": tool, **dict(tools or {})}
+        # The calls of the quiet tool, so the closing message after one is not "Posted".
+        self.quiet_calls: set[str] = set()
         self.seen: list[dict[str, Any]] = []
         self._lock = threading.Lock()
         self._server = _Server(self._handler())
@@ -1110,12 +1135,20 @@ class ScriptedClaudeAgent:
             # The room tool's result. Where it is the core's look before posting (a scene's held turn), the agent decides again.
             news = news_shown(body) if isinstance(self.script, SceneScript) else None
             if news is None:
-                return "agent", [{"type": "text", "text": "Posted my answer."}], "end_turn"
+                quiet = any(
+                    isinstance(block, Mapping) and block.get("type") == "tool_result" and block.get("tool_use_id") in self.quiet_calls
+                    for block in content
+                )
+                return "agent", [{"type": "text", "text": "Staying quiet." if quiet else "Posted my answer."}], "end_turn"
         role, arguments = ("send", {"text": self.answer}) if self.script is None else scripted_move(self.script, turn_document(body), news)
+        if role == "quiet" and "quiet" not in self.tools:
+            role = "silence"
         if role == "silence":
-            # A scene's quiet moment: no room tool call, and the turn ends on a message that is not posted anywhere.
+            # A scene's quiet moment that no moment grades: no room tool call, and the turn ends on a message that is not posted anywhere.
             return "agent", [{"type": "text", "text": "Nothing to add."}], "end_turn"
         call = {"type": "tool_use", "id": f"toolu_scripted_{secrets.token_hex(8)}", "name": self.tools[role], "input": arguments}
+        if role == "quiet":
+            self.quiet_calls.add(call["id"])
         return "agent-tool-call", [call], "tool_use"
 
     def _keep(self, kind: str, handler: BaseHTTPRequestHandler, body: Any) -> None:

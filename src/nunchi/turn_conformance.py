@@ -10,6 +10,12 @@ the library starts itself, with no new message: after a pause, when it looks
 again at a moment it waited on, and after an operator approves an action the
 agent proposed, when it gives the agent a turn about the outcome.
 
+Two scenarios, ``quiet`` and ``quiet-reason``, play the quiet tool (core role
+``quiet``): staying quiet on purpose, with the agent's reason, which posts
+nothing and is not a room action. Tool posting only: in final-answer posting
+the silence marker is the quiet (``final-silence``). An integration names a
+tool for the role, and its surface calls it by role like any other.
+
 Two scenarios, ``gap`` and ``final-gap``, start the room the way an
 integration must (`docs/harness-guide.md`): with a continuity gap declared
 before the first message. The turn that reads the room across it must say so
@@ -585,7 +591,7 @@ class ReferenceIntegration:
             profile=profile,
             driver=driver,
             guard=guard,
-            tool_names={role: role for role in ("send", "react", "propose", "withdraw", "context")},
+            tool_names={role: role for role in ("send", "react", "quiet", "propose", "withdraw", "context")},
             result_wait_seconds=5,
             **(
                 {"silence_marker": SILENCE, "also_silent": (NO_REPLY,), "model_text": True}
@@ -638,6 +644,47 @@ def _check_silence_reason(played: Played) -> list[str]:
     _expect(not played.dispatched, f"a silent turn posted {_texts(played)}", failures)
     reasons = [move.get("why") for move in played.own_moves if move.get("kind") == "silence"]
     _expect(reasons == [WAITED], f"the last words are not the silence's reason: {reasons}", failures)
+    return failures
+
+
+def _check_quiet(played: Played) -> list[str]:
+    """The quiet tool: silence the agent chose, with its reason, and nothing posted."""
+
+    failures: list[str] = []
+    _expect(played.answer(0) is True, "the turn did not bind", failures)
+    told = played.answer(1)
+    _expect(told[0] is True, f"the quiet call was refused: {told}", failures)
+    _expect(not played.dispatched, f"a quiet turn posted {_texts(played)}", failures)
+    _expect(played.host_result is None, f"expected silence, host said {played.host_result}", failures)
+    silences = [move for move in played.own_moves if move.get("kind") == "silence"]
+    _expect(
+        [move.get("why") for move in silences] == [WAITED],
+        f"the reason the agent gave is not the silence's reason in its memory: {silences}",
+        failures,
+    )
+    refused = played.answer(2)
+    _expect(
+        refused[0] is False,
+        f"a room action after the agent chose to stay quiet was accepted: {refused}",
+        failures,
+    )
+    return failures
+
+
+def _check_quiet_reason(played: Played) -> list[str]:
+    """The quiet tool needs its reason, and the agent can give it again."""
+
+    failures: list[str] = []
+    refused = played.answer(1)
+    _expect(
+        refused[0] is False and "why" in refused[1],
+        f"a quiet call without a reason was not refused: {refused}",
+        failures,
+    )
+    _expect(played.answer(2)[0] is True, f"the quiet call with a reason failed: {played.answer(2)}", failures)
+    _expect(not played.dispatched, f"a quiet turn posted {_texts(played)}", failures)
+    reasons = [move.get("why") for move in played.own_moves if move.get("kind") == "silence"]
+    _expect(reasons == [WAITED], f"the reason is not in the agent's memory: {reasons}", failures)
     return failures
 
 
@@ -1013,6 +1060,28 @@ SCENARIOS: dict[str, Scenario] = {
         "a silent turn's last words are its reason, remembered and never posted",
         (("bind",), ("end", True, WAITED)),
         _check_silence_reason,
+    ),
+    "quiet": Scenario(
+        "tools",
+        "the agent stays quiet on purpose through its quiet tool: nothing is posted, its reason is remembered, and no room action follows",
+        (
+            ("bind",),
+            ("call", "quiet", {"why": WAITED}),
+            ("call", "send", {"text": "On it."}),
+            ("end", True, "Staying quiet."),
+        ),
+        _check_quiet,
+    ),
+    "quiet-reason": Scenario(
+        "tools",
+        "the quiet tool needs the agent's reason, and the agent can give it in a second call",
+        (
+            ("bind",),
+            ("call", "quiet", {}),
+            ("call", "quiet", {"why": WAITED}),
+            ("end", True),
+        ),
+        _check_quiet_reason,
     ),
     "mhm": Scenario(
         "tools",

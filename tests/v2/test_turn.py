@@ -13,7 +13,8 @@ import threading
 import unittest
 
 from nunchi.participant import TransportResult
-from nunchi.turn import MARKER_ONLY_REFUSAL, WAKE_MARKER, SecretGuard, TurnError, TurnParticipant
+from nunchi.participant_model import build_participant_turn_request
+from nunchi.turn import MARKER_ONLY_REFUSAL, WAKE_MARKER, SecretGuard, Turn, TurnError, TurnParticipant
 from tests.v2.test_claude_code import OPPORTUNITY, PROFILE, test_wake
 
 NAMES = {
@@ -407,6 +408,250 @@ class TurnTests(unittest.TestCase):
         # one need not wait for the harness to report the end.
         self.assertIsNone(self.participant.active)
         self.assertFalse(self.participant.end_turn(turn_id="t1", ok=True))
+
+
+QUIET_NAMES = {**NAMES, "quiet": "stay_quiet"}
+
+
+class QuietTests(unittest.TestCase):
+    """The quiet tool: staying quiet is a choice the agent names, with its reason.
+
+    It is the tool turn's form of the plain call's ``{"kind": "silence"}``. It
+    posts nothing, is not a room action, and ends the turn in silence.
+    """
+
+    def setUp(self):
+        self.driver = RecordingDriver()
+        self.room = Room()
+        self.participant = TurnParticipant(
+            profile=PROFILE,
+            driver=self.driver,
+            guard=SecretGuard(["a-withheld-secret-value"]),
+            tool_names=QUIET_NAMES,
+            result_wait_seconds=5,
+        )
+        self.cancel = threading.Event()
+        self.box = {}
+
+        def run():
+            try:
+                self.box["action"] = self.participant.run_protocol(
+                    wake=test_wake(),
+                    opportunity=deepcopy(OPPORTUNITY),
+                    expand=self.room.expand,
+                    cancel=self.cancel,
+                )
+            except BaseException as exc:  # noqa: BLE001 - recorded for assertions
+                self.box["error"] = exc
+
+        self.thread = threading.Thread(target=run, daemon=True)
+        self.thread.start()
+        self.assertTrue(self.driver.started_event.wait(5))
+        self.turn = self.driver.started[0]
+        self.assertTrue(self.participant.bind_turn(turn_id="t1", wake_id=self.turn.wake_id))
+
+    def tearDown(self):
+        self.cancel.set()
+        self.thread.join(5)
+
+    def call(self, tool, arguments):
+        return self.participant.call_tool(turn_id="t1", tool=tool, arguments=arguments)
+
+    def test_the_role_is_offered_and_named_by_the_integration(self):
+        self.assertIn("quiet", self.turn.tool_names)
+        self.assertEqual("stay_quiet", self.turn.tool_names["quiet"])
+        self.assertIn("stay_quiet", [spec["name"] for spec in self.participant.tool_specs()])
+        # Always offered, whatever the permissions, and before the room actions' end.
+        self.assertLess(list(self.participant.registered_roles).index("react"), list(self.participant.registered_roles).index("quiet"))
+
+    def test_a_quiet_call_is_silence_with_the_agents_reason_at_once(self):
+        ok, text = self.call("stay_quiet", {"why": "  Castor was asked,\n not me. "})
+        self.assertTrue(ok)
+        self.assertIn("Staying quiet", text)
+        # The host hears the silence without waiting for the harness to report the run's end.
+        self.thread.join(5)
+        self.assertEqual({"action": {"kind": "silence", "why": "Castor was asked, not me."}}, self.box)
+        self.assertFalse(self.turn.action_ready.is_set())
+
+    def test_nothing_is_posted_and_no_room_action_follows(self):
+        self.assertTrue(self.call("stay_quiet", {"why": "Castor was asked."})[0])
+        self.thread.join(5)
+        for tool, arguments in (
+            ("say", {"text": "On it."}),
+            ("emoji", {"target_event_id": "e1", "reaction": "\U0001f442"}),
+            ("look", {"direction": "before"}),
+        ):
+            with self.subTest(tool=tool):
+                ok, text = self.call(tool, arguments)
+                self.assertFalse(ok)
+                self.assertIn("stay quiet", text)
+        self.assertFalse(self.turn.action_ready.is_set())
+        self.assertIsNone(self.turn.action)
+
+    def test_calling_it_again_is_harmless(self):
+        self.assertTrue(self.call("stay_quiet", {"why": "Castor was asked."})[0])
+        ok, text = self.call("stay_quiet", {"why": "Something else."})
+        self.assertTrue(ok)
+        self.assertIn("already staying quiet", text)
+        self.assertEqual("Castor was asked.", self.turn.note)
+
+    def test_calling_it_again_after_the_host_took_the_silence_is_harmless_too(self):
+        self.assertTrue(self.call("stay_quiet", {"why": "Castor was asked."})[0])
+        self.thread.join(5)
+        # The host answered the turn with silence: nothing was committed.
+        self.participant.settle(self.turn.request_id, None)
+        ok, text = self.call("stay_quiet", {"why": "Castor was asked."})
+        self.assertTrue(ok)
+        self.assertIn("already staying quiet", text)
+        # A room call is still refused, as the opportunity has ended.
+        self.assertFalse(self.call("say", {"text": "On it."})[0])
+
+    def test_the_last_words_after_it_do_not_replace_the_reason(self):
+        self.assertTrue(self.call("stay_quiet", {"why": "Castor was asked."})[0])
+        self.thread.join(5)
+        self.assertTrue(self.participant.end_turn(turn_id="t1", ok=True, detail="done", note="Staying quiet."))
+        self.assertEqual("Castor was asked.", self.turn.note)
+
+    def test_it_needs_a_reason_and_the_agent_can_give_one_in_a_second_call(self):
+        for arguments in ({}, {"why": ""}, {"why": "   "}, {"why": 3}, {"why": "x", "kind": "silence"}):
+            with self.subTest(arguments=arguments):
+                ok, text = self.call("stay_quiet", arguments)
+                self.assertFalse(ok)
+                self.assertIn("Refused", text)
+        self.assertFalse(self.turn.quieted)
+        self.assertFalse(self.turn.quiet_ready.is_set())
+        self.assertTrue(self.call("stay_quiet", {"why": "Castor was asked."})[0])
+
+    def test_a_reason_holding_a_secret_is_refused_so_the_agent_can_give_another(self):
+        ok, text = self.call("stay_quiet", {"why": "The key is a-withheld-secret-value."})
+        self.assertFalse(ok)
+        self.assertIn("secret", text)
+        self.assertFalse(self.turn.quieted)
+        self.assertIsNone(self.turn.note)
+        self.assertTrue(self.call("stay_quiet", {"why": "Nothing to add."})[0])
+
+    def test_it_is_not_a_room_action_so_the_agent_can_still_act_after_a_refused_call(self):
+        self.assertFalse(self.call("stay_quiet", {})[0])
+        thread = threading.Thread(target=lambda: self.call("say", {"text": "On it."}), daemon=True)
+        thread.start()
+        self.thread.join(5)
+        self.assertEqual("message", self.box["action"]["kind"])
+        self.participant.settle(self.turn.request_id, TransportResult("sent", "ok"))
+        thread.join(5)
+
+    def test_after_a_room_action_it_is_refused(self):
+        thread = threading.Thread(target=lambda: self.call("say", {"text": "On it."}), daemon=True)
+        thread.start()
+        self.thread.join(5)
+        ok, text = self.call("stay_quiet", {"why": "Changed my mind."})
+        self.assertFalse(ok)
+        self.assertIn("already took your one room action", text)
+        self.participant.settle(self.turn.request_id, TransportResult("sent", "ok"))
+        thread.join(5)
+
+    def test_steering_stops_once_the_agent_chose_to_stay_quiet(self):
+        self.room.arrivals = [message("e2", "use staging")]
+        self.assertTrue(self.call("stay_quiet", {"why": "Castor was asked."})[0])
+        # What arrives now is the next turn's to read, not shown to a turn that is done.
+        self.assertIsNone(self.participant.news(turn_id="t1"))
+        self.assertEqual(1, len(self.room.arrivals))
+
+    def test_an_unbound_turn_cannot_use_it(self):
+        ok, text = self.participant.call_tool(turn_id="other", tool="stay_quiet", arguments={"why": "x"})
+        self.assertFalse(ok)
+        self.assertFalse(self.turn.quieted)
+
+    def test_the_turn_text_names_the_three_choices_in_order(self):
+        text = self.turn.text
+        quiet, nod, speak = (
+            text.index("To stay quiet, call stay_quiet with why"),
+            text.index("To nod, call emoji once"),
+            text.index("To speak, call say once"),
+        )
+        self.assertLess(quiet, nod)
+        self.assertLess(nod, speak)
+        self.assertIn("or end your turn without a room call", text)
+        self.assertIn("a quick mhm, you show you are following without taking the floor", text)
+
+
+class QuietNotOfferedTests(unittest.TestCase):
+    """An integration that names no quiet tool keeps working; a final answer's silence marker is its quiet."""
+
+    def test_the_default_roles_are_the_ones_the_integration_named(self):
+        participant = TurnParticipant(
+            profile=PROFILE, driver=RecordingDriver(), guard=SecretGuard(()), tool_names=NAMES
+        )
+        self.assertNotIn("quiet", participant.registered_roles)
+        self.assertEqual(
+            (False, "stay_quiet is not a Nunchi room tool."),
+            participant.call_tool(turn_id="t1", tool="stay_quiet", arguments={"why": "x"}),
+        )
+
+    def test_a_role_without_a_tool_name_is_refused_when_asked_for(self):
+        with self.assertRaises(ValueError):
+            TurnParticipant(
+                profile=PROFILE, driver=RecordingDriver(), guard=SecretGuard(()), tool_names=NAMES, roles=("send", "quiet")
+            )
+
+    def test_a_final_answer_integration_may_list_send_or_quiet_without_naming_them(self):
+        # Before the quiet role such a list was filtered of send first; naming was checked after. It still is.
+        for roles, names in (
+            (("send", "react", "context"), {"react": "r", "context": "c"}),
+            (("quiet", "react", "context"), {"react": "r", "context": "c"}),
+            (("send", "quiet", "react", "context"), {"react": "r", "context": "c"}),
+        ):
+            with self.subTest(roles=roles):
+                participant = TurnParticipant(
+                    profile=PROFILE,
+                    driver=RecordingDriver(),
+                    guard=SecretGuard(()),
+                    tool_names=names,
+                    roles=roles,
+                    silence_marker="[SILENT]",
+                )
+                self.assertEqual(("react", "context"), participant.registered_roles)
+        # A role still offered needs its name, in either style.
+        for kwargs in ({}, {"silence_marker": "[SILENT]"}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(ValueError) as raised:
+                TurnParticipant(
+                    profile=PROFILE,
+                    driver=RecordingDriver(),
+                    guard=SecretGuard(()),
+                    tool_names={"context": "c"},
+                    roles=("react", "context"),
+                    **kwargs,
+                )
+            self.assertIn("react", str(raised.exception))
+
+    def test_tool_posting_without_roles_offers_what_is_named(self):
+        for names, offered in (
+            ({"send": "s", "react": "r", "context": "c"}, ("send", "react", "context")),
+            ({role: role for role in ("send", "react", "quiet", "propose", "withdraw", "context")},
+             ("send", "react", "quiet", "propose", "withdraw", "context")),
+        ):
+            with self.subTest(offered=offered):
+                participant = TurnParticipant(
+                    profile=PROFILE, driver=RecordingDriver(), guard=SecretGuard(()), tool_names=names
+                )
+                self.assertEqual(offered, participant.registered_roles)
+
+    def test_a_final_answer_participant_has_no_quiet_tool(self):
+        participant = TurnParticipant(
+            profile=PROFILE,
+            driver=RecordingDriver(),
+            guard=SecretGuard(()),
+            tool_names=QUIET_NAMES,
+            silence_marker="[SILENT]",
+        )
+        self.assertNotIn("quiet", participant.registered_roles)
+        self.assertNotIn("send", participant.registered_roles)
+        with self.assertRaises(ValueError):
+            Turn(
+                profile=PROFILE,
+                request=build_participant_turn_request(test_wake(), deepcopy(OPPORTUNITY)),
+                tool_names={"quiet": "stay_quiet"},
+                silence_marker="[SILENT]",
+            )
 
 
 class TurnLifecycleTests(unittest.TestCase):
@@ -1405,7 +1650,7 @@ class LocalTurnProtocolTests(unittest.TestCase):
         status, body = self.post("/v1/attach", {})
         self.assertEqual(200, status)
         self.assertEqual(
-            ("nunchi.turn-session", 2, "tools", None, False),
+            ("nunchi.turn-session", 3, "tools", None, False),
             (body["protocol"], body["version"], body["posting"], body["silence_marker"], body["model_text"]),
         )
         self.assertEqual(["say", "emoji", "ask_operator", "take_back", "look"], [tool["name"] for tool in body["tools"]])

@@ -6,7 +6,7 @@ integration's process can reach. Each request carries the per-launch session
 secret the integration was given; any other caller is refused. The harness
 holds that secret, so its agent may read it: the server adds it to its
 participant's secret guard, and a room action that carries it is refused like
-any other withheld secret. This is interface ``I-040D LocalTurnProtocolV2@2``:
+any other withheld secret. This is interface ``I-040D LocalTurnProtocolV2@3``:
 
 | Route | Body | Answer |
 |---|---|---|
@@ -20,6 +20,13 @@ any other withheld secret. This is interface ``I-040D LocalTurnProtocolV2@2``:
 
 `/v1/turn-start`, `/v1/tool` and `/v1/news` are the first integration's names
 for bind, call and after-tool, and stay as aliases.
+
+Since @3 the tools attach lists may include the quiet tool (core role
+``quiet``): a call of it with a ``why`` records the turn's silence with that
+reason, posts nothing, and is not a room action. It is additive: a harness
+that registers the tools attach lists gets it, and one that registers a fixed
+list keeps working, since ending the turn without a call is silence too. A
+final-answer participant has no quiet tool: its silence marker is its quiet.
 
 When attach answers ``model_text: true`` the integration must report what
 the model wrote, each response, with `/v1/turn/model-text` before it
@@ -45,7 +52,7 @@ from typing import Any
 from .turn import TurnParticipant
 
 PROTOCOL = "nunchi.turn-session"
-VERSION = 2
+VERSION = 3
 MAX_BODY_BYTES = 256 * 1024
 # A launch secret shorter than this is refused: the guard must be able to hold it.
 MIN_SECRET_CHARACTERS = 16

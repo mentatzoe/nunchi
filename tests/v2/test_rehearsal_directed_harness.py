@@ -29,7 +29,7 @@ from evals.rehearsal import checks, directed, discord_room, probe, standin
 from tests.v2.test_rehearsal_directed import NEWS, PLAYABLE, ROOT, _news, _played
 from tests.v2.test_rehearsal_discord_room import _tagged, _turn
 
-SEND, REACT = "mcp__nunchi__room_send", "mcp__nunchi__room_react"
+SEND, REACT, QUIET = "mcp__nunchi__room_send", "mcp__nunchi__room_react", "mcp__nunchi__room_quiet"
 HARNESS_LEGS = {"claude-code": discord_room.DiscordClaudeCodeLeg, "codex": discord_room.DiscordCodexLeg}
 
 
@@ -48,7 +48,7 @@ def _graded_turns(scene_id: str):
 
 
 class MoveTest(unittest.TestCase):
-    def test_a_graded_moment_is_a_send_a_react_or_silence_as_the_first_fitting_move_says_and_the_chatter_is_silence(self):
+    def test_a_graded_moment_is_a_send_a_react_or_quiet_as_the_first_fitting_move_says_and_the_chatter_is_silence(self):
         for scene_id in PLAYABLE:
             for script, moment, text in _graded_turns(scene_id):
                 with self.subTest(scene=scene_id, moment=moment.label):
@@ -56,13 +56,15 @@ class MoveTest(unittest.TestCase):
                     news = _news(script, moment.event)  # a held turn decides once it has been shown what landed meanwhile
                     role, arguments = script.move(turn, news=news)
                     intended = standin.SceneScript.intended(moment)
-                    self.assertEqual({"speak": "send", "mhm": "react", "stay_quiet": "silence"}[intended], role)
+                    self.assertEqual({"speak": "send", "mhm": "react", "stay_quiet": "quiet"}[intended], role)
                     if role == "send":
                         self.assertEqual({"text": standin.SCENE_SAY.format(event=moment.event)}, arguments)
                     elif role == "react":
                         self.assertEqual({"target_event_id": "discord:message:7", "reaction": standin.SCENE_NOD}, arguments)
                     else:
-                        self.assertEqual({}, arguments)
+                        # Staying quiet at a graded moment is a choice with its reason: the quiet tool.
+                        why = standin.SCENE_QUIET["wait" if moment.fitting[0] == "wait" else "stay_quiet"]
+                        self.assertEqual({"why": why.format(event=moment.event)}, arguments)
                     # The same move as the reference's action, said once.
                     self.assertEqual(intended, agent_move([script.action(turn, news=news)]))
         script = directed.spec("story-across-messages").script
@@ -73,18 +75,18 @@ class MoveTest(unittest.TestCase):
 
 class EndpointTest(unittest.TestCase):
     def claude(self, script):
-        agent = standin.ScriptedClaudeAgent("unused", SEND, script=script, tools={"react": REACT})
+        agent = standin.ScriptedClaudeAgent("unused", SEND, script=script, tools={"react": REACT, "quiet": QUIET})
         self.addCleanup(agent.close)
         return agent
 
-    def body(self, turn, *, result=False, news=None):
+    def body(self, turn, *, result=False, news=None, call_id="t", quiet=True):
         messages = [{"role": "user", "content": [{"type": "text", "text": _tagged(turn)}]}]
         if result or news:
             # The room tool's result: "ok", or the page the core's look before posting showed the turn.
-            messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": news or "ok"}]})
-        return {"tools": [{"name": SEND}, {"name": REACT}], "messages": messages}
+            messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": call_id, "content": news or "ok"}]})
+        return {"tools": [{"name": SEND}, {"name": REACT}, *([{"name": QUIET}] if quiet else [])], "messages": messages}
 
-    def test_the_scripted_claude_endpoint_follows_the_scene_each_graded_moment_by_its_tool_and_silence_by_none(self):
+    def test_the_scripted_claude_endpoint_follows_the_scene_each_graded_moment_by_its_tool_quiet_by_the_quiet_tool(self):
         for scene_id in PLAYABLE:
             agent = self.claude(directed.spec(scene_id).script)
             for script, moment, text in _graded_turns(scene_id):
@@ -92,20 +94,35 @@ class EndpointTest(unittest.TestCase):
                     agent.script = script
                     kind, blocks, stop = agent.reply(self.body(_turn("discord:message:7", text), news=_news(script, moment.event)))
                     intended = standin.SceneScript.intended(moment)
-                    if intended == "stay_quiet":
-                        self.assertEqual(("agent", "end_turn"), (kind, stop))
-                        self.assertEqual(["text"], [block["type"] for block in blocks], "no room tool call: the turn ends")
-                        continue
                     self.assertEqual(("agent-tool-call", "tool_use"), (kind, stop))
-                    self.assertEqual([SEND if intended == "speak" else REACT], [block["name"] for block in blocks])
-                    expected = (
-                        {"text": standin.SCENE_SAY.format(event=moment.event)}
-                        if intended == "speak"
-                        else {"target_event_id": "discord:message:7", "reaction": standin.SCENE_NOD}
-                    )
+                    self.assertEqual([{"speak": SEND, "mhm": REACT, "stay_quiet": QUIET}[intended]], [block["name"] for block in blocks])
+                    why = standin.SCENE_QUIET["wait" if moment.fitting[0] == "wait" else "stay_quiet"].format(event=moment.event)
+                    expected = {
+                        "speak": {"text": standin.SCENE_SAY.format(event=moment.event)},
+                        "mhm": {"target_event_id": "discord:message:7", "reaction": standin.SCENE_NOD},
+                        "stay_quiet": {"why": why},
+                    }[intended]
                     self.assertEqual(expected, blocks[0]["input"])
-                    # The call after the tool's result ends the turn, as before.
-                    self.assertEqual(("agent", "end_turn"), agent.reply(self.body(_turn("discord:message:7", text), result=True))[::2])
+                    # The call after the tool's result ends the turn, as before; after the quiet tool it does not say "Posted".
+                    closing = agent.reply(self.body(_turn("discord:message:7", text), result=True, call_id=blocks[0]["id"]))
+                    self.assertEqual(("agent", "end_turn"), closing[::2])
+                    self.assertEqual("Staying quiet." if intended == "stay_quiet" else "Posted my answer.", closing[1][0]["text"])
+
+    def test_without_the_quiet_tool_a_quiet_moment_ends_the_turn_with_no_call_as_before(self):
+        # An agent whose room offers no quiet tool (an older integration) stays quiet the other way.
+        for scene_id in PLAYABLE:
+            agent = standin.ScriptedClaudeAgent("unused", SEND, script=directed.spec(scene_id).script, tools={"react": REACT})
+            self.addCleanup(agent.close)
+            for script, moment, text in _graded_turns(scene_id):
+                if standin.SceneScript.intended(moment) != "stay_quiet":
+                    continue
+                with self.subTest(scene=scene_id, moment=moment.label):
+                    agent.script = script
+                    kind, blocks, stop = agent.reply(
+                        self.body(_turn("discord:message:7", text), news=_news(script, moment.event), quiet=False)
+                    )
+                    self.assertEqual(("agent", "end_turn"), (kind, stop))
+                    self.assertEqual(["text"], [block["type"] for block in blocks], "no room tool call: the turn ends")
 
     def test_the_scripted_claude_endpoint_is_silent_on_the_chatter_and_a_plain_run_still_posts_its_answer(self):
         agent = self.claude(directed.spec("story-across-messages").script)
@@ -115,7 +132,7 @@ class EndpointTest(unittest.TestCase):
         self.addCleanup(plain.close)
         self.assertEqual({"text": "Ten seconds."}, plain.reply(self.body(_turn("discord:message:9", "x")))[1][0]["input"])
 
-    def test_the_scripted_codex_endpoint_follows_the_scene_a_tool_call_where_it_acts_and_a_bare_message_where_it_is_quiet(self):
+    def test_the_scripted_codex_endpoint_follows_the_scene_a_tool_call_where_it_acts_or_stays_quiet_on_purpose(self):
         for scene_id in PLAYABLE:
             agent = standin.ScriptedCodexAgent("unused", script=directed.spec(scene_id).script)
             self.addCleanup(agent.close)
@@ -131,8 +148,14 @@ class EndpointTest(unittest.TestCase):
                     intended = standin.SceneScript.intended(moment)
                     if intended == "stay_quiet":
                         self.assertEqual(1, len(replies))
-                        self.assertNotIn("tool", replies[0], "no room tool call: the turn ends on its message")
-                        self.assertIn("text", replies[0])
+                        why = standin.SCENE_QUIET["wait" if moment.fitting[0] == "wait" else "stay_quiet"]
+                        self.assertEqual(("room_quiet", {"why": why.format(event=moment.event)}), (replies[0]["tool"], replies[0]["arguments"]))
+                        # The closing message after the quiet tool's result does not say "Posted".
+                        closing: list[dict] = []
+                        request["input"].append({"type": "function_call_output", "call_id": replies[0]["call_id"], "output": "Staying quiet."})
+                        with mock.patch.object(agent.model, "latest", return_value=request), mock.patch.object(agent.model, "reply", closing.append):
+                            agent._next()
+                        self.assertEqual([{"text": "Staying quiet."}], closing)
                     elif intended == "speak":
                         self.assertEqual(("room_send", {"text": standin.SCENE_SAY.format(event=moment.event)}), (replies[0]["tool"], replies[0]["arguments"]))
                     else:
@@ -140,6 +163,17 @@ class EndpointTest(unittest.TestCase):
                             ("room_react", {"target_event_id": "discord:message:7", "reaction": standin.SCENE_NOD}),
                             (replies[0]["tool"], replies[0]["arguments"]),
                         )
+
+    def test_a_turn_on_a_message_no_moment_grades_ends_with_no_call_in_both_columns(self):
+        # The other way to stay quiet, which the quiet tool does not replace: the turn ends without a room call.
+        script = directed.spec("story-across-messages").script
+        codex = standin.ScriptedCodexAgent("unused", script=script)
+        self.addCleanup(codex.close)
+        request = {"input": [{"type": "message", "content": [{"type": "input_text", "text": _tagged(_turn("discord:message:9", "nobody graded this"))}]}]}
+        replies: list[dict] = []
+        with mock.patch.object(codex.model, "latest", return_value=request), mock.patch.object(codex.model, "reply", replies.append):
+            codex._next()
+        self.assertEqual([{"text": "Nothing to add."}], replies)
 
     def test_the_moments_script_is_still_followed_as_it_was(self):
         agent = standin.ScriptedCodexAgent("unused", script=discord_room.SCRIPT)

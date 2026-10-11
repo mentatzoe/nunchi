@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010C ParticipantWakeV2@15`` (slice 010, T004; @12 the unattended messages; @13 no ACK source; @14 a message the harness posted; @15 the gaps the view reaches).
+"""Contract tests for ``I-010C ParticipantWakeV2@16`` (slice 010, T004; @12 the unattended messages; @13 no ACK source; @14 a message the harness posted; @15 the gaps the view reaches; @16 a message points at the message it answered).
 
 Red cases cover the wake sources, advice-free ``PREATTENTION_BYPASS``
 (010-Preattention-bypass), the FR-013 advice-source violations (advice on
@@ -79,6 +79,26 @@ class MemoryCases(unittest.TestCase):
         reply_without_id = {k: v for k, v in self.MOVES[1].items() if k != "event_id"}
         reaction_without_id = {k: v for k, v in self.MOVES[2].items() if k != "event_id"}
         for bad in ([reply_without_id], [reaction_without_id], [dict(posted, event_id="")]):
+            with self.subTest(bad=bad):
+                assert_schema_verdict(self, "participant-wake", self.wake(bad), "invalid")
+
+    def test_a_message_may_point_at_the_message_it_answered(self):
+        # @16: the host knows which message prompted each post, so a promise is remembered beside the ask.
+        answering = dict(self.MOVES[0], about_event_id="q1")
+        shown = dict(answering, about_author_id="human:zoe", about_text="Watch the nightly and tell me.")
+        harness_posted = {k: v for k, v in shown.items() if k != "event_id"}
+        for good in ([answering], [shown], [harness_posted], [dict(shown, why="Zoe asked me.")]):
+            with self.subTest(good=good):
+                assert_schema_verdict(self, "participant-wake", self.wake(good), "valid")
+        for bad in (
+            [dict(answering, about_author_id="human:zoe")],
+            [dict(answering, about_text="Watch the nightly.")],
+            [dict(answering, about_event_id="")],
+            [{k: v for k, v in shown.items() if k != "about_event_id"}],
+            [dict(shown, about_text="x" * 281)],
+            [dict(shown, about_author_id="")],
+            [dict(answering, answered_by="q1")],
+        ):
             with self.subTest(bad=bad):
                 assert_schema_verdict(self, "participant-wake", self.wake(bad), "invalid")
 

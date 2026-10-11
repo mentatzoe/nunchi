@@ -12,7 +12,7 @@ from __future__ import annotations
 import unittest
 
 from nunchi.attention_questions import attention_state
-from nunchi.v2_contracts import validate_attention_request
+from nunchi.v2_contracts import _memory, validate_attention_request
 from tests.v2.test_shared_foundation import FixtureModel, foundation, message
 
 ZOE = {"human:zoe": {"kind": "human"}}
@@ -81,6 +81,39 @@ class AttentionMemoryTests(unittest.TestCase):
         pipeline.handle_delivery(delivery_id="d-z2", event=message("z2", text="Any luck?"), actors=ZOE)
         _, projection = model.calls[-1]
         self.assertEqual(wakes[-1]["memory"], projection["memory"])
+
+
+class PromiseOriginTests(unittest.TestCase):
+    """A promise posted as a plain message (no platform reply) still shows what it answered (I-010A@9)."""
+
+    def test_the_judgment_cites_the_ask_beside_the_promise_and_the_thread_is_answered(self):
+        replies = iter([{"kind": "message", "origin_event_id": "z1", "text": "I'll tell you when it finishes."}, None])
+        pipeline, model, transport, _ = foundation(
+            model=FixtureModel("WAKE"), participant=lambda **turn: next(replies, None)
+        )
+        pipeline.handle_delivery(
+            delivery_id="d-z1", event=message("z1", text="Vigil, watch the nightly and tell me."), actors=ZOE
+        )
+        self.assertEqual(1, len(transport.calls))
+        # The room shows the post back as any message: no reply link, so nothing in it says what it answered.
+        pipeline.observation.observe(
+            delivery_id="d-v1", event=message("v1", author_id=SELF, text="I'll tell you when it finishes."), actors=ZOE
+        )
+        pipeline.handle_delivery(
+            delivery_id="d-c1",
+            event=message("c1", author_id="bot:ci", text="nightly #812: passed"),
+            actors={"bot:ci": {"kind": "bot"}},
+        )
+        _, projection = model.calls[-1]
+        (move,) = projection["memory"]["own_moves"]
+        self.assertEqual(
+            ("v1", "z1", "human:zoe", "Vigil, watch the nightly and tell me."),
+            tuple(move[key] for key in ("event_id", "about_event_id", "about_author_id", "about_text")),
+        )
+        (thread,) = projection["memory"]["threads"]
+        self.assertEqual(("z1", ["v1"]), (thread["event_id"], [r["event_id"] for r in thread["responses"]]))
+        # The request's memory is the contract's memory (I-010A@9 shares I-010C@16's).
+        _memory(projection["memory"], "memory")
 
 
 class RememberedTargetTests(unittest.TestCase):

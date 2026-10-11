@@ -128,7 +128,8 @@ $0 (a Claude Code cloud container's own credential is the exception, below):
   only a streamed `POST /v1/messages`, in the event shape Claude Code
   2.1.289 reads (`message_start`, each content block's start, delta and
   stop, `message_delta`, `message_stop`). A call that offers the mod's
-  `mcp__nunchi__room_send` gets a `tool_use` of it with the scripted answer;
+  `mcp__nunchi__room_send` gets a `tool_use` of it with the scripted answer
+  (a directed scene's script may call `room_react` or `room_quiet` instead);
   the call that carries its result gets a short text, which ends the turn;
   a streamed call without the room tools gets a short text. Anything else,
   a call without `stream` included, gets a 404: when Claude Code cannot read
@@ -1147,17 +1148,24 @@ them. What changes for a harness:
   (Claude Code) and the scripted Responses endpoint (Codex) follow the same
   `SceneScript` as attention: `SceneScript.move` says its move as a room tool
   call, `send` (`SCENE_SAY`, naming the moment) or `react` (`SCENE_NOD` on the
-  trigger), or `silence`. A silent turn makes no room tool call and ends on a
-  short message that goes nowhere: Claude Code and Codex post only through the
-  room's tools, so that is how they stay quiet. The scene's chatter gets
-  silence, as for the reference, and attention is the same `ScriptedAttention`.
+  trigger), `quiet` (`SCENE_QUIET`, with its reason, at a graded moment whose
+  first fitting move is a stay_quiet or a wait), or `silence`. A graded moment
+  that fits quiet is the agent's deliberate silence: it calls the room's
+  `room_quiet` tool with a `why`, which posts nothing, and its turn then ends
+  on a short message ("Staying quiet.") that goes nowhere. An endpoint whose
+  room offers no quiet tool makes no call at that moment, as `silence` does.
+  A `silence` turn, the scene's chatter and any message no moment grades, makes no room
+  tool call and ends on a short message that goes nowhere: Claude Code and
+  Codex post only through the room's tools, so that is the other way they stay
+  quiet, and every scene with chatter plays it. Attention is the same
+  `ScriptedAttention`.
   A line of the agent's is a `send` (with the `reply_to_event_id` of the message
   it answers, for a reply) or a `react`, and a held turn is held at the same
   gate: on the first model call of the turn, before the tool call, so that the
   call the core answers with the page is the endpoint's own `send` of the draft.
-  The page comes back as that tool's result, and the next model call makes no
-  room tool call (`news_shown` reads it from the newest message or input item of
-  the request). A quiet scene (`bot-status-report`) calls no room tool and no check asks for
+  The page comes back as that tool's result, and the next model call, where the
+  scene fits a stay_quiet, is the endpoint's own `quiet` call (`news_shown` reads
+  the page from the newest message or input item of the request). A quiet scene (`bot-status-report`) calls no room tool and no check asks for
   one. What its summary's verdict line says depends on the column: Codex's
   reads "no room tool was called: the turn ended without one", Claude Code's
   does not count calls and reads as always ("the mod attached and bound the

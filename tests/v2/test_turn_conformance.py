@@ -45,6 +45,50 @@ class TurnConformanceTests(unittest.TestCase):
             failed,
         )
 
+    def test_the_quiet_scenarios_catch_their_rules_turned_off(self):
+        def failed():
+            reference = kit.ReferenceIntegration("tools")
+            return {
+                name: result["failures"]
+                for name in ("quiet", "quiet-reason")
+                if (result := kit.run_scenario(name, reference))["status"] == "fail"
+            }
+
+        self.assertEqual({}, failed())
+        quiet = turn.Turn._quiet
+
+        # The reason the agent gave is lost: the silence has none in its memory.
+        def forgets(self, arguments):
+            done = quiet(self, arguments)
+            self.note = None
+            return done
+
+        with mock.patch.object(turn.Turn, "_quiet", forgets):
+            failures = failed()
+        self.assertEqual({"quiet", "quiet-reason"}, set(failures))
+        self.assertIn("is not the silence's reason", " ".join(failures["quiet"]))
+
+        # The agent may still act after it chose to stay quiet.
+        def stays_open(self, arguments):
+            done = quiet(self, arguments)
+            self.quieted = False
+            return done
+
+        with mock.patch.object(turn.Turn, "_quiet", stays_open):
+            self.assertEqual({"quiet"}, set(failed()))
+
+        # A quiet call without a reason is accepted.
+        with mock.patch.object(turn, "participant_tool_quiet", lambda arguments: arguments.get("why") or "No reason given."):
+            self.assertEqual({"quiet-reason"}, set(failed()))
+
+        # The quiet call is read as a room action: it posts.
+        def posts(self, arguments):
+            self.take({"kind": "message", "origin_event_id": kit.TRIGGER, "text": "quiet"})
+            return True, "Done."
+
+        with mock.patch.object(turn.Turn, "_quiet", posts):
+            self.assertEqual({"quiet", "quiet-reason"}, set(failed()))
+
     def test_the_final_answer_safety_scenarios_catch_their_rules_turned_off(self):
         safety = ("final-not-own-words", "final-no-answer", "final-silence-forms")
 

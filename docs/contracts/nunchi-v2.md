@@ -11,7 +11,7 @@ live, integrated, or released status.
 `docs/architecture/v2-selected-design.md` preserve the field inventory selected
 from Aleph Vault at `c834e8c`; the external path is provenance, not a
 contributor dependency. The program-canonical interface names and versions
-(`I-010F` at `@1`; `I-010D` at `@2`; `I-010A` at `@8`; `I-010E` at `@6`; `I-010C` at `@15`; `I-010B` at `@9`) are this
+(`I-010F` at `@1`; `I-010D` at `@2`; `I-010A` at `@9`; `I-010E` at `@6`; `I-010C` at `@16`; `I-010B` at `@9`) are this
 slice's vocabulary layered over that inventory. A document the selected design
 declares valid that either validator rejects is a contract defect, never
 resolved by narrowing the corpus.
@@ -20,9 +20,9 @@ resolved by narrowing the corpus.
 
 | Interface | Version | Schema path |
 |---|---|---|
-| `I-010A AttentionRequestV2` | `@8` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
+| `I-010A AttentionRequestV2` | `@9` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
 | `I-010B AttentionDecisionV2` | `@9` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
-| `I-010C ParticipantWakeV2` | `@15` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
+| `I-010C ParticipantWakeV2` | `@16` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@2` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
 | `I-010E AttentionReceiptV2` | `@6` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
 | `I-010F PrivilegedActionAuthorizationV2` | `@1` | [`schemas/v2/privileged-action-authorization.schema.json`](../../schemas/v2/privileged-action-authorization.schema.json) |
@@ -111,7 +111,7 @@ python3 -m unittest tests.v2.contract.test_privileged_action_authorization
 uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
 ```
 
-## I-010A AttentionRequestV2@8
+## I-010A AttentionRequestV2@9
 
 A truthful attention request represents:
 
@@ -220,6 +220,9 @@ A truthful attention request represents:
   empty. The attention prompt explains it only to a judgment that carries
   it. The reference typed route does not pass it to its model yet. Since @7
   it shares I-010C@14's memory: a `message` own move may lack `event_id`.
+  Since @9 it shares I-010C@16's: a `message` own move may point at the
+  message it answered, so the judgment can cite the request beside a promise
+  (additive).
 - **Messages that arrived while the participant was busy (@6, #94 step 6;
   Zoe, 2026-10-06)** — optional `unattended_event_ids`: 1 to 3 messages by
   others, in `events` and newest first, that arrived while the participant
@@ -341,7 +344,7 @@ A tagged host-facing union on `status`:
   occur before a request ID is assignable); an optional `classifier` audit is
   present only when the error occurred after classifier invocation.
 
-## I-010C ParticipantWakeV2@15
+## I-010C ParticipantWakeV2@16
 
 The normal-turn input materializes `self`, `room`, `actors`, `events`,
 `trigger_event_id`, `coverage`, and optional `continuation` directly —
@@ -450,6 +453,30 @@ the room's pace count it too (#94 step 9e). A room that never shows the
 participant's own reactions (Hermes gives plugins no reaction events) gets the
 host-attested `reaction` event in the same way, so the move is a `reaction`
 with that event's id.
+
+Since @16 a `message` own move may point at the message it answered, as a
+`reply` points at its target: `about_event_id`, and with it
+`about_author_id` and `about_text` together (the same shapes and limits as @11;
+`about_author_id` and `about_text` need `about_event_id`). The room shows the
+participant's own message back with no trace of the message that prompted it,
+which only the host knows: the action's `origin_event_id`. The reference host
+keeps it for each message and reply it commits that went out (not a failed
+one) — the message the participant named in `origin_event_id`, which is the
+message that prompted the action unless it named another, such as the older
+question a catch-up turn answers — and the memory joins it to the move once the
+room shows the message: by the id the transport attested for what it sent, when
+that is the id of the room's event; otherwise by the same kind, target and
+words, taking the newest origin whose own message came before the post and was
+committed no later than the post's timestamp (when both are known), oldest post
+first, each origin once. A message the harness posted that the room
+has not shown yet (@14) points at the message that prompted it too. The origin
+is kept like the reasons: at most 16, forgotten on restart, and a pointer to a
+message no longer retained is left out. A `reply` keeps pointing at its target.
+The post also counts among the `responses` of the thread of the message it
+answered, whether or not the platform tied the two, so that thread no longer
+reads unanswered; a promise is still not the thing done. The change is
+additive: a wake that carries no such pointer validates as before.
+Attention's request (I-010A@9) carries the same memory.
 
 Since @15 (Zoe, 2026-10-10) the wake's `coverage` carries `gaps` as the
 attention request's does (I-010A@8), computed for the fresh view the turn is
@@ -794,7 +821,9 @@ A participant-silence receipt record (the S07 stream ends at this stage):
 bump and re-verification of every consumer. A shape that several interfaces
 carry is bumped in each of them when it changes: `coverage` is carried by
 `I-010A`, `I-010C`, `I-010D` and `I-010E`, so its optional `gaps` (2026-10-10)
-is `I-010A@8`, `I-010C@15`, `I-010D@2` and `I-010E@6`. `I-010B@5` replaced the
+is `I-010A@8`, `I-010C@15`, `I-010D@2` and `I-010E@6`; and `memory` is carried
+by `I-010A` and `I-010C`, so the `about_event_id` a `message` own move may carry
+(additive) is `I-010A@9` and `I-010C@16`. `I-010B@5` replaced the
 `legacy_verdict_confidences` vector, fixed for `@1` through `@4` (FR-007),
 with the required typed `answers`, and `@6` made `asks` a required answer; margin retirement still flips only the
 reported `margin_status`, never the schema. Each runtime must pass its adapter against the same contract corpus

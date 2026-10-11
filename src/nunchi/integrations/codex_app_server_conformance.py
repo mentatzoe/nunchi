@@ -50,6 +50,7 @@ from ..turn import SecretGuard
 from ..turn_conformance import MODEL_REFUSED, KnownGap, ScriptedAgent
 from .codex_app_server.integration import (
     MCP_SERVER_NAME,
+    ROOM_ROLES,
     TOOL_NAMES,
     CodexRoomIntegration,
     CodexSettings,
@@ -326,7 +327,7 @@ class CodexHarness:
         guard: SecretGuard,
         user_config: str = "",
         project_trust_level: str = "trusted",
-        roles: tuple[str, ...] = ("send", "react", "context"),
+        roles: tuple[str, ...] = ROOM_ROLES,
         result_wait_seconds: float = 5.0,
         resume_thread: bool = False,
     ) -> None:
@@ -500,7 +501,7 @@ class CodexKitIntegration:
     ) -> Any:
         # An unbound run is one without the room tools (see the module docstring).
         unbound = not any(step[0] == "bind" for step in agent.steps)
-        roles = ("send", "react", "context")
+        roles = ROOM_ROLES
         self.harness = harness = CodexHarness(
             profile=profile,
             guard=guard,

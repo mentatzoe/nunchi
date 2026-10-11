@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010A AttentionRequestV2@8`` (slice 010, T002; #94 step 6: @2 adds the pace, @3 the pause occasion, @4 the outcome one, @5 the memory, @6 the unattended messages; #94 step 9d: @7 a message the harness posted; Zoe, 2026-10-10: @8 the gaps a window reaches).
+"""Contract tests for ``I-010A AttentionRequestV2@9`` (slice 010, T002; #94 step 6: @2 adds the pace, @3 the pause occasion, @4 the outcome one, @5 the memory, @6 the unattended messages; #94 step 9d: @7 a message the harness posted; Zoe, 2026-10-10: @8 the gaps a window reaches; @9 a message points at the message it answered).
 
 Red cases cover exact identity (S01), actor mentions versus
 ``mentions_room`` (S02), the runtime-adapter-only relational classes
@@ -107,6 +107,15 @@ class MemoryCases(unittest.TestCase):
         for bad in ({}, {"own_moves": [{"kind": "verdict"}]}, {"notes": []}):
             with self.subTest(bad=bad):
                 assert_schema_verdict(self, "attention-request", dict(make_request(), memory=bad), "invalid")
+
+
+    def test_a_message_may_point_at_the_message_it_answered(self):
+        # @9: the same memory as the turn's (I-010C@16), so the judgment can cite the ask beside the promise.
+        posted = {"kind": "message", "event_id": "v1", "text": "I'll tell you when it finishes.",
+                  "about_event_id": "e1", "about_author_id": "human:zoe", "about_text": "Tell me when the nightly finishes?"}
+        assert_schema_verdict(self, "attention-request", dict(make_request(), memory={"own_moves": [posted]}), "valid")
+        alone = {k: v for k, v in posted.items() if k != "about_event_id"}
+        assert_schema_verdict(self, "attention-request", dict(make_request(), memory={"own_moves": [alone]}), "invalid")
 
 
 class UnattendedCases(unittest.TestCase):
