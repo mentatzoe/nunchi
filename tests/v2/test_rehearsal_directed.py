@@ -1325,7 +1325,9 @@ class CiTest(unittest.TestCase):
         job = text[text.index("  discord-standin:"):text.index("  hermes-plugin:")]
         for scene in PLAYABLE:
             self.assertIn(scene, job)
-        self.assertEqual(1, job.count("--scene"))
+        self.assertEqual(2, job.count("--scene"), "each playable scene in the loop, and the story once more with a word first")
+        self.assertEqual(1, job.count("--nod-with-a-word-first"))
+        self.assertIn("--scene story-across-messages --nod-with-a-word-first", job)
         self.assertIn("discord_net --offline --", job)
         self.assertIn("steps.discord_scenes_lane.outcome == 'failure'", job)
         self.assertIn("rehearsal-directed", job)

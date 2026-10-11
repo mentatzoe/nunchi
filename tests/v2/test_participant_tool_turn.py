@@ -178,6 +178,8 @@ class ToolRolesAndPromptTests(unittest.TestCase):
         description = PARTICIPANT_TOOL_SPECS["react"]["description"]
         self.assertIn("This is the mhm", description)
         self.assertIn("following without taking the floor", description)
+        # ... and that the reaction is exactly one emoji, never a word (`tests.v2.test_reaction_is_one_emoji`).
+        self.assertIn("exactly one emoji", description)
 
     def test_the_quiet_tool_asks_for_a_reason_and_is_not_a_room_action(self):
         spec = PARTICIPANT_TOOL_SPECS["quiet"]
@@ -289,7 +291,7 @@ class ToolActionTests(unittest.TestCase):
             ("send", {"text": "  "}, "non-empty"),
             ("send", {"text": "hi", "channel": "elsewhere"}, "does not accept: channel"),
             ("send", "hi", "must be an object"),
-            ("react", {"target_event_id": "e1", "reaction": "x", "operation": "toggle"}, "add or remove"),
+            ("react", {"target_event_id": "e1", "reaction": "👍", "operation": "toggle"}, "add or remove"),
             ("propose", {"capability": "c", "resource": {"kind": "k"}, "operation": {}}, "resource"),
             ("context", {"direction": "before"}, "not a room action"),
         ):
@@ -300,7 +302,7 @@ class ToolActionTests(unittest.TestCase):
 
     def test_permissions_and_visibility_still_bind_the_action(self):
         with self.assertRaises(ParticipantModelError):
-            self._action("react", {"target_event_id": "e1", "reaction": "x"}, ordinary=("message",))
+            self._action("react", {"target_event_id": "e1", "reaction": "👍"}, ordinary=("message",))
         with self.assertRaises(ParticipantModelError):
             self._action(
                 "propose",

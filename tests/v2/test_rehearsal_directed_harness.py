@@ -666,8 +666,10 @@ class CiTest(unittest.TestCase):
         ):
             with self.subTest(job=job_name):
                 job = self.job(job_name)
-                # One loop over the four scenes, one probe command, in the launcher, offline, with the lane's own sandbox check.
-                self.assertEqual(1, job.count("--scene"))
+                # One loop over the scenes and, after it, the story once more with the agent's nod first a word the core refuses
+                # (`--nod-with-a-word-first`): two probe commands, in the launcher, offline, with the lane's own sandbox check.
+                self.assertEqual(2, job.count("--scene"))
+                self.assertEqual(1, job.count("--scene story-across-messages --nod-with-a-word-first"))
                 self.assertEqual(sorted(PLAYABLE), sorted(scene_loop(job)))
                 self.assertIn(f"--harness {harness} --scripted --room discord", job[job.index(f"id: {scenes}"):])
                 self.assertIn("discord_net --offline --require-bwrap --", job[job.index(f"id: {scenes}"):])
@@ -723,11 +725,14 @@ class CiTest(unittest.TestCase):
                 self.assertNotIn("|| true", script)
                 self.assertLess(script.index("failed=0"), script.index("for scene in"))
                 after = script[script.index("done") + len("done") :]
-                self.assertEqual('exit "$failed"', after.strip())
+                self.assertTrue(after.strip().endswith('exit "$failed"'))
+                # The word-first case after the loop is guarded the same way, so a failure there fails the step after it ran.
+                self.assertIn('|| { echo "::error::the scene story-across-messages with a word first failed"; failed=1; }', after)
+                self.assertEqual(1, after.count("evals.rehearsal.probe"))
 
     def test_the_reference_job_plays_the_same_scenes_and_the_hermes_job_plays_none(self):
         reference = self.job("discord-standin")
-        self.assertEqual(1, reference.count("--scene"))
+        self.assertEqual(2, reference.count("--scene"), "the loop, and the story once more with a word first")
         self.assertIn("--harness reference --scripted --room discord", reference)
         self.assertEqual(sorted(PLAYABLE), sorted(scene_loop(reference)))
         hermes = self.job("hermes-plugin")

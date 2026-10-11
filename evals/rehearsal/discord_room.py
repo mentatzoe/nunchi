@@ -131,7 +131,7 @@ from .routes import (
     hermes_model_config,
     hermes_section,
 )
-from .standin import RoomScript, ScriptedHermesAgent, ScriptedParticipant, received_triggers, timestamp
+from .standin import SCENE_WORD, RoomScript, ScriptedHermesAgent, ScriptedParticipant, received_triggers, timestamp
 
 # What the scripted agent does at each graded moment, and the phrases scripted attention wakes for.
 REPLY_PHRASE = "back off exponentially"
@@ -529,6 +529,15 @@ def attention_entries(
                 entry["evidence"] = list(attention.get("evidence_event_ids") or ())
         found.append(entry)
     return found
+
+
+def word_nod_checks(spec: Any, committed: Sequence[Mapping[str, Any]]) -> list[Check]:
+    """The check of a scene played with the agent's nod first a word (``--nod-with-a-word-first``); none for any other scene."""
+
+    script = spec.script
+    if not script.word_first:
+        return []
+    return [checks_module.word_nod_refused(tried=script.words_tried, refused=script.words_refused, committed=committed, word=SCENE_WORD)]
 
 
 def judge_directed(leg: Any, moments: Sequence[dict[str, Any]]) -> None:
@@ -1289,6 +1298,7 @@ class OnTheTransport:
             found.append(
                 checks_module.room_errors(document.get("lane_errors") or [], (document.get("discord") or {}).get("serve_errors") or [])
             )
+            found += word_nod_checks(self.directed, self.committed)
         return found
 
     def room_record(self) -> dict[str, Any]:
@@ -2013,9 +2023,10 @@ class ReferenceLeg(Leg):
         # A scene has no reconnect, and the calls it needs are the ones its script makes.
         calls = directed_calls(document["moments"], live=self.live is not None) if self.directed is not None else self.expected_calls
         expected = {self.discord.agent: {"chunk": True, "calls": calls}}
-        return self.discord.checks(
+        found = self.discord.checks(
             self.committed, expected=expected, gaps_fail=False, moments=document["moments"], reconnects_required=self.directed is None
         )
+        return found + word_nod_checks(self.directed, self.committed) if self.directed is not None else found
 
     def room_record(self) -> dict[str, Any]:
         return {"discord": self.discord.record()}

@@ -48,7 +48,9 @@ One wake, step by step:
    `mcp__nunchi__room_quiet` with a short `why` (or ends its turn without a
    room call and says why in its last words). To nod, the "mhm" that shows it
    is following without taking the floor, it calls `mcp__nunchi__room_react`
-   once. To speak it calls `mcp__nunchi__room_send` (a message, or a reply)
+   once, with exactly one emoji (a word is not a reaction: the core refuses it
+   with a tool error before anything is committed, and the turn is not spent).
+   To speak it calls `mcp__nunchi__room_send` (a message, or a reply)
    once. `mcp__nunchi__room_propose` exists only when privileged actions are
    configured.
 4. The gate hands that one action to the shared host. The host commits it and

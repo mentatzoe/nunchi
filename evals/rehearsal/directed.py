@@ -353,14 +353,19 @@ def load_plans(directory: Path = SCENE_DIRECTORY) -> list[Plan]:
     return [plan(scene) for scene in load_scenes(directory)]
 
 
-def script_for(scene_plan: Plan) -> SceneScript:
-    """The script the scene's graded moments are played with: attention and the agent both follow it."""
+def script_for(scene_plan: Plan, *, word_first: bool = False) -> SceneScript:
+    """The script the scene's graded moments are played with: attention and the agent both follow it.
+
+    With ``word_first`` the agent's nod is first a word, which the core refuses
+    before committing anything, and then the emoji, in the same turn
+    (`SceneScript`): the one scripted case of a reaction that is refused.
+    """
 
     moments: dict[str, Any] = {}
     for moment in scene_plan.scene.moments:
         if moment.event:
             moments.setdefault(moment.event, moment)
-    return SceneScript(moments, lines=scene_plan.lines, holds=[hold.trigger for hold in scene_plan.holds])
+    return SceneScript(moments, lines=scene_plan.lines, holds=[hold.trigger for hold in scene_plan.holds], word_first=word_first)
 
 
 @dataclass(frozen=True)
@@ -385,7 +390,7 @@ class DirectedSpec:
         return Path(self.plan.scene.path or self.plan.scene.id)
 
 
-def spec(scene_id: str, directory: Path = SCENE_DIRECTORY) -> DirectedSpec:
+def spec(scene_id: str, directory: Path = SCENE_DIRECTORY, *, word_first: bool = False) -> DirectedSpec:
     """The spec for a behavior scene by its id; `Unplayable` where there is none or it cannot be played."""
 
     plans = {item.scene.id: item for item in load_plans(directory)}
@@ -395,7 +400,7 @@ def spec(scene_id: str, directory: Path = SCENE_DIRECTORY) -> DirectedSpec:
     if chosen.unplayable:
         playable = ", ".join(sorted(item.scene.id for item in plans.values() if not item.unplayable))
         raise Unplayable(f"{scene_id} cannot be played on Discord: {chosen.unplayable}. Playable: {playable}")
-    return DirectedSpec(chosen, script_for(chosen))
+    return DirectedSpec(chosen, script_for(chosen, word_first=word_first))
 
 
 # -- playing a scene ------------------------------------------------------------------------------

@@ -438,6 +438,12 @@ jobs:
         # launcher runs online (it refuses unless CI=true and GITHUB_ACTIONS=true, and the probe refuses a live scene off a CI runner
         # and without the keys its column needs). Every launcher run has a timeout of its own (RUN_TIMEOUT_MINUTES, or what is left of
         # PLAY_LIMIT_MINUTES), and the step has one too. A run that fails does not stop the others; the step fails after the last.
+        # GitHub runs this script as `bash --noprofile --norc -eo pipefail`, and the `set -uo pipefail` in it does not clear -e: an
+        # unguarded command that failed ended the step on the spot (run 38135715452: 3 of 18 runs played, with no status row, no
+        # ::error:: line, no spend check and no `skipped` for the 15 never started). So the one command that is meant to fail, the
+        # run, is guarded by name (`|| code=$?`, with `code` reset for each run). -e stays on for everything else, on purpose: a
+        # failed mktemp or a status row that could not be written must end the step, not play the next run with no HOME or lose
+        # its record. The spend reading and the awk test are conditions, which -e never ends the step on.
         # The keys stay in the environment, never on a command line, and each column keeps only the two it reads (`env -u` drops
         # the others). Grades are reported in the summary and never fail a run; a hard check does.
         #
@@ -520,13 +526,13 @@ jobs:
                 LANE_HOME="$(mktemp -d)"
                 LANE_TMP="$(mktemp -d)"
                 errlog="$OUT/logs/pass-$pass-$scene-$column.stderr"
+                code=0
                 sudo -E timeout --signal=TERM --kill-after="${KILL_AFTER_SECONDS}s" "${limit}s" \
                   env "${drop[@]}" HOME="$LANE_HOME" TMPDIR="$LANE_TMP" \
                   "$PY" -m evals.rehearsal.discord_net "${bwrap[@]}" -- \
                   /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness "$column" --room discord --scene "$scene" \
                   "${extra[@]}" --agent-model "$AGENT_MODEL" --attention-model "$ATTENTION_MODEL" --budget-usd "$BUDGET_USD" \
-                  --wheel "$WHEEL" --out "$OUT/pass-$pass/$scene" 2> "$errlog"
-                code=$?
+                  --wheel "$WHEEL" --out "$OUT/pass-$pass/$scene" 2> "$errlog" || code=$?
                 # What the launcher or the probe said on stderr is the cause of a failure that left no record: keep its tail (it
                 # is scanned with everything else, and the summary's table of runs shows it), and show all of it in this log.
                 if [ -s "$errlog" ]; then

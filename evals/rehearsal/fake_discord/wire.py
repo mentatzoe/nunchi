@@ -27,8 +27,8 @@ FIDELITY = [
     "Every gateway frame is an uncompressed TEXT frame, whatever compress= asks.",
     "Content is never blanked for a bot without MESSAGE_CONTENT: a bot that asks for the intent without it enabled is closed with 4014.",
     "Rate limits: fixed, generous numbers (limit 50, remaining 49, reset after 1 s); a 429 comes only when injected.",
-    "Emoji: an approximate check refuses words, custom emoji and more than one emoji (10014); a symbol that is no emoji, "
-    "such as ✓, passes, and which emoji Discord accepts is unverified.",
+    "Emoji: the core's own rule (nunchi.reactions.is_one_emoji, Unicode 16.0) refuses words, custom emoji, symbols that are no "
+    "emoji, such as ✓, and more than one emoji (10014); whether Discord's own list is the same is unverified.",
     "Whether a reply without allowed_mentions pings its target's author is the world's reply_ping; Discord's default is unverified.",
     "Mentions that allowed_mentions suppresses are left out of mentions and mention_roles.",
     "A reply with fail_if_not_exists: false to a message in another channel is refused (400 50035); Discord's answer is unverified.",

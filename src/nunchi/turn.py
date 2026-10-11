@@ -58,7 +58,7 @@ from typing import Any, Protocol
 import unicodedata
 
 from .attention import ParticipantProfile
-from .errors import NunchiError
+from .errors import NunchiError, ValidationError
 from .participant import HARNESS_DELIVERS, TransportResult
 from .reactions import UNAVAILABLE_REACTION_CAPABILITY
 from .participant_model import (
@@ -66,7 +66,9 @@ from .participant_model import (
     PARTICIPANT_TOOL_SPECS,
     PARTICIPANT_TURN_PROTOCOL,
     PARTICIPANT_TURN_PROTOCOL_VERSION,
+    REACTION_ADVICE,
     ParticipantModelError,
+    ReactionRefused,
     build_participant_turn_request,
     participant_tool_action,
     participant_tool_expansion,
@@ -1063,7 +1065,11 @@ class Turn:
                     request=self.request,
                     visible_event_ids=self.visible_event_ids,
                 )
-            except ParticipantModelError as exc:
+            except ReactionRefused as exc:
+                # Not an emoji: nothing was committed and the agent's one room action is still its own.
+                return False, f"Refused: {exc} {REACTION_ADVICE}"
+            except (ParticipantModelError, ValidationError) as exc:
+                # A call the agent can read about and make again: an error that escaped here would drop the harness's connection.
                 return False, f"Refused: {exc}. Nothing was posted."
             action, refusal = self.prepare(action)
             if refusal is not None:

@@ -823,7 +823,7 @@ carry is bumped in each of them when it changes: `coverage` is carried by
 `I-010A`, `I-010C`, `I-010D` and `I-010E`, so its optional `gaps` (2026-10-10)
 is `I-010A@8`, `I-010C@15`, `I-010D@2` and `I-010E@6`; and `memory` is carried
 by `I-010A` and `I-010C`, so the `about_event_id` a `message` own move may carry
-(additive) is `I-010A@9` and `I-010C@16`. `I-010B@5` replaced the
+(additive) is `I-010A@9` and `I-010C@16`; and the participant's `reaction` action, which must be exactly one emoji and is refused before anything is committed (2026-10-11), is `I-040A@5`, with `I-040D@3` unchanged in shape (its `react` call answers the refusal). `I-010B@5` replaced the
 `legacy_verdict_confidences` vector, fixed for `@1` through `@4` (FR-007),
 with the required typed `answers`, and `@6` made `asks` a required answer; margin retirement still flips only the
 reported `margin_status`, never the schema. Each runtime must pass its adapter against the same contract corpus

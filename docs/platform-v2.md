@@ -375,7 +375,7 @@ A secret shorter than 16 characters is refused at start.
 |---|---|---|
 | `/v1/attach` | `{}` | `protocol` (`nunchi.turn-session`), `version` (3), `posting` (`tools` or `final-answer`), `silence_marker`, `model_text`, `tools` |
 | `/v1/turn/bind` | `turn_id`, `wake_id` | `bound` |
-| `/v1/turn/call` | `turn_id`, `tool`, `input` | `ok` with `text`, or `error` |
+| `/v1/turn/call` | `turn_id`, `tool`, `input` | `ok` with `text`, or `error` (a `react` call whose `reaction` is not exactly one emoji answers `ok: false` with the reason, and commits nothing; the shape is unchanged) |
 | `/v1/turn/after-tool` | `turn_id` | `text` or null |
 | `/v1/turn/model-text` | `turn_id`, `text`, `reasoning` (optional, true for the model's reasoning) | `kept` |
 | `/v1/turn/finish` | `turn_id`, `answer` | `finish` (`deliver`, `continue` or `silent`) and `text`; `failed`, with the reason, when the answer was not the model's and the turn failed |

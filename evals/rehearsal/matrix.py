@@ -44,7 +44,7 @@ import re
 import sys
 from typing import Any
 
-from .record import _cell, _matrix_cell, _played_lines
+from .record import CELL_CODES, _cell, _matrix_cell, _played_lines
 
 TITLE = "Directed scenes, live: grade matrix (draft expectations, not reviewed)"
 COLUMNS = ("reference", "claude-code", "codex")
@@ -212,8 +212,7 @@ def render(root: Path, columns: Sequence[str] = COLUMNS) -> str:
         "did with a draft's fitting moves and clear misses, so it is **reported, never a failure**, and not a finding about a model until "
         "she has reviewed the scene. The reference (`nunchi-discord` on the same models) is the control: a miss only a harness column has "
         "is the integration's, a miss all columns share is the model's or Nunchi's. What does fail a run is the plumbing and safety "
-        "checks, listed under *Runs*. Cell: the suite's letter for the move (`Q` quiet by attention, `q` quiet by the agent's choice, `m` "
-        "its own mhm, `S` it spoke, `O` another action, `W` woken, `-` not judged; `!` a clear miss, `?` an unlisted move), then the "
+        "checks, listed under *Runs*. Cell: the suite's letter for the move (" + CELL_CODES + "), then the "
         "visible grade and step 1, or `precondition not met` where the live agent did not make the setup the scene needs (not graded).",
         "",
     ]

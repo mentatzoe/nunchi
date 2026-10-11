@@ -233,8 +233,8 @@ It behaves like Discord wherever a column reads the room from:
   algorithm, behind fan-out, the 403s and the GETs the transport's reaction
   capability reads;
 - **the agent's own limits**: 2000 characters, no empty message, 20
-  distinct reactions, and an approximate emoji check that refuses a word or
-  two emoji sent as one reaction.
+  distinct reactions, and the core's own emoji rule (`nunchi.reactions.is_one_emoji`),
+  which refuses a word, a symbol that is no emoji or two emoji sent as one reaction.
 
 It serves only the routes something has been shown to call: login, posts,
 reactions, and the channel, member and roles reads, and, since PR 3c, the
@@ -1086,9 +1086,18 @@ hold is for carries its outcome (`hold`), and a run whose hold raced reads
 whether attention's evidence points at one of its messages (scripted
 attention cites the trigger only). `summary.md` shows a **grade matrix**
 (`## Grade matrix (draft expectations)`): one row per graded moment, and the
-column's cell as the suite's matrix shows it (`S`, `m`, `q`, `Q`, with `!` for
-a clear miss), then the visible grade and step 1, such as `` `S` fits/ok``, and
-`hold raced` (or `unseen`, `unmerged`, `never-asked`) where a hold did not hold.
+column's cell as the suite's matrix shows it (`Q` quiet by attention, `q`
+quiet by the agent's choice, `m` its own mhm, `S` it spoke, `O` another action,
+`W` woken with no turn on it, `E` an error, the turn's action never reached the
+room, `-` not judged; `!` for a clear miss, `?` for an unlisted move; the
+summary's legend and the dispatch matrix's are one text,
+`record.CELL_CODES`), then the visible grade and step 1, such as `` `S`
+fits/ok``, and `hold raced` (or `unseen`, `unmerged`, `never-asked`) where a hold
+did not hold. The recorded `outcome` `misses` means the moment did not fit its
+draft, which is more than a clear miss; the Moments table says `misses` only
+where a cell carries `!`, and otherwise `did not fit:` with what it was in the
+cells' words (a turn that did not deliver, `E`; a move the draft does not list,
+`?`; a step 1 the draft does not expect; a hold that did not hold).
 `summary.md` also has a section, **How the scenes were played**, that names a
 scene played with a cue and the quoted cue, a scene whose time was compressed
 and by how much, each earlier line of the agent's and whether it landed as the
@@ -1237,7 +1246,15 @@ the seven of PR 4c), each inside the launcher with
 `--offline` (and `--require-bwrap` in the two harness jobs, with Claude Code's
 sandbox on as in its lane: CI never passes `--no-sandbox`), in the lane's
 virtualenv and with a fresh `HOME` and `TMPDIR`; the step fails after the last
-if any scene failed. The launcher steps of the three jobs have a timeout of their
+if any scene failed. After the loop each lane plays `story-across-messages` once
+more with `--nod-with-a-word-first`, the one scripted case of a refused
+reaction: the scripted agent's nod at each nod moment is first the word
+"yikes" (the reaction that spent a live turn, run 38135715452), which the core
+refuses before committing anything (as the tool's error answer to Claude Code
+and Codex, as the next page of the turn to the reference), and then the emoji,
+in the same turn. The hard check `word-nod-refused` holds that every word was
+refused and the refusal shown to the agent, and that no word reached the room;
+`directed-outcomes` holds the nod and the one room action as in every scene. The launcher steps of the three jobs have a timeout of their
 own (`timeout-minutes`: 15 for the room lane, 20 for the eleven scenes; run here
 a lane took 15 to 20 seconds and the eleven scenes 2 to 3 minutes), so a hung
 scene fails the job and is not left to the runner's six hours. A failure runs the same scan for the key and the canary
@@ -1304,7 +1321,18 @@ virtualenv (discord.py) and the transports' (mcp), and plays each (pass, scene,
 column) as a probe run of its own, inside the launcher **without `--offline`**
 (the models are on the internet; the launcher allows that on a GitHub Actions
 runner alone), with `--require-bwrap` for Claude Code and Codex and their
-sandboxes on. A run that fails does not stop the others; each has a timeout of
+sandboxes on. A run that fails does not stop the others: it gets its status row,
+its stderr tail and its `::error::` line, the spend is read after it, and the
+step fails after the last run. (GitHub runs a `shell: bash` step as
+`bash -eo pipefail`, and the script's own `set -uo pipefail` does not clear `-e`,
+so the first live dispatch, run 38135715452, ended the step at its first failed
+run: 3 of 18 runs played, and the 15 never started were not marked `skipped`.
+The play loop now guards the run itself (`|| code=$?`, with `code` reset for each run),
+and leaves `-e` on for everything else on purpose, so that a failed `mktemp` or a status
+row that cannot be written ends the step instead of playing on with no `HOME` or losing
+the record; the workflow tests run each step the way the runner does,
+`bash --noprofile --norc -eo pipefail`, and a stub probe that fails on one run
+must leave every later run played.) Each has a timeout of
 40 minutes (or what is left of the step's 290 minutes of planning, wind-up
 included; none starts with less than ten minutes left), and the step has another.
 GNU `timeout`, run without `--foreground`, sends TERM to its whole process group,
@@ -1463,7 +1491,8 @@ A matrix per pass, the columns side by side (`evals/rehearsal/matrix.py`), title
 "Directed scenes, live: grade matrix (draft expectations, not reviewed)": a row
 for each graded moment, a cell for each column in the form of the scripted
 matrix (the suite's letter for the move, the visible grade and step 1, or
-`precondition not met`), a table of the facts each moment turns on and whether
+`precondition not met`; the page's legend lists every letter a cell can print,
+`E` included), a table of the facts each moment turns on and whether
 attention's evidence cites them, how each scene was played (what the live agent did
 instead of the scene's earlier lines, each hold and how it went, a scene that
 stopped), each run's exit status with the hard checks that failed and, for a run

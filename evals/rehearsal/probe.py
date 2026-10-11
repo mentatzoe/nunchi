@@ -291,6 +291,8 @@ class Options:
     # The behavior scene to play instead of the moments (a Discord room column; `directed.py`). Without ``scripted`` it is played live
     # (PR 4d): on a CI runner only, with the keys of its column (`live_scene_refusal`).
     scene: str | None = None
+    # A scripted scene in which the agent's nod is first a word, which the core refuses, and then the emoji (`--nod-with-a-word-first`).
+    word_first: bool = False
 
     @property
     def live_scene(self) -> bool:
@@ -1831,7 +1833,7 @@ def _room_parts(options: Options) -> tuple[type[Leg], tuple[MomentSpec, ...], Ro
         else:
             route = route_for(options.harness, options.agent_model)
         if options.scene:
-            return discord_room.LEGS[options.harness], (directed.spec(options.scene),), route  # type: ignore[return-value]
+            return discord_room.LEGS[options.harness], (directed.spec(options.scene, word_first=options.word_first),), route  # type: ignore[return-value]
         return discord_room.LEGS[options.harness], discord_room.MOMENTS, route
     return LEGS[options.harness], MOMENTS, route_for(options.harness, options.agent_model)
 
@@ -2401,6 +2403,13 @@ def _parser() -> argparse.ArgumentParser:
         "and every grade is a hard check; without it a live model plays the agent, on a CI runner only, and the grades are reported",
     )
     parser.add_argument(
+        "--nod-with-a-word-first",
+        action="store_true",
+        help="with --scripted --scene: the scripted agent's nod is first a word, which the core refuses before committing anything "
+        "(a tool error, or the turn's next page), and then the emoji, in the same turn. One case of the scripted lanes; "
+        "a hard check holds that every nod was refused once and then made",
+    )
+    parser.add_argument(
         "--discord-python",
         help="the Python that runs the Discord processes, with Nunchi installed (the reference also needs discord.py); "
         "default this one",
@@ -2427,6 +2436,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             file=sys.stderr,
         )
         return EXIT_USAGE
+    if args.nod_with_a_word_first and not (args.scene and args.scripted):
+        print("--nod-with-a-word-first scripts the agent's nod, so it needs --scripted and --scene", file=sys.stderr)
+        return EXIT_USAGE
     if args.scene:
         if not (args.harness in SCENE_HARNESSES and args.room == "discord"):
             print(
@@ -2437,7 +2449,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         from . import directed
 
         try:
-            directed.spec(args.scene)
+            directed.spec(args.scene, word_first=args.nod_with_a_word_first)
         except directed.Unplayable as exc:
             print(str(exc), file=sys.stderr)
             return EXIT_USAGE
@@ -2468,6 +2480,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         room=args.room,
         discord_python=str(Path(args.discord_python).absolute()) if args.discord_python else None,
         scene=args.scene,
+        word_first=args.nod_with_a_word_first,
     )
     refusal = live_scene_refusal(options, os.environ)
     if refusal is not None:

@@ -1230,7 +1230,7 @@ class ProbeTest(unittest.TestCase):
 # -- the summary and the cross-column matrix ---------------------------------------------------------------------------
 
 
-def _live_run(*, harness="claude-code", reply=True, status="pass", failed=(), spent=0.1, estimated=0.2, calls=(5, 7), exit_text=None) -> dict:
+def _live_run(*, harness="claude-code", reply=True, status="pass", failed=(), spent=0.1, estimated=0.2, calls=(5, 7), exit_text=None, delivered=True) -> dict:
     """A live run of `build-finishes-after-promise` as the probe records it: the agent's reply to Zoe (or not), then the CI line."""
 
     scene = _scene_of("build-finishes-after-promise")
@@ -1242,7 +1242,7 @@ def _live_run(*, harness="claude-code", reply=True, status="pass", failed=(), sp
     if reply:
         actions.append({"request_id": "r1", "kind": "reply", "text": "Will do.", "target_event_id": z1, "delivery": "sent", "delivered": True})
         turns.append({"request_id": "r2", "trigger": c1, "source": "WAKE"})
-        actions.append({"request_id": "r2", "kind": "message", "text": "The nightly passed.", "delivery": "sent", "delivered": True})
+        actions.append({"request_id": "r2", "kind": "message", "text": "The nightly passed.", "delivery": "sent" if delivered else "failed", "delivered": delivered})
     else:
         played["stopped"] = {"after": "z1", "line": "v1", "why": "the turn on it ended in silence, where the scene has a reply or a post"}
         played["deliveries"] = played["deliveries"][:1]
@@ -1298,6 +1298,75 @@ class SummaryTest(unittest.TestCase):
         self.assertIn("timing, nothing held the live agent): **raced** (the agent moved first)", text)
         self.assertTrue(text.index("**Failed:**") < text.index("## Grade matrix"))
         self.assertNotIn("Passed (reported", text)
+
+
+class LegendAndRowTest(unittest.TestCase):
+    """The legend lists every code a cell prints, and a Moments row agrees with its cells (run 38135715452: `E` was in no legend, and a row read `misses` over cells with no `!`)."""
+
+    # One item for each way `score.symbol` makes a letter.
+    LETTERS = {
+        "E": {"result": "woken", "provider_error": True}, "-": {"result": "unsupported"}, "W": {"result": "woken"},
+        "q": {"result": "stay_quiet", "by": "agent"}, "Q": {"result": "stay_quiet", "by": "attention"},
+        "m": {"result": "mhm"}, "S": {"result": "speak"}, "O": {"result": "other"},
+    }
+
+    def test_the_letters_the_suite_can_print_are_the_ones_this_test_lists(self):
+        from evals.behavior import score
+
+        self.assertEqual({letter: letter for letter in self.LETTERS}, {letter: score.symbol(item) for letter, item in self.LETTERS.items()})
+
+    def test_the_legend_of_the_summary_and_of_the_dispatch_matrix_lists_every_code_a_cell_prints(self):
+        run_page = record.summary_markdown(_live_run(delivered=False))
+        root = Path(tempfile.mkdtemp(prefix="legend-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        _write_run(root, 1, "build-finishes-after-promise", "codex", _live_run(harness="codex", delivered=False))
+        pages = {"the run's summary": run_page, "the dispatch's matrix": matrix.render(root)}
+        for where, page in pages.items():
+            legend = re.search(r"Cell: (.*?)isible grade", page, re.S).group(1)
+            for code in (*self.LETTERS, "!", "?"):
+                with self.subTest(where=where, code=code):
+                    self.assertIn(f"`{code}` ", legend, "the legend names it")
+        # The cell the live run printed has its letter in the legend: `E`, beside the visible grade agent-decides.
+        self.assertIn("`E` agent-decides/ok", run_page)
+        self.assertIn("`E` agent-decides/ok", pages["the dispatch's matrix"])
+        self.assertIn("`E` an error (the turn's action did not reach the room)", run_page)
+
+    def test_a_moments_row_over_a_turn_that_did_not_deliver_says_so_and_not_misses(self):
+        text = record.summary_markdown(_live_run(delivered=False))
+        row = next(line for line in text.splitlines() if line.startswith("| build-finishes-after-promise | directed |"))
+        self.assertTrue(row.endswith("| did not fit: the turn's action did not reach the room (E) |"), row)
+        self.assertNotIn("misses", row)
+        # The recorded outcome is what the checks read, and it is unchanged.
+        self.assertEqual(checks.MISSES, _live_run(delivered=False)["moments"][0]["outcome"])
+
+    def test_a_row_says_misses_exactly_where_a_cell_carries_a_bang_and_otherwise_names_what_did_not_fit(self):
+        from evals.behavior import score
+
+        found = set()
+        for visible in ("fits", "miss", "unlisted", "agent-decides"):
+            for step1 in ("ok", "over-wake", "over-suppress", "not judged"):
+                for hold in (None, "held", "unseen", "unmerged"):
+                    for error in (False, True):
+                        item = {"result": "woken" if error or visible == "agent-decides" else "speak", "provider_error": error, "by": None,
+                                "grade": {"visible": visible, "step1": step1}, **({"hold": hold} if hold else {})}
+                        clean = visible == "fits" and step1 == "ok" and hold in (None, "held") and not error
+                        moment = {"outcome": checks.FITS if clean else checks.MISSES, "graded": [item]}
+                        words = record._outcome_words(moment)
+                        bang = "!" in score.cell([item])
+                        with self.subTest(visible=visible, step1=step1, hold=hold, error=error):
+                            self.assertEqual(bang, words == checks.MISSES, (score.cell([item]), words))
+                            if not bang and not clean:
+                                self.assertTrue(words.startswith("did not fit: "), words)
+                        found.add(words)
+        self.assertIn("did not fit: the turn's action did not reach the room (E)", found)
+        self.assertIn("did not fit: a move the draft does not list (?)", found)
+        self.assertIn("did not fit: woken, with no turn on it (W)", found)
+        self.assertIn("did not fit: step 1 over-wake", found)
+        self.assertIn("did not fit: hold unseen", found)
+        # What is not a miss keeps its word, and a moment with no grade keeps the one it was recorded with.
+        for outcome in (checks.FITS, checks.RACED, checks.PRECONDITION, checks.NOT_DELIVERED):
+            self.assertEqual(outcome, record._outcome_words({"outcome": outcome, "graded": [{"grade": {"visible": "fits", "step1": "ok"}}]}))
+        self.assertEqual(checks.MISSES, record._outcome_words({"outcome": checks.MISSES, "graded": []}))
 
 
 def _write_run(root: Path, number: int, scene: str, column: str, run: dict | None, exit_code: int | None = 0) -> None:
@@ -2237,6 +2306,18 @@ def _write_executable(path: Path, text: str) -> None:
     path.chmod(0o755)
 
 
+def _as_the_runner_runs_it(directory: Path, run: str) -> list[str]:
+    """The command that runs a step's script as GitHub runs a `shell: bash` step: ``bash --noprofile --norc -eo pipefail {0}``.
+
+    The script is written to a file in ``directory``. ``bash -c`` is not the same: it has no ``-e``, and a failing command that
+    ends the step on the runner went on here. Run 38135715452 played 3 of its 18 runs for that reason, and the tests did not see it.
+    """
+
+    script = directory / "step.sh"
+    script.write_text(run, encoding="utf-8")
+    return ["bash", "--noprofile", "--norc", "-eo", "pipefail", str(script)]
+
+
 def _needs_bash(case: unittest.TestCase) -> None:
     try:
         import yaml  # noqa: F401
@@ -2259,7 +2340,7 @@ class InputsScriptTest(unittest.TestCase):
             "PATH": os.environ["PATH"], "HARNESS": "all", "SCENES": " ".join(FIRST_FOUR), "PASSES": "1", "BUDGET_USD": "2",
             "GITHUB_ENV": str(github_env), **env,
         }
-        done = subprocess.run(["bash", "-c", _step("scenes", "Check the inputs")["run"]], cwd=ROOT, env=full, capture_output=True, text=True, timeout=120)
+        done = subprocess.run(_as_the_runner_runs_it(directory, _step("scenes", "Check the inputs")["run"]), cwd=ROOT, env=full, capture_output=True, text=True, timeout=120)
         return done.returncode, done.stdout + done.stderr, github_env.read_text()
 
     def test_the_default_inputs_pass_and_only_the_checked_ids_go_on(self):
@@ -2343,12 +2424,14 @@ case "$2" in
       esac
     done
     echo "$column $scene ${args[*]}" >> "$STUBS/runs"
+    [ -e "$STUBS/break-status" ] && { rm -f "$PWD/rehearsal-out/status.tsv"; mkdir "$PWD/rehearsal-out/status.tsv"; }
     env | grep -E '^(NUNCHI_ATTENTION_API_KEY|NUNCHI_PARTICIPANT_API_KEY|ANTHROPIC_AUTH_TOKEN|OPENROUTER_API_KEY)=' | cut -d= -f1 | sort | tr '\n' ' ' > "$STUBS/env-$column"
     mkdir -p "$out/$column"
     echo '{}' > "$out/$column/run.json"
     [ -e "$STUBS/stderr-$column" ] && cat "$STUBS/stderr-$column" >&2
     [ -e "$STUBS/spend-after-run" ] && cp "$STUBS/spend-after-run" "$STUBS/spent"
-    exit "$(cat "$STUBS/code-$column" 2>/dev/null || echo 0)"
+    # The exit code of this column, or of this scene on this column (the more particular file wins).
+    exit "$(cat "$STUBS/code-$column-$scene" 2>/dev/null || cat "$STUBS/code-$column" 2>/dev/null || echo 0)"
     ;;
 esac
 '''
@@ -2370,10 +2453,11 @@ esac
             "ANTHROPIC_AUTH_TOKEN": "key", "OPENROUTER_API_KEY": "key",
             **{name: str(value) for name, value in self.job_env.items()}, **env,
         }
-        done = subprocess.run(["bash", "-c", step["run"]], cwd=work, env=full, capture_output=True, text=True, timeout=120)
+        done = subprocess.run(_as_the_runner_runs_it(self.root, step["run"]), cwd=work, env=full, capture_output=True, text=True, timeout=120)
         status = work / "rehearsal-out" / "status.tsv"
         halted = work / "rehearsal-out" / "halted.tsv"
-        return done, [line.split("\t") for line in status.read_text().splitlines()], [line.split("\t") for line in halted.read_text().splitlines()] if halted.exists() else []
+        rows = [line.split("\t") for line in status.read_text().splitlines()] if status.is_file() else []
+        return done, rows, [line.split("\t") for line in halted.read_text().splitlines()] if halted.is_file() else []
 
     def test_every_scene_runs_on_each_column_and_pass_in_order_each_column_with_only_the_keys_it_reads(self):
         step = self.sandbox()
@@ -2464,6 +2548,126 @@ esac
         self.assertIn("discord_net: refused: proxy variables are set", done.stderr, "and all of it in the step's log")
         self.assertIn("::error::pass 1, scene-a on codex: exit 2", done.stdout + done.stderr)
 
+    def test_a_run_that_fails_is_recorded_and_every_later_run_still_plays_under_the_shell_the_runner_gives_the_step(self):
+        # Run 38135715452: GitHub runs the step as `bash -eo pipefail` and the script's `set -uo pipefail` does not clear -e, so
+        # the first run that exited non-zero ended the step: 3 of 18 runs played. Here the first run of twelve fails, and the
+        # same scene on the same column again in the second pass; the other ten are well.
+        step = self.sandbox()
+        (self.stubs / "code-reference-scene-a").write_text("3")
+        done, status, halted = self.run_play(step, PASSES="2", HARNESS="all")
+        every = [(p, s, c) for p in (1, 2) for s in ("scene-a", "scene-b") for c in ("reference", "claude-code", "codex")]
+        self.assertEqual(
+            [[str(p), s, c, "3" if (s, c) == ("scene-a", "reference") else "0"] for p, s, c in every], status,
+            "all twelve runs played and each has its row, the failed ones with their exit status",
+        )
+        self.assertEqual(12, len((self.stubs / "runs").read_text().splitlines()))
+        self.assertEqual(
+            ["::error::pass 1, scene-a on reference: exit 3", "::error::pass 2, scene-a on reference: exit 3"],
+            [line for line in (done.stdout + done.stderr).splitlines() if line.startswith("::error::")],
+        )
+        self.assertEqual(1, done.returncode, "the step still fails, after the last run")
+        self.assertEqual(12, len((self.stubs / "matrix-calls").read_text().splitlines()), "the spend was read after every run, the failed one included")
+        self.assertEqual([], halted)
+
+    def test_a_failed_run_is_followed_by_the_spend_check_so_the_runs_not_started_read_skipped_and_the_step_fails(self):
+        step = self.sandbox()
+        (self.stubs / "code-reference-scene-a").write_text("1")
+        (self.stubs / "spend-after-run").write_text("2.5")
+        done, status, halted = self.run_play(step, PASSES="2")
+        self.assertEqual(
+            [["1", "scene-a", "reference", "1"]] + [[p, s, c, "skipped"] for p, s, c in (
+                ("1", "scene-a", "codex"), ("1", "scene-b", "reference"), ("1", "scene-b", "codex"),
+                ("2", "scene-a", "reference"), ("2", "scene-a", "codex"), ("2", "scene-b", "reference"), ("2", "scene-b", "codex"))], status,
+        )
+        self.assertEqual([["budget", "2.5", "2", "1 scene-a reference"]], halted)
+        self.assertEqual(1, done.returncode, "the run that failed fails the step, though the dispatch halted after it")
+        self.assertIn("::error::pass 1, scene-a on reference: exit 1", done.stdout + done.stderr)
+
+    def test_a_failed_mktemp_ends_the_step_instead_of_playing_runs_with_no_home_or_tmp(self):
+        # With -e off for the loop, a failed `mktemp -d` left HOME="" TMPDIR="" and the run played on regardless.
+        step = self.sandbox()
+        _write_executable(self.stubs / "mktemp", "#!/bin/bash\necho 'mktemp: cannot create temp dir' >&2\nexit 1\n")
+        done, status, halted = self.run_play(step)
+        self.assertNotEqual(0, done.returncode, done.stdout + done.stderr)
+        self.assertIn("mktemp: cannot create", done.stderr)
+        self.assertFalse((self.stubs / "runs").exists(), "no run was started with an empty HOME")
+        self.assertEqual([], status)
+
+    def test_a_status_row_that_cannot_be_written_ends_the_step_and_does_not_go_unnoticed(self):
+        step = self.sandbox()
+        # The first run turns status.tsv into a directory, so the append that records it fails.
+        (self.stubs / "break-status").touch()
+        done, status_rows, _ = self.run_play(step)
+        self.assertNotEqual(0, done.returncode)
+        self.assertIn("Is a directory", done.stderr)
+        self.assertEqual(1, len((self.stubs / "runs").read_text().splitlines()), "the step ended after the run whose row failed")
+
+    def test_every_script_of_the_scenes_job_names_the_shell_the_runner_gives_it_and_the_tests_run_it_that_way(self):
+        import yaml
+
+        steps = yaml.safe_load(REHEARSAL)["jobs"]["scenes"]["steps"]
+        for step in steps:
+            if "run" in step:
+                self.assertEqual("bash", step.get("shell"), step.get("name"))
+        # `shell: bash` is `bash --noprofile --norc -eo pipefail {0}` (GitHub's docs): -e is on unless the script clears it.
+        self.assertEqual(["bash", "--noprofile", "--norc", "-eo", "pipefail"], _as_the_runner_runs_it(Path(tempfile.mkdtemp()), "")[:5])
+        play = next(step for step in steps if step.get("name") == "Play the scenes live")["run"]
+        self.assertNotRegex(play, r"set -[a-zA-Z]*e", "the script never turns -e on by itself")
+        self.assertNotIn("set +e", play, "-e stays on: only the run itself is meant to fail, and a failed mktemp or status write must end the step")
+        self.assertIn("|| code=$?", play, "the run itself is guarded by name, with code reset before each run")
+        self.assertLess(play.index("code=0"), play.index("|| code=$?"))
+
+
+class ScanAndSummaryScriptTest(unittest.TestCase):
+    """The scan and the summary steps, run as the runner runs them, against stand-ins for the Python they call (-e is on there too)."""
+
+    def run_step(self, name: str, *, scan_code: int = 0, record: bool = True, **env):
+        _needs_bash(self)
+        directory = Path(tempfile.mkdtemp(prefix="scan-"))
+        self.addCleanup(shutil.rmtree, directory, True)
+        runner, work = directory / "runner", directory / "work"
+        fake = (
+            '#!/bin/bash\ncase "$2" in\n'
+            f'  evals.rehearsal.scan) echo "scan $*" >> "{directory}/calls"; exit {scan_code} ;;\n'
+            f'  evals.rehearsal.matrix) echo "matrix $*" >> "{directory}/calls"; echo "| the matrix |" ;;\n'
+            "esac\n"
+        )
+        _write_executable(runner / "transport-env" / "bin" / "python", fake)
+        work.mkdir(parents=True)
+        if record:
+            (work / "rehearsal-out").mkdir()
+            (work / "rehearsal-out" / "summary.md").write_text("LEAK NOTICE\n")
+        summary = directory / "summary.md"
+        summary.touch()
+        full = {"PATH": os.environ["PATH"], "RUNNER_TEMP": str(runner), "GITHUB_STEP_SUMMARY": str(summary), "HARNESS": "codex", **env}
+        done = subprocess.run(_as_the_runner_runs_it(directory, _step("scenes", name)["run"]), cwd=work, env=full, capture_output=True, text=True, timeout=60)
+        calls = (directory / "calls").read_text().splitlines() if (directory / "calls").exists() else []
+        return done, calls, summary.read_text()
+
+    def test_a_scan_that_finds_a_leak_fails_the_step_with_its_own_status_and_puts_the_notice_in_the_job_summary(self):
+        done, calls, summary = self.run_step("Scan every output for the key and the canary", scan_code=4)
+        self.assertEqual(4, done.returncode)
+        self.assertEqual("LEAK NOTICE\n", summary)
+        self.assertEqual(1, len(calls))
+        self.assertIn("--env NUNCHI_ATTENTION_API_KEY --env REHEARSAL_CANARY", calls[0])
+
+    def test_a_clean_scan_passes_and_a_leak_with_no_notice_still_fails_the_step(self):
+        done, _, summary = self.run_step("Scan every output for the key and the canary")
+        self.assertEqual((0, ""), (done.returncode, summary))
+        done, _, summary = self.run_step("Scan every output for the key and the canary", scan_code=2, record=False)
+        self.assertEqual((2, ""), (done.returncode, summary))
+
+    def test_the_summary_is_the_matrix_for_the_columns_of_the_harness_or_says_the_job_stopped_before_the_first_run(self):
+        for harness, columns in (("all", "reference,claude-code,codex"), ("claude-code", "reference,claude-code"), ("codex", "reference,codex")):
+            with self.subTest(harness):
+                done, calls, summary = self.run_step("Summary", HARNESS=harness)
+                self.assertEqual((0, "| the matrix |\n"), (done.returncode, summary), done.stderr)
+                self.assertTrue(calls[0].endswith(f"--in rehearsal-out --columns {columns}"), calls)
+        done, calls, summary = self.run_step("Summary", record=False)
+        self.assertEqual(0, done.returncode)
+        self.assertEqual([], calls)
+        self.assertIn("The scenes wrote no record", summary)
+
 
 class StopScriptTest(unittest.TestCase):
     """The step between the play step and the scan: TERM, then KILL, wait, and fail if anything remains. Run against stand-ins for pgrep and pkill."""
@@ -2489,7 +2693,7 @@ class StopScriptTest(unittest.TestCase):
         summary = directory / "summary.md"
         summary.touch()
         done = subprocess.run(
-            ["bash", "-c", _step("scenes", "Stop whatever the scenes left running")["run"]],
+            _as_the_runner_runs_it(directory, _step("scenes", "Stop whatever the scenes left running")["run"]),
             env={"PATH": f"{stubs}:{os.environ['PATH']}", "STUBS": str(stubs), "RUNNER_TEMP": "/home/runner/work/_temp", "GITHUB_STEP_SUMMARY": str(summary)},
             capture_output=True, text=True, timeout=60,
         )

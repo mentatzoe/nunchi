@@ -20,8 +20,8 @@ The changed portable interfaces are:
 | `I-010D ContextContinuationV2` | `@2` | the page's coverage carries the optional `gaps` of the shared coverage shape (@2) |
 | `I-010E AttentionReceiptV2` | `@6` | ACK disposition, authority audit, and ACK host source (@3); the `outcome-turn` widening (@4); no new record carries ACK, and records written before @5 still read (@5); the observation record's coverage carries the optional `gaps` (@6) |
 | `I-030A AttentionEngineV2` | `@3` | shared ACK selection and capability/policy widening (@2); removed with Nunchi's own nod, so the engine takes no ACK policy or reaction capability (@3) |
-| `I-040A ParticipantTurnHostV2` | `@4` | one core-owned participant protocol and durable ACK commit path (@2); the ACK commit path removed, and the participant's own reaction checked against the attested capability (@3); the host tells a participant that waits on its action what became of it (`settle`), for the core `Turn` (@4) |
-| `I-040D LocalTurnProtocolV2` | `@3` | the core `Turn` as versioned JSON over a private local socket, for harnesses outside Python (@1); `model_text` at attach and the `turn/model-text` route: in final-answer posting only words the model wrote can be posted, and a final answer that is not its words fails the turn (@2); the tools attach lists may include the `quiet` tool: staying quiet on purpose, with a reason, which posts nothing and is not a room action (@3, additive) |
+| `I-040A ParticipantTurnHostV2` | `@5` | one core-owned participant protocol and durable ACK commit path (@2); the ACK commit path removed, and the participant's own reaction checked against the attested capability (@3); the host tells a participant that waits on its action what became of it (`settle`), for the core `Turn` (@4); a participant's reaction must be exactly one emoji, and anything else is refused before anything is committed, so a shortcode name (`:+1:`), a word and a custom `name:id` reaction are no longer dispatched (@5, a narrowing of the action's `reaction`; the schemas are unchanged) |
+| `I-040D LocalTurnProtocolV2` | `@3` | the core `Turn` as versioned JSON over a private local socket, for harnesses outside Python (@1); `model_text` at attach and the `turn/model-text` route: in final-answer posting only words the model wrote can be posted, and a final answer that is not its words fails the turn (@2); the tools attach lists may include the `quiet` tool: staying quiet on purpose, with a reason, which posts nothing and is not a room action (@3, additive). Its shape is unchanged since `I-040A@5` made a reaction exactly one emoji: a `react` call that is not one answers `ok: false` with the reason, before anything is committed |
 
 Every Nunchi-owned participant runs `nunchi.participant-turn` version `1` from
 `src/nunchi/participant_model.py`. Core owns its prompt, request, action schema,
@@ -82,7 +82,11 @@ Nunchi never reacts on the participant's behalf (#94 step 7; Zoe,
 reservation journal, and the reaction probe it ran before attention are gone.
 The participant's own reaction still needs the adapter's attested reaction
 capability: without it the turn offers no reaction, and a reaction the
-capability does not name is refused before dispatch. Receipt journals written
+capability does not name is refused before dispatch. A reaction is exactly one
+emoji (`nunchi.reactions.is_one_emoji`): a word, a `:name:` code or two emoji is
+refused before anything is committed, in a tool turn with a tool error, in the
+one-reply style with a page, and from a plain participant as an invalid action,
+so the turn is not spent on a nod no room would take. Receipt journals written
 before the removal keep their ACK records, and those still read. A config that
 still has an `ack` setting loads, and the setting is ignored.
 

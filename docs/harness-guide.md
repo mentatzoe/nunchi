@@ -737,7 +737,13 @@ room = Room(
   lets a plugin react. It has three methods:
   - `dispatch(action=..., wake=...) -> TransportResult` for a reaction:
     `{"kind": "reaction", "origin_event_id": …, "target_event_id": …,
-    "reaction": …, "operation": "add"}` (or `"remove"`);
+    "reaction": …, "operation": "add"}` (or `"remove"`). The `reaction` is
+    exactly one emoji: the library refuses anything else (a word, a `:name:`
+    code, two emoji) before it commits the action, in every way an agent
+    acts, so the turn is not spent on a nod no room would take. It reaches you
+    as the agent wrote it, with emoji-style marks, skin tones, joined
+    sequences, flags and keycaps intact, so pass it through whole. A platform
+    that takes only some emoji says which in `reaction_capability()`;
   - `ordinary_action_capabilities() -> list[str]`, such as `["reaction"]`;
   - `reaction_capability() -> ReactionCapability` (`nunchi.reactions`): the
     operations and reactions the platform allows. The library offers the

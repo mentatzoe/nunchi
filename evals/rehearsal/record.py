@@ -38,6 +38,7 @@ from typing import Any
 
 from evals.behavior.score import cell as grade_cell, symbol as move_symbol
 
+from .checks import MISSES
 from .standin import JsonLines
 
 SCHEMA = "nunchi-rehearsal-probe/1"
@@ -393,6 +394,48 @@ def _facts(value: Mapping[str, Any], prefix: str = "") -> Iterable[tuple[str, An
             yield f"{prefix}{key}", item
 
 
+# Every code a matrix cell can carry (`score.symbol` for the letter, `score.cell` for the mark), said once, so that the run's own
+# summary and the dispatch's matrix (`matrix.py`) cannot list different ones. `E` is printed beside the visible grade
+# ``agent-decides``: the agent was woken, made an action, and the action never reached the room.
+CELL_CODES = (
+    "`Q` quiet by attention, `q` quiet by the agent's choice, `m` its own mhm, `S` it spoke, `O` another action, "
+    "`W` woken (no turn began on it), `E` an error (the turn's action did not reach the room), `-` not judged; "
+    "`!` marks a clear miss, `?` an unlisted move"
+)
+
+
+def _outcome_words(moment: Mapping[str, Any]) -> str:
+    """A moment's outcome as the Moments table says it, in step with the matrix cells under it.
+
+    The recorded ``outcome`` is what the run's checks read: ``misses`` means
+    the moment did not fit its draft, which covers more than a clear miss
+    (a turn that did not deliver, an unlisted move, a step 1 the draft does
+    not expect, a hold that did not hold). The table says ``misses`` only
+    where a cell carries ``!``, and otherwise says which of the others it was,
+    in the cells' own words, so that a row never reads ``misses`` over cells
+    that show none.
+    """
+
+    outcome = str(moment.get("outcome"))
+    graded = [item for item in moment.get("graded", ()) if item.get("grade")]
+    if outcome != MISSES or not graded or any(item["grade"].get("visible") == "miss" for item in graded):
+        return outcome
+    reasons: list[str] = []
+    for item in graded:
+        grade = item["grade"]
+        if item.get("provider_error"):
+            reasons.append("the turn's action did not reach the room (E)")
+        elif grade.get("visible") == "unlisted":
+            reasons.append("a move the draft does not list (?)")
+        elif grade.get("visible") == "agent-decides":
+            reasons.append("woken, with no turn on it (W)")
+        if grade.get("step1") not in (None, "ok"):
+            reasons.append(f"step 1 {grade['step1']}")
+        if item.get("hold") not in (None, "held"):
+            reasons.append(f"hold {item['hold']}")
+    return "did not fit: " + "; ".join(dict.fromkeys(reasons)) if reasons else outcome
+
+
 def _matrix_cell(item: Mapping[str, Any]) -> str:
     """One graded moment's cell: the suite's letter for the move, then the visible grade and step 1 (`score.cell`).
 
@@ -454,9 +497,7 @@ def _matrix_lines(run: Mapping[str, Any]) -> list[str]:
         "The scenes are drafts awaiting Zoe's review (`evals/behavior/README.md`): a grade compares the move with the draft's "
         "fitting moves and clear misses, and is not a finding about the model."
         + (" Here the agent is live, so every grade is reported and none is a failure, and its words are its own." if live else "")
-        + " Cell: `Q` quiet by attention, `q` quiet by the "
-        "agent's choice, `m` its own mhm, `S` it spoke, `O` another action, `W` woken (the turn did not deliver), `-` not "
-        "judged; `!` marks a clear miss, `?` an unlisted move. Then the visible grade and step 1"
+        + f" Cell: {CELL_CODES}. Then the visible grade and step 1"
         + (", and `precondition not met` where the setup the scene needs was not made (not graded)." if live else
            ", and `off script` where the delivered action was not exactly the one the script makes."),
         "",
@@ -705,7 +746,7 @@ def summary_markdown(run: Mapping[str, Any]) -> str:
         ]
         for moment in moments:
             posts = moment.get("posts", ())
-            outcome = str(moment.get("outcome"))
+            outcome = _outcome_words(moment)
             if "ERROR_FALLBACK" in moment.get("graded_wake_sources", ()):
                 outcome += " (woken by attention's error fallback, not its judgment)"
             lines.append(
