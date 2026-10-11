@@ -587,7 +587,7 @@ class CommandTest(unittest.TestCase):
         code, error = self.run_main("--harness", "hermes", "--scripted", "--room", "discord", "--scene", "story-across-messages")
         self.assertEqual(probe.EXIT_USAGE, code)
         self.assertIn("Hermes is parked", error)
-        with self.assertRaisesRegex(ValueError, "played in the Discord room, scripted, by reference or claude-code or codex"):
+        with self.assertRaisesRegex(ValueError, "played in the Discord room by reference or claude-code or codex"):
             probe.run_probe(probe.Options(harness="hermes", out=Path("x"), scripted=True, room="discord", scene="bot-status-report"))
         self.assertFalse(hasattr(discord_room.HermesGatewayLeg, "directed"))
         self.assertNotIn("hermes", probe.SCENE_HARNESSES)

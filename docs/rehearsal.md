@@ -21,7 +21,12 @@ through Claude Code and Codex, with the reference as the control:
 **implemented, unverified** in CI too. PR 4c plays seven more, the ones where
 timing and the agent's own history matter: a message that lands while the
 agent is composing, a question asked while it is busy, a promise it made, a
-nod it gave: **implemented, unverified** in CI too.
+nod it gave: **implemented, unverified** in CI too. PR 4d lets the manual
+`rehearsal` dispatch play the directed scenes with a live model behind each
+column on the stand-in, so we can see how a live agent reads a multi-person
+room through the reference, Claude Code and Codex (Live scenes, below):
+**implemented, unverified**. No live run has been made yet; the unit tests use
+a fake provider on loopback, and nothing in this PR's checks spends anything.
 
 ## The first live run (2026-10-09)
 
@@ -96,14 +101,16 @@ It does not prove:
   With `--room discord` (PR 3b and 3c, below), the harnesses' own Discord
   processes run on a Discord stand-in at Discord's real names, scripted only:
   Nunchi's for Claude Code, Codex and the reference, and Hermes's own
-  gateway, `hermes gateway run`, with the plugin. The live probe keeps the
-  in-process room until PR 4.
+  gateway, `hermes gateway run`, with the plugin. The live probe's two moments
+  keep the in-process room; only a directed scene is played live on the
+  stand-in (PR 4d, Live scenes).
 - **How well the agent reads the room.** Two moments, once each. Beside
   them, `--scene` plays one behavior scene on the reference, Claude Code or
   Codex column and grades it from the scene's own draft expectations, with the
   agent and attention scripted (Directed scenes, below): that checks the
   director, the grader and each harness's wiring to the room, not a model. A
-  live run comes later in PR 4.
+  live run of a scene is PR 4d (Live scenes, below); its grades are drafts
+  compared with a live agent, reported and never failed.
 - **Hermes's own model as attention** (`hermes-host`). Attention is the same
   OpenRouter chat route in every harness here.
 - **That Claude Code sends nothing past its proxy settings in CI.** Its
@@ -279,15 +286,20 @@ with Nunchi installed in it. In order, the launcher:
    five names the stand-in answers; the CA's key is deleted at once;
 2. enters a private mount namespace (`unshare --mount --propagation
    private`, plus `--net` with `--offline`, which leaves only loopback) and
-   mounts there a copy of `/etc/hosts` that maps the names to 127.0.0.1
-   alone, and a copy of `/etc/ssl/certs` with the CA in the bundle and the
-   hashed directory, so each Python trusts it with its default context;
+   mounts there a copy of `/etc/hosts` that maps the names to 127.0.0.1 and
+   `::1` alone (a line for each, so that a lookup for an IPv6 address cannot
+   reach the real service either: nothing listens on `::1`, a client falls
+   back to 127.0.0.1, and an IPv6-only one is refused), and a copy of
+   `/etc/ssl/certs` with the CA in the bundle and the hashed directory, so
+   each Python trusts it with its default context;
 3. sets `net.ipv4.ip_unprivileged_port_start=443`, so the stand-in binds
    443 as you. The setting belongs to the network namespace. Without
    `--offline` it would change this machine's, so the launcher refuses that
-   unless `CI=true`, and restores it afterwards; that mode exists for later
-   live lanes, which need their model provider's network, and no scripted
-   lane uses it;
+   unless it is on a GitHub Actions runner (`CI=true` and `GITHUB_ACTIONS=true`,
+   both: `CI` alone is a variable anyone sets), and restores it afterwards; that mode exists for live
+   lanes, which need their model provider's network, and no scripted lane
+   uses it. The first user is PR 4d's live scenes, in the manual `rehearsal`
+   workflow only (Live scenes, below);
 4. checks that no proxy variable is set (`HTTP_PROXY`, `HTTPS_PROXY`,
    `ALL_PROXY`, `WS_PROXY`, `WSS_PROXY` or `DISCORD_PROXY`, in any case: the
    transport's REST calls and Hermes's discord.py follow one past the
@@ -333,7 +345,7 @@ stand-in at port 443: the preflight, the transport's REST client and its
 gateway client reached it by name on Python 3.11, 3.12 and 3.14, as root and
 as an unprivileged user, and this machine's `/etc/hosts`, trust store and
 port setting stayed unchanged. Not run yet: without `--offline` (that needs
-`CI=true`), and the bubblewrap check itself, since bubblewrap is not
+a runner), and the bubblewrap check itself, since bubblewrap is not
 installed here. CI passes `--offline` too, so the port setting stays in the
 run's namespace on a runner as well, and passes `--require-bwrap` only for
 Claude Code and Codex (Hermes's terminal backends use no bubblewrap, and its
@@ -355,10 +367,10 @@ sudo -E "$PY" -m evals.rehearsal.discord_net --offline -- \
   /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness codex --scripted --room discord --out rehearsal-out
 ```
 
-`--room standin` stays the default. The Discord room is scripted only (a
-live run keeps the in-process room until PR 4) and runs only inside the
-launcher: without its `NUNCHI_DISCORD_NET` the probe could not run (exit 3)
-and starts nothing. `sudo` resets `PATH`, hence `env PATH="$PATH"` for the
+`--room standin` stays the default. The Discord room's moments are scripted
+only (a live run of them keeps the in-process room; only a directed scene is
+played live there, PR 4d) and the room runs only inside the launcher: without
+its `NUNCHI_DISCORD_NET` the probe could not run (exit 3) and starts nothing. `sudo` resets `PATH`, hence `env PATH="$PATH"` for the
 harnesses that need Node.
 
 - **Claude Code and Codex** each get a `nunchi-mcp-discord` process of their
@@ -887,7 +899,7 @@ new scene fails until it is classified here:
 | `two-agents-one-question` | no | `several-participants`: two harness bots in one room (PR 5) |
 
 The pause (`addressee-first`, `only-they-can-do-it`) is a real wait of 300
-seconds, which PR 4c does not play; it gets its own small PR or joins 4d.
+seconds, which neither PR 4c nor PR 4d plays; it gets its own small PR.
 `addressee-never-answers` was refused until PR 4c, because without `v1` the
 second moment's "Vigil knows the answer" would be untrue and its grade
 meaningless. One person could type `story-across-messages`,
@@ -1109,8 +1121,8 @@ to a message the model never saw proves nothing); and that the next turn after
 the agent's reaction holds it in `memory.own_moves`, about the message it
 reacted to; since PR 4c the same for each of its earlier lines (a reaction, a
 reply to the message it answered, a post by its words), at the next turn and at
-every graded turn after it. A live moment would be reported and never failed (`probe.py`): there is no live
-scene run yet.
+every graded turn after it. A live scene is graded the same way, from what the
+live agent did, reported and never failed (Live scenes, below).
 
 **A wait that timed out.** Every message is posted and then waited on until the
 room goes quiet (`Leg.settle`), and the wait is recorded in the delivery
@@ -1247,10 +1259,256 @@ assumed live, and "Vigil answered Zoe but not Sam" holds only after the
 thanks. What a hold shows is that the core's look before
 posting and the page it hands the agent work through each harness's own tools,
 and that the grade reads the room after it. It says nothing about how well any
-model reads the room: that needs a live run, a later part of PR 4, and Zoe's
+model reads the room: that needs a live run (Live scenes, below), and Zoe's
 review of the scenes first (`evals/behavior/README.md`). Six scenes are still
 not played (the table above). Hermes is parked (`AGENTS.md`): its lane keeps
 its moments and plays no scene.
+
+## Live scenes (PR 4d)
+
+**Status: implemented, unverified. No live run has been made.** What has run:
+the unit tests (`tests/v2/test_rehearsal_live_scene.py`), with a fake provider on
+loopback in place of OpenRouter and a thread for the live agent; and the eleven
+scripted scenes and the three plain Discord lanes on all three columns, which
+are unchanged (below). After this merges, one pass of the four scenes of PR 4a on
+all three columns is the first live run; this section's claims about it
+(what it reads, what it costs, how long it takes) are then to be checked.
+
+The manual `rehearsal` workflow takes `room: discord` and plays the behavior
+suite's directed scenes with a live model behind each column, on the Discord
+stand-in at Discord's real names, so that we see how a live agent reads a room
+of several people through each harness. The reference (`nunchi-discord`, on the
+same model through OpenRouter's chat completions) is the control, as in the
+scripted lanes: a miss only a harness column has is the integration's, a miss
+all three share is the model's or Nunchi's. Hermes plays no scene (parked).
+
+```
+Actions → rehearsal → Run workflow
+  room        discord            (in-process, the default, is the two-moment probe as before)
+  harness     all | claude-code | codex   (the reference always runs; hermes is refused)
+  scenes      bot-status-report story-across-messages said-it-would-check mention-in-busy-room   (the default: the four of PR 4a)
+  passes      1 | 2 | 3          (each scene once per column and pass; 23% of woken moments change move between runs)
+  agent_model, attention_model, budget_usd  as before
+```
+
+One job, `scenes`, installs the pinned Claude Code and Codex, the reference's
+virtualenv (discord.py) and the transports' (mcp), and plays each (pass, scene,
+column) as a probe run of its own, inside the launcher **without `--offline`**
+(the models are on the internet; the launcher allows that on a GitHub Actions
+runner alone), with `--require-bwrap` for Claude Code and Codex and their
+sandboxes on. A run that fails does not stop the others; each has a timeout of
+40 minutes (or what is left of the step's 290 minutes of planning, wind-up
+included; none starts with less than ten minutes left), and the step has another.
+GNU `timeout`, run without `--foreground`, sends TERM to its whole process group,
+not only to the launcher: the launcher, the probe and the harness's processes.
+The launcher passes its TERM on to the probe, which turns the first into an
+interrupt and winds the run up (stops the Discord processes, reads the key's
+usage one last time for up to 75 s, writes the record) and ignores a second, so
+the duplicate is harmless. The Discord processes run in sessions of their own
+(`setsid`), so the group's TERM does not reach them: the probe's wind-up stops
+them. `--kill-after` is how long that has before SIGKILL: 300 s, so a run that
+timed out still leaves a partial record when it can.
+
+Between runs the step reads the recorded spend of **the whole dispatch** (all
+passes together) and stops starting runs once it has passed `budget_usd` (a soft
+limit: the figure lags). A spend it cannot read stops them too, rather than
+counting as nothing. Every run not started is written to `status.tsv` as
+`skipped`, `halted.tsv` says why (budget, time, or an unreadable spend), and the
+summary's first line says the dispatch halted. The inputs are checked before
+anything is installed: `scenes` as a whole string (ids joined by single spaces,
+each a scene the director can play, de-duplicated, never more than there are),
+`budget_usd` as a plain positive number (`nan`, `inf` and exponents are refused),
+`passes` as 1, 2 or 3, and Hermes is refused.
+
+After the last run, a step TERMs and then KILLs whatever the play step left
+running (a timeout or a cancel can leave root's launcher, the Discord processes
+and the harnesses writing into the outputs the scan reads) and fails if
+anything remains; the key and canary scan covers every output only after that,
+and only after a clean scan does the job summary show the matrix (below) and
+the records upload as `rehearsal-scenes-<run id>`.
+
+**The live run's egress is open.** The launcher runs online because the models
+are on the internet, so the harnesses, their tools and the reference can reach
+any host (the in-process live probe before it was no different). What bounds it:
+Codex's workspace-write sandbox has `network_access = false`; Claude Code's Bash
+tool runs in its sandbox (bubblewrap, which the launcher checks first); the
+Discord names lead to the stand-in at 127.0.0.1 and `::1`, whose certificate
+covers those names only; Claude Code is asked to keep off telemetry and
+nonessential traffic (`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`,
+`DISABLE_TELEMETRY`); and there is no real Discord credential on the runner. A
+network-sealed live run (a private network namespace with a relay to
+openrouter.ai) is planned, not built. Not done either: hash-pinned constraints
+for the installs (pip's and npm's pins are by version, and generating the hashes
+needs the network); the GitHub environment that would gate the secret, and a
+credit-limited key, which are Zoe's to set up.
+
+**It refuses to run in the wrong place.** `probe.live_scene_refusal`, in `main`
+and in `run_probe`, stops a live scene before anything is written or started:
+off a CI runner (`CI` is not exactly `true`) it exits 2 (the launcher also wants
+`GITHUB_ACTIONS=true`, above); without a key its column
+reads, under that key's own name, it exits 3. The keys are
+`NUNCHI_ATTENTION_API_KEY` for attention and, by column, `NUNCHI_PARTICIPANT_API_KEY`
+(the reference's participant model), `ANTHROPIC_AUTH_TOKEN` (Claude Code) or
+`OPENROUTER_API_KEY` (Codex); the in-process live probe falls back to the attention
+key for a harness's own, a scene does not. The workflow gives all four the one
+secret in the step's environment, never on a command line, and `env -u` drops from
+each column the two it does not read. The Discord room also checks the launcher's
+own record: a live scene started in an `--offline` launcher, or one that never saw
+a runner (`CI=true` and `GITHUB_ACTIONS=true`), stops before any process starts.
+
+### What is reported, and what fails
+
+| | Reported in the job summary, never failed | Fails the run |
+|---|---|---|
+| The agent | each graded moment's grade (`fits`, `miss`, `unlisted`; step 1 `ok`, `over-wake`, `over-suppress`), what the agent did, whether attention's evidence cites each fact; what it did on the chatter (`other_actions`) | |
+| Setup | `precondition not met`; a hold's outcome (`held`, `raced`, `unseen`, `never-asked`, `unmerged`); a wait that ran out; a message that did not reach Nunchi | |
+| Plumbing and safety | | the checks of any run: `pins-and-isolation`, `record-complete`, `turns-bound-and-ended`, `turns-on-others-messages`, `attention-judged`, `one-room-action-per-turn`, `no-leaks`, `live-scene-plumbing` (a message the director posted never reached Nunchi; for Claude Code and Codex, an action delivered to the room without a completed room tool call of the harness's own record behind it), `room-errors` (Claude Code and Codex), the `discord-*` checks (preflight, processes, stand-in clean, clients complete, writes reconciled with the wire, continuity, addressing: what the stand-in sent arrived as sent); the probe raising an error; the key or canary in an output (the scan deletes every output) |
+| Spend | the cost, recorded and estimated | `spend-recorded`: no reading of the key's usage gave a figure (the first is tried up to three times, and the detail names the error of each that failed), the model calls were not counted, or none was counted for an agent whose turns ran |
+
+The scenes' expectations are drafts nobody has reviewed (`evals/behavior/README.md`),
+so a live result is not called a miss until Zoe has reviewed the scene: every page
+says "draft expectations", and the matrix is titled "draft expectations, not
+reviewed". There is no `directed-outcomes` or `scripted-outcomes` check live; the
+script that held an agent to its scene has nothing to hold.
+
+### The agent's words are its own
+
+The director never posts as the agent (as before), and now it cannot force
+the agent's words either, so a scene is played as the live agent makes it:
+
+- **An earlier line of the agent's** (a promise, a nod; PR 4c) is the live agent's
+  own move on the message it answers, or on the cue the director adds. It is
+  checked only to be of the scene's kind (`directed.line_landing`): a reply
+  or a post answers, a reaction nods, and it must have been delivered.
+  If the agent made no such move (no turn began, it stayed silent, it nodded
+  where the scene has a reply), every graded moment of the scene reads
+  `precondition not met` with what the agent did, is not graded, and **the scene
+  stops** there (nothing after it is posted: it would be judged against a history
+  the agent did not have, and each message costs a turn). The summary shows
+  the scene's words and the agent's side by side.
+- **A hold is timing, not a gate.** There is no proxy in front of OpenRouter. The
+  director posts the held messages as soon as the column's turn has begun
+  (`Leg.begun`: Claude Code's and Codex's turn is recorded when the host hands it
+  to the harness; the reference's is attention's receipt reading as a wake, the
+  earliest signal it has, which can come a moment before the turn's packet is
+  built), waits for each to reach Nunchi, and lets the room settle. The hold
+  reads `held` if every held message reached Nunchi before the
+  agent's move reached the room (or before its turn ended, if it moved not at all),
+  `raced` if the agent moved first (not a miss: the moment was not played as the
+  scene has it, and it is reported as `raced`), a held message never reached
+  Nunchi, or a held message was already in the first packet handed to the agent
+  for the turn (the reference's host receipt lists the packet's events, and the
+  wake Claude Code and Codex are handed does too: a message that reached Nunchi
+  before the turn began did not arrive in it), `unseen` if they reached Nunchi in
+  time, the agent moved, and the column's own record shows the turn was never
+  shown them (shown means in the transcript from the turn's start to the moment it
+  moved, or ended: the same transcript holds the next turn's wake, which is another
+  turn's), `never-asked` if no
+  turn began on the trigger within 60 s (the scene goes on, the moment reads
+  `precondition not met`), and `unmerged` for an `unattended` hold as before. The
+  times are compared to the millisecond; a tie is `held`.
+- **The scenes that need the agent to know something it does not** are not
+  meaningful live: `answered-while-composing`, `never-mind-while-composing` and
+  `addressee-never-answers` have the agent say, three hours earlier, a fact the
+  scene's later moments turn on. A live agent given the cue says whatever it
+  says, and the page shows both. They are not in the default list.
+  `asked-while-busy` is played in the order PR 4c names, and a live agent may
+  drop its reply after the page shows it Zoe's thanks, which reads
+  `precondition not met`.
+
+### What each column shows
+
+| | Claude Code, Codex | Reference |
+|---|---|---|
+| Its model | the harness's own process, through OpenRouter | `nunchi-discord`'s participant model, the agent model through OpenRouter's chat completions |
+| Turns, actions, attention | recorded in the probe's process as in the scripted lanes | read from outside its process (`discord_room.LiveTurns`): its receipts, stamped when first read (about every 0.1 s), and the stand-in's wire; a delivered action's kind, words and target are the wire's, paired in order with the transport's receipts |
+| Whether a held message was shown to the turn | yes: its id in the harness's own transcript from the turn's start to the moment it moved or ended (`shown_to_turn`) | **no**: the page goes to a model the probe does not see, so a hold is `held` or `raced`, `unseen` cannot be reported, and a `held` is marked **unproven** (timing alone) in the matrix cell (`hold held (unproven: timing alone)`) and in the summary (`held, unproven`) |
+| Which messages a turn read as unattended | yes (the wake's `unattended_event_ids`) | **no**: a message that began a turn of its own is taken as judged on its own (`unmerged`) |
+| What a turn was handed | the wake the host built, in process | the host's receipt that the trigger was in its packet, and the room log's record of the message; its memory is not shown |
+| Model calls counted | Claude Code: the distinct assistant messages in its stream-json; Codex: the `token_count` events in its session files; attention: the calls made | **a lower bound**: the turns that ran (a page the look before posting showed, or a refused answer, asks the model again and the process does not show it), and the attention receipts that name a model |
+
+Both limits of the reference are the cost of not putting a recording hop in front
+of the model, which would also have shown its calls and the pages it was shown; it
+is the repair if the reference's holds need to be told apart from a race.
+A live reference is settled when no request is open (a message observed whose
+attention is not back, a woken turn without its host receipt, a hand-off without
+its transport receipt) and nothing moved for 4 s, since a live model leaves
+nothing outside its process while it thinks. A message that arrived while the
+agent was busy is judged for the memory alone before the newest one
+(`NunchiV2Pipeline._recall_midturn`): it gets an observation and an attention
+receipt, a wake among them, and no turn, so no host receipt ever. It is told
+from a turn about to begin by what follows: once a later request has its
+attention back (the lane runs one opportunity at a time, so a real turn's host
+receipt comes first), or when it is older than the participant's timeout and its
+grace, no turn is coming, it is not open, and it did not begin.
+
+Before it starts, the live reference makes one call to its participant model
+with the body its participant will send (`response_format` `json_object`, through
+the same code), and the run could not run, with the provider's answer, if what
+comes back is not a JSON object: whether the agent model's providers honor that
+is the first thing a live run learns, and it must not be learnt by every turn
+failing. It is one model call and is counted.
+
+### The job summary
+
+A matrix per pass, the columns side by side (`evals/rehearsal/matrix.py`), titled
+"Directed scenes, live: grade matrix (draft expectations, not reviewed)": a row
+for each graded moment, a cell for each column in the form of the scripted
+matrix (the suite's letter for the move, the visible grade and step 1, or
+`precondition not met`), a table of the facts each moment turns on and whether
+attention's evidence cites them, how each scene was played (what the live agent did
+instead of the scene's earlier lines, each hold and how it went, a scene that
+stopped), each run's exit status with the hard checks that failed and, for a run
+that failed, the tail of its stderr (the cause when the launcher refused or a
+setup failed before the probe wrote a record), and the cost. A dispatch that
+halted says so first, with why, and its runs not started read `skipped`. A moment
+whose attention call failed reads step 1 `not judged` with the error named (the
+error fallback woke the agent; that is not attention's reading), and a moment
+that is not graded for a reason other than a setup the agent did not make reads
+`not judged`, not `precondition not met`.
+Each run's own `summary.md` is in the uploaded records. The grades are the draft's
+reading of a live conversation, and a live agent varies from run to run: read
+three passes before reading a column.
+
+### Cost
+
+Per pass of the default four scenes, on the three columns: **about $1.40
+(roughly $1 to $3), an estimate, not measured.** A pass is 12 runs, about 43
+messages per column (2 + 5 + 4 + 32), so at most 43 attention calls, and I
+assume 8 to 12 agent turns per column (a guess from the scenes' size; a
+harness turn is 2 or 3 model requests). Costs per call, assumed (`spend.ESTIMATED_USD_PER_CALL`):
+
+| Call | Assumed | How |
+|---|---|---|
+| attention | $0.002 | the behavior eval reported $1.92 for eight attention routes over all scenes, three runs each (about $0.001 a call); doubled for the default model's reasoning tokens and a scene's longer room |
+| the reference's agent turn | $0.01 | a snapshot of the room (about 5,000 tokens in, 200 out) at $1 and $5 per million tokens, the default agent model's list price, about $0.006; rounded up |
+| a Claude Code or Codex model request | $0.02 | the harness's system prompt and tools beside the room (about 18,000 tokens in, 300 out), same prices, no cache credit |
+
+So a pass is about 43 × $0.002 × 3 = $0.26 of attention, 10 × $0.01 = $0.10 for the
+reference and 10 × 2.5 × $0.02 = $0.50 for each harness, about $1.4. The
+summary shows it two ways per pass and column: **recorded** (the key's usage over
+each run, read before the first message and for about 75 s after the last, which
+lags the calls and counts other runs on the key, so only the sum over a pass is
+worth reading) and **estimated** (the counted calls times the assumed costs). The
+first live run replaces the assumed costs; until then neither figure has been
+seen. The 75 s wait after each run is 15 minutes of waiting per pass; a pass is
+expected to take about an hour, three passes about three (unmeasured), within the
+job's 350 minutes (the play step plans inside 290 of its 300). `budget_usd`
+(default 2) stops starting runs once the dispatch, all its passes together, has
+recorded that much (the runs not started are listed as skipped); raise it for a
+full pass if the estimate holds.
+
+### Run here, offline
+
+The eleven scripted scenes and the three plain Discord lanes on all three columns,
+offline inside the launcher (2026-10-11, the pins CI installs, Claude Code
+with `--no-sandbox` since bubblewrap cannot run here): see the status line in the
+CHANGELOG. The live path itself has not met a provider, OpenRouter's usage endpoint
+or a CI runner: `sudo -E` carrying the keys through the launcher, `timeout` signalling
+the launcher, the runner check and the online launcher on `ubuntu-latest`, the
+reference's `participant_model` on OpenRouter's chat completions with the
+agent model (whether that route honors the participant protocol's JSON response
+format), and the hold timing of a live model are all unverified.
 
 ## What a pass means
 
@@ -1295,7 +1553,10 @@ and `summary.md` opens with every reason (`evals/rehearsal/checks.py`):
   than configured: Claude Code did not recognize the model, or started in
   another permission mode than the pinned version does for that model;
 - the probe itself raised an error (`run.json`'s `errors`);
-- the key or the canary is in an output, or an output could not be read.
+- the key or the canary is in an output, or an output could not be read;
+- with a live `--scene`, only the above and `spend-recorded` (no reading of the
+  key's usage gave a figure, or the model calls were not counted). Its grades,
+  holds and setups are reported, never failed (Live scenes).
 
 A pass with no post delivered says so in its first line: the harness reached
 its model, but the room tools were not exercised in that run. A run that
@@ -1312,7 +1573,14 @@ Dispatch **Actions → rehearsal → Run workflow** (the workflow must be on
 `agent_model` (default `anthropic/claude-haiku-4.5`), `attention_model`
 (default `openai/gpt-6-luna@low`), `budget_usd` (default 2, per probe run),
 and `codex_openai_model` (default `openai/gpt-6-luna`; empty skips it), the
-agent's model for the Codex job's labelled OpenAI-model arm (R3, below). The
+agent's model for the Codex job's labelled OpenAI-model arm (R3, below). Three
+inputs choose what is played (PR 4d): `room` (`in-process`, the default: all of
+the above as before; or `discord`: the directed scenes, live, Live scenes below),
+`scenes` (behavior scene ids, separated by spaces; the four of PR 4a by default)
+and `passes` (1, 2 or 3). With `room: discord` the `harness` input picks the
+columns beside the reference (which always runs, as the control), `hermes` is
+refused, the Codex arm is not run, and `budget_usd` stops starting scene runs
+once the whole dispatch, all its passes together, has recorded that much. The
 jobs run one at a time. In each job the scan of every output is a step of
 its own after the probe, and it runs whether the probe step passed, failed,
 timed out or was cancelled. Only after a clean scan does the job show the
@@ -1353,17 +1621,30 @@ at the budget with every hard check holding. With two
 moments, a stop can only come before the direct question, and a run that
 stops there usually has no wake, so it reads as a failure (exit 1); the
 first lines of `summary.md` name the stop either way.
-`--room discord` is scripted only and needs the launcher. It exits 2 for a
-live run or the reference outside the Discord room, and 3 (could not run)
-without the launcher, or, for Hermes, where Hermes with discord.py cannot be
-read in the Python that runs it; `--harness reference` runs in it alone.
-`--scene ID` is played in the Discord room, scripted, by the reference,
-Claude Code or Codex: Hermes (parked), a live run, an unknown scene or one the
+`--room discord` needs the launcher, and its moments are scripted only: it
+exits 2 for a live run of the moments or the reference outside the Discord
+room, and 3 (could not run) without the launcher, or, for Hermes, where Hermes
+with discord.py cannot be read in the Python that runs it; `--harness
+reference` runs in it alone. `--scene ID` is played in the Discord room by the
+reference, Claude Code or Codex: Hermes (parked), an unknown scene or one the
 director cannot play exits 2 (the last two list the scenes that can be played).
+Scripted it is offline; without `--scripted` it is live (PR 4d): exit 2 off a CI
+runner, 3 without a key its column reads, and 0 or 1 as for any run, whatever the
+grades.
 `--attention-model` takes the behavior eval's label (`id` or `id@effort`);
 a label for another route (`messages:`, `responses:`) is refused, since the
 probe builds the chat route only. `--arm LABEL` names a run that is one arm
 of a comparison, in `run.json` and in the title of `summary.md`.
+
+A live scene is dispatched, never run by hand: the probe refuses it off a CI
+runner (exit 2) and without its column's keys (exit 3), and the launcher runs
+without `--offline` only there (Live scenes):
+
+```sh
+# in the rehearsal workflow only (a GitHub Actions runner, the keys in the environment):
+sudo -E timeout --signal=TERM --kill-after=300s 2400s env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net [--require-bwrap] -- \
+  /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness {reference,claude-code,codex} --room discord --scene SCENE --out OUT
+```
 
 CI runs `--scripted`, and this probe's tests (`tests/v2/test_rehearsal.py`,
 the scripted probe's own test included), in the Claude Code (`claude-code-mod`),
@@ -1385,6 +1666,7 @@ and only the probe steps and the scan step see it
 | Claude Code | `ANTHROPIC_BASE_URL=https://openrouter.ai/api`, `ANTHROPIC_API_KEY=""`, `--model <slug>`, the background-model variables on the same slug, and `modelOverrides` {Claude Code's id for the model: slug} in the user settings | `ANTHROPIC_AUTH_TOKEN` |
 | Codex | a throwaway `$CODEX_HOME/config.toml`: `[model_providers.openrouter]` at `https://openrouter.ai/api/v1`, `wire_api = "responses"`, `env_key = "OPENROUTER_API_KEY"` | `OPENROUTER_API_KEY` |
 | Hermes | `model.provider: openrouter` with the slug, every auxiliary task on the same slug | `OPENROUTER_API_KEY`, named in the plugin's `withheld_env` |
+| The reference, in a live scene (PR 4d) | `nunchi-discord`'s `participant_model` at `https://openrouter.ai/api/v1` (chat completions) on the agent model; attention beside it as for Claude Code and Codex | `NUNCHI_PARTICIPANT_API_KEY` and `NUNCHI_ATTENTION_API_KEY`, in its process only |
 
 Every harness runs as a clean user: fresh `HOME` (and XDG directories under
 it), `CODEX_HOME`, `HERMES_HOME`, `CLAUDE_CONFIG_DIR` and `TMPDIR`, its
@@ -1527,6 +1809,10 @@ loaded and how many model calls its session records.
 
 ## Cost
 
+A live scene dispatch has its own estimate, per pass, in Live scenes above (about
+$1.40 for the default four scenes on the three columns, unmeasured). The rest of
+this section is the in-process probe.
+
 Estimated under $1 for a dispatch of all three harnesses: per harness, two
 moments, about one agent turn (a few cents on Haiku 4.5) and three attention
 calls; the Codex job's OpenAI-model arm is one more such run. Not measured
@@ -1568,12 +1854,16 @@ Only a key with a credit limit is a hard one.
 
 - **R1, the key.** Default: the existing `NUNCHI_OPENROUTER` with the soft
   watchdog, and no behavior eval dispatched while a rehearsal runs. The
-  alternative is a rehearsal key with a credit limit, the only hard limit.
+  alternative is a rehearsal key with a credit limit, the only hard limit. A
+  live scene dispatch (PR 4d) uses the same secret and the same soft watchdog,
+  and three passes cost several times the two-moment probe (Live scenes,
+  Cost), so the credit limit matters more there.
 - **R2, the room.** Default: the Discord stand-in, which answers at
   Discord's hostnames so `nunchi-mcp-discord`, discord.py and
   `hermes gateway run` run unmodified. Nunchi's own processes run on it in
-  the scripted Discord room (PR 3b), `hermes gateway run` in PR 3c. Until PR 4
-  the live probe uses the in-process stand-ins above.
+  the scripted Discord room (PR 3b), `hermes gateway run` in PR 3c. The live
+  probe's two moments still use the in-process stand-ins above; a live directed
+  scene (PR 4d) runs on the Discord stand-in.
 - **R3, Codex's namespace tools.** Outcome of the first live run
   (2026-10-09): OpenRouter passed Codex's namespace tools through, and the
   Codex run on `anthropic/claude-haiku-4.5` passed. What follows is how the

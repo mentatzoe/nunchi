@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from nunchi.attention import DEFAULT_API_KEY_ENV
+from nunchi.participant_model import DEFAULT_API_KEY_ENV as PARTICIPANT_API_KEY_ENV
 
 from evals.behavior.run import is_typed_decision_model, model_route, model_spec
 
@@ -56,6 +57,8 @@ DEFAULT_AGENT_MODEL = "anthropic/claude-haiku-4.5"
 DEFAULT_ATTENTION_MODEL = "openai/gpt-6-luna@low"
 
 ATTENTION_KEY_ENV = DEFAULT_API_KEY_ENV
+# The reference's participant model reads its key from here (`discord_room.ReferenceLeg`): its own process, its own name.
+PARTICIPANT_KEY_ENV = PARTICIPANT_API_KEY_ENV
 CANARY_ENV = "REHEARSAL_CANARY"
 # The stand-in transport's output key, for Claude Code's and Codex's legs only:
 # a NUNCHI_* name, which their integrations strip from the harness.
@@ -65,6 +68,22 @@ HARNESS_KEY_ENV = {
     "codex": "OPENROUTER_API_KEY",
     "hermes": "OPENROUTER_API_KEY",
 }
+
+
+# The keys a live scene (`--room discord --scene`, no `--scripted`) needs set under their own names, by column. The in-process
+# live probe falls back to the attention key for a harness's own; a scene, which spends more and runs three columns on one
+# secret, does not: a column without its key is refused before anything starts (`probe.live_scene_refusal`).
+LIVE_SCENE_KEYS = {
+    "reference": (ATTENTION_KEY_ENV, PARTICIPANT_KEY_ENV),
+    "claude-code": (ATTENTION_KEY_ENV, HARNESS_KEY_ENV["claude-code"]),
+    "codex": (ATTENTION_KEY_ENV, HARNESS_KEY_ENV["codex"]),
+}
+
+
+def harness_key_env(harness: str) -> str:
+    """The variable a column's own model key is read from: the harness's, or the reference's participant model's."""
+
+    return PARTICIPANT_KEY_ENV if harness == "reference" else HARNESS_KEY_ENV[harness]
 
 
 def attention_key_env(harness: str) -> str:
@@ -234,6 +253,11 @@ class Route:
         }
 
 
+# Claude Code's own traffic that is neither the model's nor the room's: telemetry, the update check and the like. The rehearsal's
+# network is open for the live run (docs/rehearsal.md, Live scenes), so the harness is asked to keep to the one call it is there for.
+CLAUDE_CODE_QUIET_ENV = {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_TELEMETRY": "1"}
+
+
 def claude_code_route(agent_model: str, *, base_url: str = OPENROUTER_ANTHROPIC) -> Route:
     """Claude Code through OpenRouter's Anthropic endpoint.
 
@@ -242,7 +266,7 @@ def claude_code_route(agent_model: str, *, base_url: str = OPENROUTER_ANTHROPIC)
     settings map it to Claude Code's own id (`CLAUDE_CODE_MODELS`).
     """
 
-    env = {"ANTHROPIC_BASE_URL": base_url, "ANTHROPIC_API_KEY": ""}
+    env = {"ANTHROPIC_BASE_URL": base_url, "ANTHROPIC_API_KEY": "", **CLAUDE_CODE_QUIET_ENV}
     env.update({name: agent_model for name in CLAUDE_BACKGROUND_MODEL_ENV})
     return Route("claude-code", agent_model, env=env, secret_env=(HARNESS_KEY_ENV["claude-code"],), base_url=base_url)
 

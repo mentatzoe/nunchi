@@ -343,6 +343,8 @@ def no_leaks(
 FITS = "fits"
 MISSES = "misses"
 NOT_DELIVERED = "not delivered"
+# A live scene's moment whose setup the live agent did not make (an earlier line of its own, or the turn a hold needs): reported, not graded.
+PRECONDITION = "precondition not met"
 # A scene's held turn went on before a held message reached Nunchi: the moment was not played as scripted (`directed.hold_outcome`).
 RACED = "raced"
 
@@ -692,6 +694,99 @@ def directed_outcomes(moments: Sequence[Mapping[str, Any]], *, room_tool_calls: 
     return Check("directed-outcomes", not problems, detail)
 
 
+def live_scene_plumbing(
+    moments: Sequence[Mapping[str, Any]],
+    *,
+    committed: Sequence[Mapping[str, Any]] = (),
+    room_tool_calls: Sequence[Mapping[str, Any]] | None = None,
+) -> Check:
+    """What still fails a live scene, though its grades are only reported: the plumbing, not the model's choices.
+
+    `directed_outcomes` holds a scripted scene to its script, and a live one is
+    not (the model decides what to do, and every grade is reported). But two
+    things of it are not the model's: every message the director posted must
+    have reached Nunchi (a message that did not changes the room every later
+    moment is read in, and the run tested nothing there), and every action the
+    agent's turns delivered to the room must be one the harness's own record
+    shows it made. For Claude Code and Codex, which act through a room tool,
+    ``room_tool_calls`` (the calls that record shows) must back each delivered
+    action in ``committed`` (`room_call_for`: a completed call of the right
+    tool with the same words, or the same message and reaction, one call for
+    one action); an action that reached the room some other way fails and is
+    named. The reference acts through no tool and passes none (None). A scene
+    that stopped on an unmet line (`directed.play_scene`) posted no more
+    messages, so the ones it did not post are not missing.
+    """
+
+    problems: list[str] = []
+    posted = scenes = 0
+    for moment in moments:
+        if moment.get("expect") != "directed" or not moment.get("played_live"):
+            continue
+        scenes += 1
+        name = moment.get("name")
+        for delivery in moment.get("deliveries", ()):
+            posted += 1
+            if not delivery.get("observed"):
+                why = f" ({delivery['note']})" if delivery.get("note") else ""
+                problems.append(f"{name}, {delivery.get('scene_event')}: the director's message never reached Nunchi{why}")
+    unused = [dict(call) for call in room_tool_calls] if room_tool_calls is not None else None
+    delivered = [action for action in committed if action.get("delivered")]
+    if unused is not None:
+        for action in delivered:
+            call = room_call_for(action, unused)
+            if call is None:
+                problems.append(f"its {_describe(action)} reached the room, but the harness showed no completed room tool call for it")
+            else:
+                unused.remove(call)
+    if not scenes:
+        problems.append("no live scene was played")
+    detail = "; ".join(problems) or (
+        f"{posted} message(s) the director posted reached Nunchi"
+        + (f", and each of {len(delivered)} delivered action(s) is backed by a completed room tool call" if unused is not None else "")
+        + " (the grades are reported, not judged)"
+    )
+    return Check("live-scene-plumbing", not problems, detail)
+
+
+def spend_recorded(document: Mapping[str, Any], *, turns: int | None = None) -> Check:
+    """A live scene recorded what it spent: the key's usage before and after, and the model calls it counted.
+
+    This holds the record, not the figure. The usage OpenRouter reports lags
+    behind the calls and can read zero (`spend.SpendWatch`), the budget is
+    soft, and what a pass cost is reported beside the call counts, never
+    judged. But a live run that could not read the key at all, or counted no
+    model calls for its column, cannot say what it spent, and fails. So does
+    one that counted no agent call though ``turns`` turns ran: its counting is
+    broken, and the estimate beside the recorded figure would read zero. The
+    detail names the error each failed reading gave, so the cause (a revoked
+    key, a gateway error) is in the summary.
+    """
+
+    spend = document.get("spend") or {}
+    problems: list[str] = []
+    readings = [entry for entry in spend.get("readings") or () if isinstance(entry, Mapping)]
+    figures = [entry for entry in readings if "usage" in entry]
+    errors = sorted({f"{entry.get('error')} ({entry.get('when')})" for entry in readings if "usage" not in entry and entry.get("error")})
+    if not spend.get("read"):
+        problems.append("the key's usage was not read")
+    elif len(figures) < 2:
+        problems.append(
+            f"{len(figures)} reading(s) of the key's usage gave a figure; a first and a last are needed to say what the run spent"
+            + (f" (the readings that failed: {'; '.join(errors)})" if errors else "")
+        )
+    calls = spend.get("model_calls")
+    if not isinstance(calls, Mapping) or not all(isinstance(calls.get(name), int) for name in ("agent", "attention")):
+        problems.append("the model calls were not counted for this column" + (f" ({calls.get('basis')})" if isinstance(calls, Mapping) and calls.get("basis") else ""))
+    elif turns and calls["agent"] == 0:
+        problems.append(f"{turns} turn(s) ran but no agent model call was counted: the counting for this column is broken")
+    detail = "; ".join(problems) or (
+        f"{len(figures)} reading(s) of the key's usage (spent {spend.get('spent_usd')}), "
+        f"{calls['agent']} agent and {calls['attention']} attention model call(s) counted"
+    )
+    return Check("spend-recorded", not problems, detail)
+
+
 def room_call_for(action: Mapping[str, Any], calls: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
     """The completed room tool call that made ``action``, from the calls the harness's own record shows; None if there is none.
 
@@ -870,17 +965,25 @@ def discord_writes_reconciled(committed: Sequence[Mapping[str, Any]], writes: Se
     ``writes`` are the agent's bot's 2xx writes on the stand-in's wire: a
     message with its content and reply target, or a reaction with its emoji
     and message. A committed action that does not read ``sent`` may match a
-    write too (its acknowledgement was lost), but never needs one.
+    write too (its acknowledgement was lost), but never needs one. Each action
+    takes the first write it matches and a write is taken once, so two actions
+    with the same words (a live agent can say "Got it." twice) match one write
+    each, while one action and two such writes leave a write over, which fails.
+    The actions that read ``sent`` take their writes first: one that does not
+    (a failed delivery with the same words) must not take the write a sent one
+    needs, whatever order the turns came in.
     """
 
     problems: list[str] = []
     left = [dict(write) for write in writes]
-    for action in committed:
+    ordered = [*(action for action in committed if action.get("delivery") == "sent"), *(action for action in committed if action.get("delivery") != "sent")]
+    for action in ordered:
         matches = [write for write in left if _write_matches(action, write)]
-        if action.get("delivery") == "sent":
-            if len(matches) != 1:
-                problems.append(f"turn {action.get('request_id')}'s {action.get('kind')} reads sent and matches {len(matches)} write(s)")
+        if action.get("delivery") == "sent" and not matches:
+            problems.append(f"turn {action.get('request_id')}'s {action.get('kind')} reads sent and matches {len(matches)} write(s)")
         if matches:
+            # One write for one action, in order: two turns that said the same words (a live agent may) take one write each, and a
+            # write nothing took is left over, below.
             left.remove(matches[0])
     problems += [f"the bot wrote a {write.get('kind')} that no committed action matches: {json.dumps(write, sort_keys=True)[:200]}" for write in left]
     detail = "; ".join(problems) or f"{len(committed)} committed action(s) and {len(writes)} write(s), each matched once"
@@ -937,22 +1040,36 @@ def discord_continuity(
     return Check("discord-continuity", not problems, detail)
 
 
+def _said(line: Mapping[str, Any]) -> Mapping[str, Any]:
+    """What the agent said or did on a line's message: in a live scene its own delivered action, in a scripted run the scene's line."""
+
+    if line.get("live"):
+        delivered = [action for action in line.get("actions") or () if action.get("delivered")]
+        if delivered:
+            return delivered[0]
+    return line
+
+
 def _remembers(own_moves: Sequence[Mapping[str, Any]], line: Mapping[str, Any]) -> bool:
-    """Whether a turn's memory of the agent's own moves holds ``line``, an earlier line of the agent's the scene has it say.
+    """Whether a turn's memory of the agent's own moves holds ``line``, an earlier line of the agent's.
 
     A reaction is remembered with the message it was about and its emoji, a
     reply with the message it answered, and a plain message (a cue's answer)
-    by its words (`nunchi.memory`).
+    by its words (`nunchi.memory`). A scripted line is the scene's own; a live
+    one is what the live agent actually did (`_said`).
     """
 
+    said = _said(line)
+    kind = said.get("kind")
+    about = said.get("target_event_id") or line.get("event_id")
     for move in own_moves or ():
-        if line.get("kind") == "reaction":
-            if move.get("kind") == "reaction" and move.get("about_event_id") == line.get("event_id") and move.get("reaction") == line.get("reaction"):
+        if kind == "reaction":
+            if move.get("kind") == "reaction" and move.get("about_event_id") == about and move.get("reaction") == said.get("reaction"):
                 return True
-        elif line.get("kind") == "reply":
-            if move.get("kind") == "reply" and move.get("about_event_id") == line.get("event_id"):
+        elif kind == "reply":
+            if move.get("kind") == "reply" and move.get("about_event_id") == about:
                 return True
-        elif move.get("kind") == "message" and " ".join(str(line.get("text")).split()).startswith(str(move.get("text") or "\0").rstrip("…")):
+        elif move.get("kind") == "message" and " ".join(str(said.get("text")).split()).startswith(str(move.get("text") or "\0").rstrip("…")):
             return True
     return False
 
@@ -1090,7 +1207,7 @@ def discord_addressing(
                     if (number == 0 or after.get("trigger") in graded_ids) and not _remembers(after["own_moves"], line):
                         problems.append(
                             f"{name} {line.get('event')}: the turn on {after.get('trigger')} does not hold the agent's earlier "
-                            f"{line.get('kind')} (on {line.get('event_id')}) in memory.own_moves"
+                            f"{_said(line).get('kind')} (on {line.get('event_id')}) in memory.own_moves"
                         )
             graded.append(f"{name}: {heard} message(s) a turn was handed")
             continue

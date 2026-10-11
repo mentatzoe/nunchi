@@ -23,6 +23,11 @@ against scripted model endpoints, for CI.
   processes, unmodified, on the stand-in: Nunchi's for Claude Code, Codex and
   the reference (PR 3b), and Hermes's gateway, `hermes gateway run`, with the
   Nunchi plugin, whose evidence is read from outside its process (PR 3c).
+- `directed.py`: the director that plays a behavior scene on the Discord
+  stand-in and grades it from the scene's own expectations (PR 4a to 4c),
+  scripted or, since PR 4d, with a live model behind the column.
+- `matrix.py`: the job summary of a live scene dispatch, a grade matrix per
+  pass with the columns side by side, titled as draft expectations (PR 4d).
 
 See `docs/rehearsal.md`.
 """

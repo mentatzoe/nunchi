@@ -74,11 +74,23 @@ the agent's own earlier lines (said by the agent) and a turn held at the
 scripted model endpoint while messages land in it. The scenes are drafts:
 results say so.
 
+``--room discord --scene ID`` without ``--scripted`` (PR 4d) plays the scene
+with a live model behind the column: the reference (`nunchi-discord` on the
+agent's model through OpenRouter, the control), Claude Code or Codex, with
+attention live too. It is refused off a CI runner (``CI=true``: the launcher
+then runs without ``--offline``, which changes the port setting of the
+runner's network namespace) and without the keys its column needs, before
+anything starts. The agent's words are its own, so the scene's earlier lines
+are played as the live agent makes them and checked only to be of the scene's
+kind, a hold is timing, and every grade is reported and never failed
+(`directed.py`); the plumbing and safety checks still fail the run, and the
+spend is read as for any live run plus a count of the model calls.
+
 Exit status: 0 every hard check held; 1 a hard check failed, the probe
 raised an error, or the scan found a secret; 2 bad arguments (among them a
-Claude Code agent model with no row in `routes.CLAUDE_CODE_MODELS`); 3 the
-probe could not run (a harness or a key is missing); 4 it stopped at the
-budget before a moment, every hard check holding.
+Claude Code agent model with no row in `routes.CLAUDE_CODE_MODELS`, and a live
+scene off a CI runner); 3 the probe could not run (a harness or a key is
+missing); 4 it stopped at the budget before a moment, every hard check holding.
 """
 
 from __future__ import annotations
@@ -136,8 +148,8 @@ from .routes import (
     CLAUDE_SETTINGS,
     DEFAULT_AGENT_MODEL,
     DEFAULT_ATTENTION_MODEL,
-    HARNESS_KEY_ENV,
     HARNESSES,
+    LIVE_SCENE_KEYS,
     OPENROUTER,
     OUTPUT_KEY_ENV,
     PINS,
@@ -149,16 +161,18 @@ from .routes import (
     claude_code_model,
     clean_environment,
     codex_config,
+    harness_key_env,
     hermes_auxiliary_tasks,
     hermes_model_config,
     hermes_section,
     route_for,
 )
 from .scan import delete_outputs, enforce
-from .spend import SpendWatch
+from .spend import SpendWatch, estimate_usd
 from .standin import (
     JsonLines,
     RefusingProxy,
+    RoomScript,
     ScriptedAttention,
     ScriptedClaudeAgent,
     ScriptedCodexAgent,
@@ -220,6 +234,35 @@ class CouldNotRun(RuntimeError):
     """The probe could not reach the room: a harness, a key or a setting is missing."""
 
 
+def live_scene_refusal(options: "Options", environ: Mapping[str, str]) -> tuple[int, str] | None:
+    """Why a live scene must not start, as (exit status, reason); None when it may. Nothing has started and nothing was spent.
+
+    A live scene runs on a CI runner only: the launcher then runs without
+    ``--offline`` (it needs the model providers' network), which changes the
+    port setting of the machine's network namespace and is allowed only where
+    ``CI=true``, a runner that is discarded after its job
+    (`discord_net.refusal`). The probe refuses too, so that nothing here starts
+    on a developer's machine whatever launched it (exit 2). And it needs every key its
+    column reads, under that key's own name (`routes.LIVE_SCENE_KEYS`; exit 3):
+    the live probe elsewhere falls back to the attention key for a harness's
+    own, a scene does not.
+    """
+
+    if not options.live_scene:
+        return None
+    if environ.get("CI") != "true":
+        return EXIT_USAGE, (
+            "a live scene runs only on a CI runner (CI=true): the launcher it needs, without --offline, changes the network "
+            "namespace's port setting, and its model calls spend money. Dispatch the rehearsal workflow with room discord; "
+            "run a scene scripted (--scripted) anywhere else"
+        )
+    names = LIVE_SCENE_KEYS.get(options.harness, ())
+    missing = [name for name in names if not environ.get(name)]
+    if missing:
+        return EXIT_COULD_NOT_RUN, f"a live scene by {options.harness} needs {', '.join(names)} set; missing: {', '.join(missing)}"
+    return None
+
+
 @dataclass
 class Options:
     harness: str
@@ -245,8 +288,15 @@ class Options:
     room: str = "standin"
     # The Python that runs the Discord processes (the reference needs discord.py); default this one.
     discord_python: str | None = None
-    # The behavior scene to play instead of the moments (a Discord room column, scripted; `directed.py`).
+    # The behavior scene to play instead of the moments (a Discord room column; `directed.py`). Without ``scripted`` it is played live
+    # (PR 4d): on a CI runner only, with the keys of its column (`live_scene_refusal`).
     scene: str | None = None
+
+    @property
+    def live_scene(self) -> bool:
+        """A behavior scene played with a live model behind the column."""
+
+        return bool(self.scene) and not self.scripted
 
 
 @dataclass
@@ -321,6 +371,8 @@ class Leg:
     scope = ""
     # The harness posts the agent's final answer itself, so its delivery reads "unknown" by design.
     harness_posts = False
+    # The agent acts in the room through a room tool, whose calls the harness's own record shows (`room_calls`).
+    room_tools = False
 
     def __init__(self, ctx: Context) -> None:
         self.ctx = ctx
@@ -349,6 +401,11 @@ class Leg:
         self.room_calls: list[dict[str, Any]] | None = None
         # What the integration declares its harness shows by itself (`turn_conformance.KnownGap`).
         self.known_gaps: list[Any] = []
+        # How the wake the host handed each turn showed its trigger was addressed (`RoomScript.received`), by trigger: what a live
+        # scene reads in place of the scripted model's requests (`discord-addressing`).
+        self.wake_views: dict[str, dict[str, Any]] = {}
+        # The attention calls this process made (the in-process legs), counted as they are made.
+        self.attention_calls_made = 0
         self._ids: dict[str, str] = {}
         self._lock = threading.Lock()
 
@@ -406,6 +463,47 @@ class Leg:
             command = packages.pop("command")
             self.ran("npm ls, the harness's install, for the record", command["argv"], command["env"])
         return packages
+
+    # -- a live scene (`directed.py`) ----------------------------------------------------------------
+
+    # Whether the column's turns say which messages they read as unattended (the in-process legs do; the reference out of process, live, does not).
+    observes_unattended = True
+
+    @property
+    def live_run(self) -> bool:
+        """Whether a live model is behind the column: the run is not scripted."""
+
+        return not getattr(getattr(self.ctx, "options", None), "scripted", True)
+
+    def refresh(self) -> None:
+        """Bring ``invocations`` and ``committed`` up to date with a column that runs outside this process: none for the in-process legs."""
+
+    def begun(self, event_id: str) -> bool:
+        """Whether the column's turn has begun on ``event_id``: the earliest signal the column has, which a live hold posts on.
+
+        The in-process legs record a turn the moment the host hands it to the
+        harness (`instrument`).
+        """
+
+        with self._lock:
+            return any(turn.get("trigger") == event_id for turn in self.invocations)
+
+    def shown_to_turn(self, event_ids: Sequence[str], since: str | None, until: str | None = None) -> list[str] | None:
+        """Which of ``event_ids`` the column's own record shows the turn was shown from ``since`` to ``until``; None where it shows no such thing."""
+
+        return None
+
+    def live_check(self, moments: Sequence[Mapping[str, Any]]) -> Check:
+        """The plumbing a live scene is still held to (`checks.live_scene_plumbing`); the grades are reported."""
+
+        return checks_module.live_scene_plumbing(
+            moments, committed=self.committed, room_tool_calls=(self.room_calls or []) if self.room_tools else None
+        )
+
+    def model_calls(self) -> dict[str, Any]:
+        """The model calls this column made in the run, counted: ``agent`` (None where not counted), ``attention``, and how."""
+
+        return {"agent": None, "attention": self.attention_calls_made, "basis": "not counted for this column"}
 
     def person_id(self, name: str) -> str:
         """A Discord id for one of the scene's people or bots; the agent is its bot."""
@@ -472,8 +570,14 @@ class Leg:
             if wake.get("unattended_event_ids"):
                 # Messages that came while the agent was busy and were read with this one as a single moment.
                 entry["unattended"] = list(wake["unattended_event_ids"])
+            if self.live_run:
+                # What the turn was handed with: a held message among them reached Nunchi before the turn began (`directed.live_hold_outcome`).
+                entry["first_packet"] = [item["id"] for item in wake.get("events") or () if isinstance(item, Mapping) and item.get("id")]
+            view = RoomScript.received({"wake": wake})
             with self._lock:
                 self.invocations.append(entry)
+                if view is not None:
+                    self.wake_views.setdefault(view["trigger"], view)
             try:
                 action = run_protocol(wake=wake, opportunity=opportunity, expand=expand, cancel=cancel)
             except BaseException as exc:
@@ -514,6 +618,9 @@ class Leg:
             # Recorded before it leaves: a dispatch that raises stays "pending", never unseen.
             entry = {"request_id": wake.get("request_id"), **_summarize_action(action), "delivery": "pending"}
             entry.pop("why", None)
+            if self.live_run:
+                # When the agent's move left for the room: what a live hold compares with when a held message reached Nunchi.
+                entry["at"] = _now()
             if getattr(self.ctx, "directed", None) is not None and isinstance(action, Mapping) and "origin_event_id" in action:
                 # A scene holds each action to the message it was about; a plain message names it only by its origin.
                 entry["origin_event_id"] = action["origin_event_id"]
@@ -531,6 +638,8 @@ class Leg:
 
         def recorded_judge(*, instructions, projection, timeout_seconds):
             entry: dict[str, Any] = {"trigger": projection.get("trigger_event_id"), "model": getattr(model, "model_id", None)}
+            with self._lock:
+                self.attention_calls_made += 1
             try:
                 return judge(instructions=instructions, projection=projection, timeout_seconds=timeout_seconds)
             except BaseException as exc:
@@ -593,6 +702,8 @@ class SharedTransportLeg(Leg):
 
     actor_id = f"discord:actor:{BOT_ID}"
     scope = f"discord:channel:{ROOM_ID}"
+    # Claude Code and Codex act through the room's tools.
+    room_tools = True
     # What the scripted agent does at each moment (`standin.RoomScript`); None posts the answer once.
     script: Any = None
 
@@ -673,6 +784,49 @@ class SharedTransportLeg(Leg):
 
     def room_effects(self) -> list[dict[str, Any]]:
         return list(self.client.effects)
+
+    def shown_to_turn(self, event_ids: Sequence[str], since: str | None, until: str | None = None) -> list[str] | None:
+        """Which of ``event_ids`` the harness's own transcript shows from ``since`` to ``until``: a message the agent was shown reaches it.
+
+        The transcript is everything that crossed between the probe's process and
+        the harness (Claude Code's stream-json both ways, Codex's app-server
+        JSON-RPC both ways) with the time of each line. A held message gets to
+        the agent in the result of the room tool it called (the look before
+        posting) or as a room update after one, and either way its id is in
+        the transcript; the turn's first packet holds only what arrived before
+        the turn began.
+
+        ``until`` bounds the window: the turn's own end, the moment it moved
+        (posted) or, if it never did, ended. Without it a message the agent was
+        shown only in its *next* turn, which the same transcript holds, would
+        read as shown to this one. An entry with no readable time is left out of
+        a bounded window, since it cannot be placed in it.
+        """
+
+        transcript = getattr(self, "transcript", None)
+        floor = _parse_time(since)
+        ceiling = _parse_time(until) if until is not None else None
+        if transcript is None or floor is None:
+            return None
+        texts = []
+        for entry in list(transcript.entries):
+            at = _parse_time(entry.get("at"))
+            if at is None:
+                if ceiling is not None:
+                    continue
+                at = floor
+            if at >= floor and (ceiling is None or at <= ceiling):
+                texts.append(json.dumps(entry, ensure_ascii=False, default=str))
+        return [event_id for event_id in event_ids if any(event_id in text for text in texts)]
+
+
+def _parse_time(value: Any) -> datetime | None:
+    """A recorded time (``...Z`` or ``+00:00``) as a moment; None for anything else."""
+
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 class ClaudeCodeLeg(SharedTransportLeg):
@@ -804,6 +958,15 @@ class ClaudeCodeLeg(SharedTransportLeg):
             self.not_as_configured = list(report["not_as_configured"])
             self.harness_failures = list(report["failures"])
             self.reports["claude_code"] = report
+
+    def model_calls(self) -> dict[str, Any]:
+        calls = claude_code_calls(self.transcript.entries)
+        return {
+            "agent": calls,
+            "attention": self.attention_calls_made,
+            "basis": "agent: the distinct assistant messages in Claude Code's own stream-json (one per model response); "
+            "attention: the calls this process made",
+        }
 
     def close(self) -> None:
         if self.runtime is not None:
@@ -977,6 +1140,34 @@ def claude_code_report(
         "failures": failures,
         "stderr_tail": stderr[-10:],
     }
+
+
+def claude_code_calls(entries: Sequence[Mapping[str, Any]]) -> int:
+    """The model responses Claude Code's stream-json shows: its distinct assistant messages, ones it made up (``<synthetic>``) left out."""
+
+    found: set[str] = set()
+    for entry in entries:
+        message = entry.get("message") if entry.get("direction") == "from-claude" else None
+        inner = message.get("message") if isinstance(message, Mapping) else None
+        if isinstance(message, Mapping) and message.get("type") == "assistant" and isinstance(inner, Mapping) and inner.get("model") != "<synthetic>":
+            found.add(str(inner.get("id") or f"unnamed-{len(found)}"))
+    return len(found)
+
+
+def codex_calls(sessions: Path) -> int:
+    """The model responses Codex's own session files show: one ``token_count`` event with usage per response."""
+
+    count = 0
+    for path in sorted(sessions.rglob("*.jsonl")) if sessions.exists() else ():
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            payload = record.get("payload") if isinstance(record, dict) else None
+            if isinstance(payload, dict) and payload.get("type") == "token_count" and isinstance(payload.get("info"), dict):
+                count += 1
+    return count
 
 
 def claude_room_calls(entries: Sequence[Mapping[str, Any]], room_tools: Sequence[str]) -> list[dict[str, Any]]:
@@ -1198,6 +1389,14 @@ class CodexLeg(SharedTransportLeg):
                 "room_tools_offered_as_namespace": offered,
             }
         self.reports["codex"] = report
+
+    def model_calls(self) -> dict[str, Any]:
+        return {
+            "agent": codex_calls(Path(self.ctx.homes["CODEX_HOME"]) / "sessions"),
+            "attention": self.attention_calls_made,
+            "basis": "agent: the token_count events in Codex's own session files (one per model response); "
+            "attention: the calls this process made",
+        }
 
     def close(self) -> None:
         if self.runner is not None:
@@ -1626,7 +1825,11 @@ def _room_parts(options: Options) -> tuple[type[Leg], tuple[MomentSpec, ...], Ro
     if options.room == "discord":
         from . import directed, discord_room
 
-        route = discord_room.reference_route() if options.harness == REFERENCE else route_for(options.harness, options.agent_model)
+        if options.harness == REFERENCE:
+            # Scripted, the reference's participant is a scripted endpoint; live, it is the agent's model, the control (PR 4d).
+            route = discord_room.reference_route(options.agent_model if options.live_scene else None)
+        else:
+            route = route_for(options.harness, options.agent_model)
         if options.scene:
             return discord_room.LEGS[options.harness], (directed.spec(options.scene),), route  # type: ignore[return-value]
         return discord_room.LEGS[options.harness], discord_room.MOMENTS, route
@@ -1715,16 +1918,25 @@ def judge_moments(leg: Leg, moments: Sequence[dict[str, Any]]) -> None:
 
 
 def _secret_values(options: Options) -> tuple[str, str, str]:
-    """The key for attention, the key for the harness, and the canary; placeholders when scripted."""
+    """The key for attention, the key for the harness, and the canary; placeholders when scripted.
+
+    A live scene needs every key its column reads under its own name
+    (`live_scene_refusal`), and the reference's participant model reads its own
+    (`routes.PARTICIPANT_KEY_ENV`).
+    """
 
     canary = os.environ.get(CANARY_ENV) or f"canary-{secrets.token_urlsafe(24)}"
     if options.scripted:
         placeholder = f"scripted-placeholder-{secrets.token_urlsafe(24)}"
         return placeholder, placeholder, canary
+    if options.live_scene:
+        refusal = live_scene_refusal(options, os.environ)
+        if refusal is not None:
+            raise CouldNotRun(refusal[1])
     attention_key = os.environ.get(ATTENTION_KEY_ENV)
     if not attention_key:
         raise CouldNotRun(f"{ATTENTION_KEY_ENV} is not set: the live probe needs the OpenRouter key")
-    harness_key = os.environ.get(HARNESS_KEY_ENV[options.harness]) or attention_key
+    harness_key = os.environ.get(harness_key_env(options.harness)) or attention_key
     return attention_key, harness_key, canary
 
 
@@ -1771,10 +1983,14 @@ def run_probe(options: Options) -> int:
         raise ValueError(f"unknown harness {options.harness!r}")
     if options.room not in ROOMS:
         raise ValueError(f"unknown room {options.room!r}")
-    if options.room == "discord" and not options.scripted:
-        raise ValueError("the Discord room is scripted only; a live run keeps the in-process room (9f, PR 4)")
-    if options.scene and not (options.room == "discord" and options.scripted and options.harness in SCENE_HARNESSES):
-        raise ValueError(f"a scene is played in the Discord room, scripted, by {' or '.join(SCENE_HARNESSES)} (--room discord --scripted)")
+    if options.room == "discord" and not options.scripted and not options.scene:
+        raise ValueError("the Discord room is scripted unless a scene is played: a live run of its moments keeps the in-process room")
+    if options.scene and not (options.room == "discord" and options.harness in SCENE_HARNESSES):
+        raise ValueError(f"a scene is played in the Discord room by {' or '.join(SCENE_HARNESSES)} (--room discord)")
+    refusal = live_scene_refusal(options, os.environ)
+    if refusal is not None and refusal[0] == EXIT_USAGE:
+        # Off a CI runner, before anything is written or started: the keys are checked as the run begins (`_secret_values`).
+        raise ValueError(refusal[1])
     out = options.out / options.harness
     _reset(out)
     original_env = dict(os.environ)
@@ -1855,7 +2071,7 @@ def run_probe(options: Options) -> int:
         leg = leg_class(ctx)
         leg.prepare()
         settle = 120.0 if options.scripted else options.turn_timeout_seconds + 60
-        spend.read("before the first moment")
+        spend.read_first("before the first moment")
         for index, spec in enumerate(moment_specs):
             if index and not spend.may_continue(spec.name):
                 break
@@ -1917,7 +2133,9 @@ def run_probe(options: Options) -> int:
     )
     checks: list[Check] = []
     if leg is not None and not could_not_run:
-        checks = _checks(leg, document, base=base, before=before, after=after, scripted=options.scripted)
+        checks = _checks(
+            leg, document, base=base, before=before, after=after, scripted=options.scripted, live_scene=options.live_scene
+        )
     stopped = spend is not None and spend.stopped_before is not None
     status = _finish(out, document, secret_values, checks, could_not_run=could_not_run, stopped=stopped)
     if not options.keep_work:
@@ -2007,13 +2225,27 @@ def _record(
             "user_homes_before": before,
             "user_homes_after": after,
         },
-        "spend": spend.document() if spend is not None else {"budget_usd": options.budget_usd},
+        "spend": _spend_document(options, leg, spend),
         "moments": moments,
         "reports": leg.reports if leg is not None else {},
         "lane_errors": list(leg.room.errors) if leg is not None and leg.room is not None else [],
         "errors": errors,
         **(leg.room_record() if leg is not None else {}),
     }
+
+
+def _spend_document(options: Options, leg: Leg | None, spend: SpendWatch | None) -> dict[str, Any]:
+    """The spend watchdog's record; for a live scene also the model calls the column counted and what they would cost (`spend.estimate_usd`)."""
+
+    document = spend.document() if spend is not None else {"budget_usd": options.budget_usd}
+    if options.live_scene and leg is not None:
+        try:
+            calls = leg.model_calls()
+        except Exception as exc:  # recorded as not counted: `checks.spend_recorded` then fails the run, and the record is still whole
+            calls = {"agent": None, "attention": None, "basis": f"not counted: {type(exc).__name__}: {exc}"[:300]}
+        document["model_calls"] = calls
+        document["estimated_usd"] = estimate_usd(options.harness, calls)
+    return document
 
 
 def _agent_served(out: Path) -> list[dict[str, Any]]:
@@ -2046,8 +2278,14 @@ def _checks(
     before: Sequence[Mapping[str, Any]],
     after: Sequence[Mapping[str, Any]],
     scripted: bool,
+    live_scene: bool = False,
 ) -> list[Check]:
-    """The hard checks; the scan runs over the written outputs (`_finish`)."""
+    """The hard checks; the scan runs over the written outputs (`_finish`).
+
+    A live scene holds no script to its scene: its grades are reported
+    (`directed.judge_scene`), so `scripted_check` is not among them, and it must
+    record what it spent (`checks.spend_recorded`).
+    """
 
     install = leg.install or {}
     host_receipts = [record for record in leg.receipts() if record.get("stage") == "participant-host"]
@@ -2079,6 +2317,9 @@ def _checks(
     checks += leg.room_checks(document)
     if scripted:
         checks.append(leg.scripted_check(document["moments"]))
+    if live_scene:
+        checks.append(leg.live_check(document["moments"]))
+        checks.append(checks_module.spend_recorded(document, turns=len(leg.invocations)))
     return checks
 
 
@@ -2155,8 +2396,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--scene",
         metavar="ID",
-        help="play this behavior scene instead of the moments, graded from its own expectations (--room discord --scripted, "
-        f"--harness {' or '.join(SCENE_HARNESSES)}; one scene per run; draft expectations; see directed.py)",
+        help="play this behavior scene instead of the moments, graded from its own expectations (--room discord, "
+        f"--harness {' or '.join(SCENE_HARNESSES)}; one scene per run; draft expectations; see directed.py). With --scripted it is offline "
+        "and every grade is a hard check; without it a live model plays the agent, on a CI runner only, and the grades are reported",
     )
     parser.add_argument(
         "--discord-python",
@@ -2172,19 +2414,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.no_sandbox and args.harness != "claude-code":
         print("--no-sandbox is for claude-code only: Codex and Hermes start without bubblewrap and record their sandbox", file=sys.stderr)
         return EXIT_USAGE
-    if args.budget_usd <= 0:
-        print("--budget-usd must be positive", file=sys.stderr)
+    if not 0 < args.budget_usd < float("inf"):  # nan and inf compare as neither: a budget that stops nothing is no budget
+        print("--budget-usd must be a positive, finite number", file=sys.stderr)
         return EXIT_USAGE
     if args.harness == REFERENCE and args.room != "discord":
         print(f"--harness {REFERENCE} runs in the Discord room only: pass --room discord --scripted", file=sys.stderr)
         return EXIT_USAGE
-    if args.room == "discord" and not args.scripted:
-        print("--room discord is scripted only for now; a live run keeps the in-process room (9f, PR 4)", file=sys.stderr)
+    if args.room == "discord" and not args.scripted and not args.scene:
+        print(
+            "--room discord is scripted unless a scene is played: pass --scripted, or --scene ID for a live scene (on a CI runner only); "
+            "a live run of the moments keeps the in-process room",
+            file=sys.stderr,
+        )
         return EXIT_USAGE
     if args.scene:
-        if not (args.harness in SCENE_HARNESSES and args.room == "discord" and args.scripted):
+        if not (args.harness in SCENE_HARNESSES and args.room == "discord"):
             print(
-                f"--scene is played by --harness {' or '.join(SCENE_HARNESSES)} with --room discord --scripted (offline; Hermes is parked)",
+                f"--scene is played by --harness {' or '.join(SCENE_HARNESSES)} with --room discord (Hermes is parked)",
                 file=sys.stderr,
             )
             return EXIT_USAGE
@@ -2206,8 +2452,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         harness=args.harness,
         out=Path(args.out).absolute(),
         budget_usd=args.budget_usd,
-        # The reference's agent is its scripted plain-call participant.
-        agent_model="scripted-participant" if args.harness == REFERENCE else args.agent_model,
+        # The reference's agent is its scripted plain-call participant, or, in a live scene, the agent's model: the control.
+        agent_model="scripted-participant" if args.harness == REFERENCE and args.scripted else args.agent_model,
         attention_model=args.attention_model,
         scripted=args.scripted,
         sandbox=not args.no_sandbox,
@@ -2223,6 +2469,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         discord_python=str(Path(args.discord_python).absolute()) if args.discord_python else None,
         scene=args.scene,
     )
+    refusal = live_scene_refusal(options, os.environ)
+    if refusal is not None:
+        # Nothing has started, nothing was written and nothing was spent.
+        print(refusal[1], file=sys.stderr)
+        return refusal[0]
     return run_probe(options)
 
 
