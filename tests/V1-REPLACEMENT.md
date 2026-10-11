@@ -17,7 +17,7 @@ coverage:
 | per-adapter V1 gates | canonical Discord, Matrix, Telegram, and generic normalization/conformance tests |
 | transport send backstop only | exact one-use HMAC, durable replay journal, bounded queue gap, and native result tests |
 | Discord token hygiene | `tests/v2/test_mcp_discord_token_hygiene.py` |
-| Hermes and Claude Code integration tests | `tests/v2/test_hermes_*.py` and `tests/v2/test_claude_code*.py` |
+| Hermes plugin and Claude Code integration tests | `tests/v2/test_hermes_*.py` and `tests/v2/test_claude_code*.py` |
 | repository-copy installer | clean-wheel install, stable V2 state initialization, permission and no-fallback tests |
 
 The portable schema corpus in `tests/v2/contract/` remains the oracle for the

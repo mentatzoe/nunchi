@@ -8,8 +8,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 Nunchi V2 is on `main` and is **merged, unverified**: deterministic tests and
-installed stock-Hermes checks pass, but no surface has live real-room proof
-since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
+the clean-install lanes for Claude Code, Codex and the parked Hermes plugin
+pass, but no surface has live real-room proof since PR #67, and V2 is not
+released. The last release tag is `v0.2.0`.
+
+### Removed — the old Hermes integration (Zoe, 2026-10-11, "delete, for now")
+
+**Hermes has no supported path until the Hermes plugin is unparked.** The old
+Hermes integration is deleted. It patched Hermes at runtime (its README
+described a "Discord patch" and a "Telegram patch"), which breaks the rule in
+`AGENTS.md` that an integration follows each harness's own plugin rules and
+never patches or reimplements the harness. The parked Hermes plugin
+(`integrations/hermes-plugin`, `src/nunchi/integrations/hermes_plugin*`) is a
+different thing and stays, with its `hermes-plugin` CI job. This changes no
+behavior of the core, Claude Code, Codex or the plugin.
+
+- Code: `integrations/hermes/` (the integration's docs) and, in
+  `src/nunchi/integrations/`, `hermes_v2`, `hermes_lifecycle`,
+  `hermes_dashboard_api`, `hermes_dashboard_install`, `hermes_dashboard_store`,
+  `hermes_dashboard_assets`, `hermes_tools` and `hermes_attention_trust`.
+  `hermes_version` stays: the rehearsal probe records which Hermes ran with it.
+- Package: the `nunchi-hermes-dashboard` and `nunchi-hermes-lifecycle`
+  commands, the `hermes_agent.plugins` entry point (`nunchi =
+  nunchi.integrations.hermes_v2`), and the dashboard assets' package data.
+- Checks: the `Hermes host contract` workflow (stock Hermes 0.19.0, 0.21.5 and
+  `main`: contract, normal-attention and startup lanes), the packaging check's
+  call of `nunchi-hermes-dashboard`, the four scripts that only served them
+  (`verify_stock_hermes.py`, `stock_hermes_probe.py`,
+  `verify_hermes_attention_setup.py`, `probe_native_approval.py`), and the 19
+  test files that covered only the removed code (288 tests: the offline suite
+  went from 2205 to 1917).
+- Docs: `docs/hermes-profile-lifecycle.md` and
+  `docs/stock-hermes-verification.md`. The README, install guide, stability
+  list, platform interface, harness contract, delivery guide and the other
+  pages that named the integration now say it was removed. `evidence/`,
+  `specs/`, `docs/verification/` and the earlier entries below describe the
+  integration as it was and are unchanged.
+- Not touched: a Hermes home that ran the integration may still hold its
+  dashboard bridge (`plugins/nunchi-dashboard`), `nunchi` in
+  `plugins.enabled` and its private profile config. Nothing here edits a
+  Hermes home; remove them by hand.
 
 ### Added
 

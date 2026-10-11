@@ -11,9 +11,10 @@ and `tests/v2/test_hermes_plugin.py` run the plugin inside a real Hermes
 gateway, loaded from a throwaway `HERMES_HOME` through Hermes's own plugin
 discovery, with only the model scripted. On Discord they use Hermes's stock
 Discord adapter with fake discord.py channels, threads and messages, as
-Hermes's own tests do. It replaces the older Hermes
-integration under `integrations/hermes/`, which stays until this plugin has
-passed live checks and Zoe decides to remove it. Hermes's own gateway process
+Hermes's own tests do. It replaced the older Hermes
+integration, which patched Hermes at runtime; Zoe removed that integration on
+2026-10-11 ("delete, for now"), so Hermes has no other supported path until
+this plugin is unparked. Hermes's own gateway process
 (`hermes gateway run`), with this plugin and the settings below, has also run
 offline on a Discord stand-in at Discord's real names, in a scripted lane
 (`docs/rehearsal.md`, the Hermes column): implemented, unverified in CI, and

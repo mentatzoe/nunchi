@@ -59,14 +59,9 @@ nunchi-telegram = "nunchi.adapters.telegram:main"
 nunchi-discord = "nunchi.adapters.discord:main"
 nunchi-mcp-discord = "nunchi.mcp_discord.server:main"
 nunchi-codex-room-runner = "nunchi.integrations.codex_v2:main"
-nunchi-hermes-dashboard = "nunchi.integrations.hermes_dashboard_install:main"
-nunchi-hermes-lifecycle = "nunchi.integrations.hermes_lifecycle:main"
 nunchi-claude-code-room-runner = "nunchi.integrations.claude_code_v2:main"
 nunchi-codex-app-server-runner = "nunchi.integrations.codex_app_server.runner:main"
 nunchi-service-worker = "nunchi.service_worker:main"
-
-[project.entry-points."hermes_agent.plugins"]
-nunchi = "nunchi.integrations.hermes_v2"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -79,8 +74,3 @@ where = ["src"]
   "claude_code_mod/hooks/register.test.ts",
 ]
 "nunchi.integrations.hermes_plugin" = ["plugin.yaml"]
-"nunchi.integrations.hermes_dashboard_assets" = [
-  "index.js",
-  "manifest.json",
-  "plugin_api.py",
-]

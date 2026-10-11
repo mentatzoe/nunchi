@@ -13,9 +13,9 @@ To build a new integration, follow the [harness guide](harness-guide.md).
 Every integration builds the library's side through one `Room`
 (`nunchi.room`): the exact `ParticipantBinding`, observation, attention with
 the participant's pinned profile and delegated model, the scheduler, and the
-turn host. The older Hermes integration (`integrations/hermes`) still wires
-these itself; the Hermes plugin that replaces it builds a `Room` too, and is
-parked (2026-10-10). It then takes one of two paths for the participant turn.
+turn host. The Hermes plugin builds a `Room` too, and is parked (2026-10-10).
+The older Hermes integration wired these itself and was removed on 2026-10-11
+(Zoe). An integration then takes one of two paths for the participant turn.
 
 ## Nunchi-owned participant
 
@@ -41,7 +41,7 @@ the action `ParticipantTurnHost` commits. See
 ## Native host pipeline
 
 Some hosts run their own participant pipeline, as the older Hermes
-integration (`integrations/hermes`) does. They do not use
+integration did (removed on 2026-10-11). They do not use
 `ParticipantTurnHost`, so they miss the behaviors the shared turn carries
 (memory, catching up, looking again, steering, and telling the agent of a
 gap). That gap is a design problem, not the intended shape: see "One library,

@@ -31,8 +31,11 @@ Integrations:
 
 - `nunchi-codex-room-runner` — reduced: Discord only, read-only Codex
   sandbox, privileged actions disabled.
-- `nunchi-hermes-dashboard install|verify` and
-  `nunchi-hermes-lifecycle plan|apply|verify|rollback`.
+
+Removed on 2026-10-11 (Zoe, "delete, for now"): `nunchi-hermes-dashboard` and
+`nunchi-hermes-lifecycle`, with the `hermes_agent.plugins` entry point, belonged
+to the old Hermes integration, which patched Hermes. The parked Hermes plugin
+ships no command and no entry point.
 
 Installed but not part of the stable boundary:
 

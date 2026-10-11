@@ -35,14 +35,14 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
             "There is no executable V1 `admit` command",
             "V2 is on `main` and is partial: **merged, unverified**",
             "No surface has passed a live real-room check",
-            "incomplete Hermes, Codex, and Claude Code integrations",
+            "the incomplete Codex and Claude Code integrations",
+            "Hermes has no supported path today",
+            "The old Hermes integration was removed on 2026-10-11",
             "Historical Hermes evidence is not current proof",
-            "normal turns, ordinary tools, native approval, a mhm as the agent's own turn",
             "installed-runtime checks, not live ones",
             "it has not run in a real room",
             "issues/43",
             "issue #41",
-            "issues/44",
             "Source review, clean-wheel installation, configured probes",
         )
         for phrase in required:
@@ -142,8 +142,8 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
     ) -> None:
         normalized = _normalized(PLATFORM)
         required = (
-            "current downstream interface for Hermes and Claude Code",
-            "Both platform implementations consume the shared owners",
+            "current downstream interface for Claude Code and Codex",
+            "These implementations consume the shared owners",
             "exactly one participant-delegated social judgment",
             "requester, scope, digest, approval, expiry, revocation",
             "Room payloads are never trusted configuration",

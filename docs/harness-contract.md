@@ -37,10 +37,11 @@ library owns everything up to the agent's turn, but not the turn itself:
   one-reply protocol (`ParticipantTurnProtocol`) and once in the Claude Code
   gate (`GatedParticipant`). The gate's copy has more: steering, turn binding,
   and the rule that silence counts only for a bound turn.
-- The older Hermes integration (`integrations/hermes`) skipped the shared turn
-  and patched Hermes internals instead, so it missed memory, catching up,
-  looking again, steering, outcome turns, and the newer attention routes. The
-  Hermes plugin replaced it, and the plugin is parked (above).
+- The older Hermes integration skipped the shared turn and patched Hermes
+  internals instead, so it missed memory, catching up, looking again,
+  steering, outcome turns, and the newer attention routes. Zoe removed it on
+  2026-10-11 ("delete, for now"). The Hermes plugin replaced it, and the
+  plugin is parked (above).
 - The behavior eval measures the shared protocol, not what Claude Code runs.
 
 This contract moves the turn into the library, as one object every harness
@@ -797,11 +798,14 @@ thread without the room tools, which the integration treats as unbound.
 |---|---|
 | Turn rules inside the Claude Code gate | The library's `Turn`; the gate keeps only the session and the mod (done in step 9c) |
 | `ParticipantTurnProtocol` as a separate turn | The one-reply driver of the same `Turn` (done in step 9c) |
-| The Hermes integration's shims over Hermes internals | A plugin on Hermes's public hooks (built from the harness guide: `nunchi.integrations.hermes_plugin`, verified offline; not yet live; parked since 2026-10-10) |
+| The old Hermes integration's shims over Hermes internals (removed 2026-10-11) | A plugin on Hermes's public hooks (built from the harness guide: `nunchi.integrations.hermes_plugin`, verified offline; not yet live; parked since 2026-10-10) |
 | Codex with its tools turned off | The app-server with the user's own configuration and room tools (built from the harness guide: `nunchi.integrations.codex_app_server`, verified offline on Codex CLI 0.160.1; its runner `nunchi-codex-app-server-runner` is on the shared room connection, not yet run live) |
 
 Each current integration stays until its replacement passes the conformance
-kit. It is then removed, with migration notes.
+kit. It is then removed, with migration notes. The old Hermes integration is
+the exception: Zoe removed it on 2026-10-11, while its replacement is parked,
+so Hermes has no migration path and no supported path until the plugin is
+unparked.
 
 ## Where integrations live
 

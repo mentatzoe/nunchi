@@ -73,55 +73,15 @@ operation.
 See [`v2-shared-foundation.md`](v2-shared-foundation.md) for the schema,
 service, compatibility, and authority boundaries.
 
-For Hermes, install the same wheel into Hermes's managed Python environment.
-Package metadata lets Hermes discover the `nunchi` plugin without making
-Hermes a Nunchi package dependency or changing Hermes source or installed
-distribution files. The current source requires Hermes 0.19.0 or newer and
-activates when its checked host capability contract passes. A changed required
-interface fails closed until Nunchi evolves its package-owned compatibility
-shim. The current adapter accepts configured Discord and Telegram rooms only.
-Other platforms stay outside Nunchi and use stock Hermes behavior.
-When Nunchi admits a configured turn, stock Hermes keeps its participant
-prompt, main model, memory, post-invocation reactions, cancellation, delivery,
-and platform adapter behind Nunchi's shared core and effect guards. A
-judgment that leans to a "mhm" gives the participant a turn (DEFER), so any
-reaction is the participant's own. Nunchi's own nod was removed in #94 step
-7; a room config that still has an `ack` setting loads, and the setting is
-ignored. The [ACK verification record](verification/2026-10-02-hermes-ack.md)
-covers that nod as verified on 2026-10-02.
-Hermes tools retain native authority, with durable at-most-once
-invocation claims and cooperative cancellation; see the
-[native-tool verification record](verification/2026-10-02-native-tools.md).
-Auto-title remains disabled because it can outlive the turn. Stock typing, Discord voice input,
-native `/thread`, detached participant commands, and handoff into a configured
-room are also disabled. `/stop`, `/new`, `/reset`, and `/restart` remain
-available.
-
-The source installs its package-owned dashboard bridge automatically in
-Hermes's supported user-plugin directory. `nunchi-hermes-dashboard verify`
-checks it, and `nunchi-hermes-dashboard install` repairs it when needed. See
-[`../integrations/hermes/README.md`](../integrations/hermes/README.md) for the
-pinned room/profile configuration, dashboard, `hermes plugins enable nunchi`,
-and compatibility probe. First-time setup happens in the **Nunchi** dashboard
-tab. The first enable/restart installs the tab, leaves Nunchi inactive, and
-keeps stock Hermes available until setup is complete. Save a room in the tab,
-then restart again to activate Nunchi. The plugin creates and later discovers
-the private profile config itself; environment paths remain an optional
-override. The separate dashboard command is a repair/check tool, not a setup
-requirement.
-
-The installed-host lane checks the released minimum and current Hermes source
-on Discord and Telegram without permitting source or distribution changes.
-Live first-save/restart proof remains pending. Do not reuse the superseded
-`b6ee0c2` artifact or live record as proof of the current code.
-
-Configured Discord rooms need no mentions or separate bot/thread environment
-setup. The plugin extends Hermes's stock free-response path and admits
-bot-authored messages only for exact configured Nunchi room IDs. A
-profile-wide `DISCORD_ALLOW_BOTS` value is optional Hermes behavior, not a
-Nunchi requirement; the dashboard warns when that broader fallback is active.
-The plugin also enables Hermes's missed-message recovery only for configured
-Nunchi rooms, so restart recovery needs no profile-wide Discord setting.
+Hermes has no supported install path from this package. The old Hermes
+integration was removed on 2026-10-11 (Zoe, "delete, for now"): it patched
+Hermes at runtime, which breaks the rule that an integration follows each
+harness's own plugin rules and never patches or reimplements the harness. The
+wheel no longer registers a `hermes_agent.plugins` entry point or ships the
+`nunchi-hermes-dashboard` and `nunchi-hermes-lifecycle` commands. The Hermes
+plugin is parked (2026-10-10) and is installed by hand, as
+[`../integrations/hermes-plugin/README.md`](../integrations/hermes-plugin/README.md#install)
+says; Hermes has no supported path until it is unparked.
 
 Initialize stable operator-owned directories:
 
@@ -134,8 +94,7 @@ nunchi-install verify --config-root "$NUNCHI_CONFIG_ROOT"
 
 Both roots must be private to the operator (`0700`). Runtime journals and
 markers are created `0600`. `nunchi-install` has no repository discovery and
-no host-artifact operations. Hermes profile cutover and rollback are the
-separate `nunchi-hermes-lifecycle` command. Claude Code installation and
+no host-artifact operations. Claude Code installation and
 supervision are not built yet
 ([#58](https://github.com/mentatzoe/nunchi/issues/58)).
 
