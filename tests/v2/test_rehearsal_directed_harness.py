@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 from pathlib import Path
 import re
 import tempfile
@@ -578,8 +579,11 @@ class CommandTest(unittest.TestCase):
                 self.assertEqual((0, ""), (code, error))
                 options = run.call_args[0][0]
                 self.assertEqual((harness, "story-across-messages", "discord", True), (options.harness, options.scene, options.room, options.scripted))
+            # Off a runner, as here: on a GitHub runner (CI and GITHUB_ACTIONS set) a
+            # live scene is allowed and the missing keys refuse it instead (exit 3).
+            off_a_runner = {name: value for name, value in os.environ.items() if name not in ("CI", "GITHUB_ACTIONS")}
             for missing in (["--room", "discord"], ["--scripted"]):
-                with self.subTest(harness=harness, only=missing):
+                with self.subTest(harness=harness, only=missing), mock.patch.dict(os.environ, off_a_runner, clear=True):
                     code, error = self.run_main("--harness", harness, "--scene", "story-across-messages", *missing)
                     self.assertEqual(probe.EXIT_USAGE, code)
 
