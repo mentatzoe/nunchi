@@ -37,7 +37,9 @@ summary.md:
    scripted, each moment's outcome is known, so it is checked.
 
 A run in the Discord room (``--room discord``, PR 3b) holds seven more, the
-``discord-*`` checks, listed with them below.
+``discord-*`` checks, listed with them below. With ``--scene`` (PR 4a) the
+run plays one behavior scene, and its scripted check is `directed_outcomes`
+in place of `scripted_outcomes`.
 
 Neither the key nor the canary may be in any output: the scan
 (`scan.enforce`) fails the run after the record is written.
@@ -339,6 +341,31 @@ FITS = "fits"
 MISSES = "misses"
 NOT_DELIVERED = "not delivered"
 
+# What a wait that timed out means for a record (`unsettled`).
+NOT_SETTLED = "the room had not gone quiet when the wait ended, so a late turn or post would be missing from this record"
+
+
+def unsettled(deliveries: Sequence[Mapping[str, Any]]) -> list[str]:
+    """The scene events whose wait for a quiet room timed out (``settled`` False), in the order they were posted.
+
+    Every message is posted and then waited on (``Leg.settle``), and the wait
+    is recorded in its delivery. A wait that ran out leaves the room moving:
+    the turn that follows may not be in the record yet, and a grade made now
+    would pass over it. A scripted run fails on it (`scripted_outcomes`,
+    `discord_scripted_outcomes`, `directed_outcomes`); a live run flags it in
+    the moment (``unsettled``) and in summary.md, and reports the rest.
+    """
+
+    return [str(delivery.get("scene_event")) for delivery in deliveries if delivery.get("settled") is False]
+
+
+def _unsettled_problem(name: Any, deliveries: Sequence[Mapping[str, Any]]) -> list[str]:
+    late = unsettled(deliveries)
+    if not late:
+        return []
+    shown = ", ".join(late[:6]) + (f" and {len(late) - 6} more" if len(late) > 6 else "")
+    return [f"{name}: the wait after {shown} timed out ({NOT_SETTLED})"]
+
 
 def moment_outcome(expect: str, *, reached: bool, graded_turns: int, delivered_posts: int) -> str:
     """How a moment went against what it expects: `FITS`, `MISSES`, or `NOT_DELIVERED`.
@@ -363,11 +390,13 @@ def scripted_outcomes(moments: Sequence[Mapping[str, Any]], answer: str, *, room
     Scripted attention wakes only for the direct question, and the scripted
     agent posts ``answer`` once. So each moment fits, no other message starts
     a turn, the one post is ``answer``, and, for Codex and Claude Code, it
-    went through a room tool (``room_tool_called``).
+    went through a room tool (``room_tool_called``). A wait for the room to go
+    quiet that timed out fails too (`unsettled`).
     """
 
     problems: list[str] = []
     for moment in moments:
+        problems += _unsettled_problem(moment.get("name"), moment.get("deliveries", ()))
         if moment.get("outcome") != FITS:
             problems.append(f"{moment.get('name')} reads {moment.get('outcome')!r}, not {FITS!r}")
         if moment.get("other_turns"):
@@ -505,12 +534,15 @@ def discord_scripted_outcomes(
     misses may mean: a gap it pins, so that a fix reads as one. A harness that
     posts its answers itself is pinned to plain messages: an action the wire
     shows posted as a Discord reply (``replied_to``) fails with ``reply_note``.
+    A wait for the room to go quiet that timed out fails too, in any moment
+    (`unsettled`).
     """
 
     problems: list[str] = []
     pins = dict(pins or {})
     for moment in moments:
         name, expect = moment.get("name"), moment.get("expect")
+        problems += _unsettled_problem(name, moment.get("deliveries", ()))
         if moment.get("other_turns"):
             problems.append(f"{name} had {moment['other_turns']} turn(s) on other messages")
         if expect == "report":
@@ -541,6 +573,78 @@ def discord_scripted_outcomes(
         + (f"; pinned: {', '.join(f'{name} {outcome}' for name, outcome in pins.items())}" if pins else "")
     )
     return Check("scripted-outcomes", not problems, detail)
+
+
+def directed_outcomes(moments: Sequence[Mapping[str, Any]]) -> Check:
+    """With the agent and attention scripted, every graded moment of a directed scene is known: check it.
+
+    A directed record (``expect`` ``directed``, `directed.py`) lists its
+    graded moments. Each must have reached Nunchi, grade ``fits`` with step 1
+    ``ok`` (`evals.behavior.score.grade`, from the scene's own ``fitting`` and
+    ``misses``), be the move the script makes (``scripted``), and be exactly
+    the action it makes (``off_script``, from `directed.judge_scene`: one
+    delivered action with the scripted kind, words and reaction, about the
+    graded message, or none where the script is quiet). A script that plays a
+    listed miss fails here and the moment is named, with the scene's reason.
+    The room as a whole must hold too: every message the director posted must
+    have reached Nunchi (a lost message changes the room the graded one is read
+    in), no committed action may lie outside the graded turns
+    (``other_actions``: the chatter, which the script leaves silent), and no
+    wait for the room to go quiet may have timed out (`unsettled`). The scenes
+    are drafts (`evals/behavior/README.md`), so what this holds is the script
+    against draft expectations; with a live model the same grades are
+    reported, never failed.
+    """
+
+    problems: list[str] = []
+    graded = scenes = 0
+    for moment in moments:
+        if moment.get("expect") != "directed":
+            continue
+        scenes += 1
+        name = moment.get("name")
+        played = {item.get("event") for item in moment.get("graded", ())}
+        for delivery in moment.get("deliveries", ()):
+            if not delivery.get("observed") and delivery.get("scene_event") not in played:
+                why = f" ({delivery['note']})" if delivery.get("note") else ""
+                problems.append(f"{name}, {delivery.get('scene_event')}: the message never reached Nunchi{why}")
+        problems += _unsettled_problem(name, moment.get("deliveries", ()))
+        for item in moment.get("graded", ()):
+            graded += 1
+            where = f"{name}, {item.get('label')}"
+            if not item.get("reached"):
+                problems.append(f"{where}: the message never reached Nunchi")
+                continue
+            grade = item.get("grade") or {}
+            if grade.get("visible") != "fits":
+                why = f" ({item['why']})" if item.get("why") else ""
+                problems.append(f"{where}: the move was {item.get('result')}, graded {grade.get('visible')}, not fits{why}")
+            if grade.get("step1") != "ok":
+                problems.append(f"{where}: step 1 graded {grade.get('step1')}, not ok")
+            if item.get("result") != item.get("scripted"):
+                problems.append(f"{where}: the move was {item.get('result')}, not the scripted {item.get('scripted')}")
+            if item.get("off_script") is None:
+                problems.append(f"{where}: its actions were not held to the script")
+            problems += [f"{where}: {problem}" for problem in item.get("off_script") or ()]
+        if moment.get("other_actions") is None:
+            problems.append(f"{name}: the actions outside the graded turns were not listed")
+        for action in moment.get("other_actions") or ():
+            problems.append(f"{name}: a turn that was not graded made a {_describe(action)}, and the script is silent there")
+    if not graded:
+        problems.append("no graded moment was played")
+    detail = "; ".join(problems) or (
+        f"{graded} graded moment(s) in {scenes} scene(s), each fits with step 1 ok and exactly the scripted action, "
+        "every message reached Nunchi, nothing else was done in the room (draft expectations)"
+    )
+    return Check("directed-outcomes", not problems, detail)
+
+
+def _describe(action: Mapping[str, Any]) -> str:
+    """An action in a few words, for a problem: its kind, what it said or reacted with, and what it was about."""
+
+    said = action.get("text") or action.get("reaction")
+    about = action.get("target_event_id") or action.get("origin_event_id")
+    return str(action.get("kind")) + (f" {str(said)[:60]!r}" if said else "") + (f" about {about}" if about else "")
 
 
 def discord_preflight(processes: Sequence[Mapping[str, Any]], *, leaf_sha256: str | None) -> Check:
@@ -683,7 +787,9 @@ def discord_writes_reconciled(committed: Sequence[Mapping[str, Any]], writes: Se
     return Check("discord-writes-reconciled", not problems, detail)
 
 
-def discord_continuity(start: Mapping[str, Any], reconnects: Sequence[Mapping[str, Any]], *, gaps_fail: bool) -> Check:
+def discord_continuity(
+    start: Mapping[str, Any], reconnects: Sequence[Mapping[str, Any]], *, gaps_fail: bool, reconnects_required: bool = True
+) -> Check:
     """The gap a fresh process declares reached the participant, and a reconnect lost nothing.
 
     ``start`` is the continuity gap the column's process declares when it
@@ -698,7 +804,9 @@ def discord_continuity(start: Mapping[str, Any], reconnects: Sequence[Mapping[st
     transport's journal (``transport_gaps``) and in the participant's
     observations (``participant_gaps``). ``gaps_fail`` is False for the
     reference, which marks a stream gap on any disconnect by design: those
-    are recorded, not failed.
+    are recorded, not failed. A run that plays one scene (``--scene``) has no
+    reconnect: ``reconnects_required`` is False there and the start gap alone
+    is checked.
     """
 
     problems: list[str] = []
@@ -718,10 +826,12 @@ def discord_continuity(start: Mapping[str, Any], reconnects: Sequence[Mapping[st
             problems.append(f"{bot}'s reconnect marked {len(gaps)} continuity gap(s): {', '.join(map(str, gaps))[:300]}")
         elif gaps:
             recorded.append(f"{bot} marked {len(gaps)} stream gap(s), recorded and not failed")
-    if not reconnects:
+    if not reconnects and reconnects_required:
         problems.append("no reconnect was played")
     detail = "; ".join(problems) or (
-        f"the start gap reached the participant; {len(reconnects)} bot(s) resumed after op 7 and the message posted meanwhile "
+        "the start gap reached the participant; no reconnect was played in this run"
+        if not reconnects
+        else f"the start gap reached the participant; {len(reconnects)} bot(s) resumed after op 7 and the message posted meanwhile "
         "reached Nunchi" + ("; " + "; ".join(recorded) if recorded else ", with no continuity gap")
     )
     return Check("discord-continuity", not problems, detail)
@@ -760,6 +870,16 @@ def discord_addressing(
     because a harness may not give the library what it needs: it is True for
     every column but Hermes, whose gap it pins until Hermes closes it, and a
     pin that no longer holds fails and says to update it.
+
+    In a directed scene (``expect`` ``directed``) every message the director
+    posted is checked, not only the graded ones. It records the pings the scene
+    meant (``meant_actor_ids``, from the scene and not from the text sent) beside
+    the ones the stand-in sent (``mentioned_actor_ids``): what the scene meant
+    must have been sent, and what was sent must be in what Nunchi saw, both in
+    its own room log (``logged``, every message it took in) and in the turn that
+    was handed the message (``received``). A reply must arrive as one. And the
+    next turn after the agent's reaction must hold it in ``own_moves``, about
+    the message it reacted to.
     """
 
     problems: list[str] = []
@@ -767,6 +887,60 @@ def discord_addressing(
     graded: list[str] = []
     for index, moment in enumerate(moments):
         expect, name = moment.get("expect"), moment.get("name")
+        if expect == "directed":
+            # A directed scene's messages: each reached Nunchi and the agent as the scene meant it and the stand-in sent it.
+            heard = 0
+            deliveries = list(moment.get("deliveries", ()))
+            for delivery in deliveries:
+                label = f"{name} {delivery.get('scene_event')}"
+                sent = list(delivery.get("mentioned_actor_ids") or ())
+                meant = list(delivery.get("meant_actor_ids") or ())
+                # What the scene meant to ping must have gone out, and what went out must have arrived: so what the scene
+                # meant is a subset of what Nunchi saw. A ping the stand-in drops changes whom the room addressed.
+                unsent = [actor for actor in meant if actor not in sent]
+                if unsent:
+                    problems.append(f"{label}: the scene pings {', '.join(unsent)}, but the message was sent pinging {sent}")
+                # What Nunchi saw: its own room log holds every message it took in, a turn's packet the ones that started a turn.
+                if meant and delivery.get("observed") and not (delivery.get("logged") or delivery.get("received")):
+                    problems.append(f"{label}: nothing shows what Nunchi saw of the pings the scene meant")
+                for view in (delivery.get("logged"), delivery.get("received")):
+                    if not view:
+                        continue
+                    seen = list(view.get("mentioned_actor_ids") or ())
+                    lost = [actor for actor in sent if actor not in seen]
+                    if lost:
+                        problems.append(f"{label}: sent pinging {', '.join(lost)}, but Nunchi saw mentioned_actor_ids={seen}")
+                    reply_to = delivery.get("reply_to")
+                    if reply_to and view.get("reply_to_event_id") != f"discord:message:{reply_to}":
+                        problems.append(
+                            f"{label}: sent as a reply to {reply_to}, but Nunchi saw reply_to_event_id={view.get('reply_to_event_id')}"
+                        )
+                if delivery.get("received"):
+                    heard += 1
+            # The agent's reaction must be in its memory at the next turn, about the message it reacted to (as for the reaction moment).
+            for item in moment.get("graded", ()):
+                if not any(action.get("kind") == "reaction" and action.get("delivered") for action in item.get("actions", ())):
+                    continue
+                position = next((n for n, delivery in enumerate(deliveries) if delivery.get("event_id") == item.get("event_id")), None)
+                if position is None:
+                    continue
+                after = next(
+                    (
+                        delivery["received"]
+                        for delivery in deliveries[position + 1:]
+                        if (delivery.get("received") or {}).get("own_moves") is not None
+                    ),
+                    None,
+                )
+                if after is not None and not any(
+                    move.get("kind") == "reaction" and move.get("about_event_id") == item.get("event_id") for move in after["own_moves"]
+                ):
+                    problems.append(
+                        f"{name} {item.get('event')}: the next turn ({after.get('trigger')}) does not hold the agent's reaction to "
+                        f"{item.get('event_id')} in memory.own_moves"
+                    )
+            graded.append(f"{name}: {heard} message(s) a turn was handed")
+            continue
         if expect not in ("post", "reply", "reaction", "thread-reply"):
             continue
         delivery = next((item for item in moment.get("deliveries", ()) if item.get("event_id") == moment.get("graded_event")), None)

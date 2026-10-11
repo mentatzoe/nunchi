@@ -65,7 +65,11 @@ the harnesses' Discord processes unmodified: a `nunchi-mcp-discord` for Claude
 Code or Codex, whose runner stays in this process, `hermes gateway run` with
 the Nunchi plugin for Hermes, or, as ``--harness reference``,
 `nunchi-discord` with a scripted participant. Its moments, legs and checks
-are in `discord_room.py`.
+are in `discord_room.py`. With ``--scene ID`` (PR 4a; the reference only, one
+scene per run so that each starts from a fresh room) it plays that behavior
+scene instead: a director (`directed.py`) posts its people and bots, and each
+graded moment is graded from the scene's own expectations, with a grade matrix
+in summary.md. The scenes are drafts: results say so.
 
 Exit status: 0 every hard check held; 1 a hard check failed, the probe
 raised an error, or the scan found a secret; 2 bad arguments (among them a
@@ -238,6 +242,8 @@ class Options:
     room: str = "standin"
     # The Python that runs the Discord processes (the reference needs discord.py); default this one.
     discord_python: str | None = None
+    # The behavior scene to play instead of the moments (the reference in the Discord room, scripted; `directed.py`).
+    scene: str | None = None
 
 
 @dataclass
@@ -257,6 +263,8 @@ class Context:
     attention_endpoint: Any = None
     # The job's environment as the probe found it, before it became the clean user.
     original_env: Mapping[str, str] = field(default_factory=dict)
+    # The behavior scene being played, as the director's spec (`directed.DirectedSpec`); None for the moments.
+    directed: Any = None
 
 
 def _now() -> str:
@@ -1563,9 +1571,11 @@ def _room_parts(options: Options) -> tuple[type[Leg], tuple[MomentSpec, ...], Ro
     """The leg, the moments and the model route for this run's harness in this run's room."""
 
     if options.room == "discord":
-        from . import discord_room
+        from . import directed, discord_room
 
         route = discord_room.reference_route() if options.harness == REFERENCE else route_for(options.harness, options.agent_model)
+        if options.scene:
+            return discord_room.LEGS[options.harness], (directed.spec(options.scene),), route  # type: ignore[return-value]
         return discord_room.LEGS[options.harness], discord_room.MOMENTS, route
     return LEGS[options.harness], MOMENTS, route_for(options.harness, options.agent_model)
 
@@ -1586,7 +1596,9 @@ def play_moment(leg: Leg, spec: MomentSpec, *, settle_seconds: float) -> dict[st
     """Play one scene as live deliveries, and record what happened at its graded moment.
 
     Its posts and outcome are judged once the run is over (`judge_moments`),
-    when every delivery is known.
+    when every delivery is known. A wait for the room to go quiet that timed
+    out is recorded in its delivery (``settled``) and, where there is one, on
+    the moment (``unsettled``); a scripted run fails on it (`checks.unsettled`).
     """
 
     scene = load_scene(spec.scene)
@@ -1604,7 +1616,7 @@ def play_moment(leg: Leg, spec: MomentSpec, *, settle_seconds: float) -> dict[st
             graded_delivery = delivery
     turns = leg.invocations[first_turn:]
     graded_turns = [turn for turn in turns if turn.get("trigger") == graded_delivery.get("event_id")]
-    return {
+    moment = {
         "name": spec.name,
         "scene": str(spec.scene.relative_to(ROOT)) if spec.scene.is_relative_to(ROOT) else str(spec.scene),
         "graded_event": graded_delivery.get("event_id"),
@@ -1618,6 +1630,11 @@ def play_moment(leg: Leg, spec: MomentSpec, *, settle_seconds: float) -> dict[st
         "graded_wake_sources": [turn.get("source") for turn in graded_turns],
         "other_turns": len(turns) - len(graded_turns),
     }
+    late = checks_module.unsettled(deliveries)
+    if late:
+        # A wait for the room to go quiet ran out: the record may lack what came after (`checks.unsettled`).
+        moment["unsettled"] = late
+    return moment
 
 
 def judge_moments(leg: Leg, moments: Sequence[dict[str, Any]]) -> None:
@@ -1703,6 +1720,8 @@ def run_probe(options: Options) -> int:
         raise ValueError(f"unknown room {options.room!r}")
     if options.room == "discord" and not options.scripted:
         raise ValueError("the Discord room is scripted only; a live run keeps the in-process room (9f, PR 4)")
+    if options.scene and not (options.room == "discord" and options.scripted and options.harness == REFERENCE):
+        raise ValueError(f"a scene is played by the {REFERENCE} in the Discord room, scripted (--harness {REFERENCE} --room discord --scripted)")
     out = options.out / options.harness
     _reset(out)
     original_env = dict(os.environ)
@@ -1747,8 +1766,11 @@ def run_probe(options: Options) -> int:
         if issubclass(leg_class, SharedTransportLeg):
             nunchi_env[OUTPUT_KEY_ENV] = secrets.token_urlsafe(48)
         secret_values.update(nunchi_env)
+        directed = moment_specs[0] if options.scene else None
         if options.scripted:
-            scripted_attention = ScriptedAttention(spec.wake_phrase for spec in moment_specs if spec.wake_phrase)
+            scripted_attention = ScriptedAttention(
+                (spec.wake_phrase for spec in moment_specs if spec.wake_phrase), script=directed.script if directed else None
+            )
             attention = attention_config(
                 options.attention_model, base_url=scripted_attention.base_url, provider="scripted", api_key_env=key_env
             )
@@ -1774,6 +1796,7 @@ def run_probe(options: Options) -> int:
             profile=_profile(),
             attention_endpoint=scripted_attention,
             original_env=original_env,
+            directed=directed,
         )
         spend = SpendWatch(None if options.scripted else attention_key, options.budget_usd)
         leg = leg_class(ctx)
@@ -2077,6 +2100,12 @@ def _parser() -> argparse.ArgumentParser:
         "inside the launcher (python -m evals.rehearsal.discord_net)",
     )
     parser.add_argument(
+        "--scene",
+        metavar="ID",
+        help=f"play this behavior scene instead of the moments, graded from its own expectations (--harness {REFERENCE} --room discord "
+        "--scripted; one scene per run; draft expectations; see directed.py)",
+    )
+    parser.add_argument(
         "--discord-python",
         help="the Python that runs the Discord processes, with Nunchi installed (the reference also needs discord.py); "
         "default this one",
@@ -2099,6 +2128,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.room == "discord" and not args.scripted:
         print("--room discord is scripted only for now; a live run keeps the in-process room (9f, PR 4)", file=sys.stderr)
         return EXIT_USAGE
+    if args.scene:
+        if not (args.harness == REFERENCE and args.room == "discord" and args.scripted):
+            print(f"--scene is played by --harness {REFERENCE} --room discord --scripted (the reference column, offline)", file=sys.stderr)
+            return EXIT_USAGE
+        from . import directed
+
+        try:
+            directed.spec(args.scene)
+        except directed.Unplayable as exc:
+            print(str(exc), file=sys.stderr)
+            return EXIT_USAGE
     try:
         attention_config(args.attention_model)
         if args.harness == "claude-code":
@@ -2125,6 +2165,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         arm=args.arm,
         room=args.room,
         discord_python=str(Path(args.discord_python).absolute()) if args.discord_python else None,
+        scene=args.scene,
     )
     return run_probe(options)
 

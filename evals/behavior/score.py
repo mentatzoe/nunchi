@@ -27,7 +27,7 @@ Each run gets two grades:
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from .scene import Moment
 
@@ -47,6 +47,23 @@ def visible_result(decision: Mapping[str, Any] | None, *, transport_self: bool =
         return "stay_quiet"
     # bypass, and errors under the default wake-on-error policy.
     return "woken"
+
+
+def agent_move(calls: Sequence[Mapping[str, Any]]) -> str:
+    """The move the room saw from the agent's own actions.
+
+    A message or reply is `speak`, a reaction is `mhm`, any other action is
+    `other`, and nothing (or only silence) is `stay_quiet`.
+    """
+
+    kinds = {call.get("kind") for call in calls} - {"silence"}
+    if kinds & {"message", "reply"}:
+        return "speak"
+    if "reaction" in kinds:
+        return "mhm"
+    if kinds:
+        return "other"
+    return "stay_quiet"
 
 
 def grade(moment: Moment, result: str, *, attention: str | None = None) -> dict[str, str]:
