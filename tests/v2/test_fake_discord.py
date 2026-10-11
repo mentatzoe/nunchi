@@ -17,6 +17,7 @@ import asyncio
 from datetime import datetime, timezone
 import http.client
 import json
+import os
 from pathlib import Path
 import re
 import secrets
@@ -24,6 +25,7 @@ import shutil
 import socket
 import ssl
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -867,6 +869,16 @@ class ShapePinTest(unittest.TestCase):
             for key, nested in unions.items():
                 self.assertNotIn(key, pin["types"][name]["nested"], "the pin follows it already")
                 self.assertIn(nested.removesuffix("[]"), pin["types"])
+
+    def test_the_pin_check_starts_from_a_checkout_with_nothing_installed(self):
+        # CI runs `python -m evals.rehearsal.fake_discord.shapes --check` from the checkout with no Nunchi installed, and
+        # the stand-in takes its emoji rule from the core. -S keeps an installed Nunchi out of sys.path.
+        root = Path(__file__).resolve().parents[2]
+        env = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
+        run = subprocess.run([sys.executable, "-S", "-m", "evals.rehearsal.fake_discord.shapes", "--help"],
+                             cwd=root, env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("--check", run.stdout)
 
     def test_inherited_and_nested_keys_are_required(self):
         self.assertIn("channel_id", shapes.vendored()["types"]["message.Message"]["required"], "from PartialMessage")
