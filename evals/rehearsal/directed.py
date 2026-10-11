@@ -378,11 +378,12 @@ def judge_scene(leg: Any, record: dict[str, Any], scene: Scene) -> None:
     judged and no turn began on, reads ``unsupported``; one that woke the
     agent whose turn did not deliver reads ``woken`` (``provider_error``),
     which fits nothing. ``off_script`` lists how the delivered actions differ
-    from the one the script makes (`_off_script`), and the record's
-    ``other_actions`` every committed action outside the graded turns. ``leg``
-    supplies ``invocations`` (the turns, each with its ``trigger`` and any
-    ``unattended`` messages), ``committed`` (the actions, ``delivered`` once
-    judged) and ``attention_calls``.
+    from the one the script makes (`_off_script`) and, where the script acts, a
+    message that no turn began on (a later turn only listed it as unattended);
+    the record's ``other_actions`` are every committed action outside the
+    graded turns. ``leg`` supplies ``invocations`` (the turns, each with its
+    ``trigger`` and any ``unattended`` messages), ``committed`` (the actions,
+    ``delivered`` once judged) and ``attention_calls``.
     """
 
     native = {delivery["scene_event"]: delivery["event_id"] for delivery in record["deliveries"]}
@@ -408,6 +409,12 @@ def judge_scene(leg: Any, record: dict[str, Any], scene: Scene) -> None:
             by = "attention"
         evidence = set((call or {}).get("evidence") or ())
         allowed = {event_id, *(turn.get("trigger") for turn in turns)}
+        off_script = _off_script(item.get("scripted_action"), actions, event_id, allowed)
+        if item["reached"] and item.get("scripted_action") is not None and turns and not own:
+            # The script acts here, so the agent must have taken this message as a moment of its own. A later turn that only listed
+            # it as unattended read it with another message: one action there cannot stand for two moments.
+            folded = ", ".join(sorted({str(turn.get("trigger")) for turn in turns}))
+            off_script.append(f"no turn began on it: it was only folded into the turn on {folded} as an unattended message")
         item.update(
             result=result,
             by=by,
@@ -417,7 +424,7 @@ def judge_scene(leg: Any, record: dict[str, Any], scene: Scene) -> None:
             cited=[bool(evidence & {native[event] for event in fact["events"] if event in native}) for fact in moment.notice],
             turns=sorted(requests),
             actions=[_summary(action) for action in actions],
-            off_script=_off_script(item.get("scripted_action"), actions, event_id, allowed),
+            off_script=off_script,
         )
         why = moment.miss_reason(result)
         if why:

@@ -16,6 +16,8 @@ PR 3c adds Hermes's own gateway process to it (The Hermes column, below):
 **implemented, unverified** in CI too. PR 4a adds a director that plays four
 of the behavior suite's multi-person scenes on the reference column and grades
 them from each scene's own draft expectations (Directed scenes, below):
+**implemented, unverified** in CI too. PR 4b plays the same four scenes
+through Claude Code and Codex, with the reference as the control:
 **implemented, unverified** in CI too.
 
 ## The first live run (2026-10-09)
@@ -94,10 +96,11 @@ It does not prove:
   gateway, `hermes gateway run`, with the plugin. The live probe keeps the
   in-process room until PR 4.
 - **How well the agent reads the room.** Two moments, once each. Beside
-  them, `--scene` plays one behavior scene on the reference column and grades
-  it from the scene's own draft expectations, with the agent and attention
-  scripted (Directed scenes, below): that checks the director and the grader,
-  not a model. Other columns and a live run come later in PR 4.
+  them, `--scene` plays one behavior scene on the reference, Claude Code or
+  Codex column and grades it from the scene's own draft expectations, with the
+  agent and attention scripted (Directed scenes, below): that checks the
+  director, the grader and each harness's wiring to the room, not a model. A
+  live run comes later in PR 4.
 - **Hermes's own model as attention** (`hermes-host`). Attention is the same
   OpenRouter chat route in every harness here.
 - **That Claude Code sends nothing past its proxy settings in CI.** Its
@@ -777,7 +780,7 @@ in CI yet, and expected rather than checked on `ubuntu-latest`: passwordless
 and Hermes starting as the runner user inside the launcher's namespace in about
 the time it took here.
 
-## Directed scenes (PR 4a)
+## Directed scenes (PR 4a, 4b)
 
 **Status: implemented, unverified in CI. Run here offline, inside the
 launcher, on Python 3.12 with discord.py 2.7.1 (2026-10-11): each of the four
@@ -792,17 +795,33 @@ a reply to chatter, a dropped message, a dropped ping) each now fail the scene.
 The scenes are drafts (`evals/behavior/README.md`), so every result says
 "draft expectations".
 
+**PR 4b: implemented, unverified in CI. Run here offline, inside the launcher
+(2026-10-11), on Python 3.12 with the pins CI installs (discord.py 2.7.1,
+aiohttp 3.14.3, mcp 1.28.1), against the pinned Claude Code 2.1.289 (with
+`--no-sandbox`, since bubblewrap cannot run here) and Codex 0.160.1: each of
+the four scenes exited 0 through Claude Code, through Codex and through the
+reference, in two passes (24 runs), every hard check holding and every graded
+moment `fits`/`ok`. No
+harness column missed a scene the reference passes, so 4b has no finding about
+an integration to report yet. Three mutations each fail a harness column's
+lane and name the cause: a script that plays a listed miss (the status report
+answered), an agent that answers the chatter where the script is silent, and a
+leg that forgets what an action was about. The plain Discord lanes of the
+three columns are unchanged in substance.**
+
 The behavior suite judges one moment at a time, with the room handed to
 attention as a snapshot. A rehearsal with one person cannot show what a room
 of several does to an agent: a bot's status report, a question for someone
 else, a story told across messages. `--scene ID` plays one scene as a
 conversation instead: a **director** (`evals/rehearsal/directed.py`) posts
 the scene's people and bots to the Discord stand-in through its control API,
-as messages (pings, replies and all), and the reference, `nunchi-discord` in
-its own process, takes part in it. What the room saw of the agent is graded
+as messages (pings, replies and all), and a column takes part in it: the
+reference, `nunchi-discord` in its own process (PR 4a), or Claude Code or
+Codex through their own `nunchi-mcp-discord` (PR 4b). What the room saw of the
+agent is graded
 with the suite's own `score.grade` from each moment's `fitting`, `misses` and
 `step1`, and read like a cell of the suite's matrix. The reference is the
-control: a later column's miss that the reference does not share is the
+control: a harness column's miss that the reference does not share is the
 integration's.
 
 ```sh
@@ -812,7 +831,9 @@ sudo -E "$PY" -m evals.rehearsal.discord_net --offline -- /usr/bin/env PATH="$PA
 ```
 
 One scene per run, so that each starts from a fresh room and a fresh agent;
-the reference only, scripted, offline, with no model and no key. **The
+scripted, offline, with no model and no key. The reference plays it as shown;
+Claude Code and Codex take `--harness claude-code` or `--harness codex` in its
+place (below). **The
 director never posts as the agent**: every visible move is the agent's own,
 and the stand-in refuses a post as a harness's bot. That decides which scenes
 can be played. `directed.plan` sorts each scene and gives the reasons it
@@ -879,7 +900,11 @@ it, since the script only sees the room's text (a ping reads `<@id>` there).
 keys the suite's results use:
 
 1. the turns the message started, or that listed it as `unattended` (a turn
-   that took it with a later message as one moment);
+   that took it with a later message as one moment). Where the script acts, a
+   turn must have **begun** on the message: one that only listed it as
+   unattended read it with another, and one action cannot stand for two
+   moments, so that moment fails `off_script`, saying it was only folded into
+   another turn;
 2. their delivered committed actions, already reconciled with the bot's own
    2xx writes (`discord-writes-reconciled`);
 3. the move the room saw: `score.agent_move` (a message or reply is `speak`, a
@@ -928,9 +953,11 @@ script makes (its login, a post where it speaks, a reaction where it nods);
 pings the **scene meant** (`meant_actor_ids`, worked out from the scene and
 not from the text sent) were sent, and that they and the reply target arrived
 as the stand-in sent them in Nunchi's own room log and, where a turn was
-handed the message, in the turn; and that the next turn after the agent's
-reaction holds it in `memory.own_moves`, about the message it reacted to. A
-live moment would be reported and never failed (`probe.py`): there is no live
+handed the message, in the turn; that every turn that ran was shown its
+trigger (a request the agent's model was asked holds that turn: a quiet answer
+to a message the model never saw proves nothing); and that the next turn after
+the agent's reaction holds it in `memory.own_moves`, about the message it
+reacted to. A live moment would be reported and never failed (`probe.py`): there is no live
 scene run yet.
 
 **A wait that timed out.** Every message is posted and then waited on until the
@@ -943,17 +970,94 @@ scripted run fails on it, in the scene and in the plain moments alike
 moment and a line in `summary.md`, and reports the rest. A run whose waits all
 ended quiet records as before.
 
+**Through Claude Code and Codex (PR 4b).** The four scenes also run through
+`DiscordClaudeCodeLeg` and `DiscordCodexLeg`, so that each harness's real
+process (`claude -p` with the mod, `codex app-server` with the integration)
+reads the room the director makes, through its own `nunchi-mcp-discord`, with
+the harness's runner in the probe's process as in the moments' lane. A leg
+takes the directed spec as the reference does (`OnTheTransport.play` and
+`judge`); the world holds the scene's people and bots and the director posts
+them. What changes for a harness:
+
+- **The scripted model follows the scene.** The scripted Messages endpoint
+  (Claude Code) and the scripted Responses endpoint (Codex) follow the same
+  `SceneScript` as attention: `SceneScript.move` says its move as a room tool
+  call, `send` (`SCENE_SAY`, naming the moment) or `react` (`SCENE_NOD` on the
+  trigger), or `silence`. A silent turn makes no room tool call and ends on a
+  short message that goes nowhere: Claude Code and Codex post only through the
+  room's tools, so that is how they stay quiet. The scene's chatter gets
+  silence, as for the reference, and attention is the same `ScriptedAttention`.
+  A quiet scene (`bot-status-report`) calls no room tool and no check asks for
+  one. What its summary's verdict line says depends on the column: Codex's
+  reads "no room tool was called: the turn ended without one", Claude Code's
+  does not count calls and reads as always ("the mod attached and bound the
+  turn, and the model answered as ..."); neither fails anything.
+- **What the leg records.** The judge reads the same record as for the
+  reference. The harness runs in the probe's process, so the leg records it as
+  it goes (`Leg.instrument`): each turn with the messages it took while the
+  agent was busy (`unattended`), each committed action with the message it was
+  about (`origin_event_id`, in a scene only, so the plain lanes' records are as
+  they were), and attention's decision for each message, read from the
+  participant's own receipts, the receipts the reference's state directory
+  holds (`discord_room.attention_entries`), with the evidence it cited.
+- **The checks.** The hard checks of 4a hold for each column: `directed-outcomes`,
+  the seven `discord-*` checks, `one-room-action-per-turn`, `no-leaks`, and
+  nothing outside the graded turns. Three differ for a harness.
+  `discord-clients-complete` expects the transport's own lookups (the channel,
+  the member, the roles) and a post or a reaction where the script makes one.
+  `directed-outcomes` holds each action that reached the room to the harness's
+  own record of its room tool calls, per action and not per run
+  (`checks.room_call_for`): a post needs a completed `room_send` with the same
+  words and a nod a completed `room_react` on the same message with the same
+  reaction, one call for one action, so a move that reached the room some
+  other way, or through a call that did not complete, fails and is named. The
+  calls are read from Claude Code's stream-json (a `tool_use` of a room tool and
+  the `tool_result` that came back) and from Codex's completed `mcpToolCall`
+  items, and kept in `run.json` (`discord.room_tool_calls`). And a scene run
+  fails the hard check `room-errors` if the room's own lane (`lane_errors`) or
+  the runner's serve loop (`serve_errors`) met an error: both are recorded for
+  every run, and were empty in every run that passed here, the plain lanes
+  included; only a scene fails on them. The start gap the transport declares is
+  read after the scene; no reconnect is played.
+- **Turn counts differ by column, and nothing depends on them.** A message that
+  arrives while a turn runs is read with the next one as a single moment
+  (`unattended`, #94 step 6), and a harness's turn is slower than the
+  reference's, so the chatter of `mention-in-busy-room` took 32 turns on the
+  reference, 24 and 25 on Codex and 20 and 23 on Claude Code in two passes
+  (2026-10-11), and each graded message, posted after the room went quiet,
+  started a turn of its own in all three. The other three scenes took the same
+  turns in every column.
+
+The reference is the control. A scene that a harness column fails and the
+reference passes is that integration's miss, and is the finding this part is
+for: the script, the grader and the checks are not bent to pass it. It is
+pinned as a named failure or an expected-failure test that states what the room
+would show, and reported. None has appeared yet. What the tests hold instead
+(`tests/v2/test_rehearsal_directed_harness.py`): the scripted endpoints follow a
+scene's script for every graded moment of the four scenes; a script that plays
+a listed miss through a harness column fails `directed-outcomes` and names the
+moment and the scene's reason; so does an action the script is silent on, an
+action no room tool call backs, a graded message the script acts on that only a
+later turn listed as unattended, a turn that ran on a message the model was
+never shown, and a room whose lane met an error.
+
 **In CI** it is a step of the `discord-standin` job, after the reference's
-lane: a loop over the four scene ids, each inside the launcher with
-`--offline`, in the lane's virtualenv and with a fresh `HOME` and `TMPDIR`;
-the step fails after the last if any scene failed. A failure runs the same
-scan for the key and the canary over every scene's record and uploads it as
-`rehearsal-discord-scenes-<run id>-<attempt>` only after a clean scan. It has
-not run in CI.
+lane, and of the `claude-code-mod` and `codex-app-server` jobs, after their
+Discord lane: a loop over the four scene ids, each inside the launcher with
+`--offline` (and `--require-bwrap` in the two harness jobs, with Claude Code's
+sandbox on as in its lane: CI never passes `--no-sandbox`), in the lane's
+virtualenv and with a fresh `HOME` and `TMPDIR`; the step fails after the last
+if any scene failed. A failure runs the same scan for the key and the canary
+over every scene's record and uploads it as
+`rehearsal-discord-scenes-<run id>-<attempt>` (reference),
+`rehearsal-discord-claude-code-scenes-<run id>-<attempt>` or
+`rehearsal-discord-codex-scenes-<run id>-<attempt>` only after a clean scan.
+Run here, a scene took 5 to 30 seconds. None has run in CI.
 
 **What it does not prove.** The agent and attention are scripted, so this
 shows that the director posts a scene as a room would see it, that the
-reference hears it as sent and acts on the script, and that the grader reads
+reference and each harness hear it as sent and act on the script (through
+their own tools, for Claude Code and Codex), and that the grader reads
 the result both ways (`tests/v2/test_rehearsal_directed.py` grades a synthetic
 move for every fitting move, every miss and every unlisted move of every
 scene). It says nothing about how well any model reads the room: that needs a
@@ -1044,6 +1148,7 @@ sudo -E "$PY" -m evals.rehearsal.discord_net --offline -- /usr/bin/env PATH="$PA
 sudo -E "$PY" -m evals.rehearsal.discord_net --offline -- /usr/bin/env PATH="$PATH" \
   "$PY" -m evals.rehearsal.probe --harness reference --scripted --room discord --scene story-across-messages \
   --discord-python /path/to/python-with-discord.py --out rehearsal-out
+# the same scene through Claude Code or Codex: --harness claude-code (add --no-sandbox where bubblewrap cannot run) or --harness codex
 ```
 
 The live probe needs the key in `NUNCHI_ATTENTION_API_KEY`. It hands the
@@ -1062,9 +1167,9 @@ first lines of `summary.md` name the stop either way.
 live run or the reference outside the Discord room, and 3 (could not run)
 without the launcher, or, for Hermes, where Hermes with discord.py cannot be
 read in the Python that runs it; `--harness reference` runs in it alone.
-`--scene ID` is the reference's, in the Discord room, scripted: another
-harness, a live run, an unknown scene or one the director cannot play exits 2
-(the last two list the scenes that can be played).
+`--scene ID` is played in the Discord room, scripted, by the reference,
+Claude Code or Codex: Hermes (parked), a live run, an unknown scene or one the
+director cannot play exits 2 (the last two list the scenes that can be played).
 `--attention-model` takes the behavior eval's label (`id` or `id@effort`);
 a label for another route (`messages:`, `responses:`) is refused, since the
 probe builds the chat route only. `--arm LABEL` names a run that is one arm
@@ -1074,8 +1179,8 @@ CI runs `--scripted`, and this probe's tests (`tests/v2/test_rehearsal.py`,
 the scripted probe's own test included), in the Claude Code (`claude-code-mod`),
 Codex and Hermes lanes of `ci.yml`, with no secret. It runs `--room discord
 --scripted` inside the launcher for Claude Code, Codex, the reference and
-Hermes (The Discord room and The Hermes column), and, in the reference's job,
-the four directed scenes (Directed scenes).
+Hermes (The Discord room and The Hermes column), and, in the jobs of the
+reference, Claude Code and Codex, the four directed scenes (Directed scenes).
 
 ## Model routes and keys
 

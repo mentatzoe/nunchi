@@ -65,11 +65,12 @@ the harnesses' Discord processes unmodified: a `nunchi-mcp-discord` for Claude
 Code or Codex, whose runner stays in this process, `hermes gateway run` with
 the Nunchi plugin for Hermes, or, as ``--harness reference``,
 `nunchi-discord` with a scripted participant. Its moments, legs and checks
-are in `discord_room.py`. With ``--scene ID`` (PR 4a; the reference only, one
-scene per run so that each starts from a fresh room) it plays that behavior
-scene instead: a director (`directed.py`) posts its people and bots, and each
-graded moment is graded from the scene's own expectations, with a grade matrix
-in summary.md. The scenes are drafts: results say so.
+are in `discord_room.py`. With ``--scene ID`` (PR 4a, the reference; PR 4b,
+Claude Code and Codex too; one scene per run so that each starts from a fresh
+room) it plays that behavior scene instead: a director (`directed.py`) posts
+its people and bots, and each graded moment is graded from the scene's own
+expectations, with a grade matrix in summary.md. The scenes are drafts:
+results say so.
 
 Exit status: 0 every hard check held; 1 a hard check failed, the probe
 raised an error, or the scan found a secret; 2 bad arguments (among them a
@@ -81,7 +82,7 @@ budget before a moment, every hard check holding.
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 import contextlib
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
@@ -242,7 +243,7 @@ class Options:
     room: str = "standin"
     # The Python that runs the Discord processes (the reference needs discord.py); default this one.
     discord_python: str | None = None
-    # The behavior scene to play instead of the moments (the reference in the Discord room, scripted; `directed.py`).
+    # The behavior scene to play instead of the moments (a Discord room column, scripted; `directed.py`).
     scene: str | None = None
 
 
@@ -342,6 +343,8 @@ class Leg:
         # turn whose delivery the library has no record of (the Hermes gateway leg).
         self.harness_failures: list[str] = []
         self.tool_names: list[str] = []
+        # The room tool calls the harness's own record shows, once collected (Claude Code and Codex): see `claude_room_calls`.
+        self.room_calls: list[dict[str, Any]] | None = None
         # What the integration declares its harness shows by itself (`turn_conformance.KnownGap`).
         self.known_gaps: list[Any] = []
         self._ids: dict[str, str] = {}
@@ -464,6 +467,9 @@ class Leg:
                 "source": (wake.get("attention") or {}).get("source"),
                 "started": _now(),
             }
+            if wake.get("unattended_event_ids"):
+                # Messages that came while the agent was busy and were read with this one as a single moment.
+                entry["unattended"] = list(wake["unattended_event_ids"])
             with self._lock:
                 self.invocations.append(entry)
             try:
@@ -506,6 +512,9 @@ class Leg:
             # Recorded before it leaves: a dispatch that raises stays "pending", never unseen.
             entry = {"request_id": wake.get("request_id"), **_summarize_action(action), "delivery": "pending"}
             entry.pop("why", None)
+            if getattr(self.ctx, "directed", None) is not None and isinstance(action, Mapping) and "origin_event_id" in action:
+                # A scene holds each action to the message it was about; a plain message names it only by its origin.
+                entry["origin_event_id"] = action["origin_event_id"]
             with self._lock:
                 self.committed.append(entry)
             result = dispatch(action=action, wake=wake)
@@ -788,6 +797,7 @@ class ClaudeCodeLeg(SharedTransportLeg):
                 room_tools=self.tool_names,
             )
             report["fixed_credentials"] = claude_code_fixed_credentials()
+            self.room_calls = claude_room_calls(self.transcript.entries, self.tool_names)
             self.sandbox = report["sandbox"]
             self.not_as_configured = list(report["not_as_configured"])
             self.harness_failures = list(report["failures"])
@@ -967,6 +977,44 @@ def claude_code_report(
     }
 
 
+def claude_room_calls(entries: Sequence[Mapping[str, Any]], room_tools: Sequence[str]) -> list[dict[str, Any]]:
+    """The room tool calls Claude Code's own stream shows: each ``tool_use`` of a room tool with its arguments, and whether a result came back.
+
+    ``completed`` is True when a ``tool_result`` for the call's id came back
+    without ``is_error``: the tool ran and answered, which is what the stream
+    says of the harness and not of the scripted model that asked for it.
+    """
+
+    calls: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        message = entry.get("message") if entry.get("direction") == "from-claude" else None
+        inner = message.get("message") if isinstance(message, Mapping) else None
+        if not isinstance(inner, Mapping) or not isinstance(inner.get("content"), list):
+            continue
+        for block in inner["content"]:
+            if not isinstance(block, Mapping):
+                continue
+            if message.get("type") == "assistant" and block.get("type") == "tool_use" and block.get("name") in room_tools:
+                calls[str(block.get("id"))] = {"tool": block["name"], "arguments": dict(block.get("input") or {}), "completed": False}
+            elif message.get("type") == "user" and block.get("type") == "tool_result" and str(block.get("tool_use_id")) in calls:
+                calls[str(block["tool_use_id"])]["completed"] = not block.get("is_error")
+    return list(calls.values())
+
+
+def codex_room_calls(items: Iterable[Mapping[str, Any]], server: str) -> list[dict[str, Any]]:
+    """The room tool calls Codex's app-server reported: each completed ``mcpToolCall`` item of the room's MCP server, with its arguments."""
+
+    return [
+        {
+            "tool": item.get("tool"),
+            "arguments": dict(item.get("arguments") or {}),
+            "completed": item.get("status") == "completed" and not item.get("error"),
+        }
+        for item in items
+        if item.get("type") == "mcpToolCall" and item.get("server") == server
+    ]
+
+
 def claude_code_network(tried: Sequence[Mapping[str, Any]], *, endpoint: str) -> dict[str, Any]:
     """What else a scripted Claude Code tried to reach, with Anthropic's servers out of reach.
 
@@ -1109,6 +1157,7 @@ class CodexLeg(SharedTransportLeg):
             if item.get("type") == "mcpToolCall"
         ]
         room_calls = [item for item in items if item["server"] == MCP_SERVER_NAME]
+        self.room_calls = codex_room_calls(integration.tool_items.values(), MCP_SERVER_NAME)
         turns = [
             {"status": turn.get("status"), "error": (turn.get("error") or {}).get("message") if isinstance(turn.get("error"), Mapping) else None}
             for turn in integration.completed_turns.values()
@@ -1565,6 +1614,8 @@ LEGS: dict[str, type[Leg]] = {"claude-code": ClaudeCodeLeg, "codex": CodexLeg, "
 # reference, `nunchi-discord`, with a scripted plain-call participant (`discord_room.py`).
 ROOMS = ("standin", "discord")
 REFERENCE = "reference"
+# The columns that play a behavior scene (`--scene`, `directed.py`): the reference, Claude Code and Codex. Hermes is parked.
+SCENE_HARNESSES = (REFERENCE, "claude-code", "codex")
 
 
 def _room_parts(options: Options) -> tuple[type[Leg], tuple[MomentSpec, ...], Route]:
@@ -1720,8 +1771,8 @@ def run_probe(options: Options) -> int:
         raise ValueError(f"unknown room {options.room!r}")
     if options.room == "discord" and not options.scripted:
         raise ValueError("the Discord room is scripted only; a live run keeps the in-process room (9f, PR 4)")
-    if options.scene and not (options.room == "discord" and options.scripted and options.harness == REFERENCE):
-        raise ValueError(f"a scene is played by the {REFERENCE} in the Discord room, scripted (--harness {REFERENCE} --room discord --scripted)")
+    if options.scene and not (options.room == "discord" and options.scripted and options.harness in SCENE_HARNESSES):
+        raise ValueError(f"a scene is played in the Discord room, scripted, by {' or '.join(SCENE_HARNESSES)} (--room discord --scripted)")
     out = options.out / options.harness
     _reset(out)
     original_env = dict(os.environ)
@@ -2102,8 +2153,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--scene",
         metavar="ID",
-        help=f"play this behavior scene instead of the moments, graded from its own expectations (--harness {REFERENCE} --room discord "
-        "--scripted; one scene per run; draft expectations; see directed.py)",
+        help="play this behavior scene instead of the moments, graded from its own expectations (--room discord --scripted, "
+        f"--harness {' or '.join(SCENE_HARNESSES)}; one scene per run; draft expectations; see directed.py)",
     )
     parser.add_argument(
         "--discord-python",
@@ -2129,8 +2180,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("--room discord is scripted only for now; a live run keeps the in-process room (9f, PR 4)", file=sys.stderr)
         return EXIT_USAGE
     if args.scene:
-        if not (args.harness == REFERENCE and args.room == "discord" and args.scripted):
-            print(f"--scene is played by --harness {REFERENCE} --room discord --scripted (the reference column, offline)", file=sys.stderr)
+        if not (args.harness in SCENE_HARNESSES and args.room == "discord" and args.scripted):
+            print(
+                f"--scene is played by --harness {' or '.join(SCENE_HARNESSES)} with --room discord --scripted (offline; Hermes is parked)",
+                file=sys.stderr,
+            )
             return EXIT_USAGE
         from . import directed
 

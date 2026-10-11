@@ -23,8 +23,10 @@ discord``) the agents follow a `RoomScript` (answer, reply, react), and
 `ScriptedParticipant` is the same agent as a plain-call participant, for the
 reference column. A directed scene (``--scene``, `directed.py`) is played with
 a `SceneScript` instead, which attention and the participant both follow: at
-each graded moment it does what the scene's first fitting move says. Only
-``--scripted`` runs use these.
+each graded moment it does what the scene's first fitting move says: the
+reference answers it as a plain-call action, and Claude Code and Codex follow
+it through their scripted endpoints, as a room tool call or, where the scene
+is quiet, none. Only ``--scripted`` runs use these.
 """
 
 from __future__ import annotations
@@ -593,6 +595,24 @@ class SceneScript:
                     "reaction": SCENE_NOD, "operation": "add"}
         return {"kind": "silence"}
 
+    def move(self, turn: Mapping[str, Any] | None) -> tuple[str, dict[str, Any]]:
+        """The same move as a room tool call, for an agent that acts through the room's tools: its role and arguments.
+
+        The role is ``send`` or ``react``, or ``silence`` where the agent says
+        nothing: it makes no room tool call and its turn ends, which is how
+        Claude Code and Codex stay quiet (a woken turn with no room action).
+        It is `action`'s move, worked out once, so a column that acts through
+        tools and one that answers with an action play the scene alike.
+        """
+
+        turn = turn or {}
+        action = self.action(turn)
+        if action["kind"] == "message":
+            return "send", {"text": action["text"]}
+        if action["kind"] == "reaction":
+            return "react", {"target_event_id": action["target_event_id"], "reaction": action["reaction"]}
+        return "silence", {}
+
 
 class ScriptedParticipant:
     """A plain-call participant for a scripted run: an OpenAI-compatible chat endpoint on localhost.
@@ -696,12 +716,13 @@ class ScriptedCodexAgent:
 
     The first model call of a turn gets a ``room_send`` call with ``answer``;
     the call after the tool's result gets a short final message, which ends
-    Codex's turn. With ``script`` (`RoomScript`, the Discord room's moments)
+    Codex's turn. With ``script`` (`RoomScript`, the Discord room's moments;
+    `SceneScript`, a directed scene's, which is also silent where the scene is)
     the first call gets the script's move on the newest turn instead. Every
     request Codex made is in ``model.requests``.
     """
 
-    def __init__(self, answer: str, *, script: RoomScript | None = None) -> None:
+    def __init__(self, answer: str, *, script: RoomScript | SceneScript | None = None) -> None:
         from nunchi.integrations.codex_app_server.integration import TOOL_NAMES
         from nunchi.integrations.codex_app_server_conformance import ScriptedModel
 
@@ -723,6 +744,10 @@ class ScriptedCodexAgent:
             self.model.reply({"text": "Posted my answer."})
             return
         role, arguments = ("send", {"text": self.answer}) if self.script is None else self.script.move(turn_document(request))
+        if role == "silence":
+            # A scene's quiet moment: no room tool call, and the turn ends on a message that is not posted anywhere.
+            self.model.reply({"text": "Nothing to add."})
+            return
         self.model.reply({"tool": self.tools[role], "arguments": arguments, "call_id": f"call-{secrets.token_hex(6)}"})
 
     def requests(self) -> list[dict[str, Any]]:
@@ -832,15 +857,18 @@ class ScriptedClaudeAgent:
     carries no tool result yet gets a ``tool_use`` of it with ``answer``; a
     call that carries the result gets a short final text, which ends the
     turn; a streamed call without the room tools gets a short text. With
-    ``script`` (`RoomScript`, the Discord room's moments) the tool call is the
-    script's move on the newest turn, by its role in ``tools``. Anything
+    ``script`` (`RoomScript`, the Discord room's moments; `SceneScript`, a
+    directed scene's, which is also silent where the scene is) the tool call is
+    the script's move on the newest turn, by its role in ``tools``. Anything
     else, a call without ``stream`` included, gets a 404 in the API's error
     shape: when Claude Code cannot read the stream it retries without it,
     and that fallback must fail the turn, not pass it. Every request is
     kept, with its body and a few headers, never a key's (``requests``).
     """
 
-    def __init__(self, answer: str, tool: str, *, script: RoomScript | None = None, tools: Mapping[str, str] | None = None) -> None:
+    def __init__(
+        self, answer: str, tool: str, *, script: RoomScript | SceneScript | None = None, tools: Mapping[str, str] | None = None
+    ) -> None:
         self.answer = answer
         self.tool = tool
         self.script = script
@@ -874,6 +902,9 @@ class ScriptedClaudeAgent:
         if isinstance(content, list) and any(isinstance(block, Mapping) and block.get("type") == "tool_result" for block in content):
             return "agent", [{"type": "text", "text": "Posted my answer."}], "end_turn"
         role, arguments = ("send", {"text": self.answer}) if self.script is None else self.script.move(turn_document(body))
+        if role == "silence":
+            # A scene's quiet moment: no room tool call, and the turn ends on a message that is not posted anywhere.
+            return "agent", [{"type": "text", "text": "Nothing to add."}], "end_turn"
         call = {"type": "tool_use", "id": f"toolu_scripted_{secrets.token_hex(8)}", "name": self.tools[role], "input": arguments}
         return "agent-tool-call", [call], "tool_use"
 

@@ -37,9 +37,10 @@ summary.md:
    scripted, each moment's outcome is known, so it is checked.
 
 A run in the Discord room (``--room discord``, PR 3b) holds seven more, the
-``discord-*`` checks, listed with them below. With ``--scene`` (PR 4a) the
-run plays one behavior scene, and its scripted check is `directed_outcomes`
-in place of `scripted_outcomes`.
+``discord-*`` checks, listed with them below. With ``--scene`` (PR 4a, the
+reference; PR 4b, Claude Code and Codex too) the run plays one behavior scene,
+and its scripted check is `directed_outcomes` in place of `scripted_outcomes`;
+for Claude Code and Codex it holds one more, `room_errors`.
 
 Neither the key nor the canary may be in any output: the scan
 (`scan.enforce`) fails the run after the record is written.
@@ -575,7 +576,7 @@ def discord_scripted_outcomes(
     return Check("scripted-outcomes", not problems, detail)
 
 
-def directed_outcomes(moments: Sequence[Mapping[str, Any]]) -> Check:
+def directed_outcomes(moments: Sequence[Mapping[str, Any]], *, room_tool_calls: Sequence[Mapping[str, Any]] | None = None) -> Check:
     """With the agent and attention scripted, every graded moment of a directed scene is known: check it.
 
     A directed record (``expect`` ``directed``, `directed.py`) lists its
@@ -590,14 +591,22 @@ def directed_outcomes(moments: Sequence[Mapping[str, Any]]) -> Check:
     have reached Nunchi (a lost message changes the room the graded one is read
     in), no committed action may lie outside the graded turns
     (``other_actions``: the chatter, which the script leaves silent), and no
-    wait for the room to go quiet may have timed out (`unsettled`). The scenes
-    are drafts (`evals/behavior/README.md`), so what this holds is the script
-    against draft expectations; with a live model the same grades are
-    reported, never failed.
+    wait for the room to go quiet may have timed out (`unsettled`). For Claude
+    Code and Codex, which act through a room tool, ``room_tool_calls`` (the
+    calls the harness's own record shows, `room_call_for` reads them) must
+    back every delivered action: each post or nod must have a completed call
+    of the right tool with the same words or the same message and reaction,
+    one call for one action. A move that reached the room some other way, or a
+    call that was not completed, fails and is named. The reference, which
+    acts through no tool, passes none (None).
+    The scenes are drafts (`evals/behavior/README.md`), so what this holds is
+    the script against draft expectations; with a live model the same grades
+    are reported, never failed.
     """
 
     problems: list[str] = []
     graded = scenes = 0
+    unused = [dict(call) for call in room_tool_calls] if room_tool_calls is not None else None
     for moment in moments:
         if moment.get("expect") != "directed":
             continue
@@ -626,6 +635,17 @@ def directed_outcomes(moments: Sequence[Mapping[str, Any]]) -> Check:
             if item.get("off_script") is None:
                 problems.append(f"{where}: its actions were not held to the script")
             problems += [f"{where}: {problem}" for problem in item.get("off_script") or ()]
+            if unused is not None:
+                for action in item.get("actions") or ():
+                    if not action.get("delivered"):
+                        continue
+                    call = room_call_for(action, unused)
+                    if call is None:
+                        problems.append(
+                            f"{where}: its {action.get('kind')} reached the room, but the harness showed no completed room tool call for it"
+                        )
+                    else:
+                        unused.remove(call)
         if moment.get("other_actions") is None:
             problems.append(f"{name}: the actions outside the graded turns were not listed")
         for action in moment.get("other_actions") or ():
@@ -637,6 +657,49 @@ def directed_outcomes(moments: Sequence[Mapping[str, Any]]) -> Check:
         "every message reached Nunchi, nothing else was done in the room (draft expectations)"
     )
     return Check("directed-outcomes", not problems, detail)
+
+
+def room_call_for(action: Mapping[str, Any], calls: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
+    """The completed room tool call that made ``action``, from the calls the harness's own record shows; None if there is none.
+
+    A call is ``{tool, arguments, completed}``. A post or a reply is made by
+    ``room_send`` with the same ``text``; a reaction by ``room_react`` with the
+    same ``target_event_id`` and ``reaction``. A call that did not complete
+    (the tool answered an error, or no result came back) made nothing.
+    """
+
+    for call in calls:
+        tool, arguments = str(call.get("tool") or ""), call.get("arguments") or {}
+        if not call.get("completed"):
+            continue
+        if action.get("kind") in ("message", "reply"):
+            if tool.endswith("room_send") and arguments.get("text") == action.get("text"):
+                return call
+        elif action.get("kind") == "reaction":
+            if (
+                tool.endswith("room_react")
+                and arguments.get("target_event_id") == action.get("target_event_id")
+                and arguments.get("reaction") == action.get("reaction")
+            ):
+                return call
+    return None
+
+
+def room_errors(lane_errors: Sequence[Any], serve_errors: Sequence[Any]) -> Check:
+    """The room ran clean: its own lane met no error, and the runner served the room to the end.
+
+    ``lane_errors`` are what the in-process room's worker met (`Room.errors`),
+    and ``serve_errors`` the exceptions that ended the runner's serve loop
+    (`DiscordRoomConnection.serve`, on its thread). Both are recorded for every
+    Claude Code and Codex run and empty in every run that passed; a scene run
+    fails on either, since a lane that met an error may have dropped a message
+    or a turn the record then does not show.
+    """
+
+    problems = [f"the room's lane met: {str(error)[:300]}" for error in lane_errors]
+    problems += [f"the runner's serve loop ended with: {str(error)[:300]}" for error in serve_errors]
+    detail = "; ".join(problems) or "the room's lane met no error and the runner served the room to the end"
+    return Check("room-errors", not problems, detail)
 
 
 def _describe(action: Mapping[str, Any]) -> str:
@@ -877,9 +940,11 @@ def discord_addressing(
     the ones the stand-in sent (``mentioned_actor_ids``): what the scene meant
     must have been sent, and what was sent must be in what Nunchi saw, both in
     its own room log (``logged``, every message it took in) and in the turn that
-    was handed the message (``received``). A reply must arrive as one. And the
-    next turn after the agent's reaction must hold it in ``own_moves``, about
-    the message it reacted to.
+    was handed the message (``received``). A reply must arrive as one. Every turn
+    that ran must have been shown its trigger (a request the agent's model was
+    asked holds that turn): a silence on a message the model never saw proves
+    nothing. And the next turn after the agent's reaction must hold it in
+    ``own_moves``, about the message it reacted to.
     """
 
     problems: list[str] = []
@@ -917,6 +982,16 @@ def discord_addressing(
                         )
                 if delivery.get("received"):
                     heard += 1
+            # A turn that ran on a message the agent's model was never shown (no request it was asked holds that turn) proves
+            # nothing, least of all when it stayed quiet: the harness did not hand the agent the room.
+            by_event = {delivery.get("event_id"): delivery for delivery in deliveries}
+            for turn in moment.get("turns", ()):
+                seen = by_event.get(turn.get("trigger"))
+                if seen is not None and not seen.get("received"):
+                    problems.append(
+                        f"{name} {seen.get('scene_event')}: turn {turn.get('request_id')} ran on it, but no request the agent's model "
+                        "was asked shows that turn, so whatever it did or left undone says nothing about the message"
+                    )
             # The agent's reaction must be in its memory at the next turn, about the message it reacted to (as for the reaction moment).
             for item in moment.get("graded", ()):
                 if not any(action.get("kind") == "reaction" and action.get("delivered") for action in item.get("actions", ())):

@@ -57,10 +57,11 @@ A scene can also be played as a conversation on Discord, with a director
 that posts its people and bots and grades what the agent did with the same
 `fitting`, `misses` and `step1` (`evals/rehearsal/directed.py`; see
 [`docs/rehearsal.md`](../../docs/rehearsal.md), "Directed scenes"). Four
-scenes can be played today, on the reference column, offline, with a
-scripted agent: the director never posts as the agent, so a scene that
-holds an event of the agent's own, or needs a pause or a hold on its turn,
-cannot be set up. Results there say "draft expectations", like these.
+scenes can be played today, on the reference, Claude Code and Codex
+columns, offline, with a scripted agent: the director never posts as the
+agent, so a scene that holds an event of the agent's own, or needs a pause or
+a hold on its turn, cannot be set up. Results there say "draft
+expectations", like these.
 
 `--dry-run` uses an offline model that always wakes, to check the plumbing.
 A live run sends each moment through the production observation and
