@@ -67,7 +67,11 @@ order than it is written (z1, s1, z2, then the agent's reply, not z1, s1, the
 reply, z2), because the thanks must land while the agent is busy; a live model
 could drop that reply, so it cannot be assumed there. A scene that needs a pause, a long quiet,
 an approval, a snapshot or a second agent cannot be set up. Results there say
-"draft expectations", like these.
+"draft expectations", like these. The manual `rehearsal` workflow can also play
+them live (`room: discord`, [Live scenes](../../docs/rehearsal.md)): a live agent
+behind each column, every grade reported and none a failure, and a scene whose
+setup the live agent did not make is reported `precondition not met` and not
+graded.
 
 `--dry-run` uses an offline model that always wakes, to check the plumbing.
 A live run sends each moment through the production observation and

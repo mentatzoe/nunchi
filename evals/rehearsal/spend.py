@@ -18,11 +18,17 @@ figure. Only a key with a credit limit is a hard limit.
 
 Only the numbers are kept from OpenRouter's answer, never its ``label``,
 which can show part of the key.
+
+A live scene (PR 4d) reads the key as above and also counts the model calls
+each column made (`probe.Leg.model_calls`), since the usage figure lags. The
+summary shows the cost two ways: **recorded**, the key's usage, and
+**estimated**, those counts times `ESTIMATED_USD_PER_CALL` (`estimate_usd`),
+which are assumptions that no run has measured yet.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 import json
 import time
 from typing import Any
@@ -44,8 +50,23 @@ SETTLE_SECONDS = 75.0
 SETTLE_INTERVAL_SECONDS = 5.0
 # One read's own timeout; the last moment's reading cuts it to the time left.
 READ_TIMEOUT_SECONDS = 20.0
+# The first reading is the base of everything the run spent: a transient failure of that one read would leave the run with no
+# figure at all, so it is tried again (each try kept), up to this many times, this many seconds apart.
+FIRST_READ_TRIES = 3
+FIRST_READ_PAUSE_SECONDS = 2.0
 
 NOT_READ = "no key: a scripted run reads no spend"
+
+# What one model call is assumed to cost, in US dollars, for the estimate beside the recorded figure. Nothing here is measured:
+# the first live scene run replaces them. How they were chosen (docs/rehearsal.md, Cost):
+#   attention: the behavior eval reported $1.92 for eight attention routes over all scenes, three runs each (evals/behavior/README.md,
+#     "Which run to use"), about $0.001 a call; doubled for the default model's reasoning tokens and the longer room of a scene.
+#   reference: one plain-call turn on the agent's model, a snapshot of the room (about 5,000 tokens in, 200 out) at $1 and $5 per
+#     million tokens in and out, which is the default agent model's list price as the workflow's default input has it: about $0.006,
+#     rounded up.
+#   claude-code, codex: one model request of a harness, its system prompt and tools beside the room (about 18,000 tokens in, 300 out),
+#     at the same prices, no cache credit: about $0.02. A turn is two or three requests.
+ESTIMATED_USD_PER_CALL = {"attention": 0.002, "reference": 0.01, "claude-code": 0.02, "codex": 0.02}
 
 Opener = Callable[..., Any]
 
@@ -65,8 +86,8 @@ class SpendWatch:
     """
 
     def __init__(self, api_key: str | None, budget_usd: float, *, opener: Opener | None = None) -> None:
-        if budget_usd <= 0:
-            raise ValueError("the budget must be positive")
+        if not 0 < budget_usd < float("inf"):  # nan and inf compare as neither: a budget that stops nothing is no budget
+            raise ValueError("the budget must be a positive, finite number")
         self.api_key = api_key
         self.budget_usd = float(budget_usd)
         self.opener = opener or urllib.request.urlopen
@@ -78,6 +99,24 @@ class SpendWatch:
 
         entry = self._fetch(when)
         self.readings.append(entry)
+        return entry
+
+    first_read_pause = FIRST_READ_PAUSE_SECONDS
+
+    def read_first(self, when: str, *, tries: int = FIRST_READ_TRIES) -> dict[str, Any]:
+        """The first reading, tried again while it gives no figure, up to ``tries`` times; every try is kept.
+
+        Without a key nothing is read again. The run's spend is the latest
+        figure less the first, so a first read that failed once, and nothing
+        else wrong, must not leave the whole run without one.
+        """
+
+        entry = self.read(when)
+        for _ in range(max(0, tries - 1)):
+            if "usage" in entry or not self.api_key:
+                break
+            time.sleep(self.first_read_pause)
+            entry = self.read(f"{when} (again)")
         return entry
 
     def settle(
@@ -182,3 +221,16 @@ class SpendWatch:
             "spent_usd": self.spent(),
             "stopped_before": self.stopped_before,
         }
+
+
+def estimate_usd(column: str, calls: Mapping[str, Any] | None) -> float | None:
+    """What a column's counted model calls would cost at `ESTIMATED_USD_PER_CALL`; None when they were not counted.
+
+    ``calls`` is ``{"agent": n, "attention": m, ...}`` (`probe.Leg.model_calls`).
+    An estimate, not the key's figure: it is the same for any model the run
+    names, since it is a guess at how big a call is and what it costs.
+    """
+
+    if not isinstance(calls, Mapping) or not all(isinstance(calls.get(name), int) for name in ("agent", "attention")):
+        return None
+    return round(calls["agent"] * ESTIMATED_USD_PER_CALL.get(column, 0.0) + calls["attention"] * ESTIMATED_USD_PER_CALL["attention"], 4)

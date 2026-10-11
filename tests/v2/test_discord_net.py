@@ -69,8 +69,22 @@ class RefusalTest(unittest.TestCase):
     def test_no_network_namespace_unless_on_ci(self):
         message = self.refused(["--", "true"], {"SUDO_UID": "1000", "SUDO_GID": "1000"})
         self.assertIn("without --offline the port setting would change this machine's network namespace", message)
-        self.assertIsNone(discord_net.refusal(False, ["true"], {"CI": "true", "SUDO_UID": "1000", "SUDO_GID": "1000"}, 0),
-                          "a CI runner is discarded after the job")
+        self.assertIsNone(discord_net.refusal(False, ["true"], {"CI": "true", "GITHUB_ACTIONS": "true", "SUDO_UID": "1000", "SUDO_GID": "1000"}, 0),
+                          "a GitHub Actions runner is discarded after the job")
+
+    def test_the_online_mode_wants_a_github_actions_runner_not_just_ci_true(self):
+        # CI=true is a variable anyone sets; the runner also sets GITHUB_ACTIONS=true, and the online launcher changes the host's
+        # network namespace, so it takes both.
+        user = {"SUDO_UID": "1000", "SUDO_GID": "1000"}
+        for env in ({"CI": "true"}, {"GITHUB_ACTIONS": "true"}, {"CI": "1", "GITHUB_ACTIONS": "true"}, {"CI": "true", "GITHUB_ACTIONS": "false"}):
+            with self.subTest(env=env):
+                self.assertIn("run on a GitHub Actions runner (CI=true and GITHUB_ACTIONS=true)",
+                              self.refused(["--", "true"], {**env, **user}))
+                self.assertIn("without --offline", discord_net.refusal(False, ["true"], {**env, **user}, 0) or "")
+        # Offline needs neither, and the record says whether the launcher saw a runner.
+        self.assertIsNone(discord_net.refusal(True, ["true"], dict(user), 0))
+        self.assertFalse(discord_net.on_a_runner({"CI": "true"}))
+        self.assertTrue(discord_net.on_a_runner({"CI": "true", "GITHUB_ACTIONS": "true"}))
 
     def test_no_proxy_variable_in_any_case(self):
         message = self.refused(["--offline", "--", "true"], {"Https_Proxy": "http://127.0.0.1:9", "DISCORD_PROXY": "x", "NO_PROXY": "*",
@@ -114,7 +128,7 @@ class PreflightTest(unittest.TestCase):
             if name == "gateway.discord.gg":
                 raise socket.gaierror(-2, "Name or service not known")
             if name == "cdn.discordapp.com":
-                return [*loopback(), (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::1", 443, 0, 0))]
+                return [*loopback(), (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", 443))]
             if name == "discordapp.com":
                 return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("162.159.128.233", 443))]
             return loopback()
@@ -122,8 +136,16 @@ class PreflightTest(unittest.TestCase):
         failures = preflight.unmapped(resolve=resolve)
         self.assertEqual(len(failures), 3)
         self.assertIn("gateway.discord.gg does not resolve", failures[0])
-        self.assertIn("cdn.discordapp.com resolves to 127.0.0.1, ::1, not 127.0.0.1 alone", failures[1])
+        self.assertIn("cdn.discordapp.com resolves to 10.0.0.5, 127.0.0.1, not 127.0.0.1 alone", failures[1])
         self.assertIn("discordapp.com resolves to 162.159.128.233", failures[2])
+
+    def test_the_ipv6_loopback_beside_127_0_0_1_is_mapped_not_a_leak_and_it_alone_is_not_enough(self):
+        both = lambda *_a, **_k: [*loopback(), (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::1", 443, 0, 0))]  # noqa: E731
+        self.assertEqual(preflight.unmapped(resolve=both), [], "the launcher maps each name to ::1 as well")
+        only_v6 = lambda *_a, **_k: [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::1", 443, 0, 0))]  # noqa: E731
+        self.assertEqual(len(preflight.unmapped(resolve=only_v6)), len(preflight.NAMES), "the stand-in is on 127.0.0.1")
+        real = lambda *_a, **_k: [*loopback(), (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2606:4700::6810:84e5", 443, 0, 0))]  # noqa: E731
+        self.assertEqual(len(preflight.unmapped(resolve=real)), len(preflight.NAMES), "an address that is not loopback is a leak")
 
     def test_the_names_are_the_stand_ins(self):
         self.assertEqual(preflight.NAMES, server.HOSTS)
@@ -182,9 +204,11 @@ class FilesTest(unittest.TestCase):
         lines = text.splitlines()
         self.assertEqual(lines[:4], ["127.0.0.1 localhost", "# 1.2.3.4 discord.com stays a comment", "::1 localhost",
                                      "10.0.0.1 example.internal"])
-        self.assertEqual(lines[-5:], [f"127.0.0.1 {name}" for name in discord_net.NAMES])
+        # IPv4 and the IPv6 loopback, a line for each: an IPv6-only lookup of a Discord name reaches nothing real.
+        self.assertEqual(lines[-10:], [f"127.0.0.1 {name}" for name in discord_net.NAMES] + [f"::1 {name}" for name in discord_net.NAMES])
         mapped = [line for line in lines if not line.startswith("#") and set(line.split()[1:]) & set(discord_net.NAMES)]
-        self.assertEqual(len(mapped), 5, "no other entry for a Discord name is left, IPv6 included")
+        self.assertEqual(len(mapped), 10, "no other entry for a Discord name is left, IPv6 included")
+        self.assertEqual({line.split()[0] for line in mapped}, {"127.0.0.1", "::1"}, "nothing but loopback")
 
     @unittest.skipUnless(OPENSSL, "needs the openssl command")
     def test_the_trust_store_adds_the_ca_to_a_copy(self):

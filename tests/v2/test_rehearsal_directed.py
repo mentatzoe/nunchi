@@ -1232,8 +1232,13 @@ class CommandTest(unittest.TestCase):
         base = ["--scripted", "--room", "discord", "--scene", "story-across-messages"]
         code, error = self.run_main("--harness", "hermes", *base)
         self.assertEqual(probe.EXIT_USAGE, code)
-        self.assertIn("--harness reference or claude-code or codex with --room discord --scripted", error)
-        self.assertEqual(probe.EXIT_USAGE, self.run_main("--harness", "reference", "--room", "discord", "--scene", "story-across-messages")[0])
+        self.assertIn("--harness reference or claude-code or codex with --room discord (Hermes is parked)", error)
+        # Without --scripted a scene is live (PR 4d): refused off a CI runner (test_rehearsal_live_scene has the whole of it).
+        with mock.patch.dict(os.environ):
+            os.environ.pop("CI", None)
+            code, error = self.run_main("--harness", "reference", "--room", "discord", "--scene", "story-across-messages")
+        self.assertEqual(probe.EXIT_USAGE, code)
+        self.assertIn("only on a CI runner", error)
         self.assertEqual(probe.EXIT_USAGE, self.run_main("--harness", "reference", "--scripted", "--scene", "story-across-messages")[0])
 
     def test_a_scene_that_does_not_exist_or_cannot_be_played_is_refused_with_the_reason(self):
@@ -1252,7 +1257,7 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(["bot-status-report"], [item.name for item in specs])
         self.assertIsInstance(specs[0], directed.DirectedSpec)
         self.assertEqual(discord_room.MOMENTS, probe._room_parts(probe.Options(harness="reference", out=Path("x"), scripted=True, room="discord"))[1])
-        with self.assertRaisesRegex(ValueError, "played in the Discord room, scripted, by reference or claude-code or codex"):
+        with self.assertRaisesRegex(ValueError, "played in the Discord room by reference or claude-code or codex"):
             probe.run_probe(probe.Options(harness="hermes", out=Path("x"), scripted=True, room="discord", scene="bot-status-report"))
         with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop(discord_room.NET_ENV, None)

@@ -12,18 +12,20 @@ order:
    signed.
 2. **A private namespace:** ``unshare --mount --propagation private``, plus
    ``--net`` with ``--offline``, which leaves only loopback. Inside, a
-   private ``/etc/hosts`` maps the names to 127.0.0.1 (IPv4 only; any other
-   entry for them is dropped), and a private ``/etc/ssl/certs`` adds the CA
+   private ``/etc/hosts`` maps the names to 127.0.0.1 and ::1 (any other
+   entry for them is dropped, so a lookup for an IPv6 address cannot reach
+   the real service; nothing listens on ::1), and a private ``/etc/ssl/certs`` adds the CA
    to the system's trust store, in the bundle and in the hashed directory,
    so each Python finds it with its default context. Loopback is brought up.
 3. **Port 443.** ``net.ipv4.ip_unprivileged_port_start=443``, so the
    stand-in can bind it as the invoking user. The setting belongs to the
    network namespace: with ``--offline`` it stays private. Without, it would
    change this machine's, so the launcher refuses to run without
-   ``--offline`` unless ``CI=true`` (a runner is discarded after its job),
-   and puts the old value back afterwards.
-4. **Checks.** No proxy variable is set and each name resolves to 127.0.0.1
-   alone (`preflight.py`). With ``--require-bwrap``, for a harness whose
+   ``--offline`` unless it is on a GitHub Actions runner (``CI=true`` and
+   ``GITHUB_ACTIONS=true``; a runner is discarded after its job), and puts
+   the old value back afterwards.
+4. **Checks.** No proxy variable is set and each name resolves to loopback
+   alone, 127.0.0.1 with ::1 allowed beside it (`preflight.py`). With ``--require-bwrap``, for a harness whose
    sandbox uses bubblewrap, ``bwrap --ro-bind / / true`` runs as the
    invoking user, so the sandbox fails here, not in the middle of a run; it
    cannot be skipped. Without the flag the check does not run, and the
@@ -98,14 +100,18 @@ class SetupFailed(Exception):
 # -- what can be prepared and checked without root ---------------------------------------------
 
 
+def on_a_runner(env: Mapping[str, str]) -> bool:
+    """Whether this is a GitHub Actions runner, which is discarded after its job: both ``CI`` and ``GITHUB_ACTIONS`` are ``true``."""
+    return env.get("CI") == "true" and env.get("GITHUB_ACTIONS") == "true"
+
+
 def refusal(offline: bool, command: Sequence[str], env: Mapping[str, str], euid: int) -> str | None:
     """Why the launcher must not run as asked, before it changes anything; None when it may."""
-    ci = env.get("CI") == "true"
     if not command:
         return "no command: give it after --, as in: -- <python> -m evals.rehearsal.probe ..."
-    if not offline and not ci:
+    if not offline and not on_a_runner(env):
         return ("without --offline the port setting would change this machine's network namespace: "
-                "pass --offline, or run on a CI runner (CI=true), which is discarded after the job")
+                "pass --offline, or run on a GitHub Actions runner (CI=true and GITHUB_ACTIONS=true), which is discarded after the job")
     found = preflight.proxies(env)
     if found:
         return (f"proxy variables are set: {', '.join(found)}. A Discord client would follow them past the stand-in; "
@@ -190,7 +196,12 @@ def _fingerprint(pem_file: Path) -> str:
 
 
 def hosts_text(original: str, names: Sequence[str] = NAMES, address: str = ADDRESS) -> str:
-    """``/etc/hosts`` with every other entry for ``names`` dropped and each mapped to ``address`` alone."""
+    """``/etc/hosts`` with every other entry for ``names`` dropped and each mapped to loopback alone.
+
+    Each name is mapped to ``address`` and to the IPv6 loopback, so that a lookup
+    for an IPv6 address cannot reach the real service either: nothing listens on
+    ``::1``, a client falls back to ``address``, and an IPv6-only one is refused.
+    """
     lines = []
     wanted = {name.lower() for name in names}
     for line in original.splitlines():
@@ -204,6 +215,7 @@ def hosts_text(original: str, names: Sequence[str] = NAMES, address: str = ADDRE
             lines.append(" ".join([fields[0], *kept]) + (f" {hash_mark}{comment}" if hash_mark else ""))
     lines.append("# Nunchi rehearsal: Discord's names lead to the stand-in (evals/rehearsal/discord_net.py)")
     lines += [f"{address} {name}" for name in names]
+    lines += [f"{preflight.ADDRESS_V6} {name}" for name in names]
     return "\n".join(lines) + "\n"
 
 
@@ -415,7 +427,7 @@ def inside(run: Path, offline: bool, require_bwrap: bool, command: Sequence[str]
             "launcher": list(launcher),
             "started": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "offline": offline,
-            "ci": env.get("CI") == "true",
+            "ci": on_a_runner(env),
             "namespace": {"mount": "private", "net": "private, loopback only" if offline else "the host's"},
             "port_start": {"before": int(before), "set": 443,
                            "scope": "this run's network namespace" if offline else "the host's, restored afterwards"},

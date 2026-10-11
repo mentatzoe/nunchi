@@ -13,6 +13,70 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- Directed scenes played live on the Discord stand-in (step 9f, PR 4d;
+  [docs/rehearsal.md](docs/rehearsal.md), "Live scenes"): **implemented,
+  unverified**. No live run has been made, and nothing in this PR's checks
+  spends anything: the unit tests use a fake provider on loopback and a thread
+  for the live agent. The manual `rehearsal` workflow takes `room: discord`,
+  `scenes` (the four scenes of PR 4a by default) and `passes` (1 to 3), and plays
+  each scene on the reference (`nunchi-discord` on the agent's model through
+  OpenRouter, the control), Claude Code and Codex, with live attention, in a job
+  of its own and inside the launcher **without `--offline`**, which the launcher
+  allows on `CI=true` alone; the in-process probe is unchanged. The probe
+  refuses a live scene off a CI runner (exit 2) and without the keys its column
+  reads, under their own names (exit 3), before anything starts, and the Discord
+  room refuses an offline launcher. **Grades are reported, never failed**: the
+  scenes' expectations are drafts Zoe has not reviewed. The plumbing and safety
+  checks still fail the run, with `spend-recorded` added (no reading of the
+  key's usage gave a figure, or the model calls were not counted). The agent's
+  words are its own, so an earlier line of the agent's is its move on the
+  message it answers, checked only to be of the scene's kind; one it did not
+  make leaves the scene's moments `precondition not met` and ungraded, and the
+  scene stops. A hold is timing, with no gate or proxy in front of the provider:
+  the director posts the held messages once the column's turn has begun, and the
+  hold reads `held`, `raced` (not a miss), `unseen` or `never-asked`. The
+  reference runs out of process and its model is a real one, so its turns are
+  read from its receipts and the stand-in's wire (`discord_room.LiveTurns`);
+  that cannot show which messages a turn read as unattended, which page it was
+  shown or how many model calls it made, and the page says so (its calls are a
+  lower bound). The job summary has a grade matrix per pass, the columns side
+  by side, titled "draft expectations, not reviewed", the facts attention
+  cited, how each scene was played, each run's exit status, and the cost
+  twice: recorded (the key's usage, which lags) and estimated (the model calls
+  counted times assumed costs per call; about $1.40 a pass for the four scenes
+  on three columns, unmeasured). `discord-writes-reconciled` now matches an
+  action to a write one for one, so a live agent that says the same words twice
+  is not a failure and a write nothing took still is. Run here offline
+  (2026-10-11, inside the launcher with `--offline`, Claude Code with
+  `--no-sandbox`): the eleven scripted scenes on the reference, Codex and Claude
+  Code (33 runs) and the three plain Discord lanes all exit 0, every graded
+  moment `fits` with step 1 `ok` and every hold `held`, and the plain lanes'
+  checks, moments and record shapes match PR 4c's run with no difference; the
+  full offline suite passes.
+  Two Claude agents reviewed it (security and correctness; the same model
+  family, so not independent) and found no blocker. Fixed: the play step plans
+  its runs inside a deadline of its own, with a `--kill-after` that fits the
+  probe's wind-up, and a step after it TERMs and KILLs whatever it left running
+  and fails if anything remains, which the scan, the summary and the upload wait
+  for; `scenes` is checked as a whole string against the scene ids the director
+  can play and de-duplicated, `budget_usd` must be a plain positive number
+  (`nan` and `inf` are refused in the probe too), the budget covers the whole
+  dispatch, a spend that cannot be read stops the runs, and a halt writes the
+  runs not started as skipped; the online launcher wants `GITHUB_ACTIONS=true`
+  beside `CI=true`; the Discord names map to `::1` as well; Claude Code is asked
+  to keep off telemetry; and the live run's egress is stated as open. A live
+  scene now fails on a director message that never reached Nunchi and, for
+  Claude Code and Codex, on a delivered action no room tool call backs
+  (`live-scene-plumbing`); what a hold's turn was shown is bounded to that turn,
+  a held message already in the first packet reads `raced`, and a reference hold
+  is marked unproven; a message judged for the memory alone no longer holds the
+  reference's room open; an attention error reads step 1 `not judged`; the first
+  usage read is tried up to three times; the reference makes one preflight call
+  with its participant's body before it starts; and a failed run's stderr tail
+  is in the summary. Not done: hash-pinned constraints for the installs, the
+  GitHub environment and a credit-limited key (Zoe's), and a network-sealed live
+  run.
+
 - Directed behavior scenes where timing and the agent's own history matter
   (step 9f, PR 4c; [docs/rehearsal.md](docs/rehearsal.md), "Directed scenes"):
   **implemented, unverified** in CI; run here offline inside the launcher

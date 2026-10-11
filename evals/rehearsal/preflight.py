@@ -39,6 +39,9 @@ from typing import Any
 # Every name a Discord client in a rehearsal may reach; the stand-in answers all five (fake_discord/server.py HOSTS).
 NAMES = ("discord.com", "gateway.discord.gg", "cdn.discordapp.com", "media.discordapp.net", "discordapp.com")
 ADDRESS = "127.0.0.1"
+# The IPv6 loopback the launcher also maps each name to, so that a lookup for an IPv6 address (AAAA) cannot reach the real service
+# either: nothing listens there, a client falls back to ADDRESS, and an IPv6-only client is refused.
+ADDRESS_V6 = "::1"
 REST_HOST = "discord.com"
 ROUTE = "/api/v10/_preflight/"
 # The proxy variables a Discord client may follow, compared in lower case.
@@ -53,7 +56,10 @@ def proxies(env: Mapping[str, str]) -> list[str]:
 
 
 def unmapped(names: Sequence[str] = NAMES, resolve: Resolve | None = None) -> list[str]:
-    """A failure for each name that does not resolve to 127.0.0.1 alone (``resolve`` is the system's unless given)."""
+    """A failure for each name that does not resolve to loopback alone: 127.0.0.1, with ::1 allowed beside it.
+
+    ``resolve`` is the system's unless given. Another address, or none of 127.0.0.1, fails the name.
+    """
     resolve = resolve or socket.getaddrinfo
     failures = []
     for name in names:
@@ -62,8 +68,8 @@ def unmapped(names: Sequence[str] = NAMES, resolve: Resolve | None = None) -> li
         except OSError as error:
             failures.append(f"{name} does not resolve ({error}); the launcher maps it to {ADDRESS}")
             continue
-        if found != {ADDRESS}:
-            failures.append(f"{name} resolves to {', '.join(sorted(found))}, not {ADDRESS} alone")
+        if ADDRESS not in found or not found <= {ADDRESS, ADDRESS_V6}:
+            failures.append(f"{name} resolves to {', '.join(sorted(found))}, not {ADDRESS} alone ({ADDRESS_V6} is allowed beside it)")
     return failures
 
 

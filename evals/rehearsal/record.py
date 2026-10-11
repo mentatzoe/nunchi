@@ -36,7 +36,7 @@ import subprocess
 import sys
 from typing import Any
 
-from evals.behavior.score import cell as grade_cell
+from evals.behavior.score import cell as grade_cell, symbol as move_symbol
 
 from .standin import JsonLines
 
@@ -393,35 +393,92 @@ def _facts(value: Mapping[str, Any], prefix: str = "") -> Iterable[tuple[str, An
             yield f"{prefix}{key}", item
 
 
+def _matrix_cell(item: Mapping[str, Any]) -> str:
+    """One graded moment's cell: the suite's letter for the move, then the visible grade and step 1 (`score.cell`).
+
+    A moment whose setup the live agent did not make is not graded: it reads
+    ``precondition not met`` beside the letter for what the agent did; a moment
+    that is not graded for any other reason (it was never judged) reads ``not
+    judged``. A hold that did not hold is named after the grade, one that held
+    where the column's record cannot show it (the reference's) says so, and an
+    attention call that failed is named, since step 1 was then not judged.
+    """
+
+    grade = item.get("grade")
+    if not grade:
+        letter = move_symbol(item) if item.get("result") is not None else "-"
+        return f"`{letter}` precondition not met" if item.get("precondition") else f"`{letter}` not judged"
+    if item.get("hold") not in (None, "held"):
+        hold = f" hold {item['hold']}"
+    elif item.get("hold_unproven"):
+        hold = " hold held (unproven: timing alone)"
+    else:
+        hold = ""
+    error = f" attention error: {_cell(item['attention_error'], 80)}" if item.get("attention_error") else ""
+    return f"`{grade_cell([item])}` {grade['visible']}/{grade['step1']}{' off script' if item.get('off_script') else ''}{hold}{error}"
+
+
+def _said(item: Mapping[str, Any]) -> str:
+    """What the agent did at a graded moment, in a few words: its delivered actions, or that it did nothing."""
+
+    done = [action for action in item.get("actions", ()) if action.get("delivered")]
+    if not done:
+        if not item.get("reached"):
+            return "nothing: the message was not posted, or never reached Nunchi"
+        return {"attention": "attention suppressed it, so no turn began", "agent": "the agent stayed silent"}.get(
+            str(item.get("by")), "no action was delivered"
+        )
+    return "; ".join(
+        f"{action.get('kind')} \"{_cell(action.get('text'), 160)}\"" if action.get("kind") in ("message", "reply") else
+        f"{action.get('kind')} {action.get('reaction')}"
+        for action in done
+    )
+
+
 def _matrix_lines(run: Mapping[str, Any]) -> list[str]:
     """The grade matrix of a directed scene: each graded moment against the column, as the suite's matrix shows a cell.
 
     A cell holds the suite's letter for the move (`score.cell`), then the
-    visible grade and step 1: ``S`` fits/ok. The scenes are drafts.
+    visible grade and step 1: ``S`` fits/ok. The scenes are drafts. A live
+    scene adds what the agent did at each moment, and the facts of the moment
+    that attention's evidence points at (``cited``).
     """
 
-    rows = [(moment, item) for moment in run.get("moments", ()) for item in moment.get("graded", ()) if item.get("grade")]
+    rows = [(moment, item) for moment in run.get("moments", ()) for item in moment.get("graded", ()) if item.get("grade") or item.get("precondition")]
     if not rows:
         return []
-    return [
-        "## Grade matrix (draft expectations)",
+    live = any(moment.get("played_live") for moment, _ in rows)
+    lines = [
+        "## Grade matrix (draft expectations, not reviewed)" if live else "## Grade matrix (draft expectations)",
         "",
         "The scenes are drafts awaiting Zoe's review (`evals/behavior/README.md`): a grade compares the move with the draft's "
-        "fitting moves and clear misses, and is not a finding about the model. Cell: `Q` quiet by attention, `q` quiet by the "
+        "fitting moves and clear misses, and is not a finding about the model."
+        + (" Here the agent is live, so every grade is reported and none is a failure, and its words are its own." if live else "")
+        + " Cell: `Q` quiet by attention, `q` quiet by the "
         "agent's choice, `m` its own mhm, `S` it spoke, `O` another action, `W` woken (the turn did not deliver), `-` not "
-        "judged; `!` marks a clear miss, `?` an unlisted move. Then the visible grade and step 1, and `off script` where "
-        "the delivered action was not exactly the one the script makes.",
+        "judged; `!` marks a clear miss, `?` an unlisted move. Then the visible grade and step 1"
+        + (", and `precondition not met` where the setup the scene needs was not made (not graded)." if live else
+           ", and `off script` where the delivered action was not exactly the one the script makes."),
         "",
         f"| Scene | Moment | Fitting (step 1) | {run.get('harness')} |",
         "|---|---|---|---|",
         *(
             f"| {moment.get('name')} | {_cell(item.get('label'), 80)} | {', '.join(item.get('fitting', ()))} ({item.get('step1')}) | "
-            f"`{grade_cell([item])}` {item['grade']['visible']}/{item['grade']['step1']}{' off script' if item.get('off_script') else ''}"
-            f"{' hold ' + str(item['hold']) if item.get('hold') not in (None, 'held') else ''} |"
+            f"{_matrix_cell(item)} |"
             for moment, item in rows
         ),
         "",
     ]
+    if live:
+        lines += ["### What the agent did, and the facts attention cited", ""]
+        for moment, item in rows:
+            lines.append(f"- {moment.get('name')}, {_cell(item.get('label'), 80)}: {_said(item)}.")
+            for fact, cited in zip(item.get("facts", ()), item.get("cited", ())):
+                lines.append(f"  - {'cited' if cited else 'not cited'}: {_cell(fact, 160)}")
+            for reason in item.get("precondition", ()):
+                lines.append(f"  - precondition not met: {_cell(reason, 300)}")
+        lines.append("")
+    return lines
 
 
 def _reordered(moment: Mapping[str, Any], hold: Mapping[str, Any]) -> list[str]:
@@ -463,7 +520,7 @@ def _played_lines(run: Mapping[str, Any]) -> list[str]:
 
     lines: list[str] = []
     for moment in run.get("moments", ()):
-        if moment.get("expect") != "directed" or not (moment.get("lines") or moment.get("holds")):
+        if moment.get("expect") != "directed" or not (moment.get("lines") or moment.get("holds") or moment.get("stopped")):
             continue
         name = moment.get("name")
         for cue in moment.get("cues", ()):
@@ -479,15 +536,31 @@ def _played_lines(run: Mapping[str, Any]) -> list[str]:
                 "stamps the agent's post at the wall and nothing after it can be backdated."
             )
         for line in moment.get("lines", ()):
-            landed = "landed as the scene has it" if not line.get("problems") else "did not land: " + "; ".join(line["problems"])
             said = f"reaction {line.get('reaction')}" if line.get("kind") == "reaction" else f"{line.get('kind')} \"{_cell(line.get('text'), 90)}\""
+            if line.get("live"):
+                # Live, the agent's words are its own: only the kind of move is checked.
+                result = "landed" if not line.get("problems") else "**did not land**"
+                lines.append(
+                    f"- {name}: the scene has the agent's earlier line {line.get('event')} ({said}, on {line.get('trigger')}). The live "
+                    f"agent did this instead: {_cell(line.get('did'), 300)}. The kind of move {result}."
+                )
+                continue
+            landed = "landed as the scene has it" if not line.get("problems") else "did not land: " + "; ".join(line["problems"])
             lines.append(f"- {name}: the agent's earlier line {line.get('event')} ({said}, on {line.get('trigger')}) {landed}.")
         for hold in moment.get("holds", ()):
             lines.append(
-                f"- {name}: hold on the turn at {hold.get('trigger')} ({hold.get('kind')}; {', '.join(hold.get('events', ()))} landed in it): "
-                f"**{hold.get('outcome')}** ({hold.get('detail')})."
+                f"- {name}: hold on the turn at {hold.get('trigger')} ({hold.get('kind')}; {', '.join(hold.get('events', ()))} landed in it"
+                + ("; timing, nothing held the live agent" if hold.get("live") else "")
+                + f"): **{hold.get('outcome')}{', unproven' if hold.get('live') and hold.get('outcome') == 'held' and hold.get('shown') is None else ''}**"
+                f" ({hold.get('detail')})."
             )
             lines += _reordered(moment, hold)
+        if moment.get("stopped"):
+            stop = moment["stopped"]
+            lines.append(
+                f"- {name}: **the scene stopped** after {stop.get('after')}, because the agent's earlier line {stop.get('line')} did not land "
+                f"({_cell(stop.get('why'), 300)}); what comes after it would be judged against a history the agent did not have."
+            )
     return ["## How the scenes were played", "", *lines, ""] if lines else []
 
 
@@ -543,7 +616,14 @@ def summary_markdown(run: Mapping[str, Any]) -> str:
     lines = [f"# Rehearsal probe: {harness} ({mode}{arm})", ""]
     delivered = sum(1 for moment in run.get("moments", ()) for post in moment.get("posts", ()) if post.get("delivered"))
     scene = any(moment.get("expect") == "directed" for moment in run.get("moments", ()))
-    if status == "pass" and scene:
+    live_scene = any(moment.get("played_live") for moment in run.get("moments", ()))
+    if status == "pass" and live_scene:
+        headline = (
+            "**Passed (reported, not judged):** every hard check held: the director played the scene on Discord with a live model "
+            "behind the column. The grades below compare what the agent did with draft expectations nobody has reviewed; they are "
+            "reported and never a failure."
+        )
+    elif status == "pass" and scene:
         # A scene's moves may all be silences or nods; what a pass shows is the director and the grader.
         headline = (
             "**Passed (draft expectations):** every hard check held: the director played the scene on Discord, the agent "
@@ -692,6 +772,14 @@ def summary_markdown(run: Mapping[str, Any]) -> str:
                 "- Each read, as seconds after the last moment: usage (the lag shows here): "
                 + "; ".join(f"{at}: {'not read' if usage is None else usage}" for at, usage in last["series"]),
             ]
+        calls = spend.get("model_calls")
+        if isinstance(calls, Mapping):
+            lines.append(f"- Model calls counted: agent {calls.get('agent')}, attention {calls.get('attention')} ({calls.get('basis')})")
+            lines.append(
+                f"- Cost of the run: recorded {spend.get('spent_usd')} (the key's usage, which lags and counts other runs on the key), "
+                f"estimated {spend.get('estimated_usd')} (the counted calls times assumed costs per call, `spend.ESTIMATED_USD_PER_CALL`, "
+                "not measured)"
+            )
         if spend.get("stopped_before"):
             lines.append(f"- Stopped before: {spend['stopped_before']}")
         if not spend.get("read"):
