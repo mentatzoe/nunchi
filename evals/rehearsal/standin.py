@@ -26,7 +26,10 @@ a `SceneScript` instead, which attention and the participant both follow: at
 each graded moment it does what the scene's first fitting move says: the
 reference answers it as a plain-call action, and Claude Code and Codex follow
 it through their scripted endpoints, as a room tool call or, where the scene
-is quiet, none. Only ``--scripted`` runs use these.
+is quiet, none. A scene (PR 4c) may also give the agent lines of its own
+earlier (`Line`, played as its scripted move on a message) and hold a turn
+(`Gate`) so that a message lands while the agent is composing. Only
+``--scripted`` runs use these.
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -463,7 +467,7 @@ class RoomScript:
         """How the turn showed its trigger was addressed: whom it pings, which message it replies to and which thread it is in; None without a trigger.
 
         Also what the turn's memory held of the agent's own moves (``own_moves``: each one's kind, the message it
-        was about and its reaction), so a later turn shows whether the agent remembers an earlier one.
+        was about, its reaction and its words), so a later turn shows whether the agent remembers an earlier one.
         """
 
         wake = (turn or {}).get("wake") or {}
@@ -478,7 +482,7 @@ class RoomScript:
             "reply_to_event_id": event.get("reply_to_event_id"),
             "thread_root_event_id": event.get("thread_root_event_id"),
             "own_moves": [
-                {key: move[key] for key in ("kind", "about_event_id", "reaction") if key in move} for move in moves if isinstance(move, Mapping)
+                {key: move[key] for key in ("kind", "about_event_id", "reaction", "text") if key in move} for move in moves if isinstance(move, Mapping)
             ],
         }
 
@@ -522,6 +526,155 @@ def received_triggers(requests: Iterable[Any]) -> dict[str, dict[str, Any]]:
 # write to an action by its content.
 SCENE_SAY = "Here is what I would add, scripted ({event})."
 SCENE_NOD = "\N{EAR}"
+# What a held turn composes first (`Gate`): the post the look before posting holds back once a message has
+# landed meanwhile. It names its moment too, so that if it ever reaches the room the wire matches it to its
+# action, and the grade shows the agent spoke where the script is quiet.
+SCENE_DRAFT = "Here is what I was about to add, scripted ({event})."
+# How long a held turn waits for the director before it answers anyway: under the 30 seconds the reference's host
+# waits for its participant model (`discord_room.PARTICIPANT_TIMEOUT_SECONDS`), the shortest wait of the three columns.
+HOLD_SECONDS = 25.0
+# What the core's look before posting tells the agent when a message arrived while it was composing
+# (`nunchi.turn.Turn.call`, `nunchi.participant_model`): the same words in a tool's result and in a plain-call turn's page.
+NEWS_MARK = "Not posted yet:"
+
+
+def _strings(value: Any) -> Iterator[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, Mapping):
+        for item in value.values():
+            yield from _strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
+
+
+def news_shown(body: Any) -> str | None:
+    """The page the core's look before posting handed the agent, as the newest message of a model request carries it; None if it carries none.
+
+    A post whose message was followed by another while the agent composed is
+    not made: the agent is shown the new messages ("Not posted yet: ...") and
+    decides again. A plain-call participant gets that page in its next request,
+    and Claude Code and Codex in the result of the room tool they called, which
+    is the newest message or input item of their next model request. Only the
+    newest is read: an earlier turn's page is history.
+    """
+
+    if not isinstance(body, Mapping):
+        return None
+    items = body.get("messages") if isinstance(body.get("messages"), list) else body.get("input")
+    if not isinstance(items, list) or not items:
+        return None
+    found = [text for text in _strings(items[-1]) if NEWS_MARK in text]
+    return "\n".join(found) if found else None
+
+
+@dataclass(frozen=True)
+class Line:
+    """An earlier line of the agent's own that a scene holds, played as its scripted move on a message (rehearsal PR 4c).
+
+    The director never posts as the agent, so a scene's event of the agent's
+    is not posted: the agent says it itself, when its turn on ``trigger``
+    (a scene event) runs. A ``reply`` answers the message and a
+    ``reaction`` reacts to it, as the scene's event does. A ``message``
+    answers nothing in the scene, so its trigger is a ``cue`` the director
+    adds, a person's message posted just before it; the cue is recorded in the
+    plan and the result, since a live model sees it in the room's history.
+    """
+
+    event: str
+    trigger: str
+    kind: str
+    text: str | None = None
+    reaction: str | None = None
+    cue: bool = False
+
+    def action(self, trigger: str) -> dict[str, Any]:
+        """The action of the agent's turn on ``trigger`` (a native event id), as a plain-call participant returns it."""
+
+        if self.kind == "reaction":
+            return {"kind": "reaction", "origin_event_id": trigger, "target_event_id": trigger, "reaction": self.reaction, "operation": "add"}
+        if self.kind == "reply":
+            return {"kind": "reply", "origin_event_id": trigger, "target_event_id": trigger, "text": self.text}
+        return {"kind": "message", "origin_event_id": trigger, "text": self.text}
+
+
+class Gate:
+    """A hold on one turn: the scripted model's first answer for it waits until the director releases it (rehearsal PR 4c).
+
+    The scene needs a message to land while the agent is composing, and the
+    agent's process is the one thing the director does not control. So the
+    scripted model endpoint, where a turn's model call arrives, holds the first
+    call for the trigger (`pause`, on the endpoint's thread) until the
+    director, which waits for the call (`wait_asked`), has posted the scene's
+    held messages and seen them reach Nunchi, and releases it (`release`). It
+    is the same gate for every column. The endpoint answers anyway after
+    ``limit`` seconds, and the record says who let it go (``released_by``):
+    ``timeout`` means the turn went on without the director, which reads as a
+    race (`directed.hold_outcome`). Each page of news the core showed the turn
+    afterwards is kept (`note_news`), as evidence that the held messages
+    reached it (`shown`).
+    """
+
+    def __init__(self, event: str, limit: float = HOLD_SECONDS) -> None:
+        self.event = event
+        self.limit = limit
+        self.asked = threading.Event()
+        self.released = threading.Event()
+        self.asked_at: str | None = None
+        self.released_at: str | None = None
+        self.released_by: str | None = None
+        self.news: list[str] = []
+        self._entered = False
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _now() -> str:
+        return timestamp(datetime.now(timezone.utc))
+
+    def pause(self) -> None:
+        """The endpoint has the turn's first model call: tell the director and wait to be released. Later calls pass."""
+
+        with self._lock:
+            first, self._entered = not self._entered, True
+            if first:
+                self.asked_at = self._now()
+        if not first:
+            return
+        self.asked.set()
+        self.released.wait(self.limit)
+        with self._lock:
+            if self.released_at is None:
+                self.released_at, self.released_by = self._now(), "timeout"
+        self.released.set()
+
+    def wait_asked(self, timeout: float) -> bool:
+        """The director waits until the endpoint has the call, or ``timeout``."""
+
+        return self.asked.wait(timeout)
+
+    def release(self) -> None:
+        """The director lets the call go. Released before the call arrived, the call passes when it does."""
+
+        with self._lock:
+            if self.released_at is None:
+                self.released_at, self.released_by = self._now(), "director"
+        self.released.set()
+
+    def note_news(self, text: str) -> None:
+        with self._lock:
+            self.news.append(text)
+
+    def shown(self, event_ids: Iterable[str]) -> list[str]:
+        """Which of the ``event_ids`` the pages the core showed the turn hold (by the id each page's event carries)."""
+
+        with self._lock:
+            pages = list(self.news)
+        return [event_id for event_id in event_ids if any(event_id in page for page in pages)]
+
+    def document(self) -> dict[str, Any]:
+        with self._lock:
+            return {"asked_at": self.asked_at, "released_at": self.released_at, "released_by": self.released_by, "pages": len(self.news)}
 
 
 class SceneScript:
@@ -540,10 +693,22 @@ class SceneScript:
     then posts `SCENE_SAY` (naming the moment's event) as a plain message,
     reacts with `SCENE_NOD` on the trigger, or says nothing. The move is the
     agent's own, as in every room; the director never makes it.
+
+    A scene may also hold ``lines``, earlier lines of the agent's own (`Line`):
+    on the message that triggers one, attention wakes the agent (leans to a mhm
+    for a nod) and the agent says exactly that line. And it may hold turns
+    (``holds``, the scene events whose turns are held, `Gate`): the endpoint
+    pauses the turn's first model call at `action`. A held graded moment first
+    composes `SCENE_DRAFT`, the answer it has ready, which the core's look
+    before posting holds back once a message has landed; once the agent is
+    shown the page of news (``news``), it does what the scene fits (a silence
+    where the scene fits one). A held line is said both times.
     """
 
-    def __init__(self, moments: Mapping[str, Any]) -> None:
+    def __init__(self, moments: Mapping[str, Any], lines: Iterable[Line] = (), holds: Iterable[str] = ()) -> None:
         self.moments = dict(moments)
+        self.lines = {line.trigger: line for line in lines}
+        self.gates = {event: Gate(event) for event in holds}
         self._events: dict[str, str] = {}
         self._lock = threading.Lock()
 
@@ -565,6 +730,12 @@ class SceneScript:
         event = self.event(text)
         return self.moments.get(event) if event is not None else None
 
+    def line(self, text: str) -> Line | None:
+        """The earlier line of the agent's that the message posted with ``text`` triggers; None for any other message."""
+
+        event = self.event(text)
+        return self.lines.get(event) if event is not None else None
+
     @staticmethod
     def intended(moment: Any) -> str:
         """The move the room sees from the script at ``moment``: speak, mhm or stay_quiet."""
@@ -577,25 +748,42 @@ class SceneScript:
 
         moment = self.moment(text)
         if moment is None:
-            return "DEFER"
+            line = self.line(text)
+            if line is None:
+                return "DEFER"
+            return "mhm" if line.kind == "reaction" else "WAKE"
         if moment.step1 == "suppress":
             return "SUPPRESS"
         return {"speak": "WAKE", "mhm": "mhm"}.get(self.intended(moment), "DEFER")
 
-    def action(self, turn: Mapping[str, Any]) -> dict[str, Any]:
-        """The agent's action at this turn, as a plain-call participant returns it."""
+    def action(self, turn: Mapping[str, Any], news: str | None = None) -> dict[str, Any]:
+        """The agent's action at this turn, as a plain-call participant returns it.
+
+        ``news`` is the page the core's look before posting showed the turn
+        (`news_shown`), None on the turn's first model call. A held turn
+        waits here, on its first call, for the director (`Gate.pause`).
+        """
 
         trigger, text = RoomScript.trigger(turn)
+        event = self.event(text) if trigger else None
+        gate = self.gates.get(event) if event is not None else None
+        if gate is not None:
+            gate.pause() if news is None else gate.note_news(news)
         moment = self.moment(text) if trigger else None
-        move = self.intended(moment) if moment is not None else "stay_quiet"
-        if move == "speak":
-            return {"kind": "message", "origin_event_id": trigger, "text": SCENE_SAY.format(event=self.event(text))}
-        if move == "mhm":
-            return {"kind": "reaction", "origin_event_id": trigger, "target_event_id": trigger,
-                    "reaction": SCENE_NOD, "operation": "add"}
-        return {"kind": "silence"}
+        if moment is not None:
+            if gate is not None and news is None:
+                return {"kind": "message", "origin_event_id": trigger, "text": SCENE_DRAFT.format(event=event)}
+            move = self.intended(moment)
+            if move == "speak":
+                return {"kind": "message", "origin_event_id": trigger, "text": SCENE_SAY.format(event=event)}
+            if move == "mhm":
+                return {"kind": "reaction", "origin_event_id": trigger, "target_event_id": trigger,
+                        "reaction": SCENE_NOD, "operation": "add"}
+            return {"kind": "silence"}
+        line = self.line(text) if trigger else None
+        return line.action(trigger) if line is not None else {"kind": "silence"}
 
-    def move(self, turn: Mapping[str, Any] | None) -> tuple[str, dict[str, Any]]:
+    def move(self, turn: Mapping[str, Any] | None, news: str | None = None) -> tuple[str, dict[str, Any]]:
         """The same move as a room tool call, for an agent that acts through the room's tools: its role and arguments.
 
         The role is ``send`` or ``react``, or ``silence`` where the agent says
@@ -606,12 +794,26 @@ class SceneScript:
         """
 
         turn = turn or {}
-        action = self.action(turn)
+        action = self.action(turn, news)
         if action["kind"] == "message":
             return "send", {"text": action["text"]}
+        if action["kind"] == "reply":
+            return "send", {"text": action["text"], "reply_to_event_id": action["target_event_id"]}
         if action["kind"] == "reaction":
             return "react", {"target_event_id": action["target_event_id"], "reaction": action["reaction"]}
         return "silence", {}
+
+
+def scripted(script: Any, turn: Mapping[str, Any] | None, news: str | None) -> dict[str, Any]:
+    """The script's action on a turn, with the page the look before posting showed it where the script reads one (a scene's)."""
+
+    return script.action(turn, news) if isinstance(script, SceneScript) else script.action(turn)
+
+
+def scripted_move(script: Any, turn: Mapping[str, Any] | None, news: str | None) -> tuple[str, dict[str, Any]]:
+    """The same as a room tool call (`SceneScript.move`)."""
+
+    return script.move(turn, news) if isinstance(script, SceneScript) else script.move(turn)
 
 
 class ScriptedParticipant:
@@ -650,7 +852,7 @@ class ScriptedParticipant:
         envelope = {
             "protocol": dict(turn["protocol"]),
             "binding": {"request_id": turn["binding"]["request_id"]},
-            "action": self.script.action(turn),
+            "action": scripted(self.script, turn, news_shown(body)),
         }
         wake = turn.get("wake") or {}
         answered = {
@@ -740,10 +942,14 @@ class ScriptedCodexAgent:
     def _next(self) -> None:
         request = self.model.latest()
         items = [item for item in request.get("input", ()) if isinstance(item, Mapping)]
+        news = None
         if items and items[-1].get("type") == "function_call_output":
-            self.model.reply({"text": "Posted my answer."})
-            return
-        role, arguments = ("send", {"text": self.answer}) if self.script is None else self.script.move(turn_document(request))
+            # The room tool's result. Where it is the core's look before posting (a scene's held turn), the agent decides again.
+            news = news_shown(request) if isinstance(self.script, SceneScript) else None
+            if news is None:
+                self.model.reply({"text": "Posted my answer."})
+                return
+        role, arguments = ("send", {"text": self.answer}) if self.script is None else scripted_move(self.script, turn_document(request), news)
         if role == "silence":
             # A scene's quiet moment: no room tool call, and the turn ends on a message that is not posted anywhere.
             self.model.reply({"text": "Nothing to add."})
@@ -899,9 +1105,13 @@ class ScriptedClaudeAgent:
         messages = body.get("messages") or []
         last = messages[-1] if messages and isinstance(messages[-1], Mapping) else {}
         content = last.get("content")
+        news = None
         if isinstance(content, list) and any(isinstance(block, Mapping) and block.get("type") == "tool_result" for block in content):
-            return "agent", [{"type": "text", "text": "Posted my answer."}], "end_turn"
-        role, arguments = ("send", {"text": self.answer}) if self.script is None else self.script.move(turn_document(body))
+            # The room tool's result. Where it is the core's look before posting (a scene's held turn), the agent decides again.
+            news = news_shown(body) if isinstance(self.script, SceneScript) else None
+            if news is None:
+                return "agent", [{"type": "text", "text": "Posted my answer."}], "end_turn"
+        role, arguments = ("send", {"text": self.answer}) if self.script is None else scripted_move(self.script, turn_document(body), news)
         if role == "silence":
             # A scene's quiet moment: no room tool call, and the turn ends on a message that is not posted anywhere.
             return "agent", [{"type": "text", "text": "Nothing to add."}], "end_turn"

@@ -416,11 +416,79 @@ def _matrix_lines(run: Mapping[str, Any]) -> list[str]:
         "|---|---|---|---|",
         *(
             f"| {moment.get('name')} | {_cell(item.get('label'), 80)} | {', '.join(item.get('fitting', ()))} ({item.get('step1')}) | "
-            f"`{grade_cell([item])}` {item['grade']['visible']}/{item['grade']['step1']}{' off script' if item.get('off_script') else ''} |"
+            f"`{grade_cell([item])}` {item['grade']['visible']}/{item['grade']['step1']}{' off script' if item.get('off_script') else ''}"
+            f"{' hold ' + str(item['hold']) if item.get('hold') not in (None, 'held') else ''} |"
             for moment, item in rows
         ),
         "",
     ]
+
+
+def _reordered(moment: Mapping[str, Any], hold: Mapping[str, Any]) -> list[str]:
+    """A line that says the scene was played in another order than it is written, where a held turn made the agent's line come last.
+
+    The messages that land in a held turn are posted before the agent's line the turn plays, so a scene that has that line
+    before one of them (`asked-while-busy`: the agent's reply, then Zoe's thanks) is played with it after. A live model composes
+    its reply with the later message already in the room and may drop it once the core has shown it the page.
+    """
+
+    scene = list(moment.get("live") or ())
+    if hold.get("trigger") not in scene:
+        return []
+    start = scene.index(hold["trigger"])
+    land = [event for event in hold.get("events", ()) if event in scene]
+    end = max((scene.index(event) for event in land), default=start)
+    moved = [
+        line["event"] for line in moment.get("lines", ()) if line.get("trigger") == hold.get("trigger") and line.get("event") in scene[start : end + 1]
+    ]
+    if not moved:
+        return []
+    written = ", ".join(scene[start : end + 1])
+    played = ", ".join([hold["trigger"], *land, *moved])
+    return [
+        f"- {moment.get('name')}: **played in another order than the scene's.** The scene has {written}; played, {played}: the agent's "
+        f"{', '.join(moved)} is said after {', '.join(land)} have landed, since they land in the turn that plays it. A live model composes its "
+        f"reply with those messages already in the room and may drop it once it has been shown them, so {', '.join(moved)} cannot be assumed in a "
+        f"live run, and what the scene says the agent had already done holds only once {land[-1]} is in."
+    ]
+
+
+def _played_lines(run: Mapping[str, Any]) -> list[str]:
+    """How a directed scene was played where the agent's own history or a held turn is in it (rehearsal PR 4c).
+
+    The cue the director added, the time that was compressed, each earlier line
+    of the agent's and whether it landed as the scene has it, and each hold
+    and how it went. A scene without any of them has nothing to say here.
+    """
+
+    lines: list[str] = []
+    for moment in run.get("moments", ()):
+        if moment.get("expect") != "directed" or not (moment.get("lines") or moment.get("holds")):
+            continue
+        name = moment.get("name")
+        for cue in moment.get("cues", ()):
+            lines.append(
+                f"- {name}: played with a cue. The agent's {cue.get('before')} answers nothing in the scene, so the director added "
+                f"{cue.get('author')}'s message just before it: \"{cue.get('text')}\". A live model sees it in the room's history."
+            )
+        if moment.get("compressed"):
+            seconds = int(moment["compressed"])
+            span = f"{seconds // 3600} h" if seconds >= 3600 and not seconds % 3600 else f"{seconds // 60} min" if seconds >= 120 else f"{seconds} s"
+            lines.append(
+                f"- {name}: time compressed. The scene's {span} after the agent's first line play out in seconds, since the stand-in "
+                "stamps the agent's post at the wall and nothing after it can be backdated."
+            )
+        for line in moment.get("lines", ()):
+            landed = "landed as the scene has it" if not line.get("problems") else "did not land: " + "; ".join(line["problems"])
+            said = f"reaction {line.get('reaction')}" if line.get("kind") == "reaction" else f"{line.get('kind')} \"{_cell(line.get('text'), 90)}\""
+            lines.append(f"- {name}: the agent's earlier line {line.get('event')} ({said}, on {line.get('trigger')}) {landed}.")
+        for hold in moment.get("holds", ()):
+            lines.append(
+                f"- {name}: hold on the turn at {hold.get('trigger')} ({hold.get('kind')}; {', '.join(hold.get('events', ()))} landed in it): "
+                f"**{hold.get('outcome')}** ({hold.get('detail')})."
+            )
+            lines += _reordered(moment, hold)
+    return ["## How the scenes were played", "", *lines, ""] if lines else []
 
 
 def _discord_lines(discord: Mapping[str, Any]) -> list[str]:
@@ -578,6 +646,7 @@ def summary_markdown(run: Mapping[str, Any]) -> str:
                     lines.append(f"- {moment.get('name')}, {delivery.get('scene_event')}: {delivery['note']}")
         lines.append("")
     lines += _matrix_lines(run)
+    lines += _played_lines(run)
     discord = run.get("discord")
     if isinstance(discord, Mapping):
         lines += ["## The Discord room", "", *_discord_lines(discord), ""]

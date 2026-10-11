@@ -25,7 +25,7 @@ from unittest import mock
 from evals.behavior.score import agent_move
 from evals.rehearsal import checks, directed, discord_room, probe, standin
 
-from tests.v2.test_rehearsal_directed import PLAYABLE, ROOT, _played
+from tests.v2.test_rehearsal_directed import NEWS, PLAYABLE, ROOT, _news, _played
 from tests.v2.test_rehearsal_discord_room import _tagged, _turn
 
 SEND, REACT = "mcp__nunchi__room_send", "mcp__nunchi__room_react"
@@ -52,7 +52,8 @@ class MoveTest(unittest.TestCase):
             for script, moment, text in _graded_turns(scene_id):
                 with self.subTest(scene=scene_id, moment=moment.label):
                     turn = _turn("discord:message:7", text)
-                    role, arguments = script.move(turn)
+                    news = _news(script, moment.event)  # a held turn decides once it has been shown what landed meanwhile
+                    role, arguments = script.move(turn, news=news)
                     intended = standin.SceneScript.intended(moment)
                     self.assertEqual({"speak": "send", "mhm": "react", "stay_quiet": "silence"}[intended], role)
                     if role == "send":
@@ -62,7 +63,7 @@ class MoveTest(unittest.TestCase):
                     else:
                         self.assertEqual({}, arguments)
                     # The same move as the reference's action, said once.
-                    self.assertEqual(intended, agent_move([script.action(turn)]))
+                    self.assertEqual(intended, agent_move([script.action(turn, news=news)]))
         script = directed.spec("story-across-messages").script
         self.assertEqual(("silence", {}), script.move(_turn("discord:message:9", "something nobody graded")))
         self.assertEqual(("silence", {}), script.move({"wake": {}}), "a turn with no trigger")
@@ -75,10 +76,11 @@ class EndpointTest(unittest.TestCase):
         self.addCleanup(agent.close)
         return agent
 
-    def body(self, turn, *, result=False):
+    def body(self, turn, *, result=False, news=None):
         messages = [{"role": "user", "content": [{"type": "text", "text": _tagged(turn)}]}]
-        if result:
-            messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "ok"}]})
+        if result or news:
+            # The room tool's result: "ok", or the page the core's look before posting showed the turn.
+            messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": news or "ok"}]})
         return {"tools": [{"name": SEND}, {"name": REACT}], "messages": messages}
 
     def test_the_scripted_claude_endpoint_follows_the_scene_each_graded_moment_by_its_tool_and_silence_by_none(self):
@@ -87,7 +89,7 @@ class EndpointTest(unittest.TestCase):
             for script, moment, text in _graded_turns(scene_id):
                 with self.subTest(scene=scene_id, moment=moment.label):
                     agent.script = script
-                    kind, blocks, stop = agent.reply(self.body(_turn("discord:message:7", text)))
+                    kind, blocks, stop = agent.reply(self.body(_turn("discord:message:7", text), news=_news(script, moment.event)))
                     intended = standin.SceneScript.intended(moment)
                     if intended == "stay_quiet":
                         self.assertEqual(("agent", "end_turn"), (kind, stop))
@@ -120,6 +122,8 @@ class EndpointTest(unittest.TestCase):
                 with self.subTest(scene=scene_id, moment=moment.label):
                     agent.script = script
                     request = {"input": [{"type": "message", "content": [{"type": "input_text", "text": _tagged(_turn("discord:message:7", text))}]}]}
+                    if _news(script, moment.event):
+                        request["input"].append({"type": "function_call_output", "call_id": "c", "output": NEWS})
                     replies: list[dict] = []
                     with mock.patch.object(agent.model, "latest", return_value=request), mock.patch.object(agent.model, "reply", replies.append):
                         agent._next()
@@ -600,6 +604,13 @@ class CommandTest(unittest.TestCase):
                 self.assertEqual(discord_room.MOMENTS, plain[1])
 
 
+def scene_loop(job: str) -> list[str]:
+    """The scene ids a job's ``for scene in ...; do`` loop plays (the list may continue on following lines with a backslash)."""
+
+    loop = re.search(r"for scene in ([a-z \\\n-]+); do", job)
+    return [word for word in loop.group(1).split() if word != "\\"]
+
+
 class CiTest(unittest.TestCase):
     text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
@@ -619,8 +630,7 @@ class CiTest(unittest.TestCase):
                 job = self.job(job_name)
                 # One loop over the four scenes, one probe command, in the launcher, offline, with the lane's own sandbox check.
                 self.assertEqual(1, job.count("--scene"))
-                loop = re.search(r"for scene in ([a-z -]+); do", job)
-                self.assertEqual(sorted(PLAYABLE), sorted(loop.group(1).split()))
+                self.assertEqual(sorted(PLAYABLE), sorted(scene_loop(job)))
                 self.assertIn(f"--harness {harness} --scripted --room discord", job[job.index(f"id: {scenes}"):])
                 self.assertIn("discord_net --offline --require-bwrap --", job[job.index(f"id: {scenes}"):])
                 self.assertIn('--out "$RUNNER_TEMP/rehearsal-directed/$scene"', job)
@@ -636,6 +646,25 @@ class CiTest(unittest.TestCase):
                 # The lane's sandbox is the lane's: CI never passes --no-sandbox, here or in the lane above.
                 commands = [line for line in job.splitlines() if "--no-sandbox" in line and not line.lstrip().startswith("#")]
                 self.assertEqual([], commands)
+
+    def test_every_step_of_the_three_jobs_that_runs_the_launcher_has_a_timeout_sized_from_the_measured_times(self):
+        # Measured here (2026-10-11): a room lane 14 to 21 seconds, the eleven scenes 2 to 3 minutes for a column. CI is slower and
+        # runs bubblewrap, so the room lane gets 15 minutes and the scene loop 20: a hung scene fails the job rather than waiting
+        # for the runner's six hours. The loops still fail the job on a failing scene (the test below).
+        for job_name in ("discord-standin", "codex-app-server", "claude-code-mod"):
+            job = self.job(job_name)
+            steps = re.split(r"\n      - ", job)[1:]
+            launched = [step for step in steps if "discord_net" in step]
+            self.assertEqual(2, len(launched), f"{job_name}: the room lane and the scene loop")
+            for step in launched:
+                with self.subTest(job=job_name, step=step.splitlines()[0]):
+                    found = re.search(r"\n        timeout-minutes: (\d+)\n", step)
+                    self.assertIsNotNone(found, "a step that runs the launcher needs a timeout-minutes")
+                    minutes = int(found.group(1))
+                    if "--scene" in step:
+                        self.assertTrue(15 <= minutes <= 30, minutes)
+                    else:
+                        self.assertTrue(10 <= minutes <= 20, minutes)
 
     def test_each_scene_loop_fails_its_step_after_the_last_scene_when_any_scene_failed_and_does_not_stop_at_the_first(self):
         for job_name, lane in (
@@ -662,7 +691,7 @@ class CiTest(unittest.TestCase):
         reference = self.job("discord-standin")
         self.assertEqual(1, reference.count("--scene"))
         self.assertIn("--harness reference --scripted --room discord", reference)
-        self.assertEqual(sorted(PLAYABLE), sorted(re.search(r"for scene in ([a-z -]+); do", reference).group(1).split()))
+        self.assertEqual(sorted(PLAYABLE), sorted(scene_loop(reference)))
         hermes = self.job("hermes-plugin")
         self.assertNotIn("--scene", hermes)
         self.assertNotIn("rehearsal-directed", hermes)
