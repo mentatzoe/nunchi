@@ -39,8 +39,10 @@ summary.md:
 A run in the Discord room (``--room discord``, PR 3b) holds seven more, the
 ``discord-*`` checks, listed with them below. With ``--scene`` (PR 4a, the
 reference; PR 4b, Claude Code and Codex too) the run plays one behavior scene,
-and its scripted check is `directed_outcomes` in place of `scripted_outcomes`;
-for Claude Code and Codex it holds one more, `room_errors`.
+and its scripted check is `directed_outcomes` in place of `scripted_outcomes`
+(since PR 4c it also holds the agent's own earlier lines to the scene and the
+holds that put a message into a turn); for Claude Code and Codex it holds one
+more, `room_errors`.
 
 Neither the key nor the canary may be in any output: the scan
 (`scan.enforce`) fails the run after the record is written.
@@ -341,6 +343,8 @@ def no_leaks(
 FITS = "fits"
 MISSES = "misses"
 NOT_DELIVERED = "not delivered"
+# A scene's held turn went on before a held message reached Nunchi: the moment was not played as scripted (`directed.hold_outcome`).
+RACED = "raced"
 
 # What a wait that timed out means for a record (`unsettled`).
 NOT_SETTLED = "the room had not gone quiet when the wait ended, so a late turn or post would be missing from this record"
@@ -605,7 +609,7 @@ def directed_outcomes(moments: Sequence[Mapping[str, Any]], *, room_tool_calls: 
     """
 
     problems: list[str] = []
-    graded = scenes = 0
+    graded = scenes = earlier = held = 0
     unused = [dict(call) for call in room_tool_calls] if room_tool_calls is not None else None
     for moment in moments:
         if moment.get("expect") != "directed":
@@ -618,12 +622,38 @@ def directed_outcomes(moments: Sequence[Mapping[str, Any]], *, room_tool_calls: 
                 why = f" ({delivery['note']})" if delivery.get("note") else ""
                 problems.append(f"{name}, {delivery.get('scene_event')}: the message never reached Nunchi{why}")
         problems += _unsettled_problem(name, moment.get("deliveries", ()))
+        # The agent's own earlier lines (PR 4c) are the scene's setup: each must have landed exactly, or the moments after
+        # it were judged against a history the agent never had. A hold must have put its messages into the turn.
+        for line in moment.get("lines", ()):
+            earlier += 1
+            where = f"{name}, {line.get('event')}"
+            if line.get("problems") is None:
+                problems.append(f"{where}: the agent's earlier line was not checked")
+            for problem in line.get("problems") or ():
+                problems.append(f"{where}: the agent's earlier line did not land as the scene has it: {problem}")
+            if unused is not None:
+                for action in line.get("actions") or ():
+                    if not action.get("delivered"):
+                        continue
+                    call = room_call_for(action, unused)
+                    if call is None:
+                        problems.append(
+                            f"{where}: its {action.get('kind')} reached the room, but the harness showed no completed room tool call for it"
+                        )
+                    else:
+                        unused.remove(call)
+        for hold in moment.get("holds", ()):
+            held += 1
+            if hold.get("outcome") != "held":
+                problems.append(f"{name}, the turn on {hold.get('trigger')}: hold {hold.get('outcome')}: {hold.get('detail')}")
         for item in moment.get("graded", ()):
             graded += 1
             where = f"{name}, {item.get('label')}"
             if not item.get("reached"):
                 problems.append(f"{where}: the message never reached Nunchi")
                 continue
+            if item.get("hold") == "raced":
+                continue  # not a miss: the moment was not played as scripted, and the hold above says so
             grade = item.get("grade") or {}
             if grade.get("visible") != "fits":
                 why = f" ({item['why']})" if item.get("why") else ""
@@ -654,7 +684,10 @@ def directed_outcomes(moments: Sequence[Mapping[str, Any]], *, room_tool_calls: 
         problems.append("no graded moment was played")
     detail = "; ".join(problems) or (
         f"{graded} graded moment(s) in {scenes} scene(s), each fits with step 1 ok and exactly the scripted action, "
-        "every message reached Nunchi, nothing else was done in the room (draft expectations)"
+        "every message reached Nunchi, nothing else was done in the room"
+        + (f"; {earlier} earlier line(s) of the agent's landed as the scene has them" if earlier else "")
+        + (f"; {held} hold(s) held: the held message(s) reached Nunchi and the turn was shown them" if held else "")
+        + " (draft expectations)"
     )
     return Check("directed-outcomes", not problems, detail)
 
@@ -673,7 +706,11 @@ def room_call_for(action: Mapping[str, Any], calls: Sequence[Mapping[str, Any]])
         if not call.get("completed"):
             continue
         if action.get("kind") in ("message", "reply"):
-            if tool.endswith("room_send") and arguments.get("text") == action.get("text"):
+            # A reply names the message it answers, and a plain message none.
+            replied = arguments.get("reply_to_event_id") or None
+            if tool.endswith("room_send") and arguments.get("text") == action.get("text") and replied == (
+                action.get("target_event_id") if action.get("kind") == "reply" else None
+            ):
                 return call
         elif action.get("kind") == "reaction":
             if (
@@ -900,6 +937,26 @@ def discord_continuity(
     return Check("discord-continuity", not problems, detail)
 
 
+def _remembers(own_moves: Sequence[Mapping[str, Any]], line: Mapping[str, Any]) -> bool:
+    """Whether a turn's memory of the agent's own moves holds ``line``, an earlier line of the agent's the scene has it say.
+
+    A reaction is remembered with the message it was about and its emoji, a
+    reply with the message it answered, and a plain message (a cue's answer)
+    by its words (`nunchi.memory`).
+    """
+
+    for move in own_moves or ():
+        if line.get("kind") == "reaction":
+            if move.get("kind") == "reaction" and move.get("about_event_id") == line.get("event_id") and move.get("reaction") == line.get("reaction"):
+                return True
+        elif line.get("kind") == "reply":
+            if move.get("kind") == "reply" and move.get("about_event_id") == line.get("event_id"):
+                return True
+        elif move.get("kind") == "message" and " ".join(str(line.get("text")).split()).startswith(str(move.get("text") or "\0").rstrip("…")):
+            return True
+    return False
+
+
 def discord_addressing(
     moments: Sequence[Mapping[str, Any]],
     *,
@@ -944,7 +1001,10 @@ def discord_addressing(
     that ran must have been shown its trigger (a request the agent's model was
     asked holds that turn): a silence on a message the model never saw proves
     nothing. And the next turn after the agent's reaction must hold it in
-    ``own_moves``, about the message it reacted to.
+    ``own_moves``, about the message it reacted to. Since PR 4c the same holds
+    for each of the agent's earlier lines (``lines``: a reaction, a reply to the
+    message it answered, a post by its words), at the next turn and at every
+    graded turn after it, however many messages came between (`_remembers`).
     """
 
     problems: list[str] = []
@@ -1014,6 +1074,24 @@ def discord_addressing(
                         f"{name} {item.get('event')}: the next turn ({after.get('trigger')}) does not hold the agent's reaction to "
                         f"{item.get('event_id')} in memory.own_moves"
                     )
+            # The agent's own earlier lines (PR 4c) must be in its memory at the turns that follow them: the next turn, and each
+            # graded one, however many messages came between (a promise outlives the window of recent messages).
+            graded_ids = {item.get("event_id") for item in moment.get("graded", ())}
+            for line in moment.get("lines", ()):
+                position = next((n for n, delivery in enumerate(deliveries) if delivery.get("event_id") == line.get("event_id")), None)
+                if position is None or not any(action.get("delivered") for action in line.get("actions") or ()):
+                    continue  # a line that did not land is `directed_outcomes`' to report
+                later = [
+                    delivery["received"]
+                    for delivery in deliveries[position + 1:]
+                    if (delivery.get("received") or {}).get("own_moves") is not None
+                ]
+                for number, after in enumerate(later):
+                    if (number == 0 or after.get("trigger") in graded_ids) and not _remembers(after["own_moves"], line):
+                        problems.append(
+                            f"{name} {line.get('event')}: the turn on {after.get('trigger')} does not hold the agent's earlier "
+                            f"{line.get('kind')} (on {line.get('event_id')}) in memory.own_moves"
+                        )
             graded.append(f"{name}: {heard} message(s) a turn was handed")
             continue
         if expect not in ("post", "reply", "reaction", "thread-reply"):

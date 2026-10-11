@@ -18,7 +18,10 @@ of the behavior suite's multi-person scenes on the reference column and grades
 them from each scene's own draft expectations (Directed scenes, below):
 **implemented, unverified** in CI too. PR 4b plays the same four scenes
 through Claude Code and Codex, with the reference as the control:
-**implemented, unverified** in CI too.
+**implemented, unverified** in CI too. PR 4c plays seven more, the ones where
+timing and the agent's own history matter: a message that lands while the
+agent is composing, a question asked while it is busy, a promise it made, a
+nod it gave: **implemented, unverified** in CI too.
 
 ## The first live run (2026-10-09)
 
@@ -780,11 +783,11 @@ in CI yet, and expected rather than checked on `ubuntu-latest`: passwordless
 and Hermes starting as the runner user inside the launcher's namespace in about
 the time it took here.
 
-## Directed scenes (PR 4a, 4b)
+## Directed scenes (PR 4a, 4b, 4c)
 
 **Status: implemented, unverified in CI. Run here offline, inside the
 launcher, on Python 3.12 with discord.py 2.7.1 (2026-10-11): each of the four
-scenes below exited 0 with every hard check holding and a matrix reading
+scenes PR 4a plays exited 0 with every hard check holding and a matrix reading
 `fits`/`ok`; the reference, Codex and Claude Code lanes ran once more with the
 same results. The new tests (`tests/v2/test_rehearsal_directed.py`) pass.** A
 first review found that the grader could pass a column that did the wrong thing
@@ -808,6 +811,27 @@ lane and name the cause: a script that plays a listed miss (the status report
 answered), an agent that answers the chatter where the script is silent, and a
 leg that forgets what an action was about. The plain Discord lanes of the
 three columns are unchanged in substance.**
+
+**PR 4c: implemented, unverified in CI. Run here offline, inside the launcher
+(2026-10-11), on Python 3.12 with the pins CI installs, against the pinned
+Claude Code 2.1.289 (with `--no-sandbox`) and Codex 0.160.1: each of the seven
+scenes it adds (`asked-while-busy`, `answered-while-composing`,
+`never-mind-while-composing`, `build-finishes-after-promise`,
+`build-finishes-long-after-promise`, `did-you-see`, `addressee-never-answers`)
+exited 0 through the reference, through Claude Code and through Codex, in four
+passes (84 runs; the last on the code as committed, with the other four scenes
+and the plain lanes), every hard check
+holding, every graded moment `fits`/`ok` and every hold `held` (none raced). No
+harness column missed a scene the reference passes, so 4c has no finding about
+an integration to report. The 4a and 4b scenes and the plain Discord lanes of
+the three columns ran twice and are unchanged in substance (compared with the
+base commit's plain lanes). Mutations each fail the intended check on all three
+columns and name the cause: an agent that answers after it has been shown the
+page, a line of the agent's that is not said, a release before the held message
+reached Nunchi, a release that never comes, and a hold that lands only the
+earlier message of an unattended moment; and, with the core's look before
+posting switched off in a scratch copy, every column posts the answer it had
+ready and the hold reads `unseen`, the column's miss.**
 
 The behavior suite judges one moment at a time, with the room handed to
 attention as a snapshot. A rehearsal with one person cannot show what a room
@@ -835,36 +859,38 @@ scripted, offline, with no model and no key. The reference plays it as shown;
 Claude Code and Codex take `--harness claude-code` or `--harness codex` in its
 place (below). **The
 director never posts as the agent**: every visible move is the agent's own,
-and the stand-in refuses a post as a harness's bot. That decides which scenes
-can be played. `directed.plan` sorts each scene and gives the reasons it
-cannot be played; `tests/v2/test_rehearsal_directed.py` pins this table, so a
+and the stand-in refuses a post as a harness's bot. A scene that holds an
+earlier line of the agent's, a promise it made or a nod it gave, is played by
+having the agent say the line itself, as its scripted move on the message it
+answers (PR 4c, below). `directed.plan` sorts each scene and gives the reasons
+it cannot be played; `tests/v2/test_rehearsal_directed.py` pins this table, so a
 new scene fails until it is classified here:
 
-| Scene | What stops it (`directed.REASONS`) | Planned, not built |
+| Scene | Played | What it needs, or what stops it (`directed.REASONS`) |
 |---|---|---|
-| `bot-status-report` | nothing: **played** | |
-| `story-across-messages` | nothing: **played** | |
-| `said-it-would-check` | nothing: **played**; the agent's reply to the first request is its own live move | |
-| `mention-in-busy-room` | nothing: **played**; 21 messages of history, 11 live | |
-| `addressee-never-answers` | `agent-event`: `v1`, what the agent knew two hours ago, is knowledge nobody can plant | cannot |
-| `addressee-first` | `agent-event` (the same `v1`), `pause` | cannot |
-| `only-they-can-do-it` | `agent-event` (the same `v1`), `pause` | cannot |
-| `answered-while-composing` | `agent-event` (`v1`, the agent's knowledge three hours ago), `during-turn` | a hold on the agent's turn (4c); `v1` cannot be planted either, which that design leaves open |
-| `never-mind-while-composing` | `agent-event` (`v1`, the same kind), `during-turn` | a hold on the agent's turn (4c); the same open point |
-| `asked-while-busy` | `agent-event` (`v1`, the agent's reply to the first request), `unattended` | a hold on the agent's turn (4c); the live agent can make `v1` |
-| `build-finishes-after-promise` | `agent-event`: the promise | played as the live agent made it (4c) |
-| `build-finishes-long-after-promise` | `agent-event`: the promise and three answers | played as the live agent made it (4c) |
-| `did-you-see` | `agent-event`: the nod | played as the live agent made it (4c) |
-| `quiet-for-hours` | `agent-event`: the agent's own post is stamped at the wall, so seven quiet hours become seconds | cannot |
-| `approval-comes-through` | `agent-event`, `outcome`, `pause`: the Discord lanes have no approval path | cannot |
-| `answered-by-someone-else` | `seen-through`: a snapshot the live pipeline cannot be asked for | cannot (`answered-while-composing` covers the live case) |
-| `two-agents-one-question` | `several-participants`: two harness bots in one room | PR 5 |
+| `bot-status-report` | yes | nothing |
+| `story-across-messages` | yes | nothing |
+| `said-it-would-check` | yes | nothing; the agent's reply to the first request is its own live move |
+| `mention-in-busy-room` | yes | nothing; 21 messages of history, 11 live |
+| `asked-while-busy` | yes (4c) | a line (`v1`, the agent's reply to `z1`) and a hold: Sam's question and Zoe's thanks land while the agent is still answering Zoe; time compressed (50 seconds) |
+| `answered-while-composing` | yes (4c) | a cue for `v1` (what the agent said three hours before) and a hold: Castor's answer lands while the agent composes its own; time compressed (3 hours) |
+| `never-mind-while-composing` | yes (4c) | a cue for `v1` and a hold: Zoe's "never mind" lands while the agent composes; time compressed (3 hours) |
+| `build-finishes-after-promise` | yes (4c) | a line (`v1`, the promise); time compressed (50 minutes) |
+| `build-finishes-long-after-promise` | yes (4c) | four lines (the promise and three answers, `v1`, `r1` to `r3`); time compressed (3 hours); 25 messages, each with a turn |
+| `did-you-see` | yes (4c) | a line (`r1`, the nod, a reaction); time compressed (12 minutes) |
+| `addressee-never-answers` | yes (4c) | a cue for `v1` (what the agent wrote two hours before); time compressed (2 hours) |
+| `addressee-first` | no | `pause`: the look-again timer counts 300 real seconds |
+| `only-they-can-do-it` | no | `pause` |
+| `quiet-for-hours` | no | `time`: the room's seven quiet hours are the point, and they would be seconds (below) |
+| `approval-comes-through` | no | `outcome`, `pause`: the Discord lanes have no approval path |
+| `answered-by-someone-else` | no | `seen-through`: a snapshot the live pipeline cannot be asked for (`answered-while-composing` covers the live case) |
+| `two-agents-one-question` | no | `several-participants`: two harness bots in one room (PR 5) |
 
-The last column is the design for later parts of PR 4, not a decision.
-`addressee-never-answers` looks playable, since its moments are plain
-messages, but without `v1` the second moment's "Vigil knows the answer"
-would be untrue and its grade meaningless, so the rule (no event of the
-agent's) puts it here. One person could type `story-across-messages`,
+The pause (`addressee-first`, `only-they-can-do-it`) is a real wait of 300
+seconds, which PR 4c does not play; it gets its own small PR or joins 4d.
+`addressee-never-answers` was refused until PR 4c, because without `v1` the
+second moment's "Vigil knows the answer" would be untrue and its grade
+meaningless. One person could type `story-across-messages`,
 `never-mind-while-composing` and `did-you-see`; the rest need other voices,
 which the director gives as stand-in people and scripted bots.
 
@@ -876,12 +902,118 @@ forward, and the room goes quiet once. The clock is then moved to the wall
 quiet again (the first graded message is always among them). Their gaps are
 `pace` times the scene's own: 0 here, no wait. Two limits are real: the
 stand-in stamps the agent's own post at the wall, so a gap after the agent
-has posted cannot be kept (the stand-in raises an earlier stamp and records
-it); and `advance` does not move the agent's look-again
+has posted cannot be kept (a scene with a line of the agent's therefore has
+its time compressed, below); and `advance` does not move the agent's look-again
 timer, which counts 300 real seconds, so a scene that needs a pause is a real
 wait and is not played here. A message that mentions someone pings them in
 place of their name, and a `reply_to` becomes a Discord reply to the message
 the stand-in made for it.
+
+**The agent's own earlier lines, cues and compressed time (PR 4c).** A scene's
+event of the agent's, the promise Vigil made or the nod it gave, is not posted:
+the director never posts as the agent. The agent says it itself, as its
+scripted move on the message the scene has it answer or react to (`standin.Line`:
+`v1` of `build-finishes-after-promise` is a reply to `z1`, `r1` of
+`did-you-see` a 👂 on `z1`). Attention wakes the agent for that message (leans to
+a mhm for a nod) and the agent says exactly the scene's words or reaction. It
+is not graded; it is a precondition, checked to have happened exactly
+(`directed.judge_scene`, `directed-outcomes`): the turn on that message must
+have delivered one action, of the scene's kind, with its words or reaction,
+about that message, and for a harness column a completed room tool call must
+back it. A line that did not land fails the run, since the moments after it
+would be judged against a history the agent never had. And the turn after
+it must hold it in `memory.own_moves` (`discord-addressing`): the next turn,
+and each graded turn, however many messages came between. That is what a
+promise outliving the window of recent messages
+(`build-finishes-long-after-promise`) and a nod that is asked about
+(`did-you-see`) need to show.
+
+Two things in how that is played are named in every result, because they
+differ from the scene as written:
+
+- **Played with a cue.** A line that answers nothing in the scene (`v1` of
+  `answered-while-composing`, `never-mind-while-composing` and
+  `addressee-never-answers`) has no message to be the agent's move on, so the
+  director adds one: a person's message, posted just before the line, whose
+  scripted answer is the line. It is the first human who posts in the scene
+  (Zoe) saying "Vigil, anything to report?", and the agent's reply is the
+  scene's words as a plain post. The cue is not in the scene, it is in the
+  plan (`Plan.cues`) and the result (`cues`, and the summary), and a live model
+  will see it in the room's history, which is why it is named.
+- **Time compressed.** The stand-in stamps the agent's post at the wall, so
+  nothing posted after it can be backdated before it, and a scene with a line
+  of the agent's is played live from the message that triggers its first line
+  (`Plan.compressed` says how much of the scene's own time that is: 50 seconds
+  for `asked-while-busy`, 50 minutes, 3 hours, 12 minutes, 2 hours and 3 hours
+  for the others). The room's timestamps show seconds where the scene has
+  hours. A scene whose point is a long quiet, with more than four hours before
+  its graded message (`QUIET_SECONDS`), cannot be played that way:
+  `quiet-for-hours` is refused as `time`. No change was made to the stand-in's
+  clock rule.
+
+**Holds (PR 4c).** Three scenes put a message into a turn that is under way,
+which a one-person test cannot show: Castor answers while Vigil is composing
+its own answer, Zoe says "never mind" while Vigil composes, Sam asks a question
+while Vigil is answering Zoe and Zoe thanks Vigil before it is done. The
+director cannot hold the agent's process, so the hold is a gate on the scripted
+model endpoint (`standin.Gate`), the same for all three columns: the endpoint
+holds the first model call of the turn on the trigger. The director waits until
+the endpoint has that call, posts the scene's `during_turn` messages, waits for
+each to reach Nunchi (its audit), and releases the call. The agent's first
+attempt is the answer it has ready (`SCENE_DRAFT`, a post that names its moment,
+which would show as an action where the script is quiet); the core's look before
+posting holds it back and shows the agent the new message (a plain-call
+participant gets a page, `Not posted yet: ...`, in its next request; Claude Code
+and Codex get it in the result of the room tool they called, `Turn.call`); and
+the script then does what the scene fits, here a silence. A `during_turn` moment
+is graded on what the agent finally does after the core shows it the page, as
+every moment is. Each hold is judged (`directed.hold_outcome`) and the result
+says which:
+
+- `held`: the model was asked about the turn, every held message had reached
+  Nunchi before the release, and the page the core showed the turn holds them.
+- `raced`: the turn went on before a held message reached Nunchi (the release
+  came first, or the model's wait of `HOLD_SECONDS` (25 s, under the reference's
+  30 s model timeout) ran out). It is not a miss, since the moment was not played
+  as scripted; it is reported as `raced`, the moment's own grade is left aside,
+  and a scripted run fails.
+- `unseen`: the messages reached Nunchi in time and the core did not show them
+  to the turn before it posted. That is the column's miss, and the first attempt
+  is then in the room, graded as the speak it is.
+- `unmerged` (an `unattended` hold): the moment's unattended messages were
+  judged on their own and not read with it, or were also read on their own.
+- `never-asked`: the model was never asked about the turn.
+
+`asked-while-busy` is the other kind, the `unattended` moment: Sam's question
+arrives while Vigil answers Zoe, and Zoe's thanks comes next, "and Nunchi reads
+both". Nunchi keeps one pending message and replaces it with a newer one, so
+the question is read with the thanks only if the thanks also arrives while the
+agent is busy. The hold therefore holds the turn on Zoe's question (the one that
+plays Vigil's reply) and lands both Sam's question and Zoe's thanks in it
+(`Hold.events`).
+
+**This plays `asked-while-busy` in another order than the scene's, and says so
+in every result** (`record._reordered`, "played in another order than the
+scene's"). The scene is written z1, s1, `v1` (Vigil's reply to Zoe), z2 (the
+thanks). Played, it is z1, s1, z2, and then Vigil's reply `v1`, which is said
+after the thanks has landed, since both land in the turn that plays it. The
+unattended premise needs that order; the written one cannot be played, because
+the thanks would then follow the turn and Sam's question would be judged on its
+own. What it means for the moment's facts: "Vigil answered Zoe but not Sam"
+holds only after z2 (in the scene it held before it), and the moment is judged
+at z2 with Vigil's reply already in the room, as in the scene. What it means
+for a live model: it would compose its reply to Zoe with her thanks already in
+the room, and may drop the reply after the look page shows it the thanks, so
+`v1` cannot be assumed in a live run and the scripted run shows only that the
+core hands it the page. The scripted agent says the reply (a line, a reply to
+Zoe's first message) both at the first attempt and after the page, because the
+script is the scene's.
+
+Landing only Sam's message, and the thanks after the turn, was run here too:
+Sam's message then gets a turn of its own before the thanks, the thanks lists
+nothing as unattended, and the run fails as `unmerged`. A turn of its own for
+Sam's message beside the thanks' turn reading it as unattended (it was read
+twice) fails as `unmerged` too.
 
 **The script.** `standin.SceneScript` is what attention and the agent both
 follow, so a scene needs no phrase list. At a graded moment it does the first
@@ -894,7 +1026,10 @@ with 👂 on the message, or says nothing. Every other message is the scene's
 chatter: attention passes it (`DEFER`, as "when unsure, pay attention" asks)
 and the agent stays silent, so each scene shows a turn that ends in silence.
 The director tells the script each graded message's text just before it posts
-it, since the script only sees the room's text (a ping reads `<@id>` there).
+it, since the script only sees the room's text (a ping reads `<@id>` there); in
+PR 4c it also tells it the text of each message that triggers a line of the
+agent's (a cue included), at which attention wakes the agent and the agent says
+the line, and a held turn pauses at the endpoint (above).
 
 **How it is graded** (`directed.judge_scene`), for each graded moment, in the
 keys the suite's results use:
@@ -929,12 +1064,22 @@ that never reached Nunchi, or that attention never judged and no turn began
 on, reads `unsupported`; one that woke the agent whose turn did not deliver
 reads `woken`, which fits nothing. The record also lists `other_actions`, every
 committed action outside the graded turns (the script is silent on the
-chatter), and the moment reads `misses` for any of them. `cited` says for each of the moment's facts
+chatter), and the moment reads `misses` for any of them; the turns that play the
+agent's own earlier lines (PR 4c) are the scene's setup and not among them. It
+also lists each line with whether it landed (`lines`, with `problems`) and each
+hold with how it went (`holds`, with `outcome` and `detail`); a graded moment a
+hold is for carries its outcome (`hold`), and a run whose hold raced reads
+`raced` in place of `misses`. `cited` says for each of the moment's facts
 whether attention's evidence points at one of its messages (scripted
 attention cites the trigger only). `summary.md` shows a **grade matrix**
 (`## Grade matrix (draft expectations)`): one row per graded moment, and the
 column's cell as the suite's matrix shows it (`S`, `m`, `q`, `Q`, with `!` for
-a clear miss), then the visible grade and step 1, such as `` `S` fits/ok``.
+a clear miss), then the visible grade and step 1, such as `` `S` fits/ok``, and
+`hold raced` (or `unseen`, `unmerged`, `never-asked`) where a hold did not hold.
+`summary.md` also has a section, **How the scenes were played**, that names a
+scene played with a cue and the quoted cue, a scene whose time was compressed
+and by how much, each earlier line of the agent's and whether it landed as the
+scene has it, and each hold and how it went.
 
 **What changes in the checks.** The seven `discord-*` checks and the probe's
 own all run. `directed-outcomes` (`checks.directed_outcomes`) replaces
@@ -945,10 +1090,15 @@ scene, the moment and the scene's reason. It also fails when the agent did
 anything outside the graded turns (`other_actions`), when **any** message the
 director posted never reached Nunchi (not only the graded ones: a lost
 message changes the room the graded one is read in), and when a wait for the
-room to go quiet timed out (below).
+room to go quiet timed out (below). Since PR 4c it fails too when one of the
+agent's earlier lines did not land exactly as the scene has it (the kind, the
+words or the reaction, about the message that triggers it, one action); when a
+hold did not hold (`raced`, `unseen`, `unmerged` or `never-asked`, above); and,
+for a hold that raced, it names the race and not a miss.
 A scene plays no reconnect, so `discord-continuity` checks the start gap alone
 there (`reconnects_required`); `discord-clients-complete` expects the calls the
-script makes (its login, a post where it speaks, a reaction where it nods);
+script makes (its login, a post where it speaks or says a line, a reaction where
+it nods);
 `discord-addressing` checks, for every message the director posted, that the
 pings the **scene meant** (`meant_actor_ids`, worked out from the scene and
 not from the text sent) were sent, and that they and the reply target arrived
@@ -957,7 +1107,9 @@ handed the message, in the turn; that every turn that ran was shown its
 trigger (a request the agent's model was asked holds that turn: a quiet answer
 to a message the model never saw proves nothing); and that the next turn after
 the agent's reaction holds it in `memory.own_moves`, about the message it
-reacted to. A live moment would be reported and never failed (`probe.py`): there is no live
+reacted to; since PR 4c the same for each of its earlier lines (a reaction, a
+reply to the message it answered, a post by its words), at the next turn and at
+every graded turn after it. A live moment would be reported and never failed (`probe.py`): there is no live
 scene run yet.
 
 **A wait that timed out.** Every message is posted and then waited on until the
@@ -970,7 +1122,7 @@ scripted run fails on it, in the scene and in the plain moments alike
 moment and a line in `summary.md`, and reports the rest. A run whose waits all
 ended quiet records as before.
 
-**Through Claude Code and Codex (PR 4b).** The four scenes also run through
+**Through Claude Code and Codex (PR 4b, 4c).** The scenes also run through
 `DiscordClaudeCodeLeg` and `DiscordCodexLeg`, so that each harness's real
 process (`claude -p` with the mod, `codex app-server` with the integration)
 reads the room the director makes, through its own `nunchi-mcp-discord`, with
@@ -987,7 +1139,13 @@ them. What changes for a harness:
   short message that goes nowhere: Claude Code and Codex post only through the
   room's tools, so that is how they stay quiet. The scene's chatter gets
   silence, as for the reference, and attention is the same `ScriptedAttention`.
-  A quiet scene (`bot-status-report`) calls no room tool and no check asks for
+  A line of the agent's is a `send` (with the `reply_to_event_id` of the message
+  it answers, for a reply) or a `react`, and a held turn is held at the same
+  gate: on the first model call of the turn, before the tool call, so that the
+  call the core answers with the page is the endpoint's own `send` of the draft.
+  The page comes back as that tool's result, and the next model call makes no
+  room tool call (`news_shown` reads it from the newest message or input item of
+  the request). A quiet scene (`bot-status-report`) calls no room tool and no check asks for
   one. What its summary's verdict line says depends on the column: Codex's
   reads "no room tool was called: the turn ended without one", Claude Code's
   does not count calls and reads as always ("the mod attached and bound the
@@ -1026,7 +1184,10 @@ them. What changes for a harness:
   reference, 24 and 25 on Codex and 20 and 23 on Claude Code in two passes
   (2026-10-11), and each graded message, posted after the room went quiet,
   started a turn of its own in all three. The other three scenes took the same
-  turns in every column.
+  turns in every column, and so did the seven of PR 4c in all three passes: for
+  example `build-finishes-long-after-promise` took 25 turns (4 playing the
+  promise and its three answers, 1 graded, 20 on the chatter), and the three
+  scenes with a hold took 2 or 3, the held turn among them.
 
 The reference is the control. A scene that a harness column fails and the
 reference passes is that integration's miss, and is the finding this part is
@@ -1034,25 +1195,39 @@ for: the script, the grader and the checks are not bent to pass it. It is
 pinned as a named failure or an expected-failure test that states what the room
 would show, and reported. None has appeared yet. What the tests hold instead
 (`tests/v2/test_rehearsal_directed_harness.py`): the scripted endpoints follow a
-scene's script for every graded moment of the four scenes; a script that plays
+scene's script for every graded moment of the eleven scenes; a script that plays
 a listed miss through a harness column fails `directed-outcomes` and names the
 moment and the scene's reason; so does an action the script is silent on, an
 action no room tool call backs, a graded message the script acts on that only a
 later turn listed as unattended, a turn that ran on a message the model was
-never shown, and a room whose lane met an error.
+never shown, and a room whose lane met an error. PR 4c adds
+`tests/v2/test_rehearsal_directed_holds.py`: the plan of each of the seven
+scenes (its lines, cues, holds and compressed time), the gate, the script's
+draft and its decision after the page, the three endpoints' reading of that
+page, the director's order of posting, how a hold and a line are judged, and
+the agent's own history in the next turn's memory, each with the mutation that
+must fail it: the agent answering after it has been shown the page, a line
+missing or in other words, a release before the held message reached Nunchi, a
+model wait that ran out, an unattended message read on its own.
 
 **In CI** it is a step of the `discord-standin` job, after the reference's
 lane, and of the `claude-code-mod` and `codex-app-server` jobs, after their
-Discord lane: a loop over the four scene ids, each inside the launcher with
+Discord lane: a loop over the eleven scene ids (the four of PR 4a and 4b, then
+the seven of PR 4c), each inside the launcher with
 `--offline` (and `--require-bwrap` in the two harness jobs, with Claude Code's
 sandbox on as in its lane: CI never passes `--no-sandbox`), in the lane's
 virtualenv and with a fresh `HOME` and `TMPDIR`; the step fails after the last
-if any scene failed. A failure runs the same scan for the key and the canary
+if any scene failed. The launcher steps of the three jobs have a timeout of their
+own (`timeout-minutes`: 15 for the room lane, 20 for the eleven scenes; run here
+a lane took 15 to 20 seconds and the eleven scenes 2 to 3 minutes), so a hung
+scene fails the job and is not left to the runner's six hours. A failure runs the same scan for the key and the canary
 over every scene's record and uploads it as
 `rehearsal-discord-scenes-<run id>-<attempt>` (reference),
 `rehearsal-discord-claude-code-scenes-<run id>-<attempt>` or
 `rehearsal-discord-codex-scenes-<run id>-<attempt>` only after a clean scan.
-Run here, a scene took 5 to 30 seconds. None has run in CI.
+Run here, a scene took 5 to 60 seconds (the longest,
+`build-finishes-long-after-promise`, 25 messages each with a turn). None has run
+in CI.
 
 **What it does not prove.** The agent and attention are scripted, so this
 shows that the director posts a scene as a room would see it, that the
@@ -1060,9 +1235,21 @@ reference and each harness hear it as sent and act on the script (through
 their own tools, for Claude Code and Codex), and that the grader reads
 the result both ways (`tests/v2/test_rehearsal_directed.py` grades a synthetic
 move for every fitting move, every miss and every unlisted move of every
-scene). It says nothing about how well any model reads the room: that needs a
-live run, a later part of PR 4, and Zoe's review of the scenes first
-(`evals/behavior/README.md`). Hermes is parked (`AGENTS.md`): its lane keeps
+scene). The scenes of PR 4c are played with three stand-ins that a live
+run would not have: a cue the model will see in history, a room whose hours were
+seconds, and a turn held at the model endpoint (a live model is not held, and
+its composing takes the time it takes, so which message lands while it composes
+is a matter of timing there). One scene is also played in another order than
+it is written: in `asked-while-busy` the agent's reply comes after Zoe's thanks,
+not before it. A live model would compose that reply with the thanks already
+in the room and may drop it after the look page, so the reply cannot be
+assumed live, and "Vigil answered Zoe but not Sam" holds only after the
+thanks. What a hold shows is that the core's look before
+posting and the page it hands the agent work through each harness's own tools,
+and that the grade reads the room after it. It says nothing about how well any
+model reads the room: that needs a live run, a later part of PR 4, and Zoe's
+review of the scenes first (`evals/behavior/README.md`). Six scenes are still
+not played (the table above). Hermes is parked (`AGENTS.md`): its lane keeps
 its moments and plays no scene.
 
 ## What a pass means
@@ -1097,7 +1284,10 @@ and `summary.md` opens with every reason (`evals/rehearsal/checks.py`):
   graded moment did not read `fits` with step 1 `ok` and exactly the action the
   script makes, the agent did something outside the graded turns, or a message
   the director posted never reached Nunchi (`directed-outcomes`, naming the
-  moment); in either, a wait for the room to go quiet timed out;
+  moment); in either, a wait for the room to go quiet timed out; and, in a
+  scene with the agent's own earlier lines or a held turn, a line did not land
+  exactly as the scene has it, or a hold did not hold (`raced`, `unseen`,
+  `unmerged`, `never-asked`);
 - the pins, the isolation or the record did not hold: among them, a
   recorded process got a key other than its harness's own (Nunchi's keys
   stay in Nunchi's process), or, where Hermes's own builders show it, the
@@ -1180,7 +1370,7 @@ the scripted probe's own test included), in the Claude Code (`claude-code-mod`),
 Codex and Hermes lanes of `ci.yml`, with no secret. It runs `--room discord
 --scripted` inside the launcher for Claude Code, Codex, the reference and
 Hermes (The Discord room and The Hermes column), and, in the jobs of the
-reference, Claude Code and Codex, the four directed scenes (Directed scenes).
+reference, Claude Code and Codex, the eleven directed scenes (Directed scenes).
 
 ## Model routes and keys
 

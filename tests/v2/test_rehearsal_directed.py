@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 import shutil
 import tempfile
+import threading
 import time
 from types import SimpleNamespace
 import unittest
@@ -42,26 +43,49 @@ ROOT = Path(__file__).resolve().parents[2]
 # `test_every_behavior_scene_is_classified` until it is listed here, and so does a scene whose
 # plan changed: update `docs/rehearsal.md` (the table in "Directed scenes") with it.
 PINNED = {
-    "addressee-first": ("agent-event", "pause"),
-    "addressee-never-answers": ("agent-event",),
+    "addressee-first": ("pause",),
+    "addressee-never-answers": (),
     "answered-by-someone-else": ("seen-through",),
-    "answered-while-composing": ("agent-event", "during-turn"),
-    "approval-comes-through": ("agent-event", "outcome", "pause"),
-    "asked-while-busy": ("agent-event", "unattended"),
+    "answered-while-composing": (),
+    "approval-comes-through": ("outcome", "pause"),
+    "asked-while-busy": (),
     "bot-status-report": (),
-    "build-finishes-after-promise": ("agent-event",),
-    "build-finishes-long-after-promise": ("agent-event",),
-    "did-you-see": ("agent-event",),
+    "build-finishes-after-promise": (),
+    "build-finishes-long-after-promise": (),
+    "did-you-see": (),
     "mention-in-busy-room": (),
-    "never-mind-while-composing": ("agent-event", "during-turn"),
-    "only-they-can-do-it": ("agent-event", "pause"),
-    "quiet-for-hours": ("agent-event",),
+    "never-mind-while-composing": (),
+    "only-they-can-do-it": ("pause",),
+    "quiet-for-hours": ("time",),
     "said-it-would-check": (),
     "story-across-messages": (),
     "two-agents-one-question": ("several-participants",),
 }
-# The four the lane plays in CI, one run each.
-PLAYABLE = ("bot-status-report", "mention-in-busy-room", "said-it-would-check", "story-across-messages")
+# The eleven the lane plays in CI, one run each: the four of PR 4a and 4b, and the seven of PR 4c.
+PLAYABLE = (
+    "addressee-never-answers",
+    "answered-while-composing",
+    "asked-while-busy",
+    "bot-status-report",
+    "build-finishes-after-promise",
+    "build-finishes-long-after-promise",
+    "did-you-see",
+    "mention-in-busy-room",
+    "never-mind-while-composing",
+    "said-it-would-check",
+    "story-across-messages",
+)
+# The four scenes of PR 4a and 4b, as the CI loops list them first; the seven of PR 4c follow.
+FIRST_FOUR = ("bot-status-report", "story-across-messages", "said-it-would-check", "mention-in-busy-room")
+SEVEN = tuple(scene for scene in PLAYABLE if scene not in FIRST_FOUR)
+# What the core's look before posting tells an agent when a message arrived while it composed (`standin.NEWS_MARK`).
+NEWS = f"{standin.NEWS_MARK} 1 new message(s) arrived while you were composing."
+
+
+def _news(script, event):
+    """The page a held turn is shown before it decides: a graded moment whose own turn is held has one, any other none."""
+
+    return NEWS if event in script.gates else None
 
 
 def _scene(events: list[dict], moments: list[dict], **fields) -> object:
@@ -116,24 +140,78 @@ class PlanTest(unittest.TestCase):
     def test_a_scene_that_cannot_be_played_says_why_and_a_playable_one_does_not(self):
         plans = {item.scene.id: item for item in directed.load_plans()}
         self.assertIsNone(plans["story-across-messages"].unplayable)
-        self.assertIn("never posts as the agent", plans["addressee-never-answers"].unplayable)
-        self.assertIn("v1", plans["addressee-never-answers"].unplayable)
+        self.assertIsNone(plans["addressee-never-answers"].unplayable, "its v1 is the agent's own line, played on a cue (PR 4c)")
         self.assertIn("look-again timer", plans["only-they-can-do-it"].unplayable)
+        self.assertIn("look-again timer", plans["addressee-first"].unplayable)
         self.assertIn("several agents", plans["two-agents-one-question"].unplayable)
+        self.assertIn("hours of quiet", plans["quiet-for-hours"].unplayable)
+        self.assertIn("m1 follows 7 hours of quiet", plans["quiet-for-hours"].unplayable)
+        self.assertIn("approved action", plans["approval-comes-through"].unplayable)
 
-    def test_the_agents_own_event_makes_a_scene_unplayable_and_the_director_refuses_to_play_it(self):
-        # What a scene says Vigil said earlier is knowledge nobody can plant: the director never posts as the agent.
+    def test_an_event_of_the_agents_own_is_played_by_the_agent_as_its_move_on_a_message_never_posted_by_the_director(self):
+        # What a scene says Vigil said earlier is a line the agent says itself: the director never posts as the agent.
         scene = _scene(
             [
-                {"id": "v1", "author": "vigil", "at": "-2h", "text": "I rewrote the backoff."},
+                {"id": "z1", "author": "zoe", "at": "-2h", "mentions": ["vigil"], "text": "Vigil, can you check the build?"},
+                {"id": "v1", "author": "vigil", "at": "-2h", "reply_to": "z1", "text": "I will."},
+                {"id": "r1", "type": "reaction", "author": "vigil", "at": "-1h", "target": "z1", "reaction": "x"},
                 {"id": "q1", "author": "zoe", "at": "0s", "mentions": ["vigil"], "text": "Vigil, how does it work?"},
             ],
             [_moment("q1", ["speak"])],
         )
+        # Two lines on one message: the agent makes one action per turn, so the second cannot be placed.
+        self.assertEqual(("agent-event",), directed.plan(scene).reasons)
+        self.assertIn("r1 is a second move on z1", directed.plan(scene).unplayable)
+        with self.assertRaisesRegex(directed.Unplayable, "second move on z1"):
+            directed.play_scene(SimpleNamespace(), directed.plan(scene), 1.0)
+        fine = _scene([*scene.events[:2], scene.events[3]], [_moment("q1", ["speak"])])
+        item = directed.plan(fine)
+        self.assertEqual((), item.reasons)
+        self.assertEqual([("v1", "z1", "reply", "I will.", False)], [(l.event, l.trigger, l.kind, l.text, l.cue) for l in item.lines])
+        self.assertEqual((), item.cues)
+
+    def test_a_line_that_cannot_be_placed_is_refused_and_says_which(self):
+        def refused(events, moments, expect):
+            item = directed.plan(_scene(events, moments))
+            self.assertEqual(("agent-event",), item.reasons)
+            self.assertIn(expect, item.unplayable)
+
+        z1 = {"id": "z1", "author": "zoe", "at": "-2m", "mentions": ["vigil"], "text": "Vigil, a question?"}
+        q = {"id": "q1", "author": "zoe", "at": "0s", "text": "Vigil, anything else?"}
+        # A line on a message a moment grades: the graded moment is the agent's own move there.
+        refused([z1, {"id": "v1", "author": "vigil", "at": "-1m", "reply_to": "z1", "text": "Yes."}, q], [_moment("z1", ["speak"])], "which a moment grades")
+        # A line on the agent's own line.
+        refused(
+            [z1, {"id": "v1", "author": "vigil", "at": "-90s", "reply_to": "z1", "text": "Yes."},
+             {"id": "v2", "author": "vigil", "at": "-60s", "reply_to": "v1", "text": "Really."}, q],
+            [_moment("q1", ["speak"])],
+            "which is its own event",
+        )
+        # Two lines that answer nothing would need two cues, with the same words.
+        refused(
+            [{"id": "v1", "author": "vigil", "at": "-3m", "text": "One."}, {"id": "v2", "author": "vigil", "at": "-2m", "text": "Two."}, q],
+            [_moment("q1", ["speak"])],
+            "a cue is already added for another line",
+        )
+
+    def test_a_line_that_answers_nothing_is_cued_by_a_message_of_a_persons_added_just_before_it(self):
+        scene = _scene(
+            [
+                {"id": "v1", "author": "vigil", "at": "-3h", "text": "Heads up: the cert expired."},
+                {"id": "q1", "author": "sam", "at": "0s", "text": "Anyone know why the deploy failed?"},
+            ],
+            [_moment("q1", ["speak"])],
+        )
         item = directed.plan(scene)
-        self.assertEqual(("agent-event",), item.reasons)
-        with self.assertRaisesRegex(directed.Unplayable, "never posts as the agent"):
-            directed.play_scene(SimpleNamespace(), item, 1.0)
+        self.assertEqual((), item.reasons)
+        # The first human who posts in the scene cues it, naming the agent, and the cue is a trigger like any message.
+        self.assertEqual(
+            [{"id": "cue-v1", "author": "sam", "mentions": ["vigil"], "text": "Vigil, anything to report?", "before": "v1"}],
+            [dict(cue) for cue in item.cues],
+        )
+        self.assertEqual([("v1", "cue-v1", "message", True)], [(l.event, l.trigger, l.kind, l.cue) for l in item.lines])
+        # Played live from the cue: nothing after the agent's first line can be backdated, and its three hours are seconds.
+        self.assertEqual((0, 2, 3 * 3600), (len(item.history), len(item.live), item.compressed))
 
     def test_other_reasons_a_scene_cannot_be_played(self):
         reaction = _scene(
@@ -162,6 +240,17 @@ class PlanTest(unittest.TestCase):
         busy = plans["mention-in-busy-room"]
         self.assertEqual(("c20", "c21"), (ids(busy.history)[-1], ids(busy.live)[0]))
         self.assertEqual((21, 11), (len(busy.history), len(busy.live)))
+        # A scene with a line of the agent's is played live from the message that triggers it (or from the cue): the stand-in stamps the
+        # agent's post at the wall, so nothing after it can be backdated, and the scene's own time is compressed.
+        for scene_id in SEVEN:
+            with self.subTest(scene=scene_id):
+                self.assertEqual([], ids(plans[scene_id].history))
+                self.assertGreater(plans[scene_id].compressed, 0)
+        self.assertEqual({"asked-while-busy": 50, "answered-while-composing": 3 * 3600, "never-mind-while-composing": 3 * 3600,
+                          "build-finishes-after-promise": 50 * 60, "build-finishes-long-after-promise": 3 * 3600,
+                          "did-you-see": 12 * 60, "addressee-never-answers": 2 * 3600},
+                         {scene_id: plans[scene_id].compressed for scene_id in SEVEN})
+        self.assertEqual(0, plans["story-across-messages"].compressed)
         for item in plans.values():
             with self.subTest(scene=item.scene.id):
                 self.assertEqual(ids(item.scene.events), ids(item.history) + ids(item.live))
@@ -171,19 +260,21 @@ class PlanTest(unittest.TestCase):
     def test_spec_names_the_playable_scenes_when_asked_for_one_that_cannot_be_played(self):
         self.assertEqual("story-across-messages", directed.spec("story-across-messages").name)
         with self.assertRaises(directed.Unplayable) as caught:
-            directed.spec("addressee-never-answers")
+            directed.spec("quiet-for-hours")
         self.assertIn("Playable: " + ", ".join(PLAYABLE), str(caught.exception))
         with self.assertRaisesRegex(directed.Unplayable, "no behavior scene is called 'nope'"):
             directed.spec("nope")
 
     def test_a_graded_message_has_text_of_its_own_so_the_script_can_tell_it_from_the_chatter(self):
         for scene_id in PLAYABLE:
-            scene = next(item.scene for item in directed.load_plans() if item.scene.id == scene_id)
-            graded = {moment.event for moment in scene.moments}
-            for event in scene.events:
-                if event["id"] in graded:
-                    with self.subTest(scene=scene_id, event=event["id"]):
-                        self.assertEqual([event["id"]], [other["id"] for other in scene.events if other["text"] == event["text"]])
+            item = directed.spec(scene_id)
+            scene = item.plan.scene
+            # The messages the script must tell apart: the graded ones and those that trigger a line of the agent's (a cue too).
+            known = {moment.event for moment in scene.moments} | {line.trigger for line in item.plan.lines}
+            texts = {event["id"]: event.get("text") for event in scene.events} | {cue["id"]: cue["text"] for cue in item.plan.cues}
+            for event in known:
+                with self.subTest(scene=scene_id, event=event):
+                    self.assertEqual([event], [other for other, text in texts.items() if text == texts[event]])
 
 
 # -- what attention and the agent do -----------------------------------------------------------------------
@@ -206,7 +297,8 @@ class ScriptTest(unittest.TestCase):
                     script.register(text, moment.event)
                     self.assertIs(moment, script.moment(text))
                     self.assertEqual(_expected_lean(moment), script.lean(text))
-                    action = script.action(_turn("discord:message:7", text))
+                    # A moment whose own turn is held decides once the core has shown the turn what landed meanwhile.
+                    action = script.action(_turn("discord:message:7", text), news=_news(script, moment.event))
                     self.assertEqual(action, _validate_inner_action(action))
                     move = agent_move([action])
                     self.assertEqual(standin.SceneScript.intended(moment), move)
@@ -226,7 +318,7 @@ class ScriptTest(unittest.TestCase):
                 with self.subTest(scene=scene_id, moment=moment.label):
                     text = f"<@42> {next(e for e in item.plan.scene.events if e['id'] == moment.event)['text']}"
                     item.script.register(text, moment.event)
-                    made = item.script.action(_turn("discord:message:7", text))
+                    made = item.script.action(_turn("discord:message:7", text), news=_news(item.script, moment.event))
                     expected = directed.scripted_action(moment, "discord:message:7")
                     if expected is None:
                         self.assertEqual({"kind": "silence"}, made)
@@ -869,15 +961,36 @@ class SettledTest(unittest.TestCase):
 
 
 class _Leg:
-    """The part of a leg the director uses: its room, posting through `deliver`, and settling."""
+    """The part of a leg the director uses: its room, posting through `deliver`, and settling.
+
+    A held turn waits at its gate for the model endpoint's first call, which this stands in for: the call arrives (``Gate.pause`` on a
+    thread) as soon as the turn's trigger is posted, and ``log`` keeps the order things happened in.
+    """
 
     def __init__(self, room, spec) -> None:
         self.discord, self.script, self._spec = room, spec.script, spec
         self.settled: list[float] = []
+        self.log: list[tuple[str, str]] = []
+        self.calls: list[threading.Thread] = []
+        for gate in self.script.gates.values():
+            gate.release = self._logged(gate, gate.release)
+
+    def _logged(self, gate, release):
+        def logged():
+            self.log.append(("release", gate.event))
+            release()
+
+        return logged
 
     def deliver(self, raw, at, scene, sequence):
         delivery = self.discord.post(raw, at, scene, self._spec)
         delivery["observed"] = True
+        self.log.append(("post", raw["id"]))
+        gate = self.script.gates.get(raw["id"])
+        if gate is not None:
+            call = threading.Thread(target=gate.pause, daemon=True)
+            call.start()
+            self.calls.append(call)
         return delivery
 
     def settle(self, timeout):
@@ -886,7 +999,7 @@ class _Leg:
 
 
 class DirectorTest(_StandIn, unittest.TestCase):
-    def play(self, scene, **options):
+    def play(self, scene, leg_class=_Leg, **options):
         item = directed.plan(scene)
         self.assertIsNone(item.unplayable)
         spec = directed.DirectedSpec(item, directed.script_for(item))
@@ -896,7 +1009,7 @@ class DirectorTest(_StandIn, unittest.TestCase):
         self.addCleanup(shutil.rmtree, base, True)
         room = _room(base)
         room.fd, room.members = fd, members
-        leg = _Leg(room, spec)
+        leg = leg_class(room, spec)
         return leg, fd, directed.play_scene(leg, item, 5.0, **options)
 
     def test_history_is_backdated_the_graded_messages_are_posted_live_and_the_room_records_no_raise(self):
@@ -1025,14 +1138,19 @@ class DirectorTest(_StandIn, unittest.TestCase):
         self.assertEqual([5.0, 5.0], leg.settled)
         self.assertEqual([], [record for record in fd.wire.records if record.get("kind") == "raise"])
 
-    def test_the_four_playable_scenes_post_without_a_raise_on_the_stand_in(self):
+    def test_the_playable_scenes_post_without_a_raise_on_the_stand_in(self):
         for scene_id in PLAYABLE:
             with self.subTest(scene=scene_id):
                 scene = directed.spec(scene_id).plan.scene
                 leg, fd, played = self.play(scene)
-                self.assertEqual(len(scene.events), len(played["deliveries"]))
+                # Every event but the agent's own is posted, and a line that answers nothing has a cue posted for it.
+                agent = {event["id"] for event in scene.events if event["author"] in scene.participants}
+                self.assertEqual(len(scene.events) - len(agent) + len(played.get("cues", ())), len(played["deliveries"]))
                 self.assertEqual([], [record for record in fd.wire.records if record.get("kind") == "raise"])
                 self.assertEqual([moment.event for moment in scene.moments], [item["event"] for item in played["graded"]])
+                # The director never posts as the agent.
+                authors = {fd.world.messages[delivery["message_id"]]["author_id"] for delivery in played["deliveries"]}
+                self.assertNotIn(fd.world.member("Vigil").id, authors)
 
 
 # -- what the reference leg records for a scene ---------------------------------------------------------------
@@ -1119,9 +1237,9 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(probe.EXIT_USAGE, self.run_main("--harness", "reference", "--scripted", "--scene", "story-across-messages")[0])
 
     def test_a_scene_that_does_not_exist_or_cannot_be_played_is_refused_with_the_reason(self):
-        code, error = self.run_main("--harness", "reference", "--scripted", "--room", "discord", "--scene", "addressee-never-answers")
+        code, error = self.run_main("--harness", "reference", "--scripted", "--room", "discord", "--scene", "quiet-for-hours")
         self.assertEqual(probe.EXIT_USAGE, code)
-        self.assertIn("never posts as the agent", error)
+        self.assertIn("hours of quiet", error)
         self.assertIn("Playable: " + ", ".join(PLAYABLE), error)
         code, error = self.run_main("--harness", "reference", "--scripted", "--room", "discord", "--scene", "nope")
         self.assertEqual(probe.EXIT_USAGE, code)

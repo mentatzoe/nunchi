@@ -56,12 +56,18 @@ NUNCHI_OPENROUTER=... python3 -m evals.behavior.run --models google/gemini-3.8-f
 A scene can also be played as a conversation on Discord, with a director
 that posts its people and bots and grades what the agent did with the same
 `fitting`, `misses` and `step1` (`evals/rehearsal/directed.py`; see
-[`docs/rehearsal.md`](../../docs/rehearsal.md), "Directed scenes"). Four
+[`docs/rehearsal.md`](../../docs/rehearsal.md), "Directed scenes"). Eleven
 scenes can be played today, on the reference, Claude Code and Codex
-columns, offline, with a scripted agent: the director never posts as the
-agent, so a scene that holds an event of the agent's own, or needs a pause or
-a hold on its turn, cannot be set up. Results there say "draft
-expectations", like these.
+columns, offline, with a scripted agent. The director never posts as the
+agent, so the agent says the events of its own that a scene holds (a promise, a
+nod) itself, as its scripted move on the message they answer, with a cue where
+one answers nothing; a message that lands while a turn is under way is posted
+into a turn the scripted model holds. `asked-while-busy` is played in another
+order than it is written (z1, s1, z2, then the agent's reply, not z1, s1, the
+reply, z2), because the thanks must land while the agent is busy; a live model
+could drop that reply, so it cannot be assumed there. A scene that needs a pause, a long quiet,
+an approval, a snapshot or a second agent cannot be set up. Results there say
+"draft expectations", like these.
 
 `--dry-run` uses an offline model that always wakes, to check the plumbing.
 A live run sends each moment through the production observation and

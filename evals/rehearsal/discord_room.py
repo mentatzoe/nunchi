@@ -64,7 +64,10 @@ answers, and for the thread question the thread it was said in.
 With ``--scene`` (PR 4a, the reference; PR 4b, Claude Code and Codex too) the
 moments above give way to one behavior scene, played by the director
 (`directed.py`) and graded from its own expectations; see `ReferenceLeg` and
-`OnTheTransport`. Hermes is parked and plays none.
+`OnTheTransport`. Since PR 4c a scene may hold the agent's own earlier lines,
+which the agent says as its scripted moves, and a turn the scripted model
+endpoint holds while the director posts what lands in it. Hermes is parked and
+plays none.
 """
 
 from __future__ import annotations
@@ -171,6 +174,9 @@ REFERENCE_PINS = {"first-message": REACHED, "thread": REACHED}
 # The reference runs discord.py; the stand-in's shape pin is discord.py 2.7.1's.
 REFERENCE_PIN = "discord.py 2.7.1"
 PARTICIPANT_KEY_ENV = "NUNCHI_PARTICIPANT_API_KEY"
+# How long the reference's host waits for its participant model's answer. A scene's held turn is held at that model endpoint, so
+# `standin.HOLD_SECONDS` stays under it (Claude Code and Codex wait for minutes).
+PARTICIPANT_TIMEOUT_SECONDS = 30
 BOT_TOKEN_ENV = "DISCORD_BOT_TOKEN"
 
 # The console scripts, run as their entry points do: ``main`` from the same module.
@@ -205,10 +211,14 @@ TRANSPORT_ALWAYS = tuple(call for call in TRANSPORT_CALLS if call not in (POST, 
 
 
 def directed_calls(moments: Sequence[Mapping[str, Any]], always: Sequence[str] = ("GET /users/@me",)) -> tuple[str, ...]:
-    """The calls a column must make in a directed scene: ``always`` (the reference's login by default), and a post or a reaction where the script makes one."""
+    """The calls a column must make in a directed scene: ``always`` (the reference's login by default), and a post or a reaction where the script makes one, in a graded moment or as an earlier line of the agent's."""
 
     scripted = {item.get("scripted") for moment in moments if moment.get("expect") == "directed" for item in moment.get("graded", ())}
-    return (*always, *((POST,) if "speak" in scripted else ()), *((REACT,) if "mhm" in scripted else ()))
+    # The agent's own earlier lines are made too: a post or a reply where the scene has it say something, a reaction where it nodded.
+    earlier = {line.get("kind") for moment in moments if moment.get("expect") == "directed" for line in moment.get("lines", ())}
+    posts = "speak" in scripted or bool(earlier & {"message", "reply"})
+    reacts = "mhm" in scripted or "reaction" in earlier
+    return (*always, *((POST,) if posts else ()), *((REACT,) if reacts else ()))
 
 
 # The transport journal's outcomes that mean a gap (`nunchi.mcp_discord.server.TransportAuditJournal`).
@@ -1019,7 +1029,7 @@ def judge_discord_moments(leg: Leg, moments: Sequence[dict[str, Any]], received:
 class OnTheTransport:
     """Claude Code or Codex in the Discord room: its own `nunchi-mcp-discord`, and its runner in this process.
 
-    With ``--scene`` (``ctx.directed``, PR 4b) it plays one behavior scene
+    With ``--scene`` (``ctx.directed``, PR 4b; PR 4c adds lines and holds) it plays one behavior scene
     instead of the moments, as the reference does (`ReferenceLeg`): the world
     holds that scene's people and bots, attention and the harness's scripted
     model endpoint follow its `SceneScript` (the scripted move for a graded
@@ -1273,7 +1283,7 @@ class ReferenceLeg(Leg):
                     "base_url": self.participant_endpoint.base_url,
                     "provider": "scripted",
                     "api_key_env": PARTICIPANT_KEY_ENV,
-                    "timeout_seconds": 30,
+                    "timeout_seconds": PARTICIPANT_TIMEOUT_SECONDS,
                 },
                 "transport": {"bot_token_env": BOT_TOKEN_ENV},
             }

@@ -13,10 +13,15 @@ someone else, a story told across messages.
 Two rules bind the director:
 
 - **It never posts as the agent.** Every visible move is the agent's own,
-  and the stand-in refuses a post as a harness's bot. A scene that leans on
-  the agent's earlier words, or on a message it would have posted, cannot be
-  set up, so `plan` calls it unplayable and says why (the reasons are listed
-  in `REASONS`; `docs/rehearsal.md` has the table).
+  and the stand-in refuses a post as a harness's bot. A scene that holds an
+  earlier line of the agent's (a promise it made, a nod it gave) therefore
+  has the agent say it itself, as its scripted move on the message it answers
+  (PR 4c, `standin.Line`), and the run checks the line landed exactly as the
+  scene has it. A line that answers nothing gets a cue: one added person
+  message posted just before it, whose scripted answer is the line. The cue
+  is recorded ("played with a cue") because a live model sees it in history.
+  `plan` calls a scene unplayable only when it cannot place such a line, and
+  says why (`REASONS`; `docs/rehearsal.md` has the table).
 - **Scenes are drafts** (`evals/behavior/README.md`). Every result says
   "draft expectations": it compares the agent with a draft, and is not a
   finding about the model until Zoe reviews the scene.
@@ -27,9 +32,25 @@ clock only moves forward. The room's clock is then moved to the wall
 (`advance`) and the rest is posted live, in order, one message after
 another, each after the room has gone quiet. Their gaps are `pace` times the
 scene's own (0 scripted: no wait). The stand-in stamps the agent's own post
-at the wall, so gaps after the agent first posts cannot be kept; `advance`
-does not move the agent's look-again timer (300 real seconds), so a scene
-that needs a pause cannot be played here either.
+at the wall, so nothing after the agent's first line can be backdated: a scene
+with a line of the agent's is played live from the message that triggers it,
+and its time is compressed (the result says so). `advance` does not move the
+agent's look-again timer (300 real seconds), so a scene that needs a pause
+cannot be played here either.
+
+A hold (PR 4c) puts a message into a turn that is under way, which is what
+a one-person test cannot show. The scripted model endpoint holds the turn's
+first model call (`standin.Gate`); the director waits until the endpoint has
+it, posts the scene's `during_turn` messages (or the `unattended` ones, with
+the moment's own message, which also arrives while the agent is busy), waits
+for them to reach Nunchi, and releases the call. The same gate holds each
+column's turn. The agent's first attempt is what it had ready; the core's look
+before posting holds it back and shows the agent the page of news; and the
+script then does what the scene fits. The result says how each hold went:
+`held`, `raced` (the turn went on before a held message reached Nunchi: not a
+miss, but the scripted run fails), `unseen` (the held message reached Nunchi
+and the core did not show it to the turn), `unmerged` (an unattended message
+was judged on its own, or read twice, and not only with the moment) or `never-asked`.
 
 A graded message's grade is the move the room saw: the turns the message
 started (or was listed as unattended in), their delivered actions
@@ -38,9 +59,9 @@ started (or was listed as unattended in), their delivered actions
 attention said of it: the room saw the agent's move. The scripted run is held
 to more than the kind of move (`checks.directed_outcomes`): the delivered
 actions must be exactly the one the script makes, about the graded message
-(`off_script`), nothing may be committed outside the graded turns
-(`other_actions`), every message posted must reach Nunchi, and no wait for the
-room to go quiet may time out.
+(`off_script`), nothing may be committed outside the graded turns and the
+turns that play the agent's own lines (`other_actions`), every message posted
+must reach Nunchi, and no wait for the room to go quiet may time out.
 """
 
 from __future__ import annotations
@@ -57,22 +78,30 @@ from evals.behavior.score import agent_move, grade, visible_result
 
 from . import checks as checks_module
 from .probe import PARTICIPANT, ROOT
-from .standin import SCENE_NOD, SCENE_SAY, SceneScript
+from .standin import SCENE_NOD, SCENE_SAY, Line, SceneScript, timestamp
 
 # Events older than this before the first graded message are history: backdated, not played.
 HISTORY_SECONDS = 600
+# A graded message that follows a quiet longer than this, in a scene that holds a line of the agent's, cannot be played: the
+# stand-in stamps the agent's post at the wall, so the hours of quiet the scene is about would be seconds.
+QUIET_SECONDS = 4 * 3600
+# How long the director waits for the agent's model to be asked about a held turn (a harness process has to start first).
+HOLD_ASK_SECONDS = 60.0
+# The person's message the director adds just before an earlier line of the agent's that answers nothing in the scene (a cue).
+CUE_TEXT = "{agent}, anything to report?"
 
 # Why a scene cannot be played, in the order they are listed; `docs/rehearsal.md` explains each.
 REASONS = {
     "several-participants": "it is judged from several agents' points of view, and the room has one agent",
     "other-participant": "it is judged from another agent's point of view than the rehearsal's",
-    "agent-event": "it holds an event of the agent's own, and the director never posts as the agent",
+    "agent-event": "it holds an event of the agent's own that the agent cannot play as its scripted move on a message",
     "reaction-event": "it holds a reaction by someone else, which the director cannot add",
     "outcome": "it settles an approved action, and the Discord lanes have no approval path",
     "seen-through": "its moment is judged after later messages, a snapshot the live pipeline cannot be asked for",
-    "during-turn": "a message must arrive while the agent composes, and the director cannot hold a turn",
-    "unattended": "a message must arrive while the agent is busy, and the director cannot hold a turn",
+    "during-turn": "a message must arrive while the agent composes, and the scene's held messages cannot be placed in a turn",
+    "unattended": "a message must arrive while the agent is busy, and no line of the agent's was being composed then",
     "pause": "it needs a pause, and the agent's look-again timer counts 300 real seconds",
+    "time": "it is about hours of quiet, and the agent's own post is stamped at the wall, so the hours would become seconds",
 }
 
 SCENE_DIRECTORY = BEHAVIOR_SCENES / "behavior"
@@ -80,6 +109,27 @@ SCENE_DIRECTORY = BEHAVIOR_SCENES / "behavior"
 
 class Unplayable(ValueError):
     """A scene cannot be played on Discord, or does not exist."""
+
+
+@dataclass(frozen=True)
+class Hold:
+    """A turn the scripted model's first call is held for, and the messages that arrive while it is held (rehearsal PR 4c).
+
+    ``trigger`` is the scene event whose turn is held and ``events`` the
+    scene's messages that land in it, in the scene's order. A ``during-turn``
+    moment holds its own turn (the messages that arrive while the agent is
+    composing its answer). An ``unattended`` moment holds the turn the agent
+    was busy with, the one that plays the line it was composing: the
+    unattended messages and the moment's own message all arrive while it is
+    busy, since Nunchi then reads them as a single moment (#94 step 6). Posted
+    after the turn, the first would be judged on its own. ``moment`` is the
+    graded event the hold is for.
+    """
+
+    trigger: str
+    events: tuple[str, ...]
+    kind: str
+    moment: str
 
 
 @dataclass(frozen=True)
@@ -93,6 +143,15 @@ class Plan:
     reasons: tuple[str, ...] = ()
     # The same as a sentence, naming the events and moments; None when it can be played.
     unplayable: str | None = None
+    # The scene's events of the agent's own, each played by the agent as its scripted move on a message (`standin.Line`),
+    # and the cues the director adds for the ones that answer nothing: {id, author, mentions, text, before}.
+    lines: tuple[Line, ...] = ()
+    cues: tuple[Mapping[str, Any], ...] = ()
+    # The turns that are held while messages land in them.
+    holds: tuple[Hold, ...] = ()
+    # How many seconds of the scene's own time play out in seconds, because a line of the agent's is stamped at the wall
+    # and nothing after it can be backdated; 0 where the scene has no line.
+    compressed: int = 0
 
 
 def _offsets(scene: Scene) -> list[int]:
@@ -104,6 +163,99 @@ def _offsets(scene: Scene) -> list[int]:
     return found
 
 
+def _cue_author(scene: Scene) -> str | None:
+    """The person whose message cues a line of the agent's: the first human who posts in the scene."""
+
+    for kind in ("human", None):
+        for event in scene.events:
+            actor = scene.actors.get(event["author"], {})
+            if event["author"] not in scene.participants and (kind is None or actor.get("kind") == kind):
+                return event["author"]
+    return None
+
+
+def _lines(scene: Scene, refuse: Any) -> tuple[list[Line], list[dict[str, Any]]]:
+    """The scene's events of the agent's, as lines it can play on a message, and the cues for those that answer nothing.
+
+    An event that answers or reacts to a person's message is the agent's
+    scripted move on that message. One that answers nothing is its move on a
+    cue, a message of a person's the director adds just before it. Anything
+    else (a line on a graded message, two lines on one message, one on the
+    agent's own event, several cues) cannot be placed and is refused.
+    """
+
+    graded = {moment.event for moment in scene.moments if moment.event}
+    own = {event["id"] for event in scene.events if event["author"] in scene.participants}
+    found: list[Line] = []
+    cues: list[dict[str, Any]] = []
+    taken: set[str] = set()
+    for event in scene.events:
+        if event["author"] not in scene.participants:
+            continue
+        kind = "reaction" if event.get("type", "message") == "reaction" else ("reply" if event.get("reply_to") else "message")
+        trigger = event.get("target") if kind == "reaction" else event.get("reply_to")
+        if kind == "message":
+            author = _cue_author(scene)
+            if cues or author is None:
+                refuse("agent-event", f"{event['id']} answers nothing, and {'a cue is already added for another line' if cues else 'no person posts to cue it'}")
+                continue
+            trigger = f"cue-{event['id']}"
+            cues.append(
+                {
+                    "id": trigger,
+                    "author": author,
+                    "mentions": list(scene.participants),
+                    "text": CUE_TEXT.format(agent=scene.actors[scene.participants[0]].get("display_name", scene.participants[0])),
+                    "before": event["id"],
+                }
+            )
+        elif trigger in own or trigger in graded:
+            refuse("agent-event", f"{event['id']} is the agent's move on {trigger}, which {'is its own event' if trigger in own else 'a moment grades'}")
+            continue
+        if trigger in taken:
+            refuse("agent-event", f"{event['id']} is a second move on {trigger}, and the agent makes one action per turn")
+            continue
+        taken.add(trigger)
+        found.append(
+            Line(event["id"], trigger, kind, text=event.get("text"), reaction=event.get("reaction") if kind == "reaction" else None, cue=kind == "message")
+        )
+    return found, cues
+
+
+def _begins(line: Line, position: Mapping[str, int]) -> int:
+    """Where in the scene the agent's turn on a line begins: at the message it answers, or, for a cue, just before the line."""
+
+    return position[line.event] if line.cue else position[line.trigger]
+
+
+def _holds(scene: Scene, lines: Sequence[Line], refuse: Any) -> list[Hold]:
+    """The turns to hold: where a message must arrive while the agent composes (`during_turn`) or is busy (`unattended`)."""
+
+    position = {event["id"]: index for index, event in enumerate(scene.events)}
+    own = {event["id"] for event in scene.events if event["author"] in scene.participants}
+    found: list[Hold] = []
+    for moment in scene.moments:
+        if moment.event is None:
+            continue
+        if moment.during_turn:
+            if any(event in own for event in moment.during_turn):
+                refuse("during-turn", f"{moment.label}: the agent's own event cannot arrive during its turn")
+                continue
+            found.append(Hold(moment.event, tuple(moment.during_turn), "during-turn", moment.event))
+        if moment.unattended:
+            # The agent was busy with a line of its own, begun before the first unattended message and said after it. A line
+            # that answers nothing begins where it is said (its cue is just before it), so it is never the one.
+            first = min(position[event] for event in moment.unattended)
+            busy = [line for line in lines if _begins(line, position) < first < position[line.event]]
+            if not busy:
+                refuse("unattended", f"{moment.label}: the agent says no line while its messages arrive")
+                continue
+            trigger = busy[-1].trigger
+            events = tuple(dict.fromkeys((*moment.unattended, moment.event)))
+            found.append(Hold(trigger, events, "unattended", moment.event))
+    return found
+
+
 def plan(scene: Scene) -> Plan:
     """Sort a scene into what the director can play, and say why when it cannot."""
 
@@ -112,33 +264,49 @@ def plan(scene: Scene) -> Plan:
     def refuse(code: str, detail: str) -> None:
         found.setdefault(code, []).append(detail)
 
+    solo = len(scene.participants) == 1 and scene.participants[0] == PARTICIPANT
     if len(scene.participants) > 1:
         refuse("several-participants", ", ".join(scene.participants))
     elif scene.participants[0] != PARTICIPANT:
         refuse("other-participant", scene.participants[0])
+    lines: list[Line] = []
+    cues: list[dict[str, Any]] = []
+    if solo:
+        lines, cues = _lines(scene, refuse)
     for event in scene.events:
         if event["author"] in scene.participants:
-            refuse("agent-event", event["id"])
+            if not solo:
+                refuse("agent-event", event["id"])
         elif event.get("type", "message") != "message":
             refuse("reaction-event", event["id"])
+    holds = _holds(scene, lines, refuse) if solo else []
     for moment in scene.moments:
         if moment.outcome is not None:
             refuse("outcome", moment.label)
         if moment.seen_through:
             refuse("seen-through", moment.label)
-        if moment.during_turn:
-            refuse("during-turn", moment.label)
-        if moment.unattended:
-            refuse("unattended", moment.label)
         if moment.pause_after:
             refuse("pause", moment.label)
-    reasons = tuple(code for code in REASONS if code in found)
     offsets = _offsets(scene)
-    graded = [scene.event_index(moment.event) for moment in scene.moments if moment.event]
-    first = min(graded) if graded else 0
+    for number, event in enumerate(scene.events):
+        graded = any(moment.event == event["id"] for moment in scene.moments)
+        if lines and graded and number and offsets[number - 1] - offsets[number] > QUIET_SECONDS:
+            hours = (offsets[number - 1] - offsets[number]) // 3600
+            refuse("time", f"{event['id']} follows {hours} hours of quiet")
+    reasons = tuple(code for code in REASONS if code in found)
+    graded_at = [scene.event_index(moment.event) for moment in scene.moments if moment.event]
+    first = min(graded_at) if graded_at else 0
     cut = 0
     while cut < first and offsets[cut] - offsets[first] > HISTORY_SECONDS:
         cut += 1
+    # Nothing after the agent's first line can be backdated, and a held turn starts live: play from the earliest of them.
+    position = {event["id"]: index for index, event in enumerate(scene.events)}
+    starts = [_begins(line, position) for line in lines]
+    compressed = 0
+    if starts:
+        compressed = offsets[min(starts)] - min(offsets[min(starts):])
+        cut = min(cut, min(starts))
+    cut = min([cut, *(position[hold.trigger] for hold in holds)])
     return Plan(
         scene=scene,
         history=tuple(scene.events[:cut]),
@@ -147,6 +315,10 @@ def plan(scene: Scene) -> Plan:
         unplayable=(
             "; ".join(f"{REASONS[code]} ({', '.join(found[code])})" for code in reasons) if reasons else None
         ),
+        lines=tuple(lines),
+        cues=tuple(cues),
+        holds=tuple(holds),
+        compressed=compressed,
     )
 
 
@@ -163,7 +335,7 @@ def script_for(scene_plan: Plan) -> SceneScript:
     for moment in scene_plan.scene.moments:
         if moment.event:
             moments.setdefault(moment.event, moment)
-    return SceneScript(moments)
+    return SceneScript(moments, lines=scene_plan.lines, holds=[hold.trigger for hold in scene_plan.holds])
 
 
 @dataclass(frozen=True)
@@ -243,6 +415,62 @@ def graded_moments(scene: Scene, deliveries: Sequence[Mapping[str, Any]]) -> lis
     return entries
 
 
+def _line_record(line: Line) -> dict[str, Any]:
+    return {
+        "event": line.event,
+        "trigger": line.trigger,
+        "kind": line.kind,
+        "text": line.text,
+        "reaction": line.reaction,
+        "cue": line.cue,
+    }
+
+
+def _hold_scene(
+    leg: Any,
+    spec: Hold,
+    trigger: dict[str, Any],
+    events: Mapping[str, Mapping[str, Any]],
+    post: Any,
+    settle_seconds: float,
+) -> dict[str, Any]:
+    """Hold the turn on ``spec.trigger``: wait until the model is asked about it, post what lands in it, release it, let the room settle.
+
+    The held messages are posted one after another, each waited on until
+    Nunchi has taken it in (``leg.deliver``), so that the release comes after
+    all of them have arrived. Each is stamped when it had (``delivered_at``),
+    and the gate stamps the release: `hold_outcome` compares the two. The wait
+    for the room to go quiet is one wait, recorded on the trigger and on every
+    held message.
+    """
+
+    gate = leg.script.gates[spec.trigger]
+    asked = gate.wait_asked(HOLD_ASK_SECONDS)
+    arrived = []
+    for event in spec.events:
+        delivery = post(events[event], None)
+        delivery["phase"] = "live"
+        delivery["delivered_at"] = timestamp(datetime.now(timezone.utc))
+        delivery["held_for"] = spec.trigger
+        arrived.append(delivery)
+    gate.release()
+    settled = leg.settle(settle_seconds)
+    for delivery in (trigger, *arrived):
+        delivery["settled"] = settled
+    return {
+        "trigger": spec.trigger,
+        "kind": spec.kind,
+        "moment": spec.moment,
+        "events": list(spec.events),
+        "asked": asked,
+        "held": [
+            {"event": delivery["scene_event"], "event_id": delivery["event_id"], "observed": bool(delivery.get("observed")),
+             "delivered_at": delivery["delivered_at"]}
+            for delivery in arrived
+        ],
+    }
+
+
 def play_scene(leg: Any, scene_plan: Plan, settle_seconds: float, pace: float = 0.0) -> dict[str, Any]:
     """Play a scene on the leg's Discord room and return the record of what was posted, not yet judged.
 
@@ -252,9 +480,14 @@ def play_scene(leg: Any, scene_plan: Plan, settle_seconds: float, pace: float = 
     first, oldest first, backdated; the room's clock is then moved to the
     wall; each live event follows after the room settled, ``pace`` times the
     scene's own gap later. Where the leg has a `SceneScript`, each graded
-    message's text is told to it before it is posted. A wait that timed out is
-    recorded in its delivery (``settled``) and listed in ``unsettled`` (a
-    scripted run fails on it: `checks.unsettled`).
+    message's text is told to it before it is posted, and so is the text of
+    each message that triggers a line of the agent's. A scene's own events of
+    the agent's are not posted: the agent says them as its move on the message
+    that triggers them, and a line that answers nothing is cued by a message
+    the director adds just before it. A held turn (`Hold`) is posted into
+    (`_hold_scene`). A wait that timed out is recorded in its delivery
+    (``settled``) and listed in ``unsettled`` (a scripted run fails on it:
+    `checks.unsettled`).
     """
 
     if scene_plan.unplayable:
@@ -263,13 +496,21 @@ def play_scene(leg: Any, scene_plan: Plan, settle_seconds: float, pace: float = 
     room = leg.discord
     script = getattr(leg, "script", None)
     graded = {moment.event for moment in scene.moments if moment.event}
+    # The script is told the text of every message it must tell apart: the graded ones and those that trigger a line.
+    known = graded | {line.trigger for line in scene_plan.lines}
+    spoken = {line.event for line in scene_plan.lines}
+    cues = {cue["before"]: cue for cue in scene_plan.cues}
+    holds = {hold.trigger: hold for hold in scene_plan.holds}
+    landing = {event for hold in scene_plan.holds for event in hold.events}
+    events = {event["id"]: event for event in scene.events}
     offsets = dict(zip((event["id"] for event in scene.events), _offsets(scene)))
     anchor = offsets[scene_plan.live[0]["id"]]
     now = datetime.now(timezone.utc)
     deliveries: list[dict[str, Any]] = []
+    held: list[dict[str, Any]] = []
 
     def post(raw: Mapping[str, Any], at: datetime | None) -> dict[str, Any]:
-        if isinstance(script, SceneScript) and raw["id"] in graded:
+        if isinstance(script, SceneScript) and raw["id"] in known:
             script.register(room.render(raw, scene), raw["id"])
         delivery = leg.deliver(raw, at, scene, len(deliveries))
         deliveries.append(delivery)
@@ -287,11 +528,24 @@ def play_scene(leg: Any, scene_plan: Plan, settle_seconds: float, pace: float = 
             room.fd.advance(room.column, lag)
     previous: str | None = None
     for raw in scene_plan.live:
+        if raw["id"] in spoken:
+            # The agent's own event: its turn on the message it answers plays it. One that answers nothing is cued here.
+            cue = cues.get(raw["id"])
+            if cue is not None:
+                delivery = post({key: cue[key] for key in ("id", "author", "mentions", "text")}, None)
+                delivery["phase"], delivery["cue"] = "live", True
+                delivery["settled"] = leg.settle(settle_seconds)
+            continue
+        if raw["id"] in landing:
+            continue  # posted while its turn was held
         if previous is not None and pace > 0:
             time.sleep(max(0, offsets[previous] - offsets[raw["id"]]) * pace)
         delivery = post(raw, None)
         delivery["phase"] = "live"
-        delivery["settled"] = leg.settle(settle_seconds)
+        if raw["id"] in holds:
+            held.append(_hold_scene(leg, holds[raw["id"]], delivery, events, post, settle_seconds))
+        else:
+            delivery["settled"] = leg.settle(settle_seconds)
         previous = raw["id"]
     entries = graded_moments(scene, deliveries)
     played = {
@@ -307,6 +561,13 @@ def play_scene(leg: Any, scene_plan: Plan, settle_seconds: float, pace: float = 
         # Whether every graded message reached Nunchi: when one did not, its moment tested nothing.
         "reached": all(entry["reached"] for entry in entries),
     }
+    if scene_plan.lines:
+        # What the scene says the agent said earlier, how it was played (cues), and how much of the scene's time was compressed.
+        played["lines"] = [_line_record(line) for line in scene_plan.lines]
+        played["cues"] = [dict(cue) for cue in scene_plan.cues]
+        played["compressed"] = scene_plan.compressed
+    if held:
+        played["holds"] = held
     late = checks_module.unsettled(deliveries)
     if late:
         # A wait for the room to go quiet ran out: the record may lack what came after (`checks.unsettled`).
@@ -363,6 +624,102 @@ def _off_script(
     return problems
 
 
+def hold_outcome(hold: Mapping[str, Any]) -> tuple[str, str]:
+    """How a hold went, and why, from the record the director and the gate kept.
+
+    ``held``: the model was asked about the turn, every held message had
+    reached Nunchi before the director released it, and the core showed the
+    turn the page that holds them. ``never-asked``: the model was never asked
+    about the turn, so nothing was held. ``raced``: the turn went on before a
+    held message reached Nunchi (the model's wait ran out, or the release came
+    before the message had arrived): the moment was not played as scripted,
+    which is the run's fault and not a miss. ``unseen``: the messages reached
+    Nunchi in time and the core did not show them to the turn before it posted,
+    which is the column's miss. (An ``unattended`` hold that held can still be
+    ``unmerged``, which `judge_scene` decides from the graded turn: see there.)
+    """
+
+    trigger = hold.get("trigger")
+    gate = hold.get("gate") or {}
+    if not hold.get("asked") or not gate.get("asked_at"):
+        return "never-asked", f"the model was never asked about the turn on {trigger}, so nothing was held"
+    released = str(gate.get("released_at") or "")
+    if not released:
+        return "raced", f"the turn on {trigger} was still held when the scene ended: the director never released it"
+    if gate.get("released_by") == "timeout":
+        return "raced", f"the model's wait for the turn on {trigger} ran out, so the turn went on without the held message(s)"
+    late = [
+        str(item.get("event"))
+        for item in hold.get("held", ())
+        if not item.get("observed") or str(item.get("delivered_at") or "~") > released
+    ]
+    if late:
+        return "raced", f"the turn on {trigger} was released before {', '.join(late)} reached Nunchi"
+    shown = set(hold.get("shown") or ())
+    unseen = [str(item.get("event")) for item in hold.get("held", ()) if item.get("event_id") not in shown]
+    if unseen:
+        return "unseen", (
+            f"{', '.join(unseen)} reached Nunchi before the turn on {trigger} was released, and the core did not show the turn "
+            "a page that holds it before the turn posted"
+        )
+    return "held", f"{', '.join(str(item.get('event')) for item in hold.get('held', ()))} reached Nunchi while the turn on {trigger} was held, and the core showed the turn them"
+
+
+def _judge_holds(leg: Any, record: dict[str, Any]) -> None:
+    """Add to each hold the gate's own record, the held messages the turn was shown, and how the hold went (`hold_outcome`)."""
+
+    gates = getattr(getattr(leg, "script", None), "gates", None) or {}
+    for hold in record.get("holds", ()):
+        gate = gates.get(hold["trigger"])
+        hold["gate"] = gate.document() if gate is not None else {}
+        hold["shown"] = gate.shown(item["event_id"] for item in hold["held"]) if gate is not None else []
+        hold["outcome"], hold["detail"] = hold_outcome(hold)
+
+
+def _line_problems(line: Mapping[str, Any], event_id: str | None, actions: Sequence[Mapping[str, Any]]) -> list[str]:
+    """How the delivered ``actions`` of the turn on a line's trigger differ from the one the scene has, in words (none when it landed)."""
+
+    delivered = [action for action in actions if action.get("delivered")]
+    if len(delivered) != 1:
+        return [f"it delivered {len(delivered)} action(s), not the one scripted {line['kind']}"]
+    action, problems = delivered[0], []
+    # A reaction and a reply are about the message they answer (``target_event_id``), a cue's answer by the turn it began on (``origin_event_id``).
+    about = "origin_event_id" if line["kind"] == "message" else "target_event_id"
+    expected = {"kind": "reaction", "reaction": line["reaction"]} if line["kind"] == "reaction" else {"kind": line["kind"], "text": line["text"]}
+    for key, value in expected.items():
+        if action.get(key) != value:
+            problems.append(f"its {key} is {str(action.get(key))[:80]!r}, not the scene's {str(value)[:80]!r}")
+    if action.get(about) != event_id:
+        problems.append(f"its {about} is {action.get(about)}, not the message that triggers it, {event_id}")
+    return problems
+
+
+def _judge_lines(leg: Any, record: dict[str, Any]) -> set[str]:
+    """Check that each of the agent's earlier lines landed exactly as the scene has it; the request ids of the turns that played them.
+
+    A line is the agent's scripted move on a message (`standin.Line`), so its
+    turn must have begun on that message and delivered exactly one action: the
+    scene's words as a reply to it (or a post, for a cue), or its reaction on
+    it. Nothing is graded here: a line that does not land fails the run
+    (`checks.directed_outcomes`), since the moments after it would be judged
+    against a history the agent never had.
+    """
+
+    native = {delivery["scene_event"]: delivery["event_id"] for delivery in record["deliveries"]}
+    played: set[str] = set()
+    for line in record.get("lines", ()):
+        event_id = native.get(line["trigger"])
+        turns = [turn for turn in leg.invocations if event_id and turn.get("trigger") == event_id]
+        requests = {turn["request_id"] for turn in turns}
+        played |= requests
+        actions = [action for action in leg.committed if action.get("request_id") in requests]
+        problems = _line_problems(line, event_id, actions)
+        if not turns:
+            problems.insert(0, f"no turn began on {line['trigger']}, so the agent never got to say it")
+        line.update(event_id=event_id, turns=sorted(requests), actions=[_summary(action) for action in actions], problems=problems)
+    return played
+
+
 def judge_scene(leg: Any, record: dict[str, Any], scene: Scene) -> None:
     """Grade each graded moment of a played scene, in the keys the suite's results use (`score.cell` reads them).
 
@@ -387,6 +744,10 @@ def judge_scene(leg: Any, record: dict[str, Any], scene: Scene) -> None:
     """
 
     native = {delivery["scene_event"]: delivery["event_id"] for delivery in record["deliveries"]}
+    # The turns that play the agent's own earlier lines are the scene's setup: checked to have landed, not graded.
+    played = _judge_lines(leg, record)
+    _judge_holds(leg, record)
+    holds = {hold["moment"]: hold for hold in record.get("holds", ())}
     started: dict[str, dict[str, Any]] = {}
     shown: list[dict[str, Any]] = []
     for item, moment in zip(record["graded"], scene.moments):
@@ -429,25 +790,63 @@ def judge_scene(leg: Any, record: dict[str, Any], scene: Scene) -> None:
         why = moment.miss_reason(result)
         if why:
             item["why"] = why
+        hold = holds.get(item["event"])
+        if hold is not None and hold["kind"] == "unattended" and hold["outcome"] == "held":
+            # The moment is the scene's: the messages that arrived while the agent was busy are read with it, as one moment, and
+            # only with it. A turn that did not list them as unattended read the moment on its own, and they were judged before
+            # it; a message that also started a turn of its own was read twice.
+            listed = {event for turn in own for event in turn.get("unattended") or ()}
+            apart = [event for event in moment.unattended if native.get(event) not in listed]
+            twice = [
+                event
+                for event in moment.unattended
+                if event not in apart and any(turn.get("trigger") == native.get(event) for turn in leg.invocations)
+            ]
+            if apart or twice:
+                hold["outcome"] = "unmerged"
+                hold["detail"] = "; ".join(
+                    [
+                        *(
+                            f"{event} arrived while the agent was busy, but the turn on {item['event']} did not list it as unattended: "
+                            "it was judged on its own, so the moment was not read as the scene has it"
+                            for event in apart
+                        ),
+                        *(
+                            f"{event} was read with {item['event']} as unattended and also started a turn of its own: "
+                            "the moment was not read as the scene has it"
+                            for event in twice
+                        ),
+                    ]
+                )
+        if hold is not None:
+            item["hold"] = hold["outcome"]
         started.update({turn["request_id"]: turn for turn in turns})
         shown += item["actions"]
     record["turns"] = list(leg.invocations)
     record["graded_turns"] = len(started)
     record["graded_wake_sources"] = [turn.get("source") for turn in started.values()]
-    record["other_turns"] = sum(1 for turn in leg.invocations if turn["request_id"] not in started)
-    # What the agent did on the messages nobody graded: the script is silent there.
-    record["other_actions"] = [_summary(action) for action in leg.committed if action.get("request_id") not in started]
+    record["other_turns"] = sum(1 for turn in leg.invocations if turn["request_id"] not in started and turn["request_id"] not in played)
+    # What the agent did on the messages nobody graded: the script is silent there. Its earlier lines are the exception.
+    record["other_actions"] = [
+        _summary(action) for action in leg.committed if action.get("request_id") not in started and action.get("request_id") not in played
+    ]
     record["actions"] = shown
     record["posts"] = [
         {"text": action.get("text"), "delivery": action.get("delivery"), "delivered": bool(action.get("delivered"))}
         for action in shown
         if action.get("kind") in ("message", "reply")
     ]
+    outcomes = {hold["outcome"] for hold in record.get("holds", ())}
     if not record["reached"]:
         record["outcome"] = checks_module.NOT_DELIVERED
+    elif "raced" in outcomes:
+        # The turn went on before a held message reached Nunchi: not played as scripted, and not a miss.
+        record["outcome"] = checks_module.RACED
     elif (
         all(item["grade"]["visible"] == "fits" and item["grade"]["step1"] == "ok" and not item["off_script"] for item in record["graded"])
         and not record["other_actions"]
+        and not any(line.get("problems") for line in record.get("lines", ()))
+        and outcomes <= {"held"}
     ):
         record["outcome"] = checks_module.FITS
     else:

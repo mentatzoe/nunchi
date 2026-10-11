@@ -69,7 +69,9 @@ are in `discord_room.py`. With ``--scene ID`` (PR 4a, the reference; PR 4b,
 Claude Code and Codex too; one scene per run so that each starts from a fresh
 room) it plays that behavior scene instead: a director (`directed.py`) posts
 its people and bots, and each graded moment is graded from the scene's own
-expectations, with a grade matrix in summary.md. The scenes are drafts:
+expectations, with a grade matrix in summary.md. Since PR 4c a scene may hold
+the agent's own earlier lines (said by the agent) and a turn held at the
+scripted model endpoint while messages land in it. The scenes are drafts:
 results say so.
 
 Exit status: 0 every hard check held; 1 a hard check failed, the probe

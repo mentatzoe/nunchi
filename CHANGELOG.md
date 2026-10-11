@@ -13,6 +13,61 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- Directed behavior scenes where timing and the agent's own history matter
+  (step 9f, PR 4c; [docs/rehearsal.md](docs/rehearsal.md), "Directed scenes"):
+  **implemented, unverified** in CI; run here offline inside the launcher
+  (2026-10-11), on Python 3.12 with the pins CI installs, against the pinned
+  Claude Code 2.1.289 (with `--no-sandbox`, since bubblewrap cannot run here)
+  and Codex 0.160.1. Seven more of the behavior suite's scenes now play
+  (`asked-while-busy`, `answered-while-composing`, `never-mind-while-composing`,
+  `build-finishes-after-promise`, `build-finishes-long-after-promise`,
+  `did-you-see`, `addressee-never-answers`; eleven of seventeen), through the
+  reference, Claude Code and Codex, each graded from the scene's own draft
+  expectations. These are the scenes a one-person test cannot show: a message
+  that lands while the agent is composing, a question asked while it is busy, a
+  promise it made and must keep, a nod it gave and is asked about. Each exited
+  0 on all three columns in four passes (84 runs; the last on the code as
+  committed, with the other four scenes and the plain lanes), every hard check holding and every graded moment `fits`/`ok`,
+  with every hold `held`; none raced. No
+  harness column missed a scene the reference passes, so 4c has no finding
+  about an integration. Two mechanisms make them playable, and results name
+  what differs from the scene as written. The director still never posts as
+  the agent: the agent's earlier lines (a promise, a nod) are its own scripted
+  moves on the messages they answer (`standin.Line`), checked to have landed
+  exactly (the kind, the words or reaction, the message, one action, and for a
+  harness a completed room tool call) and held in the next turn's and each
+  graded turn's `memory.own_moves`; a line that answers nothing is **played
+  with a cue**, one added person message ("Vigil, anything to report?") posted
+  just before it, which a live model would see in history; and the scene's
+  **time is compressed**, since the stand-in stamps the agent's post at the
+  wall and nothing after it can be backdated (`quiet-for-hours`, which is
+  about hours of quiet, is refused as `time`). A hold is a gate on the scripted
+  model endpoint (`standin.Gate`), the same for all three columns: the
+  endpoint holds the turn's first model call, the director waits until it has
+  it, posts the scene's `during_turn` messages and waits for them to reach
+  Nunchi, then releases it. The agent's first attempt is the answer it had
+  ready, the core's look before posting holds it back and shows the page, and
+  the script then does what the scene fits. For an `unattended` moment the
+  moment's own message lands in the held turn too (otherwise the earlier
+  message is judged on its own, which the run reports as `unmerged`; run here
+  with only the earlier message landing in the held turn, it failed on all three
+  columns). Each hold
+  reads `held`, `raced` (the turn went on before a held message reached
+  Nunchi: not a miss, and a scripted run still fails), `unseen`, `unmerged` or
+  `never-asked`. Mutations each fail the intended check on all three columns:
+  an agent that answers after it has been shown the page (a listed miss), a
+  line the scene has the agent say that it does not, a release before the held
+  message reached Nunchi, a release that never comes, and a hold that lands only
+  the earlier message of an unattended moment. One scene is **played in another
+  order than it is written**: `asked-while-busy` is written z1, s1, Vigil's
+  reply, z2 (the thanks), and played z1, s1, z2, then the reply, because the
+  thanks must land while the agent is busy for Sam's message to be read with
+  it; results say so. A live model would compose its reply with the thanks
+  already in the room and may drop it after the look page, so the reply cannot
+  be assumed live, and "Vigil answered Zoe but not Sam" holds only after the
+  thanks. CI plays all eleven in the three jobs, each scene step under a
+  timeout. The pause (`addressee-first`,
+  `only-they-can-do-it`) is not played here. No live run yet.
 - Directed behavior scenes through Claude Code and Codex (step 9f, PR 4b;
   [docs/rehearsal.md](docs/rehearsal.md), "Directed scenes"): **implemented,
   unverified** in CI; run here offline inside the launcher against the pinned

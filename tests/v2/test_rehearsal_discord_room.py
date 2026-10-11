@@ -138,7 +138,7 @@ class ScriptTest(unittest.TestCase):
         woken = _turn("discord:message:7", "q", mentioned_actor_ids=[ping], reply_to_event_id=reply)
         in_thread = _turn("discord:message:8", "q2", thread_root_event_id="discord:message:3")
         earlier = _turn("discord:message:6", "e")
-        # The turn's memory: the agent's own moves, as far as the check needs them (kind, the message, the reaction).
+        # The turn's memory: the agent's own moves, as far as the check needs them (kind, the message, the reaction, the words).
         woken["wake"]["memory"] = {"own_moves": [
             {"kind": "reply", "event_id": "discord:message:5", "about_event_id": reply, "text": "an answer", "at": "2026-10-10T10:00:00Z"},
             {"kind": "reaction", "event_id": "discord:reaction:1", "about_event_id": "discord:message:4", "reaction": "x"},
@@ -153,7 +153,7 @@ class ScriptTest(unittest.TestCase):
                                    "thread_root_event_id": None, "own_moves": []},
              "discord:message:7": {"trigger": "discord:message:7", "mentioned_actor_ids": [ping], "reply_to_event_id": reply,
                                    "thread_root_event_id": None,
-                                   "own_moves": [{"kind": "reply", "about_event_id": reply},
+                                   "own_moves": [{"kind": "reply", "about_event_id": reply, "text": "an answer"},
                                                  {"kind": "reaction", "about_event_id": "discord:message:4", "reaction": "x"},
                                                  {"kind": "silence", "about_event_id": "discord:message:6"}]}},
             standin.received_triggers(requests),

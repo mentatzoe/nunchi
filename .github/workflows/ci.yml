@@ -40,7 +40,7 @@ jobs:
     # (zstd-stream). The pin check runs first, so a missing or other
     # discord.py fails the job instead of skipping its tests. Then the
     # reference, nunchi-discord, runs unmodified on the stand-in in the
-    # probe's Discord room, and plays four behavior scenes, directed and graded.
+    # probe's Discord room, and plays eleven behavior scenes, directed and graded.
     name: Discord stand-in (discord.py 2.7.1)
     runs-on: ubuntu-latest
     steps:
@@ -73,6 +73,7 @@ jobs:
         # bubblewrap here. Each moment's outcome and the seven discord-*
         # checks are hard checks.
         id: discord_reference_lane
+        timeout-minutes: 15
         shell: bash
         run: |
           set -euo pipefail
@@ -110,21 +111,26 @@ jobs:
           name: rehearsal-discord-reference-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/rehearsal-discord-out/
           if-no-files-found: ignore
-      - name: Four behavior scenes directed on the stand-in, graded (docs/rehearsal.md)
-        # The same reference, in the same virtualenv, plays four of the behavior
+      - name: Eleven behavior scenes directed on the stand-in, graded (docs/rehearsal.md)
+        # The same reference, in the same virtualenv, plays eleven of the behavior
         # suite's scenes one run each: a director posts the scene's people and
         # bot as Discord messages, and each graded moment is graded from the
         # scene's own expectations (draft expectations, with the scripted agent
-        # and attention, no key). Each run is inside the launcher with
+        # and attention, no key). Seven of them need the agent's own earlier lines
+        # (played by the agent, some on a cue the director adds) or a message that
+        # lands while a turn is held; their time is compressed. Each run is inside the launcher with
         # --offline and a fresh HOME and TMPDIR, as the lane above. A run that
         # fails does not stop the others; the step fails after the last.
         id: discord_scenes_lane
+        timeout-minutes: 20
         shell: bash
         run: |
           set -uo pipefail
           PY="$RUNNER_TEMP/reference-env/bin/python"
           failed=0
-          for scene in bot-status-report story-across-messages said-it-would-check mention-in-busy-room; do
+          for scene in bot-status-report story-across-messages said-it-would-check mention-in-busy-room \
+            asked-while-busy answered-while-composing never-mind-while-composing build-finishes-after-promise \
+            build-finishes-long-after-promise did-you-see addressee-never-answers; do
             LANE_HOME="$(mktemp -d)"
             LANE_TMP="$(mktemp -d)"
             sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline -- \
@@ -341,6 +347,7 @@ jobs:
         # step's (Node). Each moment's outcome, the room tool call and the
         # seven discord-* checks are hard checks.
         id: discord_codex_lane
+        timeout-minutes: 15
         shell: bash
         run: |
           set -euo pipefail
@@ -398,9 +405,9 @@ jobs:
           name: rehearsal-discord-codex-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/rehearsal-discord-out/
           if-no-files-found: ignore
-      - name: Four behavior scenes directed through codex app-server, scripted, graded (docs/rehearsal.md)
+      - name: Eleven behavior scenes directed through codex app-server, scripted, graded (docs/rehearsal.md)
         # Right after the Discord room lane above, in the same virtualenv and
-        # with the same pinned Codex. The four behavior scenes the
+        # with the same pinned Codex. The eleven behavior scenes the
         # discord-standin job plays on the reference are played here, one run
         # each: a director posts the scene's people and bot as Discord
         # messages, the harness takes part in them through its own
@@ -412,12 +419,15 @@ jobs:
         # TMPDIR, as the lane above (Codex's bubblewrap, installed there). A run that fails
         # does not stop the others; the step fails after the last.
         id: discord_codex_scenes_lane
+        timeout-minutes: 20
         shell: bash
         run: |
           set -uo pipefail
           PY="$RUNNER_TEMP/codex-env/bin/python"
           failed=0
-          for scene in bot-status-report story-across-messages said-it-would-check mention-in-busy-room; do
+          for scene in bot-status-report story-across-messages said-it-would-check mention-in-busy-room \
+            asked-while-busy answered-while-composing never-mind-while-composing build-finishes-after-promise \
+            build-finishes-long-after-promise did-you-see addressee-never-answers; do
             LANE_HOME="$(mktemp -d)"
             LANE_TMP="$(mktemp -d)"
             sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline --require-bwrap -- \
@@ -566,6 +576,7 @@ jobs:
         # --no-sandbox. Each moment's outcome, the room tool call and the
         # seven discord-* checks are hard checks.
         id: discord_claude_lane
+        timeout-minutes: 15
         shell: bash
         run: |
           set -euo pipefail
@@ -601,9 +612,9 @@ jobs:
           name: rehearsal-discord-claude-code-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/rehearsal-discord-out/
           if-no-files-found: ignore
-      - name: Four behavior scenes directed through claude -p, scripted, graded (docs/rehearsal.md)
+      - name: Eleven behavior scenes directed through claude -p, scripted, graded (docs/rehearsal.md)
         # Right after the Discord room lane above, in the same virtualenv and
-        # with the same pinned Claude Code. The four behavior scenes the
+        # with the same pinned Claude Code. The eleven behavior scenes the
         # discord-standin job plays on the reference are played here, one run
         # each: a director posts the scene's people and bot as Discord
         # messages, the harness takes part in them through its own
@@ -615,12 +626,15 @@ jobs:
         # TMPDIR, as the lane above (the README's Bash sandbox on: this step never passes --no-sandbox). A run that fails
         # does not stop the others; the step fails after the last.
         id: discord_claude_scenes_lane
+        timeout-minutes: 20
         shell: bash
         run: |
           set -uo pipefail
           PY="$RUNNER_TEMP/claude-env/bin/python"
           failed=0
-          for scene in bot-status-report story-across-messages said-it-would-check mention-in-busy-room; do
+          for scene in bot-status-report story-across-messages said-it-would-check mention-in-busy-room \
+            asked-while-busy answered-while-composing never-mind-while-composing build-finishes-after-promise \
+            build-finishes-long-after-promise did-you-see addressee-never-answers; do
             LANE_HOME="$(mktemp -d)"
             LANE_TMP="$(mktemp -d)"
             sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline --require-bwrap -- \
