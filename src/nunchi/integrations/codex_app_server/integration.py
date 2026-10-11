@@ -72,10 +72,14 @@ MCP_SERVER_NAME = "nunchi_room"
 TOOL_NAMES = {
     "send": "room_send",
     "react": "room_react",
+    "quiet": "room_quiet",
     "context": "room_context",
     "propose": "room_propose",
     "withdraw": "room_withdraw",
 }
+# The room tools every Codex turn offers; the privileged ones join them when the
+# room authorizes privileged actions.
+ROOM_ROLES = ("send", "react", "quiet", "context")
 TRUST_LEVELS = ("trusted", "untrusted")
 BRIDGE_PATH = Path(mcp_bridge.__file__).resolve()
 # Platform credentials Nunchi holds that the agent must never see or post.
@@ -275,7 +279,7 @@ class CodexRoomIntegration:
         settings: CodexSettings,
         environment: Mapping[str, str],
         runtime_directory: Path,
-        roles: Iterable[str] = ("send", "react", "context"),
+        roles: Iterable[str] = ROOM_ROLES,
         result_wait_seconds: float = DEFAULT_RESULT_WAIT_SECONDS,
         thread_store: Path | None = None,
     ) -> None:
@@ -857,7 +861,7 @@ def build_integration(
     if codex.working_directory.resolve().is_relative_to(state):
         # The agent may write in its working directory; Nunchi's state is not its.
         raise ValidationError("codex.working_directory must be outside state_directory")
-    roles = ["send", "react", "context"]
+    roles = list(ROOM_ROLES)
     if settings.authorization is not None:
         roles += ["propose", "withdraw"]
     # What the agent never sees, and the room never gets: the config's own

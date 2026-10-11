@@ -19,6 +19,15 @@ remembers that they held back because someone else was asked, not only that
 they held back. The host keeps the reason it was given; a visible move gets
 it when the room shows the move as it was sent.
 
+A message the participant posts also remembers what it answered. The host
+knows which message prompted each message and reply it commits (the action's
+origin), and the room shows the post back with no trace of it, so the host
+keeps the origin until the room does: the post then points at the message it
+answered, and a later turn sees the promise beside the request it was made
+for, even after the request has left the window. The post also counts as a
+response on that message's thread, so the thread no longer reads unanswered
+(a response is not an answer, and a promise is not the thing done).
+
 Threads: recent messages that asked someone for something, and the
 participant's own messages that others responded to, each with the messages
 that responded. Whether a message asks, and what it responds to, are the
@@ -39,7 +48,7 @@ from collections import OrderedDict, deque
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta, timezone
 import threading
-from typing import Any
+from typing import Any, NamedTuple
 
 from .v2_contracts import (
     ANSWER_ADDRESSEES,
@@ -56,6 +65,9 @@ DEFAULT_PROPOSALS = 3
 DEFAULT_THREADS = 6
 DEFAULT_JUDGMENTS = 64
 DEFAULT_MAX_AGE_SECONDS = 86_400
+# How far a platform's clock may run ahead of the host's when a post is paired
+# with the message it answered by the time it was sent.
+ORIGIN_CLOCK_SKEW = timedelta(seconds=10)
 
 
 def _timestamp(moment: datetime) -> str:
@@ -121,6 +133,77 @@ def _own_move(event: Mapping[str, Any]) -> dict[str, Any] | None:
     return move
 
 
+class _Origin(NamedTuple):
+    """The message one committed message or reply answered, and how to find its post in the room."""
+
+    key: tuple[Any, ...]
+    origin: str
+    # The id the transport attested for the message it sent, when it did.
+    message_id: str | None
+    # When the host committed it, when known.
+    at: datetime | None
+
+
+def _answered(
+    events: Iterable[Mapping[str, Any]],
+    *,
+    actor_id: str,
+    origins: Iterable[_Origin],
+) -> dict[str, str]:
+    """For each of the participant's own messages and replies in ``events``, the message it answered.
+
+    A post is paired with the origin kept for it, each origin once:
+
+    - first by the id the transport attested for the message it sent, when
+      that is the id of one of the participant's own events: exact;
+    - then by the move's kind, target and words, oldest post first. A post
+      takes the newest origin kept for the same words whose message came
+      before it in the log, and that was not committed after the post was
+      made (when both times are known, within the platform's clock skew). So
+      an identical post still in flight, and an origin whose post the room
+      never showed, do not shift the pairing of the posts that are there.
+      Without ids or times, two identical posts that answered messages
+      both older than either are paired newest origin first, as a reason is.
+
+    A post the host recorded no origin for has none.
+    """
+
+    events = list(events)
+    left = list(origins)
+    found: dict[str, str] = {}
+    if not left:
+        return found
+    position = {event["id"]: index for index, event in enumerate(events)}
+    mine = [
+        (index, event)
+        for index, event in enumerate(events)
+        if event.get("type") == "message" and event.get("author_id") == actor_id
+    ]
+    shown = {event["id"] for _, event in mine}
+    for entry in list(left):
+        if entry.message_id in shown and entry.message_id not in found:
+            found[entry.message_id] = entry.origin
+            left.remove(entry)
+    for index, event in mine:
+        if event["id"] in found:
+            continue
+        key = _move_key(_own_move(event) or {})
+        when = _parse(event.get("timestamp"))
+        for at in range(len(left) - 1, -1, -1):
+            entry = left[at]
+            if entry.key != key:
+                continue
+            asked = position.get(entry.origin)
+            if asked is None or asked >= index:
+                continue
+            if when is not None and entry.at is not None and when < entry.at - ORIGIN_CLOCK_SKEW:
+                continue
+            found[event["id"]] = entry.origin
+            left.pop(at)
+            break
+    return found
+
+
 class ConversationMemory:
     """The participant's memory of one room: its own moves and the threads."""
 
@@ -149,6 +232,9 @@ class ConversationMemory:
         self._silences: deque[dict[str, Any]] = deque(maxlen=silences)
         self._delivered: deque[dict[str, Any]] = deque(maxlen=own_moves)
         self._reasons: deque[tuple[tuple[Any, ...], str]] = deque(maxlen=own_moves * 2)
+        # The message each committed message or reply answered, by the move's
+        # key, until the room shows it; bounded like the reasons.
+        self._origins: deque[_Origin] = deque(maxlen=own_moves * 2)
         self._judgments: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._lock = threading.Lock()
 
@@ -193,6 +279,39 @@ class ConversationMemory:
         }
         with self._lock:
             self._reasons.append((_move_key(move), reason))
+
+    def record_origin(
+        self,
+        action: Mapping[str, Any],
+        *,
+        message_id: str | None = None,
+        at: datetime | None = None,
+    ) -> None:
+        """Keep the message a committed message or reply answered.
+
+        ``action`` is the core action. Its ``origin_event_id`` is the room
+        message its words answer or follow up on (the one that prompted it
+        unless the participant named another). The origin joins the move once
+        the room shows it: by ``message_id``, the id the transport attested
+        for the message it sent, when that is the id of the room's event; else
+        by the same kind, target and words, no earlier than ``at``, when the
+        host committed it (`own_moves`, `threads`). A move the room never
+        shows keeps it to itself. A reaction needs none: it already points at
+        the message it is on.
+        """
+
+        kind = action.get("kind")
+        origin = action.get("origin_event_id")
+        if kind not in ("message", "reply") or not isinstance(origin, str) or not origin:
+            return
+        move = {
+            "kind": kind,
+            "about_event_id": action.get("target_event_id"),
+            "text": action.get("text", ""),
+        }
+        attested = message_id if isinstance(message_id, str) and message_id else None
+        with self._lock:
+            self._origins.append(_Origin(_move_key(move), origin, attested, at))
 
     def record_delivered(
         self,
@@ -265,6 +384,7 @@ class ConversationMemory:
             self._silences.clear()
             self._delivered.clear()
             self._reasons.clear()
+            self._origins.clear()
             self._judgments.clear()
 
     def own_moves(
@@ -286,6 +406,7 @@ class ConversationMemory:
         """
 
         now = now or datetime.now(timezone.utc)
+        events = list(events)
 
         def fresh(move: Mapping[str, Any]) -> bool:
             when = _parse(move.get("at"))
@@ -293,6 +414,8 @@ class ConversationMemory:
 
         visible: list[tuple[float, dict[str, Any]]] = []
         position: dict[str, int] = {}
+        # The message each not yet shown post was prompted by (by move identity).
+        prompted: dict[int, str] = {}
         for index, event in enumerate(events):
             position[event["id"]] = index
             if event.get("author_id") == actor_id:
@@ -303,6 +426,7 @@ class ConversationMemory:
             silences = [dict(item) for item in self._silences]
             delivered = [(item["origin"], dict(item["move"])) for item in self._delivered]
             reasons = list(self._reasons)
+            origins = list(self._origins)
         # A message the harness posted joins the moves after the message it
         # was about, until the room shows it; then the room's copy stands.
         shown = [(index, _move_key(move)) for index, move in visible]
@@ -313,6 +437,7 @@ class ConversationMemory:
             if any(index > position[origin] and seen == key for index, seen in shown):
                 continue
             visible.append((position[origin] + 0.5 + order / 1000, move))
+            prompted[id(move)] = origin
         visible.sort(key=lambda item: item[0])
         # Each reason joins the newest move it matches, once.
         for _, move in reversed(visible):
@@ -321,6 +446,16 @@ class ConversationMemory:
                 if reasons[index][0] == key:
                     move["why"] = reasons.pop(index)[1]
                     break
+        # A message points at the one it answered: the origin the host kept
+        # for the post the room showed, or for the one the harness posted that
+        # the room has not shown yet. Set after the keys above are used.
+        answered = _answered(events, actor_id=actor_id, origins=origins)
+        for _, move in visible:
+            if move["kind"] != "message" or "about_event_id" in move:
+                continue
+            origin = answered.get(move.get("event_id")) or prompted.get(id(move))
+            if origin in position:
+                move["about_event_id"] = origin
         quiet = [
             (position[silence["about_event_id"]] + 0.5 + order / 1000, silence)
             for order, silence in enumerate(silences)
@@ -369,11 +504,13 @@ class ConversationMemory:
         model judged to ask for something, or at one of the participant's own
         messages that someone responded to. Its responses are later messages
         by others that reply to it on the platform, that the model judged to
-        respond to it, or that the model named as having answered it, each
-        with what it said: a response is not always an answer, and a promise
-        is not the thing done. ``exclude_event_id`` is the message the turn
-        is about: its own reading already describes it, so it neither starts
-        a thread nor appears as a response.
+        respond to it, or that the model named as having answered it, and the
+        participant's own message that answered it (the host kept which
+        message prompted each of its posts), each with what it said: a
+        response is not always an answer, and a promise is not the thing
+        done. ``exclude_event_id`` is the message the turn is about: its own
+        reading already describes it, so it neither starts a thread nor
+        appears as a response.
         """
 
         now = now or datetime.now(timezone.utc)
@@ -381,6 +518,7 @@ class ConversationMemory:
         position = {event["id"]: index for index, event in enumerate(events)}
         with self._lock:
             judgments = {key: dict(value) for key, value in self._judgments.items()}
+            origins = list(self._origins)
 
         responses: dict[str, set[str]] = {}
 
@@ -400,6 +538,12 @@ class ConversationMemory:
         for judged in judgments.values():
             if judged.get("answered_by") in position and judged["answered_by"] != exclude_event_id:
                 link(judged["event_id"], judged["answered_by"])
+        # The participant's own message responds to the message it answered,
+        # whether or not the platform tied the two: the host kept which
+        # message prompted it, so the thread no longer reads unanswered.
+        for response, head in _answered(events, actor_id=actor_id, origins=origins).items():
+            if response != exclude_event_id:
+                link(head, response)
 
         threads = []
         for event in events:

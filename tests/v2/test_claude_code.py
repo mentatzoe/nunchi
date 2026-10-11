@@ -78,6 +78,7 @@ _WAKE = re.compile(r'^<nunchi_wake id="([A-Za-z0-9_-]{16,64})"/>')
 SEND = full_tool_name("send")
 REACT = full_tool_name("react")
 CONTEXT = full_tool_name("context")
+QUIET = full_tool_name("quiet")
 
 
 def test_wake(request_id="r1"):
@@ -2028,7 +2029,7 @@ class GatedParticipantTests(unittest.TestCase):
         self.assertTrue(
             body.startswith(
                 participant_tool_turn_prompt(
-                    PROFILE, tools={"send": SEND, "react": REACT, "context": CONTEXT}
+                    PROFILE, tools={"send": SEND, "react": REACT, "quiet": QUIET, "context": CONTEXT}
                 )
             )
         )
@@ -2087,6 +2088,25 @@ class GatedParticipantTests(unittest.TestCase):
         participant.settle("r1", TransportResult("sent", "discord:message:777"))
         acting.join(5)
         self.assertEqual((True, "Done: the room accepted this action."), answer["value"])
+
+    def test_the_quiet_tool_is_silence_with_the_agents_reason_and_the_gate_does_not_wait_for_the_session(self):
+        participant, session = self._participant()
+        thread, box, wake_id, _ = self._start(participant, session)
+        # The turn names the choice with the mod's own tool name.
+        self.assertIn(f"To stay quiet, call {QUIET} with why", session.submitted[0])
+        participant.bind_turn(turn_id="t1", wake_id=wake_id)
+        ok, text = participant.call_tool(turn_id="t1", tool=QUIET, arguments={"why": "Castor was asked, not me."})
+        self.assertTrue(ok)
+        self.assertIn("Staying quiet", text)
+        # The host has the silence while the session is still finishing its run.
+        thread.join(5)
+        self.assertEqual({"action": {"kind": "silence", "why": "Castor was asked, not me."}}, box)
+        ok, text = participant.call_tool(turn_id="t1", tool=SEND, arguments={"text": "on it"})
+        self.assertFalse(ok)
+        # The session's final message does not replace the reason.
+        turn = participant.active
+        participant.turn_ended(ok=True, detail="success", note="Staying quiet.")
+        self.assertEqual("Castor was asked, not me.", turn.note)
 
     def test_a_host_that_commits_nothing_reaches_the_tool_as_not_posted(self):
         participant, session = self._participant()
@@ -2339,11 +2359,11 @@ class GatedParticipantTests(unittest.TestCase):
         disabled, _ = self._participant()
         enabled, _ = self._participant(privileged=True)
         self.assertEqual(
-            ["room_send", "room_react", "room_context"],
+            ["room_send", "room_react", "room_quiet", "room_context"],
             [spec["name"] for spec in disabled.tool_specs()],
         )
         self.assertEqual(
-            ["room_send", "room_react", "room_propose", "room_withdraw", "room_context"],
+            ["room_send", "room_react", "room_quiet", "room_propose", "room_withdraw", "room_context"],
             [spec["name"] for spec in enabled.tool_specs()],
         )
 
@@ -2402,7 +2422,7 @@ class GateServerTests(unittest.TestCase):
         status, body = gate_post(self.socket_path, "/v1/attach", {}, self.secret)
         self.assertEqual(200, status)
         self.assertEqual(
-            ["room_send", "room_react", "room_context"],
+            ["room_send", "room_react", "room_quiet", "room_context"],
             [tool["name"] for tool in body["tools"]],
         )
         self.assertTrue(self.participant.attached)
@@ -2915,7 +2935,7 @@ class InstalledSurfaceTests(unittest.TestCase):
                 self.assertEqual("claude-code-session", probe["participant"])
                 self.assertIsNone(probe["claude_code_executable"])
                 self.assertFalse(probe["claude_code_supported"])
-                self.assertEqual([SEND, REACT, CONTEXT], probe["room_tools"])
+                self.assertEqual([SEND, REACT, QUIET, CONTEXT], probe["room_tools"])
                 self.assertEqual("claude-code-permission-rules", probe["native_tools"])
                 self.assertTrue(probe["shared_discord_transport"])
                 self.assertEqual("fresh", probe["session_mode"])

@@ -67,16 +67,21 @@ Everything that decides behavior, once, for every harness:
 - **Scheduling**: one turn at a time per participant; waiting; looking again
   after a pause; catching up after a busy turn; the turn an approved action's
   outcome starts.
-- **Memory**: the agent's own moves and reasons, and who asked what.
+- **Memory**: the agent's own moves and reasons, and who asked what. A
+  message the agent posts remembers the message it answered, and counts as a
+  response on that message's thread.
 - **The turn's content**: a stable guide (how a socially aware participant
   behaves) and this turn's context (the reading, memory, pace, missed
   messages, an outcome).
 - **The room actions and their rules**:
   - look at more of the room;
   - post a message or a reply;
-  - react;
+  - react (the agent's "mhm");
   - propose or withdraw a privileged action;
-  - stay silent.
+  - stay quiet: in tool posting the `quiet` tool, which takes the agent's
+    reason, posts nothing, is not a room action and ends the turn in silence,
+    or ending the turn without a call; in final-answer posting the harness's
+    silence marker.
 
   The rules: one room action per turn; look again once before the first post
   or reaction; steering updates while the agent works; a turn counts as
@@ -145,6 +150,9 @@ class Room:                                        # harness-hosted entry point
 
 - `call` does what the Claude Code gate does today, once, for everyone:
   - it refuses a call outside a bound, current turn;
+  - it ends the turn in silence, with the agent's reason, when the agent calls
+    the quiet tool (`quiet`: no look again, no room action, and no room call
+    after it);
   - it holds the first post when others posted meanwhile;
   - it takes any wake marker out of the post (`split_private`);
   - it refuses a post with nothing else in it, which is never posted empty;
@@ -224,7 +232,7 @@ class Room:                                        # harness-hosted entry point
   | none | `turn/model-text` (@2), with `reasoning` for reasoning |
 
   The protocol joins `v2_contracts.INTERFACE_VERSIONS` like the others, as
-  `I-040D LocalTurnProtocolV2@2`.
+  `I-040D LocalTurnProtocolV2@3`.
 
 ## Posting styles
 
@@ -233,8 +241,16 @@ class Room:                                        # harness-hosted entry point
 - One room action per turn.
 - The first post or reaction is held once if others posted while the agent
   composed. The agent then sends it as is, changes it, or drops it.
-- Ending the turn without an action is silence, but only when the turn was
-  bound to its wake. Any other ending is a failure.
+- The turn names three normal choices, in this order: stay quiet, nod (the
+  react tool, the agent's "mhm"), speak (the send tool).
+- Staying quiet is the `quiet` tool with a required `why`, or ending the turn
+  without an action. The tool is the deliberate form: it ends the turn in
+  silence with that reason, the equivalent of the plain call's
+  `{"kind": "silence"}`. It posts nothing, is not a room action, needs no
+  look again, and after it the turn takes no room call. Ending the turn
+  without an action is silence too, with the agent's last words as the
+  reason, but only when the turn was bound to its wake. Any other ending is a
+  failure.
 
 **Final-answer posting** (Hermes):
 
@@ -306,15 +322,15 @@ maintainers.
 | Guide | session prompt | with every turn's text (`developerInstructions` would replace the user's own; the library gives one text per turn) | `register_system_prompt_section` | request |
 | Turn context | turn text | `turn/start` input | the injected turn text, plus `pre_llm_call` | request |
 | Room view | mod tool | per-thread MCP server in `thread/start` config (stable); client tools need an experimental opt-in | `register_tool` | room-view action |
-| Reaction | mod tool | the same MCP server | a tool calling `platform_actions.add_reaction`, if the user grants it | action |
-| Silence | a bound turn ends without an action; its final message is the reason | a bound turn ends without an action (bound from `turn/start`'s answer once the room server is ready); its last agent message is the reason | `[SILENT]` on the injected turn; its `<thinking>` is the reason; Hermes's other silent answers (`SILENT`, `NO_REPLY`, `NO REPLY` and the zh forms) as `also_silent`, checked against the installed Hermes (verified offline, `a50406d9`) | silence action, with its `why` |
+| Reaction (the "mhm") | mod tool | the same MCP server | a tool calling `platform_actions.add_reaction`, if the user grants it | action |
+| Silence | the `room_quiet` tool with its reason, or a bound turn ends without an action; its final message is the reason | the `room_quiet` tool with its reason, or a bound turn ends without an action (bound from `turn/start`'s answer once the room server is ready); its last agent message is the reason | `[SILENT]` on the injected turn; its `<thinking>` is the reason; Hermes's other silent answers (`SILENT`, `NO_REPLY`, `NO REPLY` and the zh forms) as `also_silent`, checked against the installed Hermes (verified offline, `a50406d9`) | silence action, with its `why` |
 | Only the model's words are posted | n/a (tools) | n/a (tools) | `post_api_request` reports each response's content and, apart, its reasoning (from the provider data too, as under `plugins.isolation: host`); `pre_api_request` reports the part of an answer the length limit or a dropped stream cut (`model_wrote`). Hermes's own text for a run that gave no answer (`(empty)`, its iteration-limit notice) fails the turn, also when the model wrote the word "empty" (verified offline, `a50406d9`). The summary at Hermes's iteration limit reaches no hook and fails the turn (gap 9). A failed run still shows Hermes's failed-turn notice (gap 7) | n/a: the model's reply is the answer |
 | Look again before posting | send tool holds | send tool holds | `transform_llm_output` silences the draft; the plugin injects a fresh run with the draft and the new messages (verified offline, `a50406d9`). Needs streaming off: Discord's default, while Telegram streams unless `display.platforms.telegram.streaming` is false | action held |
 | Steering | mod, after each tool call | with each room tool's result; `turn/steer` after every other tool call | `transform_tool_result` | between room views |
 | Pause and outcome turns | library | library | `inject_message`, like every turn | library |
 | Catching up | library | library | library | library |
 | Cancel | stream-json interrupt | `turn/interrupt` | no plugin interrupt: the library silences the answer at `transform_llm_output`; tools already run stay run | drop the reply |
-| Own message in memory | transport id | transport id | the library records it in the room log with an id of its own (no delivery id; Hermes drops the bot's own messages before hooks) | transport id |
+| Own message in memory | transport id; the library keeps which message it answered | transport id; the library keeps which message it answered | the library records it in the room log with an id of its own, as a reply to the message the turn was about (no delivery id; Hermes drops the bot's own messages before hooks) | transport id; the library keeps which message it answered |
 | Attention routes | all | all | all, plus the host's model through `ctx.llm` | all |
 | Native tool approvals | user's rules; prompts declined | user's rules; approval requests declined | Hermes's own approvals, whose prompts reach the room (gap 8) | — |
 | Secret guard (the room's, from `room_guard`; the host checks every action again) | plus the launch secret, which the session's environment holds, so the agent can read it | plus the bridge's launch secret, which the room's MCP server holds; the agent can read it when Codex runs commands without a sandbox | plus Hermes's platform tokens (Telegram, Discord, Slack) when the config names none | the room's guard (old Codex runner, reference adapters) |
@@ -402,6 +418,17 @@ reason kept for a tool post is checked in the core's tests, not by the kit:
 the host strips it before its transport, and the kit's room never shows a
 tool post back.
 
+Two scenarios cover the `quiet` tool, in tool posting (reference, Claude Code,
+Codex), each through the integration's own surface, so Codex plays them through
+a real `codex app-server` and its MCP bridge. `quiet` has the agent call the
+tool with its reason and then try to post: nothing is committed, the host's
+answer is silence, the reason is the silence's reason in the agent's memory (the
+last words after it do not replace it), and the post is refused. `quiet-reason`
+has it call the tool with no reason, which is refused, and then with one. In
+final-answer posting the silence marker is the quiet (`final-silence`), so
+those columns read `n/a`. The Hermes cells above are `n/a` by that rule, not
+re-run for this change.
+
 `harness-failure` and `final-harness-failure` fail the agent's model call:
 the reference harness's call raises; Claude Code ends the run with a failed
 `result` (`is_error: true`), read by the gate's own stream-json reader;
@@ -424,6 +451,8 @@ all):
 | post: one post goes to the room, and the tool call says so | pass | n/a | pass | n/a | n/a | pass |
 | bound-silence: a bound turn that ends without an action is silence, remembered | pass | n/a | pass | n/a | n/a | pass |
 | silence-reason: a silent turn's last words are its reason, remembered and never posted | pass | n/a | pass | n/a | n/a | pass |
+| quiet: the agent stays quiet on purpose through its quiet tool: nothing is posted, its reason is remembered, and no room action follows | pass | n/a | pass | n/a | n/a | pass |
+| quiet-reason: the quiet tool needs the agent's reason, and the agent can give it in a second call | pass | n/a | pass | n/a | n/a | pass |
 | mhm: the agent's own mhm is one reaction on the message, through its react tool | pass | n/a | pass | n/a | n/a | pass |
 | unbound-failure: a turn never bound to its wake is a failure, not silence | pass | n/a | pass | n/a | n/a | pass |
 | look-again: the first post is held once when someone posted meanwhile | pass | n/a | pass | n/a | n/a | pass |

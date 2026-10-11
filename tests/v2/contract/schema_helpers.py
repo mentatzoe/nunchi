@@ -97,9 +97,9 @@ SCHEMA_FILES = {
 }
 
 INTERFACE_VERSIONS = {
-    "attention-request": ("I-010A", "AttentionRequestV2", 8),
+    "attention-request": ("I-010A", "AttentionRequestV2", 9),
     "attention-decision": ("I-010B", "AttentionDecisionV2", 9),
-    "participant-wake": ("I-010C", "ParticipantWakeV2", 15),
+    "participant-wake": ("I-010C", "ParticipantWakeV2", 16),
     "context-continuation": ("I-010D", "ContextContinuationV2", 2),
     "attention-receipt": ("I-010E", "AttentionReceiptV2", 6),
     "privileged-action-authorization": (
@@ -1306,7 +1306,7 @@ def _validate_decision_error(doc: dict[str, Any]) -> list[str]:
 
 _ABOUT = ("about_author_id", "about_text")  # @11: who wrote the message and what it said
 _OWN_MOVE_FIELDS = {
-    "message": (("kind", "text"), ("event_id", "at", "why")),
+    "message": (("kind", "text"), ("event_id", "about_event_id", "at", "why") + _ABOUT),  # @16: the message it answered
     "reply": (("kind", "event_id", "about_event_id", "text"), ("at", "why") + _ABOUT),
     "reaction": (("kind", "event_id", "about_event_id", "reaction"), ("at", "why") + _ABOUT),
     "silence": (("kind", "about_event_id", "at"), ("why",) + _ABOUT),
@@ -1378,6 +1378,8 @@ def _check_wake_memory(errors: "_Errors", path: str, value: Any) -> None:
                 errors.add(f"{item}.{name}", "must be a string of at most 280 characters")
         if ("about_author_id" in move) != ("about_text" in move):
             errors.add(item, "about_author_id and about_text come together")
+        if "about_author_id" in move and "about_event_id" not in move:
+            errors.add(item, "about_author_id and about_text need about_event_id")
         if "why" in move and (not isinstance(move["why"], str) or not 1 <= len(move["why"]) <= 200):
             errors.add(f"{item}.why", "must be a non-empty string of at most 200 characters")
 

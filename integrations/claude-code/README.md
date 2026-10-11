@@ -43,12 +43,18 @@ One wake, step by step:
    nods itself if it wants to.
 2. On a wake, the gate writes one turn into the session: a wake marker, the
    participant prompt with your profile's instructions, and the room facts.
-3. The agent may call `mcp__nunchi__room_context` for more history. To take
-   part it calls `mcp__nunchi__room_send` (a message, or a reply) or
-   `mcp__nunchi__room_react` once. `mcp__nunchi__room_propose` exists only
-   when privileged actions are configured.
+3. The agent may call `mcp__nunchi__room_context` for more history. The turn
+   names three normal choices, in this order. To stay quiet it calls
+   `mcp__nunchi__room_quiet` with a short `why` (or ends its turn without a
+   room call and says why in its last words). To nod, the "mhm" that shows it
+   is following without taking the floor, it calls `mcp__nunchi__room_react`
+   once. To speak it calls `mcp__nunchi__room_send` (a message, or a reply)
+   once. `mcp__nunchi__room_propose` exists only when privileged actions are
+   configured.
 4. The gate hands that one action to the shared host. The host commits it and
    the result goes back to the tool call, so the agent knows what happened.
+   `room_quiet` is not an action: it posts nothing, and the host hears the
+   silence, with the agent's reason, at once.
 5. The agent's own reply text never reaches the room.
 
 How a turn is recorded:
@@ -56,6 +62,7 @@ How a turn is recorded:
 | The turn | Recorded as |
 |---|---|
 | ends with a room action | the transport's result (`sent`, `failed`, `unknown`) |
+| the agent called `room_quiet` | silence, with the agent's `why` as its reason (never posted); the last words after it do not replace it |
 | ends normally without one, and the mod bound it | silence, with the session's final message as its reason (never posted) |
 | was never bound by the mod (mod missing or disabled) | failure, never silence |
 | ends in an error or refusal, or the session exits | failure, never silence |

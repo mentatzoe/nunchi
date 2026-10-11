@@ -202,7 +202,7 @@ its absence. Receipt stages run `observation` → `attention` →
 |---|---|---|---|
 | 1 | SUPPRESS | ambient chatter not for the participant | attention `SUPPRESS`; no session turn; no message |
 | 2 | WAKE, contribution | address it directly, within its brief | `room_send` called once; `transport` `sent`; a real message |
-| 3 | WAKE, silence | an open moment not worth speaking into | a session turn; `participant-host` `silent`; **no** transport stage |
+| 3 | WAKE, silence | an open moment not worth speaking into | a session turn; `participant-host` `silent`; **no** transport stage. The agent may say it with `room_quiet` and a `why` (the silence's reason in its memory) or end its turn without a call; both are silence |
 | 4 | reaction | a message better answered with a reaction | `room_react`; `transport` `sent` |
 | 5 | mhm | a moment that only needs acknowledgement | DEFER: a session turn whose reading says a "mhm" could fit; `room_react` if the agent nods, and Nunchi never reacts for it |
 | 6 | more context | a question about something said earlier | `room_context` before acting; the action names a fetched event |

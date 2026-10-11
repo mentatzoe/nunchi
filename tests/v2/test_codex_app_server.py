@@ -361,7 +361,7 @@ class RoomSocketTest(unittest.TestCase):
     def test_the_bridge_lists_the_room_tools_and_a_call_outside_a_turn_is_refused(self):
         bridge = mcp_bridge.Bridge(self.room)
         tools = bridge.handle({"id": 1, "method": "tools/list"})["result"]["tools"]
-        self.assertEqual({tool["name"] for tool in tools}, {"room_send", "room_react", "room_context"})
+        self.assertEqual({tool["name"] for tool in tools}, {"room_send", "room_react", "room_quiet", "room_context"})
         answer = bridge.handle(
             _call({"name": "room_send", "arguments": {"text": "hi"}, "_meta": {"x-codex-turn-metadata": {"turn_id": "x"}}})
         )

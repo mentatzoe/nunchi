@@ -47,6 +47,7 @@ PLUGIN_NAME = "nunchi"
 TOOL_NAMES = {
     "send": "room_send",
     "react": "room_react",
+    "quiet": "room_quiet",
     "propose": "room_propose",
     "withdraw": "room_withdraw",
     "context": "room_context",

@@ -23,9 +23,9 @@ DISPOSITIONS = ("SUPPRESS", "WAKE", "DEFER")
 WAKE_SOURCES = ("WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS")
 # The portable interfaces and their versions, as `nunchi probe` reports them.
 INTERFACE_VERSIONS = {
-    "I-010A": 8,
+    "I-010A": 9,
     "I-010B": 9,
-    "I-010C": 15,
+    "I-010C": 16,
     "I-010D": 2,
     "I-010E": 6,
     "I-010F": 1,
@@ -34,7 +34,7 @@ INTERFACE_VERSIONS = {
     "I-040A": 4,
     "I-040B": 1,
     "I-040C": 1,
-    "I-040D": 2,
+    "I-040D": 3,
 }
 # Nunchi's own nod is gone (#94 step 7): a mhm is the participant's own move.
 # Receipts it wrote before I-010E@5 still read, so older journals load.
@@ -771,9 +771,11 @@ MOVE_REASON_MAX_CHARS = 200
 # (``about_author_id``, ``about_text``), together (#94 step 6).
 _ABOUT = ("about_author_id", "about_text")
 # Since @14 (I-010A@7) a message may lack ``event_id``: the harness posted it
-# and the room has not shown it back (#94 step 9d).
+# and the room has not shown it back (#94 step 9d). Since @16 (I-010A@9) a
+# message may point at the message it answered (``about_event_id``, and with
+# it ``about_author_id`` and ``about_text`` together), as a reply does.
 _OWN_MOVE_FIELDS = {
-    "message": (("kind", "text"), ("event_id", "at", "why")),
+    "message": (("kind", "text"), ("event_id", "about_event_id", "at", "why") + _ABOUT),
     "reply": (("kind", "event_id", "about_event_id", "text"), ("at", "why") + _ABOUT),
     "reaction": (("kind", "event_id", "about_event_id", "reaction"), ("at", "why") + _ABOUT),
     "silence": (("kind", "about_event_id", "at"), ("why",) + _ABOUT),
@@ -847,6 +849,10 @@ def _memory(value: Any, path: str) -> dict[str, Any]:
             _memory_text(move["text"], f"{item}.text")
         if ("about_author_id" in move) != ("about_text" in move):
             _fail(item, "about_author_id and about_text come together")
+        if "about_author_id" in move and "about_event_id" not in move:
+            # A message's about_event_id is optional (@16), but who wrote the message and
+            # what it said belong to a message that is named.
+            _fail(item, "about_author_id and about_text need about_event_id")
         if "about_author_id" in move:
             _nes(move["about_author_id"], f"{item}.about_author_id")
             _memory_text(move["about_text"], f"{item}.about_text")

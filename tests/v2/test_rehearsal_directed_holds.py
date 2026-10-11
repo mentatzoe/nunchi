@@ -33,7 +33,7 @@ from evals.behavior.score import agent_move
 from evals.rehearsal import checks, directed, discord_room, record, standin
 
 from tests.v2.test_rehearsal_directed import FIRST_FOUR, NEWS, SEVEN, _moment, _news, _scene
-from tests.v2.test_rehearsal_directed_harness import REACT, SEND
+from tests.v2.test_rehearsal_directed_harness import QUIET, REACT, SEND
 from tests.v2.test_rehearsal_discord_room import _tagged, _turn
 
 DURING = ("answered-while-composing", "never-mind-while-composing")
@@ -287,7 +287,10 @@ class LineScriptTest(unittest.TestCase):
                 self.assertNotEqual(standin.SCENE_SAY.format(event=moment.event), held["action"]["text"])
                 # Shown the page, it does what the scene fits: stay quiet, which the scene lists first.
                 self.assertEqual({"kind": "silence"}, item.script.action(turn, news=NEWS))
-                self.assertEqual(("silence", {}), item.script.move(turn, news=NEWS))
+                self.assertEqual(
+                    ("quiet", {"why": standin.SCENE_QUIET["stay_quiet"].format(event=moment.event)}),
+                    item.script.move(turn, news=NEWS),
+                )
                 self.assertEqual([NEWS, NEWS], gate.news, "each page the core showed the turn is kept")
 
     def test_a_held_line_is_said_both_times_and_a_script_without_holds_never_waits(self):
@@ -378,10 +381,10 @@ class EndpointTest(unittest.TestCase):
     def test_the_scripted_claude_endpoint_holds_a_turns_first_call_drafts_then_decides_on_the_page(self):
         item, moment, text = _held()
         gate = item.script.gates[moment.event]
-        agent = standin.ScriptedClaudeAgent("unused", SEND, script=item.script, tools={"react": REACT})
+        agent = standin.ScriptedClaudeAgent("unused", SEND, script=item.script, tools={"react": REACT, "quiet": QUIET})
         self.addCleanup(agent.close)
         turn = _turn("discord:message:7", text)
-        first = {"tools": [{"name": SEND}, {"name": REACT}], "messages": [{"role": "user", "content": [{"type": "text", "text": _tagged(turn)}]}]}
+        first = {"tools": [{"name": SEND}, {"name": REACT}, {"name": QUIET}], "messages": [{"role": "user", "content": [{"type": "text", "text": _tagged(turn)}]}]}
         thread, got = self.asking(lambda: agent.reply(first))
         self.assertTrue(gate.wait_asked(2))
         time.sleep(0.2)
@@ -391,11 +394,14 @@ class EndpointTest(unittest.TestCase):
         kind, blocks, stop = got["answer"]
         self.assertEqual(("agent-tool-call", "tool_use"), (kind, stop))
         self.assertEqual({"text": standin.SCENE_DRAFT.format(event=moment.event)}, blocks[0]["input"])
-        # The room tool's answer is the page: the agent drops its post and the turn ends without a room tool call.
+        # The room tool's answer is the page: the agent drops its post and says it stays quiet, with the quiet tool.
         second = copy.deepcopy(first)
         second["messages"].append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": NEWS}]})
         kind, blocks, stop = agent.reply(second)
-        self.assertEqual(("agent", "end_turn", ["text"]), (kind, stop, [block["type"] for block in blocks]))
+        self.assertEqual(("agent-tool-call", "tool_use"), (kind, stop))
+        self.assertEqual(
+            (QUIET, {"why": standin.SCENE_QUIET["stay_quiet"].format(event=moment.event)}), (blocks[0]["name"], blocks[0]["input"])
+        )
         self.assertEqual([NEWS], gate.news)
         # A result that is not the page ends the turn as it always did.
         done = copy.deepcopy(first)
@@ -421,8 +427,11 @@ class EndpointTest(unittest.TestCase):
             self.assertEqual(("room_send", {"text": standin.SCENE_DRAFT.format(event=moment.event)}), (replies[0]["tool"], replies[0]["arguments"]))
             requests = {"input": [message, {"type": "function_call_output", "call_id": "c", "output": NEWS}]}
             agent._next()
-            self.assertNotIn("tool", replies[1], "shown the page, the agent makes no room tool call")
-            self.assertIn("text", replies[1])
+            self.assertEqual(
+                ("room_quiet", {"why": standin.SCENE_QUIET["stay_quiet"].format(event=moment.event)}),
+                (replies[1]["tool"], replies[1]["arguments"]),
+                "shown the page, the agent drops its post and says it stays quiet, with the quiet tool",
+            )
             requests = {"input": [message, {"type": "function_call_output", "call_id": "c", "output": "Posted."}]}
             agent._next()
             self.assertEqual({"text": "Posted my answer."}, replies[2])

@@ -863,7 +863,7 @@ class ClaudeCodeLeg(SharedTransportLeg):
         except ValueError as exc:
             raise CouldNotRun(str(exc)) from exc
         if self.ctx.options.scripted:
-            self.go_offline(full_tool_name("send"), {role: full_tool_name(role) for role in ("send", "react")})
+            self.go_offline(full_tool_name("send"), {role: full_tool_name(role) for role in ("send", "react", "quiet")})
         # The README's settings, and the slug mapped to the id Claude Code knows the model by.
         sandbox = CLAUDE_SETTINGS["sandbox"] if self.ctx.options.sandbox else {"enabled": False}
         self.settings = {**CLAUDE_SETTINGS, "sandbox": sandbox, "modelOverrides": {self.model.anthropic_id: self.ctx.route.model}}

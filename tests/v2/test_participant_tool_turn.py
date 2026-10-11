@@ -14,11 +14,13 @@ import unittest
 from nunchi.attention import ParticipantProfile
 from nunchi.errors import ValidationError
 from nunchi.participant_model import (
+    PARTICIPANT_ACTION_TOOL_ROLES,
     PARTICIPANT_TOOL_SPECS,
     ParticipantModelError,
     build_participant_turn_request,
     participant_tool_action,
     participant_tool_expansion,
+    participant_tool_quiet,
     participant_tool_roles,
     participant_tool_turn_prompt,
     participant_tool_turn_text,
@@ -93,25 +95,100 @@ VISIBLE = {"e1", "e2"}
 
 class ToolRolesAndPromptTests(unittest.TestCase):
     def test_permissions_decide_which_roles_a_turn_offers(self):
-        self.assertEqual(("send", "react", "propose", "withdraw", "context"), participant_tool_roles(_request()))
         self.assertEqual(
-            ("send", "context"),
-            participant_tool_roles(_request(ordinary=("message",), privileged=False)),
+            ("send", "react", "quiet", "propose", "withdraw", "context"), participant_tool_roles(_request())
         )
         self.assertEqual(
-            ("context",), participant_tool_roles(_request(ordinary=(), privileged=False))
+            ("send", "quiet", "context"),
+            participant_tool_roles(_request(ordinary=("message",), privileged=False)),
+        )
+        # Staying quiet is not a room action, so no permission governs it.
+        self.assertEqual(
+            ("quiet", "context"), participant_tool_roles(_request(ordinary=(), privileged=False))
         )
 
     def test_the_prompt_names_only_the_tools_offered(self):
         prompt = participant_tool_turn_prompt(PROFILE, tools={"send": "room.send", "context": "room.context"})
         self.assertIn("call room.send once", prompt)
-        self.assertIn("end your turn without calling it", prompt)
+        # No quiet tool is named: ending the turn without a room call is the way to stay quiet.
+        # (Was "end your turn without calling it", which pointed at the one send tool; the choices
+        # are now named in order, so the phrase says what the call is.)
+        self.assertIn("end your turn without a room call", prompt)
+        self.assertNotIn("room.quiet", prompt)
         self.assertIn("never posted to the room", prompt)
         self.assertIn(PROFILE.instructions, prompt)
         self.assertNotIn("room.react", prompt)
         self.assertNotIn("proposal", prompt)
         silent = participant_tool_turn_prompt(PROFILE, tools={"context": "room.context"})
         self.assertIn("cannot post in the room", silent)
+
+    def test_the_prompt_names_the_three_choices_in_order_quiet_nod_speak(self):
+        tools = {"send": "room.send", "react": "room.react", "quiet": "room.quiet", "context": "room.context"}
+        prompt = participant_tool_turn_prompt(PROFILE, tools=tools)
+        quiet = prompt.index("To stay quiet, call room.quiet with why, or end your turn without a room call")
+        nod = prompt.index("To nod, call room.react once: a quick mhm, you show you are following without taking the floor")
+        speak = prompt.index("To speak, call room.send once")
+        self.assertLess(quiet, nod)
+        self.assertLess(nod, speak)
+        # The reason is the agent's either way: its last words, or the quiet call's why.
+        self.assertIn("say why in your last words", prompt)
+
+    def test_a_choice_the_turn_does_not_offer_is_left_out_but_staying_quiet_never_is(self):
+        speak_only = participant_tool_turn_prompt(PROFILE, tools={"send": "room.send", "context": "room.context"})
+        self.assertNotIn("To nod", speak_only)
+        self.assertIn("To stay quiet, end your turn without a room call", speak_only)
+        nod_only = participant_tool_turn_prompt(
+            PROFILE, tools={"react": "room.react", "quiet": "room.quiet", "context": "room.context"}
+        )
+        self.assertNotIn("To speak", nod_only)
+        self.assertIn("To stay quiet, call room.quiet with why", nod_only)
+        cannot_post = participant_tool_turn_prompt(PROFILE, tools={"quiet": "room.quiet", "context": "room.context"})
+        self.assertIn("cannot post in the room", cannot_post)
+        self.assertIn("call room.quiet with why", cannot_post)
+
+    def test_a_participant_whose_final_reply_is_its_post_has_no_quiet_tool(self):
+        with self.assertRaises(ValidationError):
+            participant_tool_turn_prompt(
+                PROFILE, tools={"quiet": "room.quiet", "context": "room.context"}, silence_marker="[SILENT]"
+            )
+        prompt = participant_tool_turn_prompt(PROFILE, tools={"react": "room.react"}, silence_marker="[SILENT]")
+        self.assertIn("put exactly [SILENT] outside it", prompt)
+        self.assertNotIn("To stay quiet", prompt)
+
+    def test_the_speak_sentence_and_the_send_tool_ask_for_the_message_the_words_answer(self):
+        # A catch-up send answers an older ask; the origin defaulting to the trigger would link the wrong thread.
+        prompt = participant_tool_turn_prompt(PROFILE, tools={"send": "room.send", "context": "room.context"})
+        self.assertIn(
+            "To speak, call room.send once; if your words answer a message other than the one this turn is about, "
+            "name it in origin_event_id.",
+            prompt,
+        )
+        description = PARTICIPANT_TOOL_SPECS["send"]["input_schema"]["properties"]["origin_event_id"]["description"]
+        self.assertIn("The room message your words answer or follow up on", description)
+        self.assertIn("older question you are answering now", description)
+        self.assertIn("defaults to the message the turn is about", description)
+        # The other tools keep the generic description: their origin is the message that prompted them.
+        self.assertIn(
+            "Defaults to the event that woke you",
+            PARTICIPANT_TOOL_SPECS["react"]["input_schema"]["properties"]["origin_event_id"]["description"],
+        )
+        self.assertNotIn("To speak", participant_tool_turn_prompt(PROFILE, tools={"react": "room.react", "context": "room.context"}))
+
+    def test_the_react_tool_says_it_is_the_mhm(self):
+        description = PARTICIPANT_TOOL_SPECS["react"]["description"]
+        self.assertIn("This is the mhm", description)
+        self.assertIn("following without taking the floor", description)
+
+    def test_the_quiet_tool_asks_for_a_reason_and_is_not_a_room_action(self):
+        spec = PARTICIPANT_TOOL_SPECS["quiet"]
+        self.assertEqual(["why"], spec["input_schema"]["required"])
+        self.assertEqual({"why"}, set(spec["input_schema"]["properties"]))
+        self.assertIn("not a room action", spec["description"])
+        self.assertIn("quiet", PARTICIPANT_TOOL_SPECS)
+        self.assertNotIn("quiet", PARTICIPANT_ACTION_TOOL_ROLES)
+        # The core action tools have no way to make it into a room action.
+        with self.assertRaises(ParticipantModelError):
+            participant_tool_action("quiet", {"why": "x"}, request=_request(), visible_event_ids=set(VISIBLE))
 
     def test_the_prompt_never_asks_for_an_admission_verdict(self):
         prompt = participant_tool_turn_prompt(PROFILE, tools=TOOLS)
@@ -200,6 +277,13 @@ class ToolActionTests(unittest.TestCase):
         self.assertEqual("privileged", action["kind"])
         self.assertEqual("e2", action["origin_event_id"])
 
+    def test_send_may_name_an_older_message_as_the_one_it_answers(self):
+        named = self._action("send", {"text": "It is 3pm.", "origin_event_id": "e1"})
+        self.assertEqual("e1", named["origin_event_id"])
+        self.assertEqual("e2", self._action("send", {"text": "It is 3pm."})["origin_event_id"])
+        with self.assertRaises(ParticipantModelError):
+            self._action("send", {"text": "hi", "origin_event_id": "e404"})
+
     def test_malformed_calls_are_refused_with_a_readable_reason(self):
         for role, arguments, reason in (
             ("send", {"text": "  "}, "non-empty"),
@@ -235,6 +319,24 @@ class ToolActionTests(unittest.TestCase):
         before = deepcopy(request)
         participant_tool_action("send", {"text": "hi"}, request=request, visible_event_ids=set(VISIBLE))
         self.assertEqual(before, request)
+
+
+class ToolQuietTests(unittest.TestCase):
+    def test_the_reason_is_the_agents_words_on_one_line(self):
+        self.assertEqual(
+            "Castor was asked, not me.", participant_tool_quiet({"why": "  Castor was asked,\n  not me. "})
+        )
+
+    def test_a_missing_or_blank_reason_is_refused_with_a_readable_message(self):
+        for arguments in ({}, {"why": ""}, {"why": "  \n"}, {"why": None}, {"why": 3}):
+            with self.subTest(arguments=arguments), self.assertRaises(ParticipantModelError) as raised:
+                participant_tool_quiet(arguments)
+            self.assertIn("quiet needs why", str(raised.exception))
+
+    def test_it_takes_nothing_but_why(self):
+        for arguments in ({"why": "x", "origin_event_id": "e1"}, {"why": "x", "text": "hi"}, "why"):
+            with self.subTest(arguments=arguments), self.assertRaises(ParticipantModelError):
+                participant_tool_quiet(arguments)
 
 
 class ToolExpansionTests(unittest.TestCase):

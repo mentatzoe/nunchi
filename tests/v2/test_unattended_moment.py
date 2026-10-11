@@ -119,6 +119,43 @@ class UnattendedMomentTests(unittest.TestCase):
         first = ParticipantTurnProtocol(profile=TURN_PROFILE, wake=self.wakes[0], opportunity=allowed)
         self.assertNotIn("unattended_event_ids", first.instructions)
 
+    def test_a_post_that_names_the_unattended_ask_it_answers_links_that_thread_not_the_thanks(self):
+        # The turn is about Zoe's thanks; the agent answers Sam, whose question arrived while it was busy, and
+        # names it as the message its words answer (the send tool asks for that). Without the named origin the
+        # post would be filed under the newest message and Sam's thread would read unanswered.
+        wakes, during = [], [("s1", "human:sam", "Vigil, is staging up?"), ("z2", "human:zoe", "Thanks!")]
+        answers = {"z2": {"kind": "message", "origin_event_id": "s1", "text": "Staging is up."}}
+        pipeline, _, _, _ = foundation(model=FixtureModel("DEFER"))
+
+        def take(**turn):
+            wake = turn["wake"]
+            wakes.append(wake)
+            while during:
+                event_id, author_id, text = during.pop(0)
+                pipeline.observe_and_offer(
+                    delivery_id=f"d-{event_id}", event=message(event_id, author_id, text), actors=ACTORS
+                )
+            return answers.pop(wake["trigger_event_id"], None)
+
+        pipeline.host.participant = take
+        pipeline.handle_delivery(
+            delivery_id="d-z1", event=message("z1", text="Vigil, can you check the build?"), actors=ACTORS
+        )
+        self.assertEqual(["s1"], [w for w in wakes if w["trigger_event_id"] == "z2"][0]["unattended_event_ids"])
+        pipeline.observation.observe(
+            delivery_id="d-v1", event=message("v1", "discord:bot:9", "Staging is up."), actors={}
+        )
+        pipeline.handle_delivery(delivery_id="d-z3", event=message("z3", text="Great."), actors=ACTORS)
+        facts = pipeline.host.memory_facts("z3")
+        (post,) = [move for move in facts["own_moves"] if move["kind"] == "message"]
+        self.assertEqual(
+            ("v1", "s1", "human:sam", "Vigil, is staging up?"),
+            (post["event_id"], post["about_event_id"], post["about_author_id"], post["about_text"]),
+        )
+        threads = {thread["event_id"]: [r["event_id"] for r in thread["responses"]] for thread in facts["threads"]}
+        self.assertEqual(["v1"], threads["s1"])
+        self.assertEqual([], threads.get("z2", []))
+
     def test_a_lone_message_mid_turn_has_nothing_unattended(self):
         model = FixtureModel("DEFER")
         pipeline, _, _, _ = foundation(model=model)

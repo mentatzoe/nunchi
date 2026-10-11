@@ -322,11 +322,20 @@ _SOCIAL_GUIDE = (
     "nod, shows you are following without taking the floor. Holding back "
     "fits when the person addressed has not had a chance to answer yet, when "
     "someone already answered, or when the speaker is still mid-thought. "
+    "While someone is telling something across several messages, let them "
+    "finish: a nod or silence while they go on. When they stop, you may "
+    "reply or stay quiet. "
     "Say only what you know: one clarifying question beats a guess, and a "
-    "guess stated as fact misleads the room. If you have not checked "
-    "something, say so, ask, or say you will check; when someone asks you "
-    "for news you do not have yet, \"not yet\" answers them, and silence "
-    "leaves them waiting."
+    "guess stated as fact misleads the room. If you do not know something, "
+    "say so or ask. The people here cannot see your tools, files, commands "
+    "or machine, so answer as a person in the room would and do not narrate "
+    "what you ran. Nunchi reads what is posted in this room as it arrives, a "
+    "bot's status line included, and brings it to you when it bears on "
+    "something you said you would do; so for anything that will be said "
+    "here, \"I'll tell you when it finishes\" is a promise you can make. For "
+    "anything you cannot see from here, say so. When someone asks you for "
+    "news you do not have yet, \"not yet\" answers them, and silence leaves "
+    "them waiting."
 )
 
 _MEMORY_GUIDE = (
@@ -338,10 +347,10 @@ _MEMORY_GUIDE = (
     "memory.threads is present, it is who asked what: recent messages that "
     "asked someone for something, with whom each was addressed to, and your "
     "own messages that others responded to, each with the first messages "
-    "that responded and what they said; an empty responses list means none "
-    "has yet. A response is not always an answer, and a promise is not the "
-    "thing done. Check any of it against the messages it points to. It is "
-    "your memory, not a to-do list."
+    "that responded, yours among them, and what they said; an empty "
+    "responses list means none has yet. A response is not always an "
+    "answer, and a promise is not the thing done. Check any of it against "
+    "the messages it points to. It is your memory, not a to-do list."
 )
 
 # The room's pace, as a person notices it (#94 step 6).
@@ -921,14 +930,25 @@ PARTICIPANT_TOOL_SPECS: dict[str, dict[str, Any]] = {
                     **_EVENT_ID,
                     "description": "The id of the room message this replies to.",
                 },
-                "origin_event_id": _ORIGIN_EVENT_ID,
+                "origin_event_id": {
+                    **_EVENT_ID,
+                    "description": (
+                        "The room message your words answer or follow up on, "
+                        "one you were shown. Name it when it is not the one "
+                        "that woke you, such as an older question you are "
+                        "answering now; it defaults to the message the turn is "
+                        "about."
+                    ),
+                },
             },
         },
     },
     "react": {
         "description": (
-            "Add or remove one reaction on one room message. Counts as your one "
-            "room action for this turn."
+            "Add or remove one reaction on one room message. This is the "
+            "mhm: a quick nod that shows you are following without taking the "
+            "floor, on the message you are nodding at. Counts as your one room "
+            "action for this turn."
         ),
         "input_schema": {
             "type": "object",
@@ -946,6 +966,30 @@ PARTICIPANT_TOOL_SPECS: dict[str, dict[str, Any]] = {
                 },
                 "operation": {"enum": ["add", "remove"], "default": "add"},
                 "origin_event_id": _ORIGIN_EVENT_ID,
+            },
+        },
+    },
+    "quiet": {
+        "description": (
+            "Stay quiet on purpose: post nothing and end your turn, with the "
+            "reason you give. This is the same as ending your turn without a "
+            "room call, with a reason you chose, and it is not a room action. "
+            "Your later turns see the reason with this move in "
+            "memory.own_moves."
+        ),
+        "input_schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["why"],
+            "properties": {
+                "why": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": (
+                        "One short sentence, in your own words, on why you "
+                        "stay quiet. It is never posted."
+                    ),
+                },
             },
         },
     },
@@ -1021,7 +1065,11 @@ PARTICIPANT_ACTION_TOOL_ROLES = ("send", "react", "propose", "withdraw")
 
 
 def participant_tool_roles(request: Mapping[str, Any]) -> tuple[str, ...]:
-    """Return the tool roles this turn's permissions allow, in a stable order."""
+    """Return the tool roles this turn's permissions allow, in a stable order.
+
+    ``quiet`` is always offered: staying quiet on purpose is not a room
+    action, so no permission governs it.
+    """
 
     permissions = request["permissions"]
     ordinary = set(permissions["ordinary_actions"])
@@ -1030,6 +1078,7 @@ def participant_tool_roles(request: Mapping[str, Any]) -> tuple[str, ...]:
         roles.append("send")
     if "reaction" in ordinary:
         roles.append("react")
+    roles.append("quiet")
     if permissions["privileged_proposals"]:
         roles += ["propose", "withdraw"]
     roles.append("context")
@@ -1043,6 +1092,45 @@ def _checked_tool_names(tools: Mapping[str, str], *, allow_empty: bool = False) 
     if unknown:
         raise ValidationError("participant tool roles are unknown: " + ", ".join(sorted(unknown)))
     return {role: _nonempty(name, f"{role} tool name") for role, name in tools.items()}
+
+
+def _choices(names: Mapping[str, str]) -> str:
+    """The three normal choices of a tool turn, in this order: stay quiet, nod, speak.
+
+    Staying quiet comes first, and is named as a choice the agent makes, with
+    its reason, not as the absence of a call under a long prompt; a nod is the
+    "mhm" of docs/behavior.md; speaking is last. A choice whose tool the turn
+    does not offer is left out, except quiet, which is always possible: ending
+    the turn without a room call is silence too.
+    """
+
+    if "quiet" in names:
+        quiet = (
+            f" To stay quiet, call {names['quiet']} with why, or end your turn "
+            "without a room call and say why in your last words; either way "
+            "your later turns see the reason."
+        )
+    else:
+        quiet = (
+            " To stay quiet, end your turn without a room call, and say why "
+            "in your last words: your later turns see them as your reason."
+        )
+    nod = (
+        f" To nod, call {names['react']} once: a quick mhm, you show you are "
+        "following without taking the floor."
+        if "react" in names
+        else ""
+    )
+    speak = (
+        f" To speak, call {names['send']} once; if your words answer a message "
+        "other than the one this turn is about, name it in origin_event_id."
+        if "send" in names
+        else ""
+    )
+    return (
+        f"{quiet}{nod}{speak} The host owns the one output commit point and "
+        "its result tells you what happened."
+    )
 
 
 def participant_tool_turn_prompt(
@@ -1067,6 +1155,10 @@ def participant_tool_turn_prompt(
         silence_marker = _nonempty(silence_marker, "silence marker")
         if "send" in names:
             raise ValidationError("a participant whose final reply is its post has no send tool")
+        if "quiet" in names:
+            raise ValidationError(
+                "a participant whose final reply is its post has no quiet tool: its silence marker is its quiet"
+            )
     acting = [names[role] for role in ("send", "react") if role in names]
     parts = [
         f"You are {profile.participant_id}, taking part in a shared room with "
@@ -1100,15 +1192,14 @@ def participant_tool_turn_prompt(
     else:
         parts.append("Your own reply in this conversation is never posted to the room.")
         if acting:
-            parts.append(
-                f" To contribute, call {' or '.join(acting)} once. The host owns "
-                "the one output commit point and its result tells you what "
-                "happened. To stay silent, end your turn without calling it, "
-                "and say why in your last words: your later turns see them as "
-                "your reason."
-            )
+            parts.append(_choices(names))
         else:
             parts.append(" You cannot post in the room this turn.")
+            if "quiet" in names:
+                parts.append(
+                    f" To end your turn on purpose, call {names['quiet']} with "
+                    "why; it is never posted, and your later turns see it as your reason."
+                )
     if "propose" in names:
         parts.append(
             f" {names['propose']} submits a privileged action as a proposal "
@@ -1229,6 +1320,23 @@ def participant_tool_action(
         }
     checked = _validate_inner_action(action)
     return _bind_action(checked, request=request, visible_event_ids=visible_event_ids)
+
+
+def participant_tool_quiet(arguments: Any) -> str:
+    """Turn one quiet tool call into the agent's reason for staying quiet.
+
+    Raises `ParticipantModelError` with a message the participant can read
+    when the call has no reason. The reason is never posted: it becomes the
+    reason of the turn's silence in the participant's memory.
+    """
+
+    args = _tool_arguments("quiet", arguments)
+    why = args.get("why")
+    if not isinstance(why, str) or not why.strip():
+        raise ParticipantModelError(
+            "quiet needs why: one short sentence on why you stay quiet"
+        )
+    return " ".join(why.split())
 
 
 def participant_tool_expansion(arguments: Any) -> dict[str, Any]:

@@ -5,13 +5,16 @@ do inside its turn, once, so every integration gets the same behavior
 (`docs/harness-contract.md`, "The turn interface"):
 
 - one room action per turn;
+- staying quiet is a choice the agent can name: the quiet tool ends the turn
+  in silence with the agent's reason. It posts nothing and is not a room
+  action, and it is the deliberate form of ending the turn without a call;
 - before the first post or reaction, look again once: if others posted while
   the agent composed, the action is held and the agent decides again;
 - steering: after each of the agent's tool calls, what others posted since it
   last looked;
 - ending the turn without an action is silence only when the turn was bound
   to its wake, which shows the agent had the room actions; any other ending is
-  a failure;
+  a failure. The last words of such a silence are its reason;
 - in final-answer posting, only words the agent's own model wrote can be its
   post; text the harness puts in their place makes the turn a failure;
 - a post never carries a wake marker (`split_private`); in final-answer
@@ -67,12 +70,13 @@ from .participant_model import (
     build_participant_turn_request,
     participant_tool_action,
     participant_tool_expansion,
+    participant_tool_quiet,
     participant_tool_roles,
     participant_tool_turn_text,
 )
 from .v2_contracts import shown_event_ids
 
-TURN_ROLES = ("send", "react", "propose", "withdraw", "context")
+TURN_ROLES = ("send", "react", "quiet", "propose", "withdraw", "context")
 # Actions the room sees; the agent looks again before the first one.
 VISIBLE_KINDS = ("message", "reply", "reaction")
 DEFAULT_RESULT_WAIT_SECONDS = 25.0
@@ -114,6 +118,10 @@ MARKER_ONLY_REFUSAL = (
     "Refused: this post held only Nunchi's wake marker, which the room never "
     "reads. Nothing was posted. Write what the room should read, or stay silent."
 )
+
+
+# What a room call after the quiet tool is told: the agent chose to stay quiet.
+QUIETED = "You chose to stay quiet in this turn. Nothing was posted. End your turn."
 
 
 def _without_wake_markers(text: str) -> str:
@@ -904,6 +912,8 @@ class Turn:
                 raise ValueError("a silence marker must be non-empty text")
             if "send" in self.tool_names:
                 raise ValueError("a turn whose final answer is its post has no send tool")
+            if "quiet" in self.tool_names:
+                raise ValueError("a turn whose final answer is its post has no quiet tool: its silence marker is its quiet")
         self._silent_forms = _silent_forms(silence_marker, also_silent, model_text)
         self.silence_marker = silence_marker
         self.also_silent = tuple(also_silent)
@@ -935,6 +945,10 @@ class Turn:
         self.turn_ids: set[str] = set()
         self.action: dict[str, Any] | None = None
         self.action_ready = threading.Event()
+        # The agent chose to stay quiet (the quiet tool): no room action, and
+        # the turn is done for the room. Its reason is ``note``.
+        self.quieted = False
+        self.quiet_ready = threading.Event()
         self.outcome: TransportResult | None = None
         self.outcome_ready = threading.Event()
         self.ended = threading.Event()
@@ -1023,13 +1037,20 @@ class Turn:
         ``name`` is the tool's name as the agent called it, for the answer.
         """
 
+        if role == "quiet" and self.quieted and not self.cancelled.is_set():
+            # A second call, perhaps made beside the first: the agent is quiet, however far the host is.
+            return True, "You are already staying quiet this turn. End your turn."
         if not self.open():
             return False, "This room opportunity has ended. Nothing was posted."
         if role not in self.roles:
             return False, f"{name or self.tool_names.get(role, role)} is not available in this turn."
         if role == "context":
             return self._context(arguments)
+        if role == "quiet":
+            return self._quiet(arguments)
         with self.lock:
+            if self.quieted:
+                return False, QUIETED
             if self.action is not None:
                 return False, (
                     "You already took your one room action in this turn. End "
@@ -1070,6 +1091,43 @@ class Turn:
             )
         return answer
 
+    def _quiet(self, arguments: Any) -> tuple[bool, str]:
+        """The agent stays quiet on purpose: the turn ends in silence with its reason.
+
+        The deliberate form of ending the turn without a room call, as
+        ``{"kind": "silence"}`` is in the one-reply style. It posts nothing,
+        and it is not a room action, so there is no look again before it: a
+        silence never goes stale. Once called, the turn takes no room action,
+        and the host hears the silence at once, with the agent's reason as
+        the silence's reason. A reason that holds a withheld secret is
+        refused, so the agent can give another.
+        """
+
+        with self.lock:
+            if self.action is not None:
+                return False, (
+                    "You already took your one room action in this turn. End "
+                    "your turn."
+                )
+            try:
+                why = participant_tool_quiet(arguments)
+            except ParticipantModelError as exc:
+                return False, f"Refused: {exc}. You have not stayed quiet yet."
+            if not self._may_keep(why):
+                return False, (
+                    "Refused: this reason contains a credential or secret. "
+                    "Give another reason, without it."
+                )
+            if self.quieted:
+                return True, "You are already staying quiet this turn. End your turn."
+            self.quieted = True
+            self.note = why
+            self.quiet_ready.set()
+        return True, (
+            "Staying quiet: nothing is posted, and your reason is in your "
+            "memory. End your turn."
+        )
+
     def after_tool_call(self) -> str | None:
         """What others posted since the agent last looked, or None (steering).
 
@@ -1081,7 +1139,9 @@ class Turn:
         then holds only for what the agent has not seen.
         """
 
-        if self.cancelled.is_set() or self.ended.is_set():
+        if self.cancelled.is_set() or self.ended.is_set() or self.quieted:
+            # A turn that chose to stay quiet is done for the room: what
+            # arrives now is the next turn's to read.
             return None
         # Parallel tool calls may ask at once, and the look-again reads the
         # same view under this lock: each message is shown once.
@@ -1275,6 +1335,8 @@ class Turn:
         return decision
 
     def _context(self, arguments: Any) -> tuple[bool, str]:
+        if self.quieted:
+            return False, QUIETED
         if self.action is not None:
             return False, "You already took your room action in this turn."
         try:
@@ -1351,7 +1413,7 @@ class TurnParticipant:
         driver: TurnDriver,
         guard: SecretGuard,
         tool_names: Mapping[str, str],
-        roles: Sequence[str] = TURN_ROLES,
+        roles: Sequence[str] | None = None,
         result_wait_seconds: float = DEFAULT_RESULT_WAIT_SECONDS,
         silence_marker: str | None = None,
         also_silent: Sequence[str] = (),
@@ -1359,14 +1421,24 @@ class TurnParticipant:
         bind_timeout_seconds: float | None = None,
         previous_turn_grace_seconds: float = DEFAULT_PREVIOUS_TURN_GRACE_SECONDS,
     ) -> None:
+        if roles is None:
+            # Every role the integration named a tool for. A role added to the
+            # turn later (such as quiet) is offered once an integration names it.
+            roles = [role for role in TURN_ROLES if role in tool_names]
         unknown = set(roles) - set(TURN_ROLES)
         if unknown:
             raise ValueError(f"unknown turn roles: {sorted(unknown)}")
         if silence_marker is not None:
-            # Final-answer posting: the answer is the post, so there is no send tool.
-            roles = [role for role in roles if role != "send"]
+            # Final-answer posting: the answer is the post, so there is no send
+            # tool, and the silence marker is the quiet. Dropped before the names
+            # are checked, so an integration that lists them without names, as
+            # it could before the quiet role, still works.
+            roles = [role for role in roles if role not in ("send", "quiet")]
             if not isinstance(silence_marker, str) or not silence_marker.strip():
                 raise ValueError("a silence marker must be non-empty text")
+        unnamed = [role for role in roles if role not in tool_names]
+        if unnamed:
+            raise ValueError(f"no tool name for turn roles: {sorted(unnamed)}")
         # Checked now, not at the first turn.
         _silent_forms(silence_marker, also_silent, model_text)
         self.also_silent = tuple(also_silent)
@@ -1463,6 +1535,10 @@ class TurnParticipant:
         while True:
             if turn.action_ready.wait(0.05):
                 return deepcopy(turn.action)
+            if turn.quiet_ready.is_set():
+                # The agent chose to stay quiet: silence now, with its reason,
+                # without waiting for the harness to report the run's end.
+                return {"kind": "silence", "why": turn.note}
             if cancel.is_set():
                 self.driver.interrupt(turn)
                 # The library is done with this turn: whatever the agent does

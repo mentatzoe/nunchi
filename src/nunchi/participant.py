@@ -1168,12 +1168,14 @@ class ParticipantTurnHost:
             result = TransportResult("unknown", "transport returned no attested result")
         self._append_transport_receipt(wake["request_id"], result)
         self.memory.record_reason(action, why)
+        synthetic = False
         if (result.delivery, result.detail) == ("unknown", HARNESS_DELIVERS):
             # The harness posts it. If the room never shows it back, it goes
             # into the room log now; otherwise memory keeps it by its words
             # until the room shows it (#94 steps 9d and 9e).
             shows = getattr(self.transport, "room_shows_own_messages", True)
-            if shows or not self._record_delivered_message(wake, action, why):
+            synthetic = not shows and self._record_delivered_message(wake, action, why)
+            if not synthetic:
                 self.memory.record_delivered(action, why=why)
         elif (
             result.delivery == "sent"
@@ -1184,6 +1186,20 @@ class ParticipantTurnHost:
             # back: it goes into the room log now, so the participant's next
             # turn holds it among its own moves.
             self._record_sent_reaction(wake, action)
+        if result.delivery in ("sent", "unknown") and not synthetic:
+            # The room shows the post back with no trace of the message that
+            # prompted it, which only this host knows: keep it, so the post
+            # points at the message it answered and counts as a response on
+            # that message's thread. The id the transport attested for what it
+            # sent and the time pair it with the room's copy; the words alone
+            # do when there is neither. A post that never went out has no
+            # origin to keep, and one the host put into the room log itself
+            # already replies to it.
+            self.memory.record_origin(
+                action,
+                message_id=result.detail if result.delivery == "sent" else None,
+                at=self.observation.clock().astimezone(timezone.utc),
+            )
         return result
 
     def _record_delivered_message(
