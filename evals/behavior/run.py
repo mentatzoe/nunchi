@@ -56,9 +56,17 @@ from nunchi.participant import (
     ParticipantTurnHost,
     TransportResult,
 )
-from nunchi.participant_model import OpenAICompatibleParticipant
+from nunchi.participant_model import OpenAICompatibleParticipant, ParticipantModelError
 from nunchi.pipeline import NunchiV2Pipeline
-from nunchi.turn import is_silence, machinery_in, without_taught_thinking
+from nunchi.turn import (
+    TURN_ROLES,
+    SecretGuard,
+    Turn,
+    TurnParticipant,
+    is_silence,
+    machinery_in,
+    without_taught_thinking,
+)
 from nunchi.receipts import ReceiptJournal
 
 from .scene import SCENES, Moment, Scene, load_scenes, parse_offset, profile_sha256
@@ -192,6 +200,8 @@ class RecordingAgent:
         # What the model wrote for the room in this turn, before the
         # library's commit: each plain reply, or each envelope's text.
         self.written: list[str] = []
+        # A tool turn's record: how it ended, and each step (`ToolTurnParticipant`).
+        self.tool_turn: dict[str, Any] | None = None
 
     def reset(self) -> None:
         """Forget a played earlier turn, so the record shows only the judged one."""
@@ -205,6 +215,7 @@ class RecordingAgent:
         self.memory_threads = []
         self.replies = []
         self.written = []
+        self.tool_turn = None
 
     def _usage_since(self, start: int) -> dict[str, Any] | None:
         log = getattr(self.inner, "usage_log", None)
@@ -232,6 +243,8 @@ class RecordingAgent:
         first_reply = len(replies) if isinstance(replies, list) else 0
         written = getattr(self.inner, "written_log", None)
         first_written = len(written) if isinstance(written, list) else 0
+        tool_turns = getattr(self.inner, "turn_log", None)
+        first_tool_turn = len(tool_turns) if isinstance(tool_turns, list) else 0
         try:
             self.action = self.inner.run_protocol(
                 wake=wake, expand=self._recorded(expand, "with reading"), **kwargs
@@ -247,6 +260,8 @@ class RecordingAgent:
                 self.replies = list(replies[first_reply:])
             if isinstance(written, list):
                 self.written = list(written[first_written:])
+            if isinstance(tool_turns, list) and len(tool_turns) > first_tool_turn:
+                self.tool_turn = deepcopy(tool_turns[first_tool_turn])
         if self.paired and self.attention.get("advice"):
             self.without_reading = self._play_without_reading(wake, expand, kwargs)
         return self.action
@@ -593,14 +608,24 @@ class RecordingParticipant(OpenAICompatibleParticipant):
         self.written_log: list[str] = []
 
     def _complete(self, messages: Any, *, json_reply: bool) -> Any:
+        reply = self._request(messages, json_reply=json_reply)
+        if not json_reply:
+            self.reply_log.append(reply)
+        written = envelope_text(reply) if json_reply else reply
+        if isinstance(written, str):
+            self.written_log.append(written)
+        return reply
+
+    def _request(self, messages: Any, *, json_reply: bool) -> Any:
+        """One call to the endpoint, with its raw reply and its usage kept.
+
+        The core's request, unchanged. What the reply means for the room is
+        the caller's to log: an envelope's text, a plain reply, or a tool call.
+        """
+
         self.last_reply = None
         try:
             self.last_reply = super()._complete(messages, json_reply=json_reply)
-            if not json_reply:
-                self.reply_log.append(self.last_reply)
-            written = envelope_text(self.last_reply) if json_reply else self.last_reply
-            if isinstance(written, str):
-                self.written_log.append(written)
             return self.last_reply
         finally:
             if self.last_response is not None:
@@ -664,8 +689,8 @@ def written_machinery(
 def turn_tool_names(agent: Any) -> tuple[str, ...]:
     """The names the agent's turn gave its room tools, which a post must not name.
 
-    The eval's two arms offer none today: an envelope names action kinds,
-    and a final answer is the post itself.
+    Only the tool arms offer any (`ROOM_TOOL_NAMES`): an envelope names
+    action kinds, and a final answer is the post itself.
     """
 
     names = getattr(getattr(agent, "inner", None), "tool_names", None)
@@ -691,21 +716,309 @@ def _raw_reply(agent: Any) -> Any:
 # integration names its harness's own marker.
 FINAL_ANSWER_SILENCE = "[SILENT]"
 
+# -- the tool arms: `--agent-posting tools` and `tools-coding` -------------------------
+
+POSTINGS = ("envelope", "final-answer", "tools", "tools-coding")
+TOOL_POSTINGS = ("tools", "tools-coding")
+# The names both active integrations register the room tools under; the core
+# leaves them to the integration. (Claude Code shows its model a prefix,
+# `mcp__nunchi__`, that the eval leaves off.) They hold an underscore, so a post
+# that names one is counted as machinery (`nunchi.turn.machinery_in`, `ids`).
+ROOM_TOOL_NAMES = {role: f"room_{role}" for role in TURN_ROLES}
+# Model calls in one tool turn, at most. A turn that has taken no room action
+# and given no answer by then ends in silence, and its record says it hit the bound.
+TOOL_STEPS = 6
+# The host's budget for one tool turn; an envelope turn gets AGENT_TIMEOUT_SECONDS.
+TOOL_TURN_SECONDS = 2 * AGENT_TIMEOUT_SECONDS
+
+# `tools-coding` approximates a coding harness's framing: a system prompt that
+# makes the agent a coding agent, and two generic tools beside the room's. The
+# wording is ours, not any harness's, and far shorter than a real harness's
+# prompt and tool set. The two tools do nothing: each call gets the same answer.
+CODING_SYSTEM_PROMPT = (
+    "You are a coding agent. You work in a software project from a terminal and "
+    "help with engineering tasks: reading and changing code, running commands, "
+    "tracking down bugs, and explaining what you find. Use your tools to check "
+    "the project instead of guessing. Other tools may be connected to you; use "
+    "them when they fit what you are asked. Keep your answers short and plain."
+)
+CODING_TOOLS: tuple[dict[str, Any], ...] = (
+    {
+        "type": "function",
+        "function": {
+            "name": "shell",
+            "description": "Run a shell command in the project directory and return its output.",
+            "parameters": {
+                "type": "object",
+                "properties": {"command": {"type": "string", "description": "The command to run."}},
+                "required": ["command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read a text file from the project and return its contents.",
+            "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string", "description": "The file's path."}},
+                "required": ["path"],
+            },
+        },
+    },
+)
+CODING_TOOL_NAMES = frozenset(tool["function"]["name"] for tool in CODING_TOOLS)
+NOT_AVAILABLE = "Not available in this evaluation."
+
+
+def _clipped(text: str) -> str:
+    return text if len(text) <= RAW_REPLY_MAX_CHARS else text[:RAW_REPLY_MAX_CHARS] + "…"
+
+
+def parsed_arguments(raw: Any) -> Any:
+    """A tool call's arguments: the JSON value they hold, or the text when it is not JSON.
+
+    Text that is not JSON goes to the core as it is, so the core's own tool
+    error ("arguments must be an object") answers it. An empty string is no
+    arguments, as models send it for a tool that needs none.
+    """
+
+    if isinstance(raw, str):
+        if not raw.strip():
+            return {}
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return raw
+    return {} if raw is None else raw
+
+
+class ToolTurnParticipant(RecordingParticipant):
+    """The simulated agent taking its turn through tools, as Claude Code and Codex give it.
+
+    The agent gets exactly the core's tool turn: the turn's text
+    (`participant_tool_turn_text`, through `Turn.text`) as its one user
+    message, and the room tools the turn offers (`PARTICIPANT_TOOL_SPECS`) as
+    OpenAI-style function tools through the same chat completions request as
+    the other arms. With ``coding`` it also gets a short coding-agent system
+    prompt and two generic tools whose calls all return `NOT_AVAILABLE`.
+
+    A harness drives the turn. This one is the core's own `TurnParticipant`
+    with this class as its driver, so the core decides each tool call: it
+    binds the run to the wake, answers every call (`call_tool`: a refused
+    reaction, a malformed call, a second room action), looks again before the
+    first post or reaction, steers with what others posted (`news`), and reads
+    the turn's end (`end_turn`). The loop calls the model, runs each tool call
+    it asks for, and sends the results back, for at most ``max_steps`` model
+    calls. The turn ends at its one room action, at the quiet tool, or when
+    the model answers with no tool call; that is silence, and its last words
+    are the reason. ``turn_log`` keeps one record per turn: how it ended and
+    each step's words, calls and results.
+    """
+
+    def __init__(self, *, coding: bool = False, max_steps: int | None = None, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.coding = coding
+        self.max_steps = TOOL_STEPS if max_steps is None else max_steps
+        if isinstance(self.max_steps, bool) or not isinstance(self.max_steps, int) or self.max_steps < 1:
+            raise ValueError("a tool turn needs at least one step")
+        self.tool_names = dict(ROOM_TOOL_NAMES)
+        self.turn_log: list[dict[str, Any]] = []
+        self._request_lock = threading.Lock()
+        self._turns = TurnParticipant(
+            profile=self.profile,
+            driver=self,
+            guard=SecretGuard(self.withheld_values()),
+            tool_names=self.tool_names,
+            # The loop runs inside the host's call, so the host cannot settle an
+            # action while a tool call waits for it. The turn ends at its action.
+            result_wait_seconds=0,
+        )
+
+    def run_protocol(self, *, wake, opportunity, expand, cancel):
+        return self._turns.run_protocol(wake=wake, opportunity=opportunity, expand=expand, cancel=cancel)
+
+    # -- the TurnDriver interface -------------------------------------------------
+
+    def start(self, turn: Turn) -> None:
+        """Run the agent's whole turn now, then report its end."""
+
+        turn_id = f"eval:{turn.request_id}"
+        played: dict[str, Any] = {"ended": None, "steps": []}
+        self.turn_log.append(played)
+        if not self._turns.bind_turn(turn_id=turn_id, wake_id=turn.wake_id):
+            raise ParticipantModelError("the eval's agent run did not bind to its wake")
+        ended, last_words = self._play(turn, turn_id, played)
+        played["ended"] = ended
+        self._turns.end_turn(
+            turn_id=turn_id,
+            ok=ended != "cancelled",
+            detail="the turn was cancelled" if ended == "cancelled" else "",
+            note=last_words,
+        )
+
+    def interrupt(self, turn: Turn) -> None:
+        pass
+
+    # -- the loop --------------------------------------------------------------------
+
+    def _tools(self, turn: Turn) -> list[dict[str, Any]]:
+        """The tools this turn offers, as the model's function tools."""
+
+        offered = set(turn.tool_names.values())
+        room = [
+            {
+                "type": "function",
+                "function": {
+                    "name": spec["name"],
+                    "description": spec["description"],
+                    "parameters": spec["inputSchema"],
+                },
+            }
+            for spec in self._turns.tool_specs()
+            if spec["name"] in offered
+        ]
+        return [*deepcopy(CODING_TOOLS), *room] if self.coding else room
+
+    def _next_message(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> Mapping[str, Any]:
+        """One model call with the tools offered; the assistant message it answers with."""
+
+        # The tools go in the request body through the core's own extra_body. The
+        # lock keeps a turn the host gave up on, whose call is still in flight,
+        # from taking them out of the next turn's request.
+        with self._request_lock:
+            self._extra_body["tools"] = tools
+            try:
+                self._request(messages, json_reply=False)
+            finally:
+                self._extra_body.pop("tools", None)
+            message = self.last_response["choices"][0]["message"]
+        self.last_reply = message
+        return message
+
+    def _play(self, turn: Turn, turn_id: str, played: dict[str, Any]) -> tuple[str, str | None]:
+        """Call the model and answer its tool calls until the turn ends; how, and its last words."""
+
+        tools = self._tools(turn)
+        messages: list[dict[str, Any]] = (
+            [{"role": "system", "content": CODING_SYSTEM_PROMPT}] if self.coding else []
+        )
+        messages.append({"role": "user", "content": turn.text})
+        for number in range(1, self.max_steps + 1):
+            if not turn.open():
+                return "cancelled", None
+            message = self._next_message(messages, tools)
+            text = message.get("content") if isinstance(message.get("content"), str) else ""
+            step: dict[str, Any] = {"step": number, "text": _clipped(text), "calls": []}
+            played["steps"].append(step)
+            asked = message.get("tool_calls")
+            asked = [call for call in asked if isinstance(call, Mapping)] if isinstance(asked, list) else []
+            if not asked:
+                # No tool call ends the turn; the last words are the reason.
+                return "no-call", text
+            calls = []
+            for index, call in enumerate(asked, start=1):
+                function = call.get("function") if isinstance(call.get("function"), Mapping) else {}
+                arguments = function.get("arguments")
+                calls.append(
+                    {
+                        "id": call["id"] if isinstance(call.get("id"), str) and call["id"] else f"call_{number}_{index}",
+                        "type": "function",
+                        "function": {
+                            "name": function["name"] if isinstance(function.get("name"), str) else "",
+                            "arguments": arguments if isinstance(arguments, str) else json.dumps(arguments or {}),
+                        },
+                    }
+                )
+            messages.append({"role": "assistant", "content": text, "tool_calls": calls})
+            for call in calls:
+                result = self._call(turn, turn_id, call, step)
+                messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
+            if turn.action is not None:
+                return "action", None
+            if turn.quieted:
+                return "quiet", None
+        return "step-bound", None
+
+    def _call(self, turn: Turn, turn_id: str, call: Mapping[str, Any], step: dict[str, Any]) -> str:
+        """Answer one tool call, as the harness would: the core for a room tool, a fixed answer for a coding one."""
+
+        name = call["function"]["name"]
+        arguments = parsed_arguments(call["function"]["arguments"])
+        entry: dict[str, Any] = {"tool": name, "arguments": arguments}
+        step["calls"].append(entry)
+        if self.coding and name in CODING_TOOL_NAMES:
+            entry["room"] = False
+            ok, result = True, NOT_AVAILABLE
+        else:
+            entry["room"] = True
+            ok, result = self._turns.call_tool(turn_id=turn_id, tool=name, arguments=arguments)
+            if name == self.tool_names["send"] and isinstance(arguments, Mapping):
+                # What the model wrote for the room, before the library's commit.
+                if isinstance(arguments.get("text"), str):
+                    self.written_log.append(arguments["text"])
+        if turn.action is None and not turn.quieted:
+            # Steering: what others posted since the agent last looked.
+            news = self._turns.news(turn_id=turn_id)
+            if news:
+                result = f"{result}\n\n{news}"
+        entry["ok"] = ok
+        entry["result"] = _clipped(result)
+        return result
+
+
+class OfflineToolParticipant(ToolTurnParticipant):
+    """Always speaks through the tool turn; checks the tool loop without a network."""
+
+    def __init__(self, *, profile: ParticipantProfile, coding: bool = False) -> None:
+        super().__init__(
+            profile=profile,
+            model=DRY_RUN_AGENT,
+            api_key="offline",
+            base_url="http://offline.invalid/v1",
+            coding=coding,
+        )
+        # No call is made, so there is no usage to report.
+        self.usage_log = None
+
+    def _next_message(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> Mapping[str, Any]:
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "offline-1",
+                    "type": "function",
+                    "function": {
+                        "name": self.tool_names["send"],
+                        "arguments": json.dumps({"text": "offline dry run"}),
+                    },
+                }
+            ],
+        }
+
 
 def openai_compatible_agent_factory(
     *, api_key: str, base_url: str, model: str, posting: str = "envelope"
 ) -> AgentFactory:
+    if posting not in POSTINGS:
+        raise ValueError(f"agent posting must be one of {', '.join(POSTINGS)}")
+
     def build(profile: ParticipantProfile) -> Any:
         openrouter = "openrouter.ai" in base_url
+        settings: dict[str, Any] = {
+            "profile": profile,
+            "model": model,
+            "api_key": api_key,
+            "base_url": base_url,
+            "provider": "openrouter" if openrouter else "openai-compatible",
+            "timeout_seconds": AGENT_TIMEOUT_SECONDS / 2,
+            "extra_body": {"max_tokens": AGENT_MAX_TOKENS, **({"usage": {"include": True}} if openrouter else {})},
+        }
+        if posting in TOOL_POSTINGS:
+            return ToolTurnParticipant(coding=posting == "tools-coding", **settings)
         return RecordingParticipant(
-            profile=profile,
-            model=model,
-            api_key=api_key,
-            base_url=base_url,
-            provider="openrouter" if openrouter else "openai-compatible",
-            timeout_seconds=AGENT_TIMEOUT_SECONDS / 2,
-            extra_body={"max_tokens": AGENT_MAX_TOKENS, **({"usage": {"include": True}} if openrouter else {})},
-            silence_marker=FINAL_ANSWER_SILENCE if posting == "final-answer" else None,
+            silence_marker=FINAL_ANSWER_SILENCE if posting == "final-answer" else None, **settings
         )
 
     return build
@@ -776,6 +1089,7 @@ def judge_moment(
     reading_chars: int = 400,
     replay: bool = True,
     now: datetime | None = None,
+    agent_seconds: float = AGENT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     """Run one moment through the production pipeline and grade what the room saw.
 
@@ -882,7 +1196,7 @@ def judge_moment(
         receipts=receipts,
         privileged=scripted,
         # A paired turn plays the agent twice before the real action is sent.
-        participant_timeout_seconds=timeout_seconds + AGENT_TIMEOUT_SECONDS * (2 if paired else 1),
+        participant_timeout_seconds=timeout_seconds + agent_seconds * (2 if paired else 1),
     )
     pipeline = NunchiV2Pipeline(
         observation=observation, attention=engine, host=host, scheduler=scheduler
@@ -1125,6 +1439,8 @@ def judge_moment(
                 else reply
                 for reply in agent.replies
             ]
+        if agent.tool_turn is not None:
+            record["agent"]["tool_turn"] = agent.tool_turn
         ids = (request["request_id"], *turn_tool_names(agent))
         silence_marker = getattr(getattr(agent, "inner", None), "silence_marker", None)
         written = written_machinery(agent.written, ids=ids, silence_marker=silence_marker)
@@ -1146,7 +1462,7 @@ def judge_moment(
         looked_again = [
             entry
             for entry in agent.expansions
-            if entry["arm"] == "with reading" and entry["request"].get("direction") == "new"
+            if entry["arm"] == "with reading" and entry["request"].get("direction") in ("new", "news")
         ]
         if looked_again:
             # How many new messages the agent was shown before it posted.
@@ -1374,6 +1690,86 @@ def _agent_turn_sections(records: list[dict[str, Any]], *, paired: bool) -> list
     return lines
 
 
+def tool_outcome(record: Mapping[str, Any]) -> str | None:
+    """How a tool turn ended, in the words of the summary; None for a turn without one.
+
+    ``quiet tool`` and ``no-call silence`` are the two silences the agent
+    chose; ``reaction`` and ``post`` are its one room action; a turn that hit
+    the step bound, or was cancelled, or took another action, is counted apart.
+    """
+
+    agent = record.get("agent") or {}
+    turn = agent.get("tool_turn")
+    if not turn or agent.get("error"):
+        return None
+    ended = turn.get("ended")
+    if ended == "action":
+        kind = (agent.get("action") or {}).get("kind")
+        return {"message": "post", "reply": "post", "reaction": "reaction"}.get(kind, "other")
+    return {"quiet": "quiet tool", "no-call": "no-call silence", "step-bound": "step bound"}.get(ended, "other")
+
+
+def refused_calls(record: Mapping[str, Any]) -> int:
+    """How many room tool calls the core refused in a tool turn (it tells the agent, who may try again)."""
+
+    turn = (record.get("agent") or {}).get("tool_turn") or {}
+    return sum(
+        1
+        for step in turn.get("steps", ())
+        for call in step.get("calls", ())
+        if call.get("room") and call.get("ok") is False
+    )
+
+
+TOOL_OUTCOMES = ("quiet tool", "no-call silence", "reaction", "post", "step bound", "other")
+
+
+def _tool_turn_section(scenes: list[Scene], records: list[dict[str, Any]]) -> list[str]:
+    """What the agent did with its tools, by moment: the move's route, and the core's refusals."""
+
+    turns = [record for record in records if tool_outcome(record)]
+    if not turns:
+        return []
+    totals = Counter(tool_outcome(record) for record in turns)
+    refused = sum(refused_calls(record) for record in turns)
+    lines = [
+        "",
+        "## The tool turn",
+        "",
+        "How each agent turn went through the tools. *Quiet tool* and *no-call silence*",
+        "are the two ways the agent stayed quiet on purpose (the quiet tool, or an",
+        "answer with no tool call, whose last words are its reason); *reaction* is its",
+        "nod and *post* its message or reply. *Step bound* is a turn that ran out of",
+        f"steps ({TOOL_STEPS} model calls) with no room action and no answer, which is",
+        "silence but not a choice. *Refused* counts room tool calls the core refused",
+        "(a word for a reaction, a malformed call, a second room action); the agent is",
+        "told and may try again. Counted over every attention route in the run.",
+        "",
+        f"Over {len(turns)} turns: "
+        + ", ".join(f"{totals[name]} {name}" for name in TOOL_OUTCOMES if totals[name])
+        + f"; {refused} refused call(s) in {sum(1 for record in turns if refused_calls(record))} turn(s).",
+        "",
+        "| Scene | Moment | Who | Turns | Quiet tool | No-call silence | Reaction | Post | Step bound | Other | Refused |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    grouped: dict[tuple, list[dict[str, Any]]] = defaultdict(list)
+    for record in turns:
+        grouped[(record["scene"], record["moment"], record["participant"])].append(record)
+    for scene in scenes:
+        for index, moment in enumerate(scene.moments):
+            for participant in scene.participants:
+                mine = grouped.get((scene.id, index, participant))
+                if not mine:
+                    continue
+                counts = Counter(tool_outcome(record) for record in mine)
+                lines.append(
+                    f"| {scene.id} | {moment.label} | {participant} | {len(mine)} | "
+                    + " | ".join(str(counts[name]) for name in TOOL_OUTCOMES)
+                    + f" | {sum(refused_calls(record) for record in mine)} |"
+                )
+    return lines
+
+
 def _cost(value: float) -> str:
     return f"${value:.4f}"
 
@@ -1503,11 +1899,14 @@ def summarize(
             + ("; each turn with a reading is also played without it" if meta.get("paired") else ""),
         ]
     if meta.get("agent_model"):
-        posting = (
-            "and its plain final answer is its post"
-            if meta.get("agent_posting") == "final-answer"
-            else "one JSON envelope per reply"
-        )
+        posting = {
+            "final-answer": "and its plain final answer is its post",
+            "tools": "the room tools, one room action, as a harness gives them",
+            "tools-coding": (
+                "the room tools as a harness gives them, with a coding agent's system "
+                "prompt and two coding tools that do nothing: an approximation"
+            ),
+        }.get(meta.get("agent_posting"), "one JSON envelope per reply")
         lines += [
             f"Each moment runs through Nunchi's pipeline. When attention wakes the agent,",
             f"`{meta['agent_model']}` plays its turn through the shared participant",
@@ -1583,6 +1982,7 @@ def summarize(
     lines += _cost_section(models, records)
     if meta.get("agent_model"):
         lines += _agent_turn_sections(records, paired=bool(meta.get("paired")))
+        lines += _tool_turn_section(scenes, records)
     if together:
         lines += ["", "## Collective checks", ""]
         for item in together:
@@ -1675,11 +2075,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--agent-posting",
-        choices=("envelope", "final-answer"),
+        choices=POSTINGS,
         default="envelope",
         help=(
-            "how the agent posts: one JSON envelope per reply, or its plain final "
-            "answer is the post (as in harnesses like Hermes)"
+            "how the agent posts: one JSON envelope per reply; its plain final "
+            "answer is the post (as in harnesses like Hermes); through the room "
+            "tools, as Claude Code and Codex take the turn (tools); or the same "
+            "with a coding agent's system prompt and two coding tools that do "
+            "nothing (tools-coding, an approximation)"
         ),
     )
     parser.add_argument(
@@ -1728,7 +2131,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         models = [DRY_RUN_MODEL]
         factory: ModelFactory = OfflineModel
-        if args.agent_model:
+        if args.agent_model and args.agent_posting in TOOL_POSTINGS:
+            agent_factory = lambda profile: OfflineToolParticipant(  # noqa: E731
+                profile=profile, coding=args.agent_posting == "tools-coding"
+            )
+        elif args.agent_model:
             agent_factory = lambda profile: OfflineAgent()  # noqa: E731
     else:
         models = [item.strip() for item in args.models.split(",") if item.strip()]
@@ -1768,6 +2175,7 @@ def main(argv: list[str] | None = None) -> int:
                 reading_items=args.reading_items,
                 reading_chars=args.reading_chars,
                 replay=not args.no_replay,
+                agent_seconds=TOOL_TURN_SECONDS if args.agent_posting in TOOL_POSTINGS else AGENT_TIMEOUT_SECONDS,
             )
 
     started = datetime.now(timezone.utc)
@@ -1793,6 +2201,7 @@ def main(argv: list[str] | None = None) -> int:
         "reasoning_efforts": {model: model_spec(model)[1] for model in models if model_spec(model)[1]},
         "agent_model": (DRY_RUN_AGENT if args.dry_run else args.agent_model) if args.agent_model else None,
         "agent_posting": args.agent_posting if args.agent_model else None,
+        "tool_steps": TOOL_STEPS if args.agent_model and args.agent_posting in TOOL_POSTINGS else None,
         "paired": args.paired,
         "reading_items": args.reading_items,
         "reading_chars": args.reading_chars,

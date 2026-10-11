@@ -9,11 +9,13 @@ runs, not here.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
 import json
 import os
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -29,6 +31,13 @@ from evals.behavior.score import cell, grade, visible_result
 from nunchi.adapters.model_apis import MessagesAttentionModel, ResponsesAttentionModel
 from nunchi.attention_questions import answers_leaning
 from nunchi.observation import ObservationLimits
+from nunchi.participant_model import (
+    PARTICIPANT_TOOL_SPECS,
+    REACTION_ADVICE,
+    build_participant_turn_request,
+    participant_tool_roles,
+    participant_tool_turn_text,
+)
 
 
 PARTICIPANTS = load_participants()
@@ -1174,6 +1183,373 @@ class UsageTests(unittest.TestCase):
             },
         )
         self.assertNotIn("## Cost and tokens", summary)
+
+
+class ScriptedToolProvider:
+    """An OpenAI-compatible chat endpoint on loopback that answers with scripted assistant messages.
+
+    Each request gets the next message of the script (a plain "nothing more to
+    do" once it runs out), in the chat completions shape, with usage. It keeps
+    every request body, so a test can read what the agent was sent.
+    """
+
+    def __init__(self, test, script):
+        self.requests = []
+        self.script = list(script)
+        provider = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):  # noqa: N802
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                provider.requests.append(body)
+                message = provider.script.pop(0) if provider.script else {"content": "Nothing more to do."}
+                payload = json.dumps(
+                    {
+                        "model": body["model"] + "-20260901",
+                        "provider": "FixtureCloud",
+                        "choices": [{"message": message}],
+                        "usage": {"prompt_tokens": 6000, "completion_tokens": 50, "cost": 0.0065},
+                    }
+                ).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *_args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        test.addCleanup(server.server_close)
+        test.addCleanup(server.shutdown)
+        self.base_url = f"http://127.0.0.1:{server.server_address[1]}/v1"
+
+
+def calling(name, call_id="call-1", **arguments):
+    """An assistant message that calls one tool."""
+
+    return {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {"id": call_id, "type": "function", "function": {"name": name, "arguments": json.dumps(arguments)}}
+        ],
+    }
+
+
+class ToolTurnTests(unittest.TestCase):
+    """The agent takes its turn through tools, as Claude Code and Codex give it (`--agent-posting tools`).
+
+    A scripted provider on loopback stands for the model; the core's own turn
+    decides every tool call (`TurnParticipant`, `Turn.call`).
+    """
+
+    def setUp(self):
+        # The provider is on loopback: no proxy of the developer's may stand in the way.
+        self.enterContext(mock.patch.dict(os.environ, {"NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1"}))
+
+    def play(self, script, *, posting="tools", scene_id="story-across-messages", moment=1, **kwargs):
+        provider = ScriptedToolProvider(self, script)
+        scene = scene_by_id(scene_id)
+        job = run.Job(scene, moment, scene.participants[0], "fixture/model", 0)
+        agents = run.openai_compatible_agent_factory(
+            api_key="fixture-key", base_url=provider.base_url, model="fixture/agent", posting=posting
+        )
+        record = run.judge_moment(
+            job,
+            lambda _: FixedModel("WAKE"),
+            timeout_seconds=5,
+            agent_factory=agents,
+            replay=False,
+            **kwargs,
+        )
+        return record, provider
+
+    def calls(self, record):
+        return [call for step in record["agent"]["tool_turn"]["steps"] for call in step["calls"]]
+
+    def test_the_quiet_tool_ends_the_turn_in_silence_with_its_reason(self):
+        why = "Zoe is still telling it; I will let her finish."
+        record, provider = self.play([calling("room_quiet", why=why)])
+        self.assertFalse(record["provider_error"])
+        self.assertEqual(1, len(provider.requests))
+        self.assertEqual(("stay_quiet", "agent", "fits"), (record["result"], record["by"], record["grade"]["visible"]))
+        self.assertEqual({"kind": "silence", "why": why}, record["agent"]["action"])
+        self.assertEqual(why, record["agent"]["why"])
+        self.assertEqual("quiet", record["agent"]["tool_turn"]["ended"])
+        self.assertEqual("quiet tool", run.tool_outcome(record))
+        (call,) = self.calls(record)
+        self.assertEqual(("room_quiet", True, True), (call["tool"], call["room"], call["ok"]))
+        self.assertEqual({"calls": 1, "prompt_tokens": 6000, "completion_tokens": 50, "cost": 0.0065,
+                          "providers": ["FixtureCloud"]}, record["agent"]["usage"])
+
+    def test_a_word_for_a_reaction_is_refused_by_the_core_and_the_agent_nods_with_an_emoji(self):
+        record, provider = self.play(
+            [
+                calling("room_react", call_id="word", target_event_id="s4", reaction="yikes"),
+                calling("room_react", call_id="emoji", target_event_id="s4", reaction="👍"),
+            ]
+        )
+        self.assertFalse(record["provider_error"])
+        self.assertEqual(("mhm", "agent", "fits"), (record["result"], record["by"], record["grade"]["visible"]))
+        self.assertEqual("reaction", run.tool_outcome(record))
+        self.assertEqual("action", record["agent"]["tool_turn"]["ended"])
+        word, emoji = self.calls(record)
+        self.assertFalse(word["ok"])
+        self.assertTrue(word["result"].startswith("Refused:"))
+        self.assertIn(REACTION_ADVICE, word["result"])
+        self.assertTrue(emoji["ok"])
+        self.assertEqual(1, run.refused_calls(record))
+        self.assertEqual("👍", record["agent"]["action"]["reaction"])
+        # The agent was told, in the core's words, and tried again.
+        self.assertEqual(2, len(provider.requests))
+        told = provider.requests[1]["messages"][-1]
+        self.assertEqual(("tool", "word"), (told["role"], told["tool_call_id"]))
+        self.assertIn(REACTION_ADVICE, told["content"])
+        asked = provider.requests[1]["messages"][-2]
+        self.assertEqual("room_react", asked["tool_calls"][0]["function"]["name"])
+
+    def test_a_malformed_call_gets_the_cores_tool_error_and_the_agent_may_try_again(self):
+        broken = calling("room_send", call_id="broken")
+        broken["tool_calls"][0]["function"]["arguments"] = "{not json"
+        record, provider = self.play(
+            [broken, calling("room_send", call_id="fixed", text="Rolled back at 2am. That is a long night.")],
+            moment=2,
+        )
+        self.assertEqual(("speak", "fits"), (record["result"], record["grade"]["visible"]))
+        first, second = self.calls(record)
+        self.assertFalse(first["ok"])
+        self.assertEqual("{not json", first["arguments"])
+        self.assertIn("arguments must be an object", first["result"])
+        self.assertTrue(second["ok"])
+        self.assertEqual(1, run.refused_calls(record))
+        self.assertEqual("post", run.tool_outcome(record))
+
+    def test_send_is_a_post_and_the_turn_ends_there(self):
+        text = "I would have pinned the signing key before the canary."
+        record, provider = self.play([calling("room_send", text=text), calling("room_quiet", why="unreachable")], moment=2)
+        self.assertEqual(("speak", "agent", "fits"), (record["result"], record["by"], record["grade"]["visible"]))
+        self.assertEqual(text, record["agent"]["action"]["text"])
+        self.assertEqual("post", run.tool_outcome(record))
+        self.assertEqual("action", record["agent"]["tool_turn"]["ended"])
+        # The turn ends at its one room action: the model is not called again.
+        self.assertEqual(1, len(provider.requests))
+        self.assertNotIn("machinery_written", record["agent"])
+        self.assertNotIn("machinery_posted", record["agent"])
+        self.assertEqual(0, run.refused_calls(record))
+
+    def test_a_post_that_names_a_room_tool_is_a_leak(self):
+        record, _ = self.play([calling("room_send", text="I would call room_send to say so.")], moment=2)
+        self.assertEqual(["room_send"], record["agent"]["machinery_written"])
+        self.assertEqual(["room_send"], record["agent"]["machinery_posted"])
+        # The words the agent wrote beside its tool calls are never posted, so they are not machinery.
+        quiet = calling("room_quiet", why="I will not call room_send here.")
+        quiet["content"] = "Using room_quiet."
+        record, _ = self.play([quiet])
+        self.assertNotIn("machinery_written", record["agent"])
+
+    def test_an_answer_with_no_tool_call_is_silence_and_its_last_words_are_the_reason(self):
+        words = "Zoe is mid-story; nothing for me to add yet."
+        record, provider = self.play([{"role": "assistant", "content": words}])
+        self.assertEqual(1, len(provider.requests))
+        self.assertEqual(("stay_quiet", "agent", "fits"), (record["result"], record["by"], record["grade"]["visible"]))
+        self.assertEqual({"kind": "silence", "why": words}, record["agent"]["action"])
+        self.assertEqual("no-call", record["agent"]["tool_turn"]["ended"])
+        self.assertEqual("no-call silence", run.tool_outcome(record))
+        self.assertEqual(words, record["agent"]["tool_turn"]["steps"][0]["text"])
+        # With no words, the silence has no reason.
+        record, _ = self.play([{"role": "assistant", "content": ""}])
+        self.assertEqual("stay_quiet", record["result"])
+        self.assertIsNone(record["agent"]["action"])
+        self.assertNotIn("why", record["agent"])
+
+    def test_a_loop_that_hits_the_step_bound_ends_in_silence_and_says_so(self):
+        looking = [calling("room_context", call_id=f"look-{n}", direction="before") for n in range(5)]
+        with mock.patch.object(run, "TOOL_STEPS", 3):
+            record, provider = self.play(looking)
+        self.assertFalse(record["provider_error"])
+        self.assertEqual(3, len(provider.requests))
+        turn = record["agent"]["tool_turn"]
+        self.assertEqual(("step-bound", 3), (turn["ended"], len(turn["steps"])))
+        self.assertEqual("step bound", run.tool_outcome(record))
+        self.assertEqual("stay_quiet", record["result"])
+        self.assertIsNone(record["agent"]["action"])
+        self.assertTrue(all(call["ok"] for call in self.calls(record)))
+        # Each call is a model call, and each is counted.
+        self.assertEqual(3, record["agent"]["usage"]["calls"])
+
+    def test_a_post_held_by_looking_again_can_be_given_up_by_staying_quiet(self):
+        # Castor answers while Vigil composes: the core holds the first post and
+        # shows the agent what arrived, and the agent decides again.
+        record, provider = self.play(
+            [
+                calling("room_send", call_id="first", text="The cert on the gateway expired."),
+                calling("room_quiet", call_id="second", why="Castor already answered it."),
+            ],
+            scene_id="answered-while-composing",
+            moment=0,
+        )
+        self.assertFalse(record["provider_error"])
+        held, quiet = self.calls(record)
+        self.assertTrue(held["ok"])
+        self.assertIn("Not posted yet: 1 new message(s)", held["result"])
+        self.assertIn("It was the expired TLS cert", held["result"])
+        self.assertEqual(("stay_quiet", "fits"), (record["result"], record["grade"]["visible"]))
+        self.assertEqual("quiet", record["agent"]["tool_turn"]["ended"])
+        self.assertEqual(1, record["agent"]["looked_again"])
+        self.assertEqual(0, run.refused_calls(record))
+
+    def test_the_tools_sent_are_the_cores_room_tools(self):
+        record, provider = self.play([calling("room_quiet", why="Waiting.")])
+        body = provider.requests[0]
+        self.assertNotIn("tool_choice", body)
+        functions = [tool["function"] for tool in body["tools"]]
+        self.assertTrue(all(tool["type"] == "function" for tool in body["tools"]))
+        self.assertEqual(
+            ["room_send", "room_react", "room_quiet", "room_context"], [function["name"] for function in functions]
+        )
+        for role, function in zip(("send", "react", "quiet", "context"), functions):
+            with self.subTest(role=role):
+                self.assertEqual(PARTICIPANT_TOOL_SPECS[role]["description"], function["description"])
+                self.assertEqual(PARTICIPANT_TOOL_SPECS[role]["input_schema"], function["parameters"])
+        # Exactly the core's turn: no system message, and the turn's text is the one user message.
+        self.assertEqual(["user"], [message["role"] for message in body["messages"]])
+        self.assertEqual("fixture/agent", body["model"])
+        self.assertEqual(run.AGENT_MAX_TOKENS, body["max_tokens"])
+
+    def test_the_user_message_is_the_cores_tool_turn_text_for_the_same_request(self):
+        seen = []
+        provider = ScriptedToolProvider(self, [calling("room_quiet", why="Waiting.")])
+        scene = scene_by_id("story-across-messages")
+        job = run.Job(scene, 1, scene.participants[0], "fixture/model", 0)
+        build = run.openai_compatible_agent_factory(
+            api_key="fixture-key", base_url=provider.base_url, model="fixture/agent", posting="tools"
+        )
+
+        def spied(profile):
+            agent = build(profile)
+            inner = agent.run_protocol
+
+            def run_protocol(**kwargs):
+                seen.append((profile, kwargs["wake"], kwargs["opportunity"]))
+                return inner(**kwargs)
+
+            agent.run_protocol = run_protocol
+            return agent
+
+        run.judge_moment(job, lambda _: FixedModel("WAKE"), timeout_seconds=5, agent_factory=spied, replay=False)
+        ((profile, wake, opportunity),) = seen
+        request = build_participant_turn_request(wake, opportunity)
+        tools = {role: run.ROOM_TOOL_NAMES[role] for role in participant_tool_roles(request)}
+        self.assertEqual(["send", "react", "quiet", "context"], list(tools))
+        expected = participant_tool_turn_text(profile, request, tools=tools)
+        self.assertEqual([{"role": "user", "content": expected}], provider.requests[0]["messages"])
+        # The text names the tools by the names they are registered under.
+        self.assertIn("call room_quiet with why", expected)
+
+    def test_the_coding_arm_adds_a_system_prompt_and_two_tools_that_do_nothing(self):
+        record, provider = self.play(
+            [
+                calling("shell", call_id="look", command="gh run list --workflow nightly"),
+                calling("room_quiet", call_id="quiet", why="Nothing to say yet."),
+            ],
+            posting="tools-coding",
+        )
+        self.assertFalse(record["provider_error"])
+        first, second = provider.requests
+        self.assertEqual(
+            [{"role": "system", "content": run.CODING_SYSTEM_PROMPT}], first["messages"][:1]
+        )
+        self.assertEqual("user", first["messages"][1]["role"])
+        self.assertEqual(
+            ["shell", "read_file", "room_send", "room_react", "room_quiet", "room_context"],
+            [tool["function"]["name"] for tool in first["tools"]],
+        )
+        # The room's tools are the core's, unchanged.
+        self.assertEqual(
+            PARTICIPANT_TOOL_SPECS["react"]["input_schema"], first["tools"][3]["function"]["parameters"]
+        )
+        # The shell call got the fixed answer, and the turn went on.
+        shell, quiet = self.calls(record)
+        self.assertEqual(("shell", False, True, run.NOT_AVAILABLE), (shell["tool"], shell["room"], shell["ok"], shell["result"]))
+        told = second["messages"][-1]
+        self.assertEqual(("tool", "look", run.NOT_AVAILABLE), (told["role"], told["tool_call_id"], told["content"]))
+        self.assertEqual("quiet", record["agent"]["tool_turn"]["ended"])
+        self.assertEqual(0, run.refused_calls(record))
+        self.assertEqual(("stay_quiet", "fits"), (record["result"], record["grade"]["visible"]))
+        # The prompt is ours and says what it is.
+        self.assertIn("coding agent", run.CODING_SYSTEM_PROMPT)
+
+    def test_without_the_coding_arm_a_shell_call_is_not_a_room_tool(self):
+        record, provider = self.play(
+            [calling("shell", command="ls"), calling("room_quiet", why="Waiting.")], posting="tools"
+        )
+        self.assertEqual(["user"], [message["role"] for message in provider.requests[0]["messages"]])
+        self.assertNotIn("shell", [tool["function"]["name"] for tool in provider.requests[0]["tools"]])
+        shell, _ = self.calls(record)
+        self.assertEqual(("shell", True, False, "shell is not a Nunchi room tool."),
+                         (shell["tool"], shell["room"], shell["ok"], shell["result"]))
+        self.assertEqual(1, run.refused_calls(record))
+
+    def test_the_summary_counts_how_each_turn_went(self):
+        scene = scene_by_id("story-across-messages")
+        scripts = [
+            [calling("room_quiet", why="Waiting.")],
+            [{"role": "assistant", "content": "Letting her finish."}],
+            [
+                calling("room_react", call_id="word", target_event_id="s4", reaction="yikes"),
+                calling("room_react", call_id="emoji", target_event_id="s4", reaction="👍"),
+            ],
+            [calling("room_send", text="That sounds like a rough night.")],
+        ]
+        records = []
+        for number, script in enumerate(scripts):
+            record, _ = self.play(script)
+            record["run"] = number
+            records.append(record)
+        meta = {
+            "started_at": "s", "finished_at": "f", "git_sha": "x", "git_dirty": False, "nunchi_version": "v",
+            "runs": 4, "temperature": 0, "base_url": "u", "calls": 4, "provider_errors": 0, "command": "c",
+            "agent_model": "fixture/agent", "agent_posting": "tools",
+        }
+        summary = run.summarize([scene], ["fixture/model"], records, [], meta)
+        self.assertIn("Over 4 turns: 1 quiet tool, 1 no-call silence, 1 reaction, 1 post; 1 refused call(s) in 1 turn(s).", summary)
+        self.assertIn(
+            "| story-across-messages | mid-story, fourth message | vigil | 4 | 1 | 1 | 1 | 1 | 0 | 0 | 1 |", summary
+        )
+        self.assertIn("the room tools, one room action, as a harness gives them", summary)
+        # Without tool turns, the section is left out.
+        plain = [{key: value for key, value in record.items() if key != "agent"} | {"agent": {"action": None}}
+                 for record in records]
+        self.assertNotIn("## The tool turn", run.summarize([scene], ["fixture/model"], plain, [], meta))
+
+    def test_a_dry_run_plays_the_tool_loop_offline(self):
+        for posting in ("tools", "tools-coding"):
+            with self.subTest(posting=posting), tempfile.TemporaryDirectory() as directory, mock.patch("sys.stdout"):
+                code = run.main([
+                    "--dry-run", "--runs", "1", "--scenes", "bot-status-report",
+                    "--agent-model", "any", "--agent-posting", posting, "--out", directory,
+                ])
+                meta = json.loads((Path(directory) / "run.json").read_text())
+                summary = (Path(directory) / "summary.md").read_text()
+                records = [json.loads(line) for line in (Path(directory) / "results.jsonl").read_text().splitlines()]
+            self.assertEqual(0, code)
+            self.assertEqual(posting, meta["agent_posting"])
+            turns = [record["agent"]["tool_turn"] for record in records if "agent" in record]
+            self.assertTrue(turns)
+            self.assertTrue(all(turn["ended"] == "action" for turn in turns))
+            self.assertIn("## The tool turn", summary)
+
+    def test_the_posting_styles_and_the_workflow_agree(self):
+        self.assertEqual(("envelope", "final-answer", "tools", "tools-coding"), run.POSTINGS)
+        workflow = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "behavior-eval.yml").read_text()
+        offered = workflow.split("agent_posting:")[1].split("paired:")[0]
+        for posting in run.POSTINGS:
+            self.assertIn(f"- {posting}\n", offered)
+        with self.assertRaises(ValueError):
+            run.openai_compatible_agent_factory(api_key="k", base_url="http://x/v1", model="m", posting="telepathy")
 
 
 class LitmusConversionTests(unittest.TestCase):

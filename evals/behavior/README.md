@@ -164,14 +164,66 @@ agent's side of the room:
   attention route. In the workflow, the `agent_posting` input sets it, and
   `agent_model: none` grades attention alone. Each record keeps the agent's
   plain replies (`agent.replies`), so a silence can be read too.
+- `--agent-posting tools` takes the agent's turn through tools, the way Claude
+  Code and Codex take it, so the core's tool-turn wording is measured here
+  and not only in live rehearsal. The agent gets exactly the core's tool turn
+  and nothing else: its one user message is the turn's text
+  (`participant_tool_turn_text`, through `Turn.text`), with no system message,
+  and its tools are the room tools the turn offers (`PARTICIPANT_TOOL_SPECS`:
+  send, react, quiet and context, and propose and withdraw only on a moment
+  whose scene settles an approval), as OpenAI-style function tools in the same
+  chat completions request as the other arms. They are named `room_send`,
+  `room_react`, `room_quiet` and `room_context`, the names both active
+  integrations register them under (Claude Code shows its model a prefix,
+  `mcp__nunchi__`, that the eval leaves off). A short loop runs the turn as a
+  harness would, at most `TOOL_STEPS` (6) model calls:
+  1. The model answers with words, tool calls, or both.
+  2. Each tool call goes through the core's own turn (`TurnParticipant` with
+     this loop as its driver, so `Turn.call` decides): a reaction that is a
+     word, a malformed call (arguments that are not a JSON object), a call to
+     a tool the turn does not offer, or a second room action comes back as
+     the core's tool error, which the agent reads and may try again. Before
+     the first post or reaction the core looks again, and holds it if others
+     posted while the agent composed ("Not posted yet", with their messages).
+     After each call the core's steering adds what others posted since.
+  3. The results go back as tool messages, and the model is called again.
+  4. The turn ends at its one room action (a post or a reaction), at the quiet
+     tool, or when the model answers with no tool call. The quiet tool and the
+     answer with no call are both silence, and the quiet tool's `why` or the
+     answer's last words are the reason. A turn that uses all its steps with
+     none of the three ends in silence with no reason, and its record says
+     `step-bound`.
+
+  The move the room sees is graded exactly as in the other arms. Each record
+  keeps the turn under `agent.tool_turn`: how it ended (`action`, `quiet`,
+  `no-call`, `step-bound`) and each step's words and calls, with each call's
+  tool, arguments, whether the core accepted it, and what the core answered.
+  The call that takes the room action is answered "not confirmed yet", because
+  the host commits the action after the loop returns; the turn ends there, so
+  the model never sees a later answer. The words beside tool calls and the
+  last words are never posted, so the leak count's `machinery_written` here is
+  each `send` call's text, held or refused ones included. Steering's looks at
+  the room are in `agent.expansions` (direction `news`), and count in
+  `looked_again`. The summary adds *The tool turn*: per moment, how many turns
+  ended at the quiet tool, with a no-call silence, with a reaction, with a post,
+  or at the step bound, and how many room tool calls the core refused.
+- `--agent-posting tools-coding` is the same turn with a coding harness's
+  framing added, **as an approximation**: a short coding-agent system prompt
+  (`CODING_SYSTEM_PROMPT`, our own wording, not any vendor's) and two generic
+  tools, `shell` and `read_file`, whose every call returns "Not available in
+  this evaluation." and lets the turn go on. A real coding harness carries a
+  much longer prompt, many more tools and its own conventions for when to ask
+  and when to run something, so this arm shows whether the core's wording
+  survives a coding agent's framing, not what Claude Code or Codex do. Compare
+  it with `tools` on the same attention route and agent model.
 
 The grade covers the move, not its words. The summary also counts leaks: the
 room should receive only what the library committed, and nothing that names
 Nunchi's machinery. The core's `nunchi.turn.machinery_in` decides what does,
 the same check the conformance kit uses: a wake marker, the turn's tag
 (`<nunchi_participant_turn_v1>`), a Nunchi tool's name (`mcp__nunchi…`, and
-the names the turn gave its tools, none in the eval's arms), thinking tags
-(`<think>`, `<thinking>`, `<reasoning>`, `<thought>`, in lowercase) outside
+the names the turn gave its tools, `room_send` and the rest, in the tool arms
+only), thinking tags (`<think>`, `<thinking>`, `<reasoning>`, `<thought>`, in lowercase) outside
 code that mark thinking (an opening tag with its closing tag, or a tag alone
 on its line; balanced ``` or ~~~ fences and inline `code` are removed
 first, with a simple regex; "What does <thinking> do?" in prose is not
@@ -183,12 +235,12 @@ use on their own (`request_id`, `event_id`) and dotted words that are no
 object's field (`memory.text`) are not counted. It counts two things apart:
 
 - `agent.machinery_written`: what the model wrote for the room in the turn,
-  before the library's commit: each envelope's message text, or each plain
-  reply meant as a post. In final-answer posting a reply the library reads
-  as silence is not counted, since nothing of it would be posted (a taught
-  `[SILENT]` is not a leak), and the `<thinking>` block the turn teaches is
-  the agent's private place, read as the turn reads it
-  (`<thinking>(.*?)(?:</thinking>|\Z)`, any case).
+  before the library's commit: each envelope's message text, each plain
+  reply meant as a post, or each `send` call's text in the tool arms. In
+  final-answer posting a reply the library reads as silence is not counted,
+  since nothing of it would be posted (a taught `[SILENT]` is not a leak), and
+  the `<thinking>` block the turn teaches is the agent's private place, read
+  as the turn reads it (`<thinking>(.*?)(?:</thinking>|\Z)`, any case).
 - `agent.machinery_posted`: what the committed post carried into the room.
 
 The library takes each wake marker out of a post, and in final-answer
@@ -239,11 +291,30 @@ play).
 | Which model should answer steps 1 and 2? | `--agent-model` empty (`none` in the workflow): attention alone, graded on step 1 and on each route's own top move | $2 |
 | Did a change to the agent's turn help? | `--agent-model anthropic/claude-haiku-4.5` | $9 |
 | Did a change to the reading help? | the same agent, with `--paired` | $16 |
+| Does the core's tool-turn wording make the agent nod, stay quiet or promise? | one attention route, the same agent, `--agent-posting tools`, targeted scenes and 10 runs | $2 (an estimate, below) |
+| Does that wording hold under a coding agent's framing? | the same, `--agent-posting tools-coding` | $2 to $3 (an estimate) |
 
 The agent's turns cost the most: a Haiku turn costs several times an
 attention call, and `--paired` plays each turn twice. Since step 5b each
 moment also replays its earlier messages through attention, which roughly
 doubles the attention calls; these figures predate that.
+
+The two `--agent-posting tools` rows are an estimate, not a measurement. A tool
+turn is one to three model calls, not one. Take the per-call figures the
+rehearsal assumes (`evals/rehearsal/spend.py`: $0.002 an attention call, $0.01
+an agent call of about 5,000 tokens in at Haiku's list price; the tool
+definitions and the later steps' history are inside that round-up). For
+`story-across-messages` and `said-it-would-check`, 10 runs each, with the
+replay counted, that is 160 attention calls and at most 90 agent turns of about
+two calls each: about $0.3 for attention and $1.8 for the agent. The cost
+multiplies with the number of routes in `--models`, so give a targeted run one:
+
+```sh
+NUNCHI_OPENROUTER=... python3 -m evals.behavior.run \
+  --models anthropic/claude-haiku-4.5 --runs 10 \
+  --scenes story-across-messages,said-it-would-check \
+  --agent-model anthropic/claude-haiku-4.5 --agent-posting tools
+```
 
 **The implementation baseline keeps one agent.** Every run that judges a
 step of the plan on [#94](https://github.com/mentatzoe/nunchi/issues/94)

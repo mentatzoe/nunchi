@@ -380,7 +380,9 @@ the action checked without it. The room's host checks every action against
 the same guard before it leaves, whatever the participant did.
 `OpenAICompatibleParticipant` with a `silence_marker` drives the same `Turn`
 in final-answer posting: its plain reply is the post, through
-`Turn.decide`. The behavior eval uses it for `--agent-posting final-answer`.
+`Turn.decide`. The behavior eval uses it for `--agent-posting final-answer`,
+and its `--agent-posting tools` takes the turn through the room tools: a loop of model
+calls driven by `TurnParticipant`, so `Turn.call` decides each tool call.
 
 ## The participant's view of the room
 
