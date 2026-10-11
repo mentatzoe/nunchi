@@ -16,6 +16,7 @@ from typing import Any, Literal, Protocol
 from uuid import uuid4
 
 from .errors import NunchiError, ValidationError
+from .gaps import gap_times
 from .reactions import (
     ReactionCapability,
     UNAVAILABLE_REACTION_CAPABILITY,
@@ -544,6 +545,9 @@ class RoomView:
         # The events the turn's pages showed, kept whole: the wake holds the
         # rest, and a transport needs a message's own facts (its thread, say).
         self.seen_events: dict[str, dict[str, Any]] = {}
+        # When each gap the turn's pages reached or crossed was declared: once
+        # the turn is taken, those are no longer news either.
+        self.gaps_seen: list[str] = []
 
     def fork(self) -> "RoomView":
         """A fresh view of the same turn, as if nothing had been read yet.
@@ -615,6 +619,14 @@ class RoomView:
             if isinstance(event, Mapping) and isinstance(event.get("id"), str):
                 self.seen_event_ids.add(event["id"])
                 self.seen_events[event["id"]] = deepcopy(dict(event))
+        # A page of older or surrounding messages reaches the participant
+        # whole, so its gaps are read. A page of new messages may be the
+        # turn's own read for steering or the look before posting, which
+        # reaches the participant only when it holds a message, and this view
+        # cannot tell which: its gaps stay news and the next turn's reading
+        # tells them. When unsure, tell.
+        if direction not in ("new", "news"):
+            self.gaps_seen.extend(gap_times(page.get("coverage")))
         page["request_id"] = self._wake["request_id"]
         return page
 
@@ -961,8 +973,18 @@ class ParticipantTurnHost:
         if not self.scheduler.is_current(token):
             settle_host("unknown")
             return None
+        # From here the turn is current: `is_current` is false once it was
+        # cancelled, superseded or out of time. The agent took it when it
+        # answered with silence or with an action the host accepts, and then
+        # what its reading showed it of gaps is no longer news (Zoe,
+        # 2026-10-10). An answer the host refuses, and a turn that failed or
+        # was cancelled, leave them to be told again: when unsure, tell.
+        def tell_gaps() -> None:
+            self.observation.gaps_told([*gap_times(wake["coverage"]), *view.gaps_seen])
+
         if _is_silence(raw_action):
             settle_host("silent")
+            tell_gaps()
             why = raw_action.get("why") if raw_action is not None else None
             if isinstance(why, str) and self._refused({"kind": "message", "text": why}):
                 # A reason reaches later turns and attention: one that holds
@@ -1014,6 +1036,9 @@ class ParticipantTurnHost:
         if token.cancel_event.is_set() or not self.scheduler.is_current(token):
             settle_host("unknown")
             return None
+        # The action is accepted: the agent has taken its turn, whatever the
+        # transport then does with it.
+        tell_gaps()
 
         def dispatch() -> TransportResult:
             # This append and the native call share the scheduler's commit

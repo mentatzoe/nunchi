@@ -206,7 +206,7 @@ WAKE_FIELDS = frozenset(
         "caused_by_actor_id", "change", "continuation", "continuity",
         "continuity_scope_id", "coverage", "description", "display_name",
         "event_id", "event_visibility", "events", "evidence_event_ids",
-        "expires_at", "handle_id", "has_gaps", "has_more_after", "has_more_before",
+        "expires_at", "gaps", "handle_id", "has_gaps", "has_more_after", "has_more_before",
         "has_restart_gap", "id", "judged_seconds_ago", "judged_through_event_id",
         "kind", "max_age_seconds", "max_bytes", "max_bytes_per_fetch", "max_events",
         "max_events_per_fetch", "memory", "mentioned_actor_ids", "mentions_room",
@@ -263,7 +263,7 @@ FIELD_PATHS: Mapping[str, frozenset[str]] = {
     ),
     "coverage": frozenset(
         {
-            "continuity", "event_visibility", "has_gaps", "has_more_after", "has_more_before",
+            "continuity", "event_visibility", "gaps", "has_gaps", "has_more_after", "has_more_before",
             "has_restart_gap", "max_age_seconds", "max_bytes", "max_events", "truncated_by",
         }
     ),

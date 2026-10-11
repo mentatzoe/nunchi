@@ -1808,13 +1808,17 @@ class PrivateTextTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual((text.strip(), ""), self.split(text, final_answer=True))
 
-    def test_the_marker_is_the_cores_and_every_integration_uses_it(self):
-        from nunchi.integrations import claude_code_gate
-        from nunchi.integrations.hermes_plugin import plugin
+    def test_the_marker_is_the_cores_and_the_integrations_that_run_use_it(self):
+        from nunchi.integrations import claude_code_conformance, claude_code_gate
 
         self.assertIs(WAKE_MARKER, claude_code_gate.WAKE_MARKER)
-        self.assertIs(WAKE_MARKER, plugin.WAKE_MARKER)
-        self.assertEqual("abc-_1", plugin._WAKE.search(WAKE_MARKER.format("abc-_1")).group(1))
+        self.assertIs(WAKE_MARKER, claude_code_conformance.WAKE_MARKER)
+        # The wake id an integration reads back from the marker. The reader is the
+        # small one each integration carries (the parked Hermes plugin has the same
+        # line); this test no longer imports the plugin for it.
+        reader = re.compile(re.escape(WAKE_MARKER).replace(re.escape("{}"), "([A-Za-z0-9_-]+)"))
+        self.assertEqual("abc-_1", reader.search(WAKE_MARKER.format("abc-_1")).group(1))
+        self.assertEqual("abc-_1", claude_code_conformance._WAKE.match(WAKE_MARKER.format("abc-_1")).group(1))
 
     def test_a_large_adversarial_answer_is_decided_in_bounded_time(self):
         # The step 5 check found a cubic case; the rules now are single regexes.

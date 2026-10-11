@@ -1,5 +1,6 @@
-"""Contract tests for ``I-010D ContextContinuationV2@1`` and
-``I-010E AttentionReceiptV2@5`` (slice 010, T005; @5 reads legacy ACK records only).
+"""Contract tests for ``I-010D ContextContinuationV2@2`` and
+``I-010E AttentionReceiptV2@6`` (slice 010, T005; @5 reads legacy ACK records only;
+@2 and @6 carry the shared coverage's optional ``gaps``).
 
 Red cases cover host-secret leakage, fetch-time binding validation
 (expired-handle rejection and cross-binding cursor reuse,
@@ -14,6 +15,7 @@ outcomes. This file also runs the ``evals/v2/contract/downstream`` corpus
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 import unittest
 
 from tests.v2.contract import schema_helpers as helpers
@@ -51,6 +53,18 @@ class InterfaceVersionCases(unittest.TestCase):
                         f"{interface} {title}@{version}"
                     )
                 )
+
+
+    def test_the_runtime_reports_the_versions_the_schema_descriptions_declare(self):
+        # `nunchi probe` reports nunchi.v2_contracts.INTERFACE_VERSIONS; the schemas say their own
+        # "I-010X Title@N" first. Read the numbers from the descriptions, not from a second table.
+        from nunchi.v2_contracts import INTERFACE_VERSIONS
+
+        for name in helpers.SCHEMA_FILES:
+            with self.subTest(schema=name):
+                found = re.match(r"(I-\d{3}[A-Z]) \w+@(\d+)\b", helpers.load_schema(name)["description"])
+                self.assertIsNotNone(found)
+                self.assertEqual(int(found.group(2)), INTERFACE_VERSIONS[found.group(1)])
 
 
 class ContinuationShapeCases(unittest.TestCase):

@@ -13,8 +13,9 @@ To build a new integration, follow the [harness guide](harness-guide.md).
 Every integration builds the library's side through one `Room`
 (`nunchi.room`): the exact `ParticipantBinding`, observation, attention with
 the participant's pinned profile and delegated model, the scheduler, and the
-turn host. Hermes still wires these itself until its plugin replaces it (step
-9e). It then takes one of two paths for the participant turn.
+turn host. The older Hermes integration (`integrations/hermes`) still wires
+these itself; the Hermes plugin that replaces it builds a `Room` too, and is
+parked (2026-10-10). It then takes one of two paths for the participant turn.
 
 ## Nunchi-owned participant
 
@@ -39,17 +40,23 @@ the action `ParticipantTurnHost` commits. See
 
 ## Native host pipeline
 
-Some hosts run their own participant pipeline, as Hermes does today. They do
-not use `ParticipantTurnHost`, so they miss the behaviors the shared turn
-carries (memory, catching up, looking again, steering). That gap is a design
-problem, not the intended shape: see "One library, every harness" in
-[`AGENTS.md`](../AGENTS.md) and step 9 of
-[#94](https://github.com/mentatzoe/nunchi/issues/94), which replaces this path
-with a plugin on Hermes's public hooks. Instead they wrap their own turn with the shared
-owners: observation, attention, the scheduler, shared opportunity preparation
-and wake facts (`nunchi.pipeline.prepare_opportunity`), and shared receipts (`participant_host_receipt_body`). Nunchi decides before the
-host starts visible work, hands an admitted turn the bounded wake facts, and
-records the lifecycle facts the host exposes. The host keeps its own prompt,
+Some hosts run their own participant pipeline, as the older Hermes
+integration (`integrations/hermes`) does. They do not use
+`ParticipantTurnHost`, so they miss the behaviors the shared turn carries
+(memory, catching up, looking again, steering, and telling the agent of a
+gap). That gap is a design problem, not the intended shape: see "One library,
+every harness" in [`AGENTS.md`](../AGENTS.md) and step 9 of
+[#94](https://github.com/mentatzoe/nunchi/issues/94), which replaced this path
+with a plugin on Hermes's public hooks. That plugin consumes each message and
+starts the turn itself (consume and inject), and it is parked since
+2026-10-10; gating the harness's own native turn is the open redesign (the
+[harness contract](harness-contract.md#topologies)). Until then, such hosts
+wrap their own turn with the shared owners: observation, attention, the
+scheduler, shared opportunity preparation and wake facts
+(`nunchi.pipeline.prepare_opportunity`), and shared receipts
+(`participant_host_receipt_body`). Nunchi decides before the host starts
+visible work, hands an admitted turn the bounded wake facts, and records the
+lifecycle facts the host exposes. The host keeps its own prompt,
 model, tools, and delivery behind Nunchi's guards. See
 [Host-owned participant pipelines](platform-v2.md#host-owned-participant-pipelines).
 

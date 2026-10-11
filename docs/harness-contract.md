@@ -37,9 +37,10 @@ library owns everything up to the agent's turn, but not the turn itself:
   one-reply protocol (`ParticipantTurnProtocol`) and once in the Claude Code
   gate (`GatedParticipant`). The gate's copy has more: steering, turn binding,
   and the rule that silence counts only for a bound turn.
-- Hermes skips the shared turn and patches Hermes internals instead, so it
-  misses memory, catching up, looking again, steering, outcome turns, and the
-  newer attention routes.
+- The older Hermes integration (`integrations/hermes`) skipped the shared turn
+  and patched Hermes internals instead, so it missed memory, catching up,
+  looking again, steering, outcome turns, and the newer attention routes. The
+  Hermes plugin replaced it, and the plugin is parked (above).
 - The behavior eval measures the shared protocol, not what Claude Code runs.
 
 This contract moves the turn into the library, as one object every harness
@@ -261,14 +262,18 @@ possible:
 
 - **Gate the harness's runs.** The integration lets the harness start its
   agent on a message unless the library says skip, and adds the turn's
-  context through hooks.
+  context through hooks. This is gating the harness's own native turn; for
+  Hermes it is the open redesign (the plugin's README, "Before unparking").
 - **Consume and start.** The integration consumes every room message before
   the harness runs on it, hands it to the library, and starts the agent's
   turn itself, with the library's text, when the library decides. The
   harness still delivers the answer and keeps its own model, tools, memory,
-  and settings.
+  and settings. This is the shape the parked Hermes plugin used; it is also
+  why the plugin was parked, since Hermes's own thread, session and identity
+  settings never apply to a turn the plugin injects.
 
-Hermes needs the second shape (checked in source, `a50406d9`):
+For Hermes, gating its runs as they stand would miss messages and overlap
+runs, so the plugin used the second shape (checked in source, `a50406d9`):
 
 - Messages that arrive while a session is busy skip both gateway hooks
   (`gateway/run_busy.py`), so gating runs would miss them, and by default
@@ -278,7 +283,10 @@ Hermes needs the second shape (checked in source, `a50406d9`):
   is replaced by a visible warning (`gateway/response_filters.py`).
 
 With consume and start, people's messages never start runs of their own, so
-the hooks see every message, one turn runs at a time, and silence works.
+the hooks see every message, one turn runs at a time, and silence works. That
+describes what the plugin did, not a requirement for the next harness-hosted
+integration: how to gate a native turn and still get silence and looking again
+is what the redesign has to answer.
 
 In either shape the library still decides at the commit point. The harness
 then performs delivery, and the receipt says so: the effect is reported as
@@ -425,6 +433,7 @@ all):
 | launch-secret: the launch secret the harness holds never reaches the room, and the agent can post without it | n/a | n/a | pass | n/a | n/a | pass |
 | cancel: a cancelled turn posts nothing | pass | n/a | pass | n/a | n/a | pass |
 | pause: after a pause the library starts a turn with no new message, which remembers why the agent waited | pass | n/a | pass | n/a | n/a | pass |
+| gap: a gap declared at the start is told in the turn that reads across it, once, and not in the turn after | pass | n/a | pass | n/a | n/a | pass |
 | outcome: an approved action's outcome starts a turn, and the agent reports it | pass | n/a | pass | n/a | n/a | pass |
 | leak: a post loses an echoed wake marker, and the agent is told | pass | n/a | pass | n/a | n/a | pass |
 | leak-markup: a post of only a wake marker is refused, and the agent writes again | pass | n/a | pass | n/a | n/a | pass |
@@ -438,6 +447,7 @@ all):
 | final-secret: a withheld secret is refused once, and the agent answers again | n/a | pass | n/a | gap | gap | n/a |
 | final-cancel: a cancelled turn's final answer is silent | n/a | pass | n/a | pass | pass | n/a |
 | final-pause: after a pause the library starts a turn with no new message, which remembers why the agent waited | n/a | pass | n/a | pass | pass | n/a |
+| final-gap: a gap declared at the start is told in the turn that reads across it, once, and not in the turn after | n/a | pass | n/a | pass | pass | n/a |
 | final-outcome: an approved action's outcome starts a turn, and the agent's answer reports it | n/a | pass | n/a | pass | pass | n/a |
 | final-not-own-words: text the harness puts in place of the agent's answer is never posted or remembered, and the turn fails | n/a | pass | n/a | pass | pass | n/a |
 | final-no-answer: a run whose model wrote nothing, with the harness's text as its answer, posts nothing and fails | n/a | pass | n/a | pass | pass | n/a |

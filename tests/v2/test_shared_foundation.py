@@ -120,6 +120,7 @@ def foundation(
     transport=None,
     participant_timeout_seconds=300,
     binding=None,
+    clock=None,
 ):
     binding = binding or ParticipantBinding(
         participant_id="vigil",
@@ -135,6 +136,7 @@ def foundation(
         receipts=receipts,
         persistence_path=persistence_path,
         limits=limits,
+        clock=clock,
     )
     model = model or FixtureModel()
     transport = transport or RecordingTransport()

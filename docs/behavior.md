@@ -104,6 +104,11 @@ memory of it. A judgment that a "mhm" could fit gives the agent a turn, and
 any "mhm" is the agent's own. Nunchi's own nod was off by default from
 2026-10-05 and was removed in step 7 of the plan.
 
+**A gap is told once, at the gap.** When what the agent reads runs up to or
+across a point where messages may be missing (a restart, a lost connection),
+the turn says so in one plain sentence and attention sees the same fact; once
+the agent has taken a turn past it, it is no longer news (Zoe, 2026-10-10).
+
 ### Looking again
 
 Some moves depend on what happens next: wait for the addressee, or let the

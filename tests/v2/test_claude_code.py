@@ -1987,14 +1987,14 @@ class GatedParticipantTests(unittest.TestCase):
         session.on_turn_end = participant.turn_ended
         return participant, session
 
-    def _start(self, participant, session, *, expand=None, opportunity=OPPORTUNITY):
+    def _start(self, participant, session, *, expand=None, opportunity=OPPORTUNITY, wake=None):
         cancel = threading.Event()
         box = {}
 
         def run():
             try:
                 box["action"] = participant.run_protocol(
-                    wake=test_wake(),
+                    wake=wake or test_wake(),
                     opportunity=deepcopy(opportunity),
                     expand=expand or (lambda **_: {"events": []}),
                     cancel=cancel,
@@ -2037,6 +2037,24 @@ class GatedParticipantTests(unittest.TestCase):
         participant.turn_ended(ok=True, detail="success")
         thread.join(5)
         self.assertEqual({"action": None}, box)
+
+    def test_a_gap_the_view_reaches_is_one_sentence_in_the_turn_and_a_view_without_one_has_none(self):
+        # The same library sentence every harness gets (Zoe, 2026-10-10); this gate adds none of its own.
+        sentence = "Messages may be missing before 14:02 UTC; read the history if it matters."
+        gapped = test_wake()
+        gapped["coverage"].update(
+            has_gaps=True, has_restart_gap=True, continuity="unknown", gaps=[{"at": "2026-10-10T14:02:00.000Z"}]
+        )
+        gapped["pace"] = {"now": "2026-10-10T14:30:00.000Z", "window_messages": 1, "own_messages": 0}
+        for wake, said in ((gapped, 1), (test_wake(), 0)):
+            with self.subTest(gap=bool(said)):
+                participant, session = self._participant()
+                thread, box, wake_id, _ = self._start(participant, session, wake=wake)
+                self.assertEqual(said, session.submitted[0].count(sentence))
+                self.assertEqual(said, session.submitted[0].count("Messages may be missing"))
+                self.assertTrue(participant.bind_turn(turn_id="t1", wake_id=wake_id))
+                participant.turn_ended(ok=True, detail="success")
+                thread.join(5)
 
     def test_a_turn_the_mod_never_bound_is_a_failure_never_silence(self):
         participant, session = self._participant()

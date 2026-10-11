@@ -201,6 +201,25 @@ class RoomTests(unittest.TestCase):
             self.assertTrue((state / "example-observations.jsonl").exists())
             self.assertEqual(0o700, state.stat().st_mode & 0o777)
 
+    def test_a_gap_declared_at_the_start_is_told_in_the_first_turn_and_not_in_the_next(self) -> None:
+        """What every integration must do at a start (`docs/harness-guide.md`, step 8), and what the Room then gives its agent."""
+        with tempfile.TemporaryDirectory() as directory:
+            texts: list[str] = []
+            driver = _Driver(lambda participant: None)
+            start = driver.start
+            driver.start = lambda turn: (texts.append(turn.text), start(turn))[1]
+            room = self._room(Path(directory), driver=driver, transport=_Recording())
+            room.observation.mark_continuity_gap(delivery_id="example:start", detail="the room started")
+            for number in (1, 2):
+                driver.done.clear()
+                room.deliver(delivery_id=f"d{number}", event=_message(f"m{number}", "Anyone around?"), actors=ACTORS)
+                self.assertTrue(driver.done.wait(10))
+                self.assertTrue(room.drain(10))
+            self.assertEqual(2, len(texts))
+            self.assertEqual([1, 0], [text.count("Messages may be missing before ") for text in texts])
+            self.assertIn("; read the history if it matters.", texts[0])
+            self.assertEqual((), room.observation.gaps_pending())
+
     def test_a_harness_that_posts_its_agents_final_answer(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             transport = HarnessDelivery(room_shows_own_messages=False)
