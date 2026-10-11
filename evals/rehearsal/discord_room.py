@@ -61,9 +61,10 @@ Each graded message must reach the agent as it was sent
 message it answers), for the reply the agent's own last post as the message it
 answers, and for the thread question the thread it was said in.
 
-With ``--scene`` (PR 4a, the reference only) the moments above give way to one
-behavior scene, played by the director (`directed.py`) and graded from its own
-expectations; see `ReferenceLeg`.
+With ``--scene`` (PR 4a, the reference; PR 4b, Claude Code and Codex too) the
+moments above give way to one behavior scene, played by the director
+(`directed.py`) and graded from its own expectations; see `ReferenceLeg` and
+`OnTheTransport`. Hermes is parked and plays none.
 """
 
 from __future__ import annotations
@@ -199,11 +200,15 @@ TRANSPORT_CALLS = (POST, REACT, "GET /channels/{channel}", "GET /guilds/{guild}/
 REFERENCE_CALLS = ("GET /users/@me", POST, REACT)
 
 
-def directed_calls(moments: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
-    """The calls the reference must make in a directed scene: its login, and a post or a reaction where the script makes one."""
+# The calls a transport column makes whatever the script does: it looks up the channel, the member and the roles of what it routes.
+TRANSPORT_ALWAYS = tuple(call for call in TRANSPORT_CALLS if call not in (POST, REACT))
+
+
+def directed_calls(moments: Sequence[Mapping[str, Any]], always: Sequence[str] = ("GET /users/@me",)) -> tuple[str, ...]:
+    """The calls a column must make in a directed scene: ``always`` (the reference's login by default), and a post or a reaction where the script makes one."""
 
     scripted = {item.get("scripted") for moment in moments if moment.get("expect") == "directed" for item in moment.get("graded", ())}
-    return ("GET /users/@me", *((POST,) if "speak" in scripted else ()), *((REACT,) if "mhm" in scripted else ()))
+    return (*always, *((POST,) if "speak" in scripted else ()), *((REACT,) if "mhm" in scripted else ()))
 
 
 # The transport journal's outcomes that mean a gap (`nunchi.mcp_discord.server.TransportAuditJournal`).
@@ -410,6 +415,65 @@ def reconnect_facts(
         "transport_gaps": [record.get("outcome") for record in transport_journal if record.get("outcome") in TRANSPORT_GAP_OUTCOMES],
         "participant_gaps": [audit.get("delivery_id") for audit in audits if audit.get("outcome") == "continuity-gap"],
     }
+
+
+def stages_by_request(receipts: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Each request's receipts by stage: ``{request_id: {stage: body}}``."""
+
+    stages: dict[str, dict[str, Any]] = {}
+    for receipt in receipts:
+        stages.setdefault(receipt["request_id"], {})[receipt["stage"]] = receipt.get("body") or {}
+    return stages
+
+
+def attention_entries(stages: Mapping[str, Mapping[str, Any]], model: Any, *, evidence: bool) -> list[dict[str, Any]]:
+    """Attention's decision for each request, from the participant's own receipts: the trigger, the disposition, and the evidence it cited.
+
+    The reference reads them from its state directory (it runs in its own
+    process) and Claude Code and Codex from the room they run in-process, the
+    same receipts either way. ``evidence`` (a scene) adds the message ids
+    attention's reading points at (`directed.judge_scene` reads them as ``cited``).
+    """
+
+    found: list[dict[str, Any]] = []
+    for request_id, stage in stages.items():
+        attention = stage.get("attention")
+        if attention is None:
+            continue
+        trigger = (stage.get("observation") or {}).get("trigger_event_id")
+        entry: dict[str, Any] = {"request_id": request_id, "trigger": trigger, "model": model}
+        if "error" in attention:
+            entry["error"] = f"{attention['error'].get('code')}: {attention['error'].get('detail')}"
+            if attention.get("wake_action"):
+                entry["wake_action"] = attention["wake_action"]
+        else:
+            entry["disposition"] = attention.get("effective_disposition")
+            entry["served"] = {"provider": "scripted"}
+            if evidence:
+                entry["evidence"] = list(attention.get("evidence_event_ids") or ())
+        found.append(entry)
+    return found
+
+
+def judge_directed(leg: Any, moments: Sequence[dict[str, Any]]) -> None:
+    """Grade the directed scene(s): note what Nunchi's own room log holds of each message, then `directed.judge_scene`.
+
+    The log holds every message it took in, a turn only some: ``logged`` is
+    what `checks.discord_addressing` compares with what the stand-in sent.
+    """
+
+    logged = room_events(leg.discord.state)
+    for moment in moments:
+        if moment.get("expect") != "directed":
+            continue
+        for delivery in moment.get("deliveries", ()):
+            event = logged.get(delivery.get("event_id"))
+            if event is not None:
+                delivery["logged"] = {
+                    "mentioned_actor_ids": list(event.get("mentioned_actor_ids") or ()),
+                    "reply_to_event_id": event.get("reply_to_event_id"),
+                }
+        directed.judge_scene(leg, moment, leg.directed.plan.scene)
 
 
 class DiscordProcess:
@@ -953,7 +1017,18 @@ def judge_discord_moments(leg: Leg, moments: Sequence[dict[str, Any]], received:
 
 
 class OnTheTransport:
-    """Claude Code or Codex in the Discord room: its own `nunchi-mcp-discord`, and its runner in this process."""
+    """Claude Code or Codex in the Discord room: its own `nunchi-mcp-discord`, and its runner in this process.
+
+    With ``--scene`` (``ctx.directed``, PR 4b) it plays one behavior scene
+    instead of the moments, as the reference does (`ReferenceLeg`): the world
+    holds that scene's people and bots, attention and the harness's scripted
+    model endpoint follow its `SceneScript` (the scripted move for a graded
+    moment, silence otherwise), the director (`directed.py`) posts the scene,
+    and each graded moment is graded from the scene's own expectations
+    (`directed.judge_scene`) from what the harness's real process did. The
+    reference is the control: a miss only a harness column has is the
+    integration's.
+    """
 
     script = SCRIPT
     pins = TRANSPORT_PINS
@@ -969,11 +1044,14 @@ class OnTheTransport:
         self._serving: threading.Thread | None = None
         self._registered = threading.Event()
         self._streaming = threading.Event()
-        self._spec: MomentSpec | None = None
+        self._spec: MomentSpec | directed.DirectedSpec | None = None
+        self.directed: directed.DirectedSpec | None = getattr(ctx, "directed", None)
+        if self.directed is not None:
+            self.script = self.directed.script
 
     def prepare(self) -> None:
         self.executable()  # type: ignore[attr-defined]  # a missing harness stops the run before any process starts
-        self.discord.start()
+        self.discord.start([self.directed.plan.scene] if self.directed is not None else None)
         self.room_id = self.discord.channel_id
         self.actor_id = f"discord:actor:{self.discord.agent_id}"
         self.scope = f"discord:channel:{self.room_id}"
@@ -1044,8 +1122,14 @@ class OnTheTransport:
         if not self._streaming.is_set():
             raise RuntimeError("the runner registered with nunchi-mcp-discord before it opened its notification stream")
 
-    def play(self, spec: MomentSpec, *, settle_seconds: float) -> dict[str, Any]:
+    def play(self, spec: MomentSpec | directed.DirectedSpec, *, settle_seconds: float) -> dict[str, Any]:
         self._spec = spec
+        if isinstance(spec, directed.DirectedSpec):
+            moment = directed.play_scene(self, spec.plan, settle_seconds)
+            self.note_start_gap()
+            for turn in self.invocations:
+                turn["moment"] = spec.name
+            return moment
         if spec.reconnect_before:
             self.discord.reconnect()
         moment = play_moment(self, spec, settle_seconds=settle_seconds)  # type: ignore[arg-type]
@@ -1054,14 +1138,19 @@ class OnTheTransport:
         if spec.reconnect_before:
             self.discord.reconnected(moment)
         if spec.name == "first-message":
-            gaps = [audit for audit in delivery_audits(self.discord.state) if str(audit.get("delivery_id", "")).startswith("discord:transport-gap:")]
-            self.discord.start_gap = {
-                "process": "nunchi-mcp-discord",
-                "gap": gaps[0]["delivery_id"] if gaps else None,
-                "detail": "the transport put a continuity gap ahead of the first routed event after it started",
-                "journal": [record.get("outcome") for record in self.discord.transport_journal()],
-            }
+            self.note_start_gap()
         return moment
+
+    def note_start_gap(self) -> None:
+        """The continuity gap a fresh transport declares, as the participant's audits show it: it comes ahead of the first routed event."""
+
+        gaps = [audit for audit in delivery_audits(self.discord.state) if str(audit.get("delivery_id", "")).startswith("discord:transport-gap:")]
+        self.discord.start_gap = {
+            "process": "nunchi-mcp-discord",
+            "gap": gaps[0]["delivery_id"] if gaps else None,
+            "detail": "the transport put a continuity gap ahead of the first routed event after it started",
+            "journal": [record.get("outcome") for record in self.discord.transport_journal()],
+        }
 
     def deliver(self, raw: Mapping[str, Any], at: datetime, scene: Scene, sequence: int) -> dict[str, Any]:
         assert self._spec is not None
@@ -1084,18 +1173,41 @@ class OnTheTransport:
 
     def judge(self, moments: Sequence[dict[str, Any]]) -> None:
         requests = self.agent.requests() if self.agent is not None else ()  # type: ignore[attr-defined]
+        if self.directed is not None:
+            # A scene reads attention's decision per message from the participant's receipts, as the reference does.
+            stages = stages_by_request(self.receipts())  # type: ignore[attr-defined]
+            self.attention_calls = attention_entries(stages, (self.ctx.attention or {}).get("model"), evidence=True)  # type: ignore[attr-defined]
         judge_discord_moments(self, moments, received_triggers(requests))  # type: ignore[arg-type]
+        if self.directed is not None:
+            judge_directed(self, moments)
 
     def scripted_check(self, moments: Sequence[Mapping[str, Any]]) -> Check:
+        if self.directed is not None:
+            # The calls the harness's own record shows, one for each action that reached the room; none read means none shown.
+            return checks_module.directed_outcomes(moments, room_tool_calls=self.room_calls or [])  # type: ignore[attr-defined]
         report = self.reports.get("codex") or self.reports.get("claude_code") or {}  # type: ignore[attr-defined]
         return checks_module.discord_scripted_outcomes(moments, EXPECTED, pins=self.pins, room_tool_called=report.get("room_tool_called"))
 
     def room_checks(self, document: Mapping[str, Any]) -> list[Check]:
-        expected = {self.discord.agent: {"chunk": False, "calls": self.expected_calls}}
-        return self.discord.checks(self.committed, expected=expected, gaps_fail=True, moments=document["moments"])  # type: ignore[attr-defined]
+        # A scene has no reconnect, and the calls it needs are the transport's own and the ones its script makes.
+        calls = directed_calls(document["moments"], TRANSPORT_ALWAYS) if self.directed is not None else self.expected_calls
+        expected = {self.discord.agent: {"chunk": False, "calls": calls}}
+        found = self.discord.checks(  # type: ignore[attr-defined]
+            self.committed, expected=expected, gaps_fail=True, moments=document["moments"], reconnects_required=self.directed is None
+        )
+        if self.directed is not None:
+            # Both are recorded for every run and were empty in every plain lane that passed; only a scene fails on them.
+            found.append(
+                checks_module.room_errors(document.get("lane_errors") or [], (document.get("discord") or {}).get("serve_errors") or [])
+            )
+        return found
 
     def room_record(self) -> dict[str, Any]:
-        return {"discord": {**self.discord.record(), "runner": self.runner_calls, "serve_errors": list(self.serve_errors)}}
+        record = {**self.discord.record(), "runner": self.runner_calls, "serve_errors": list(self.serve_errors)}
+        if self.directed is not None:
+            # What `directed_outcomes` held each action to: the harness's own record of its room tool calls.
+            record["room_tool_calls"] = list(self.room_calls or [])  # type: ignore[attr-defined]
+        return {"discord": record}
 
     def close(self) -> None:
         self._stop.set()
@@ -1285,10 +1397,7 @@ class ReferenceLeg(Leg):
         reference's transport receipt says how its delivery went.
         """
 
-        receipts = self.receipts()
-        stages: dict[str, dict[str, Any]] = {}
-        for receipt in receipts:
-            stages.setdefault(receipt["request_id"], {})[receipt["stage"]] = receipt.get("body") or {}
+        stages = stages_by_request(self.receipts())
         answers: dict[str, list[dict[str, Any]]] = {}
         for answer in self.participant_endpoint.answers if self.participant_endpoint else ():
             answers.setdefault(answer["request_id"], []).append(answer)
@@ -1322,23 +1431,7 @@ class ReferenceLeg(Leg):
                 # A scene holds each action to the message it was about; a plain message names it only by its origin.
                 action["origin_event_id"] = given["origin_event_id"]
             self.committed.append({"request_id": request_id, **action, "delivery": transport.get("delivery"), "detail": transport.get("detail")})
-        self.attention_calls = []
-        for request_id, stage in stages.items():
-            attention = stage.get("attention")
-            if attention is None:
-                continue
-            trigger = (stage.get("observation") or {}).get("trigger_event_id")
-            entry: dict[str, Any] = {"request_id": request_id, "trigger": trigger, "model": (self.ctx.attention or {}).get("model")}
-            if "error" in attention:
-                entry["error"] = f"{attention['error'].get('code')}: {attention['error'].get('detail')}"
-                if attention.get("wake_action"):
-                    entry["wake_action"] = attention["wake_action"]
-            else:
-                entry["disposition"] = attention.get("effective_disposition")
-                entry["served"] = {"provider": "scripted"}
-                if self.directed is not None:
-                    entry["evidence"] = list(attention.get("evidence_event_ids") or ())
-            self.attention_calls.append(entry)
+        self.attention_calls = attention_entries(stages, (self.ctx.attention or {}).get("model"), evidence=self.directed is not None)
 
     def collect(self) -> None:
         self.copy_state()
@@ -1369,18 +1462,7 @@ class ReferenceLeg(Leg):
         received = {answer["received"]["trigger"]: answer["received"] for answer in answers if answer.get("received")}
         judge_discord_moments(self, moments, received)
         if self.directed is not None:
-            logged = room_events(self.discord.state)
-            for moment in moments:
-                if moment.get("expect") == "directed":
-                    for delivery in moment.get("deliveries", ()):
-                        # What Nunchi's own room log holds of the message: it saw every message it took in, a turn only some.
-                        event = logged.get(delivery.get("event_id"))
-                        if event is not None:
-                            delivery["logged"] = {
-                                "mentioned_actor_ids": list(event.get("mentioned_actor_ids") or ()),
-                                "reply_to_event_id": event.get("reply_to_event_id"),
-                            }
-                    directed.judge_scene(self, moment, self.directed.plan.scene)
+            judge_directed(self, moments)
 
     def scripted_check(self, moments: Sequence[Mapping[str, Any]]) -> Check:
         if self.directed is not None:

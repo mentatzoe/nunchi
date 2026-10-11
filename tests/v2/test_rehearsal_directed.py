@@ -672,6 +672,33 @@ class ExactActionTest(unittest.TestCase):
         self.assertEqual("fits", played["graded"][1]["grade"]["visible"])
         self.assertEqual(["it delivered 0 action(s), not the one scripted reaction"], played["graded"][1]["off_script"])
 
+    def test_a_message_the_script_acts_on_needs_a_turn_that_began_on_it_not_one_that_only_listed_it_as_unattended(self):
+        # The second message gets no turn of its own; the turn on the fourth lists it as unattended, and makes the one nod the
+        # fourth is owed. One nod then stands for both moments, and the old grade passed it (target in the turn's triggers).
+        def fold(leg, played):
+            leg.invocations[:] = [turn for turn in leg.invocations if turn["request_id"] != "r0"]
+            leg.committed[:] = [action for action in leg.committed if action["request_id"] != "r0"]
+            next(turn for turn in leg.invocations if turn["request_id"] == "r1")["unattended"] = [played["graded"][0]["event_id"]]
+
+        _, played = self.story(edit=fold)
+        first, fourth = played["graded"][0], played["graded"][1]
+        self.assertEqual(["mhm", "mhm"], [first["result"], fourth["result"]], "the room did see one nod")
+        self.assertEqual(
+            [f"no turn began on it: it was only folded into the turn on {fourth['event_id']} as an unattended message"], first["off_script"]
+        )
+        self.assertEqual([], fourth["off_script"], "the turn that began on the fourth message is not at fault")
+        self.assertEqual(checks.MISSES, played["outcome"])
+        held = checks.directed_outcomes([played])
+        self.assertFalse(held.ok)
+        self.assertIn("story-across-messages, mid-story, second message: no turn began on it: it was only folded into the turn on", held.detail)
+        self.assertNotIn("mid-story, fourth message", held.detail)
+        # A moment where the script is quiet, and one attention suppressed, may be folded: nothing is owed there.
+        report = directed.spec("bot-status-report").plan.scene
+        played = _played(report)
+        leg = _leg(played["graded"][0]["event_id"], "stay_quiet", attention="SUPPRESS", unattended_on="discord:message:9999")
+        directed.judge_scene(leg, played, report)
+        self.assertEqual([], played["graded"][0]["off_script"])
+
     def test_an_action_where_the_script_is_quiet_fails(self):
         report = directed.spec("bot-status-report").plan.scene
         played = _played_with(report, {0: ("mhm", "DEFER")})
@@ -762,6 +789,10 @@ class ArrivalTest(unittest.TestCase):
         played = _played_with(scene, STORY)
         ids = [delivery["event_id"] for delivery in played["deliveries"]]
         moves = lambda *kept: [{"kind": "reaction", "about_event_id": about, "reaction": standin.SCENE_NOD} for about in kept]  # noqa: E731
+        # Every turn was shown its trigger (a request holds it), and some also show what the agent remembers of its own moves.
+        for turn in played["turns"]:
+            by_trigger = next(delivery for delivery in played["deliveries"] if delivery["event_id"] == turn["trigger"])
+            by_trigger["received"] = {"mentioned_actor_ids": [], "trigger": turn["trigger"]}
         # s3's turn holds the nod on s2, s5's holds the nod on s4: as the reference's memory shows them.
         for delivery, own in ((played["deliveries"][2], moves(ids[1])), (played["deliveries"][4], moves(ids[1], ids[3]))):
             delivery["received"] = {"mentioned_actor_ids": [], "trigger": delivery["event_id"], "own_moves": own}
@@ -1078,13 +1109,12 @@ class CommandTest(unittest.TestCase):
             self.assertEqual([], list(Path(directory).iterdir()), "a refused command starts and writes nothing")
         return code, error.getvalue()
 
-    def test_a_scene_is_played_by_the_reference_in_the_discord_room_scripted_and_by_nothing_else(self):
+    def test_a_scene_is_played_in_the_discord_room_scripted_and_by_no_column_but_the_reference_claude_code_and_codex(self):
+        # Hermes is parked (AGENTS.md); Claude Code and Codex play scenes since PR 4b (test_rehearsal_directed_harness).
         base = ["--scripted", "--room", "discord", "--scene", "story-across-messages"]
-        for harness in ("codex", "claude-code", "hermes"):
-            with self.subTest(harness=harness):
-                code, error = self.run_main("--harness", harness, *base)
-                self.assertEqual(probe.EXIT_USAGE, code)
-                self.assertIn("--harness reference --room discord --scripted", error)
+        code, error = self.run_main("--harness", "hermes", *base)
+        self.assertEqual(probe.EXIT_USAGE, code)
+        self.assertIn("--harness reference or claude-code or codex with --room discord --scripted", error)
         self.assertEqual(probe.EXIT_USAGE, self.run_main("--harness", "reference", "--room", "discord", "--scene", "story-across-messages")[0])
         self.assertEqual(probe.EXIT_USAGE, self.run_main("--harness", "reference", "--scripted", "--scene", "story-across-messages")[0])
 
@@ -1104,8 +1134,8 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(["bot-status-report"], [item.name for item in specs])
         self.assertIsInstance(specs[0], directed.DirectedSpec)
         self.assertEqual(discord_room.MOMENTS, probe._room_parts(probe.Options(harness="reference", out=Path("x"), scripted=True, room="discord"))[1])
-        with self.assertRaisesRegex(ValueError, "reference in the Discord room, scripted"):
-            probe.run_probe(probe.Options(harness="codex", out=Path("x"), scripted=True, room="discord", scene="bot-status-report"))
+        with self.assertRaisesRegex(ValueError, "played in the Discord room, scripted, by reference or claude-code or codex"):
+            probe.run_probe(probe.Options(harness="hermes", out=Path("x"), scripted=True, room="discord", scene="bot-status-report"))
         with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop(discord_room.NET_ENV, None)
             options.out = Path(directory)

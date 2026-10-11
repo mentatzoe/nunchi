@@ -13,6 +13,36 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- Directed behavior scenes through Claude Code and Codex (step 9f, PR 4b;
+  [docs/rehearsal.md](docs/rehearsal.md), "Directed scenes"): **implemented,
+  unverified** in CI; run here offline inside the launcher against the pinned
+  Claude Code 2.1.289 (with `--no-sandbox`, since bubblewrap cannot run here)
+  and Codex 0.160.1. The four scenes PR 4a plays on the reference
+  (`bot-status-report`, `story-across-messages`, `said-it-would-check`,
+  `mention-in-busy-room`) now run through the Claude Code and Codex columns
+  too (`--scene ID` with `--harness claude-code` or `codex`, `--room discord
+  --scripted`), so each harness's real process reads the room the director
+  makes, with the reference as the control: a miss only a harness column has
+  is that integration's. Their scripted model endpoints (the Messages
+  endpoint for `claude -p`, the Responses endpoint for `codex app-server`)
+  follow the scene's `SceneScript` as attention does: the scripted room tool
+  call (a post, or a nod on the message) at a graded moment, and at every other
+  message a turn that makes no room tool call (`SceneScript.move`). The legs
+  record what the 4a judge reads (the messages a turn took while busy, the
+  message each action was about, and attention's decision per message from the
+  participant's own receipts), and the same hard checks hold for each column.
+  Three things are asked of a harness column that 4a asks of no one: every
+  action that reached the room must be backed by a completed room tool call
+  in the harness's own record (Claude Code's stream, Codex's `mcpToolCall`
+  items), one call for one action; the room's lane and the runner's serve loop
+  must have met no error (`room-errors`); and `discord-addressing` fails a turn
+  that ran on a message no request to the model shows, since a quiet answer
+  proves nothing then. For every column, a graded message the script acts on
+  needs a turn that began on it: one that a later turn only listed as
+  unattended now fails. CI plays the four after the Claude Code and Codex jobs'
+  Discord lanes, with the failure-only key and canary scan and upload, and a
+  test pins that a failed scene fails the step. Hermes is parked and plays
+  none. No live run yet.
 - A continuity gap is a point in the room's timeline, told once in one plain
   sentence (Zoe, 2026-10-10: "A plain sentence at the gap"; **implemented,
   unverified**, offline tests only). Before, a restart, a lost connection or
@@ -89,8 +119,8 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   `said-it-would-check`, `mention-in-busy-room`); a test pins why each of
   the others cannot. The scenes are drafts, so results say "draft
   expectations". CI plays the four after the reference's lane. Hermes plays
-  none; its lane is unchanged. No live run, and no Claude Code or Codex column
-  yet.
+  none; its lane is unchanged. No live run; the Claude Code and Codex columns
+  are the entry above.
 - `binding.threads_in_room`, one per-room setting with the same name and
   meaning in every harness (Zoe, 2026-10-10: "This should be configurable by
   the user"): whether the threads opened under the room's channel are part of

@@ -398,6 +398,52 @@ jobs:
           name: rehearsal-discord-codex-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/rehearsal-discord-out/
           if-no-files-found: ignore
+      - name: Four behavior scenes directed through codex app-server, scripted, graded (docs/rehearsal.md)
+        # Right after the Discord room lane above, in the same virtualenv and
+        # with the same pinned Codex. The four behavior scenes the
+        # discord-standin job plays on the reference are played here, one run
+        # each: a director posts the scene's people and bot as Discord
+        # messages, the harness takes part in them through its own
+        # nunchi-mcp-discord, and each graded moment is graded from the
+        # scene's own expectations (draft expectations; the agent and
+        # attention are scripted, no key). The reference is the control: a miss
+        # only this column has is the integration's. Each run is inside the
+        # launcher with --offline and --require-bwrap and a fresh HOME and
+        # TMPDIR, as the lane above (Codex's bubblewrap, installed there). A run that fails
+        # does not stop the others; the step fails after the last.
+        id: discord_codex_scenes_lane
+        shell: bash
+        run: |
+          set -uo pipefail
+          PY="$RUNNER_TEMP/codex-env/bin/python"
+          failed=0
+          for scene in bot-status-report story-across-messages said-it-would-check mention-in-busy-room; do
+            LANE_HOME="$(mktemp -d)"
+            LANE_TMP="$(mktemp -d)"
+            sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline --require-bwrap -- \
+              /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness codex --scripted --room discord \
+              --scene "$scene" --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-directed/$scene" \
+              || { echo "::error::the scene $scene failed"; failed=1; }
+          done
+          exit "$failed"
+      - name: Scan the failed scene runs' records for the key and the canary
+        # As for the lane above: only after a failure, and the record is uploaded
+        # only when the scan passes. It covers every scene's output.
+        id: discord_codex_scenes_scan
+        if: failure() && steps.discord_codex_scenes_lane.outcome == 'failure'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -uo pipefail
+          python -m evals.rehearsal.scan --out "$RUNNER_TEMP/rehearsal-directed" \
+            --env NUNCHI_ATTENTION_API_KEY --env REHEARSAL_CANARY
+      - name: Keep the failed scene runs' records
+        if: failure() && steps.discord_codex_scenes_scan.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rehearsal-discord-codex-scenes-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rehearsal-directed/
+          if-no-files-found: ignore
 
   package:
     name: clean-install packaging
@@ -554,4 +600,50 @@ jobs:
         with:
           name: rehearsal-discord-claude-code-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/rehearsal-discord-out/
+          if-no-files-found: ignore
+      - name: Four behavior scenes directed through claude -p, scripted, graded (docs/rehearsal.md)
+        # Right after the Discord room lane above, in the same virtualenv and
+        # with the same pinned Claude Code. The four behavior scenes the
+        # discord-standin job plays on the reference are played here, one run
+        # each: a director posts the scene's people and bot as Discord
+        # messages, the harness takes part in them through its own
+        # nunchi-mcp-discord, and each graded moment is graded from the
+        # scene's own expectations (draft expectations; the agent and
+        # attention are scripted, no key). The reference is the control: a miss
+        # only this column has is the integration's. Each run is inside the
+        # launcher with --offline and --require-bwrap and a fresh HOME and
+        # TMPDIR, as the lane above (the README's Bash sandbox on: this step never passes --no-sandbox). A run that fails
+        # does not stop the others; the step fails after the last.
+        id: discord_claude_scenes_lane
+        shell: bash
+        run: |
+          set -uo pipefail
+          PY="$RUNNER_TEMP/claude-env/bin/python"
+          failed=0
+          for scene in bot-status-report story-across-messages said-it-would-check mention-in-busy-room; do
+            LANE_HOME="$(mktemp -d)"
+            LANE_TMP="$(mktemp -d)"
+            sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline --require-bwrap -- \
+              /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness claude-code --scripted --room discord \
+              --scene "$scene" --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-directed/$scene" \
+              || { echo "::error::the scene $scene failed"; failed=1; }
+          done
+          exit "$failed"
+      - name: Scan the failed scene runs' records for the key and the canary
+        # As for the lane above: only after a failure, and the record is uploaded
+        # only when the scan passes. It covers every scene's output.
+        id: discord_claude_scenes_scan
+        if: failure() && steps.discord_claude_scenes_lane.outcome == 'failure'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -uo pipefail
+          python -m evals.rehearsal.scan --out "$RUNNER_TEMP/rehearsal-directed" \
+            --env NUNCHI_ATTENTION_API_KEY --env REHEARSAL_CANARY
+      - name: Keep the failed scene runs' records
+        if: failure() && steps.discord_claude_scenes_scan.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rehearsal-discord-claude-code-scenes-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rehearsal-directed/
           if-no-files-found: ignore
