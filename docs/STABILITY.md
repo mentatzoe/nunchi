@@ -30,7 +30,8 @@ Reference adapters and the shared transport:
 Integrations:
 
 - `nunchi-codex-room-runner` — reduced: Discord only, read-only Codex
-  sandbox, privileged actions disabled.
+  sandbox, privileged actions disabled. It stays until
+  `nunchi-codex-app-server-runner` passes live checks.
 
 Removed on 2026-10-11 (Zoe, "delete, for now"): `nunchi-hermes-dashboard` and
 `nunchi-hermes-lifecycle`, with the `hermes_agent.plugins` entry point, belonged
@@ -43,6 +44,9 @@ Installed but not part of the stable boundary:
   ([#43](https://github.com/mentatzoe/nunchi/issues/43)). Its configuration and
   the mod's room tools may still change: it depends on Claude Code's mods API,
   which is early access, and it has no live proof.
+- `nunchi-codex-app-server-runner` — Codex through `codex app-server`, with
+  the user's own Codex configuration. It has no live proof yet, and is to
+  replace `nunchi-codex-room-runner`.
 - `nunchi-service-worker` — internal supervisor that `nunchi service` starts.
 
 No V1 request, verdict, hook, responder, configuration, or exit-code contract

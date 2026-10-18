@@ -163,7 +163,7 @@ and an explicit state-purge boundary.
 | Generic channel / Discord | full shared protocol; Discord MCP measures exact bot, room, roles, and permission overwrites before the participant may react | platform-specific live validation and acceptance |
 | Matrix | shared protocol; exact `whoami` and room power-level measurement before the participant may react | platform-specific live validation and acceptance |
 | Telegram | shared protocol; no attested reaction capability, so the participant cannot react | native reactions only if a future verified adapter supplies them |
-| Codex | shared protocol and operator schema; the merged runner is reduced to Discord with Codex tools disabled | draft PR #71; parity issues #59–#65; live proof |
+| Codex | the app-server runner uses the shared `Room`, attention and `Turn` with the user's own Codex configuration; the older runner is reduced to Discord with Codex tools disabled | live proof for the app-server runner; the older runner stays until then |
 | Claude Code | the per-room gate, dedicated session, and mod (issue #43) use the shared host and the core tool-turn helpers | Discord only; #57, #58, and live proof in #39 |
 | Hermes plugin (parked) | the shared `Room`, attention and `Turn`; the plugin injects the agent's turn | unparking ([plugin README](../integrations/hermes-plugin/README.md#before-unparking)); the old integration was removed on 2026-10-11 |
 
