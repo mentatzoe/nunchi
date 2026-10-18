@@ -94,8 +94,9 @@ one vendor, the core needs a neutral interface instead.
   Nunchi starts the agent. Guarding what the agent's own commands can still
   read is the job of the harness's sandbox and settings; each active
   integration's README names them.
-- **Claude Code keeps Nunchi's own Discord transport**
-  ([#69](https://github.com/mentatzoe/nunchi/issues/69),
+- **Claude Code keeps Nunchi's own Discord transport** (Claude as lead
+  engineer, by principle, 2026-10-11;
+  [#69](https://github.com/mentatzoe/nunchi/issues/69),
   [#70](https://github.com/mentatzoe/nunchi/issues/70)). Claude Code's
   official Discord channel plugin acts in the room before Nunchi decides and
   drops other agents' messages
@@ -177,18 +178,21 @@ Code and reproducible behavior determine implementation truth. Specs under
 
 - Work on the earliest missing behavior the product needs, and build only
   what the library needs for it.
-- The current milestone is the internal test track: Zoe's own machine, one
-  person, kept in-house (Zoe, 2026-10-10). Claude Code goes first, then Codex
+- The current milestone is every rehearsal left in step 9f of
+  [#94](https://github.com/mentatzoe/nunchi/issues/94) (4e, PR 5 and PR 6),
+  then the internal test track: Zoe's own machine, one person, kept in-house
+  (Zoe, 2026-10-10: "Keep all rehearsals"). Claude Code goes first, then Codex
   (Claude's order as lead engineer).
 - Before building a step, price it in days, lines of code and credits (the
   model and CI spend it takes). Name the eval arm that will show it working
   (a setting of `evals/behavior`, or a rehearsal run), and read the plugin
   rules of each harness it touches (Claude as lead engineer, 2026-10-11,
   after step 9f ran days over).
-- Write no more rehearsal code until a live run finds something that needs it
-  (Claude, 2026-10-11). Zoe, 2026-10-18: "I'd almost want to try these live
-  rather than keep building an eval library";
-  [#174](https://github.com/mentatzoe/nunchi/issues/174).
+- Beyond the rehearsals Zoe kept (4e, PR 5 and PR 6, each priced before it is
+  built), write no more rehearsal code until a live run finds something that
+  needs it (Claude, 2026-10-11). Zoe, 2026-10-18, a thought parked for later:
+  "I'd almost want to try these live rather than keep building an eval
+  library" ([#174](https://github.com/mentatzoe/nunchi/issues/174)).
 - When a shared interface changes, run every consumer's tests in the same PR
   and fix or flag what breaks.
 - A stale assignment, previous session owner, missing process artifact,
@@ -198,7 +202,8 @@ Code and reproducible behavior determine implementation truth. Specs under
   remains, and state the concrete dependency.
 - Do not narrow supported behavior, redefine completion, or drop a required
   surface without Zoe's explicit decision. What this file and
-  `docs/behavior.md` state is decided: build it. Ask Zoe only when a choice
+  `docs/behavior.md` state is decided: build it. Rules marked as Claude's are
+  engineering calls; change them with evidence. Ask Zoe only when a choice
   materially changes product behavior or supported surfaces and they leave
   it open, or when it touches security boundaries or requires an
   irreversible external action.
@@ -264,8 +269,10 @@ models. Live provider and
 platform runs need explicit credentials and must record the installed version,
 identity, configuration, command, and complete result.
 
-Run records from Zoe's test server may be published in this repository, which
-is public, once a scan finds none of the run's keys in them (Zoe,
-2026-10-18). Run `python3 -m evals.rehearsal.scan --out <records> --env
+Records of test runs on Zoe's test server, which carries test talk only, may
+be published in this repository, which is public, once a scan finds none of
+the run's keys in them (Zoe, 2026-10-18, to a proposal of test talk only,
+scanned before upload: "You mean the logs from the trials on Discord? I'd say
+yes"). Run `python3 -m evals.rehearsal.scan --out <records> --env
 <variable>`, with one `--env` for each key the run used. A hit deletes the
 records.

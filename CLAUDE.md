@@ -35,8 +35,9 @@ the documentation current. Each integration documents itself under
 
 ## Exec summary
 
-Zoe keeps a living exec summary of Nunchi in claude.ai: status, what is
-decided, what is pending, and findings. She gives a session its link. Never
+At Zoe's request, Claude keeps a living exec summary of Nunchi for her in
+claude.ai: status, what is decided, what is pending, and findings. She gives a
+session its link, so a session started from `main` can keep it current. Never
 write the link into this repository, its issues or its pull requests: all
 are public. Keep the summary current at each milestone of your work. When
 Zoe decides something there, record it in the repository too (`AGENTS.md`,
