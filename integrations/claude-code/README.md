@@ -22,7 +22,13 @@ Three parts:
 
 - **The gate**, `nunchi-claude-code-room-runner`: one Python process per room.
   It owns the room transport (the shared Discord MCP server), observation,
-  attention, scheduling, authority, and receipts.
+  attention, scheduling, authority, and receipts. It does not use Claude
+  Code's official Discord channel plugin. That plugin (checked on its 0.0.4
+  build) shows typing, and may react, before Nunchi decides, and it drops
+  every bot's message. The room would see the agent typing on messages it
+  ignores, and the agent would never hear its peers
+  ([#69](https://github.com/mentatzoe/nunchi/issues/69),
+  [#70](https://github.com/mentatzoe/nunchi/issues/70)).
 - **A dedicated Claude Code session** per room, which the gate starts on the
   first wake. It is not your everyday terminal session. The gate runs
   `claude -p --input-format stream-json --output-format stream-json --verbose

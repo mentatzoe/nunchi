@@ -6,7 +6,7 @@ they receive. Nunchi gives an agent the social awareness people use in a group
 conversation, so it can read the room and take part the way a socially aware
 person would: listen, nod, speak, or hold back.
 
-[`docs/behavior.md`](docs/behavior.md) defines that behavior (draft).
+[`docs/behavior.md`](docs/behavior.md) defines that behavior.
 [Issue #94](https://github.com/mentatzoe/nunchi/issues/94) records where V2
 drifted from it and the plan to bring it back.
 
@@ -51,7 +51,7 @@ flowchart TB
     end
     subgraph hosts["Hosts and integrations: they own the platform and start the agent"]
         direction LR
-        cc["Claude Code<br/>a per-room gate and a mod"] ~~~ hermes["Hermes plugin"] ~~~ codex["Codex room runner"] ~~~ ref["Reference adapters"]
+        cc["Claude Code<br/>a per-room gate and a mod"] ~~~ hermes["Hermes plugin<br/>(parked)"] ~~~ codex["Codex room runner"] ~~~ ref["Reference adapters"]
     end
     subgraph core["Shared core: names no agent host, platform or model vendor"]
         direction LR
@@ -164,11 +164,14 @@ that plugin's turn conformance kit and tests inside a clean install of a pinned
 stock Hermes, with the model scripted; these are installed-runtime checks, not
 live ones. Historical Hermes evidence is not current proof.
 
-**Codex.** `nunchi-codex-room-runner` runs a Codex participant in a Discord
-room in a reduced mode: Codex shell, browser, plugin, app, skill, and MCP
-capabilities are disabled. Safer task continuity and the other adapters are
-in draft [PR #71](https://github.com/mentatzoe/nunchi/pull/71). It has no live
-proof since PR #67.
+**Codex.** `nunchi-codex-app-server-runner` runs a Codex participant in a
+Discord room through `codex app-server`, with the user's own Codex model,
+sandbox, tools, MCP servers and skills. It passes its tests against a real,
+pinned `codex app-server`; it has not run in a real room. See
+[`integrations/codex-app-server/README.md`](integrations/codex-app-server/README.md).
+The older `nunchi-codex-room-runner` runs Codex with its tools turned off. It
+stays until the app-server runner has passed live checks
+([`integrations/codex/README.md`](integrations/codex/README.md)).
 
 **Claude Code.** `nunchi-claude-code-room-runner` is a per-room gate. It
 starts a dedicated Claude Code session that keeps the user's own Claude Code

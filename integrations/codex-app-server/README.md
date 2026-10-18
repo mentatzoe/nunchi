@@ -182,7 +182,8 @@ process could post to the room without the library.
 - When Codex reports the thread's sandbox as `dangerFullAccess`, or
   `externalSandbox` (Codex adds none of its own), the runner logs a warning
   and `CodexRoomRunner.status()` reports it (`codex_sandbox`,
-  `codex_sandbox_warning`). It still runs: whether to refuse is not decided.
+  `codex_sandbox_warning`). It still runs: keys the agent can reach are
+  Codex's to protect (D2, [`AGENTS.md`](../../AGENTS.md)).
 
 `tests/v2/test_codex_app_server.py` checks both against the pinned Codex:
 the warning under `danger-full-access` and none by default, and, under

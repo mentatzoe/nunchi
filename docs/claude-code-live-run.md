@@ -243,7 +243,9 @@ expected, check what the acknowledgement said.
 
 ## Filing the result
 
-Save the records under `evidence/v2/claude-code/` with the date, and update
+Scan the records for the keys in `transport.env` and `gate.env` first
+(`AGENTS.md`, Verification). Then save them under
+`evidence/v2/claude-code/` with the date, and update
 [#39](https://github.com/mentatzoe/nunchi/issues/39). One clean run shows the
 lifecycle plumbing, identity, authority, cancellation, receipts, and native
 transport facts working together. It does not measure social quality; that is
