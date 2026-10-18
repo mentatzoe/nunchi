@@ -87,11 +87,13 @@ one vendor, the core needs a neutral interface instead.
   whether to ask the harness's maintainers.
 - **Independent evidence.** Tests, evaluations, and benchmarks run on clean,
   pinned installs of each harness, never on anyone's own setup.
-- **D2, decided** (Zoe, 2026-10-11): keys the agent can reach are the
-  harness's to protect. Nunchi keeps its own keys out of the room, and out of
-  the agent's environment when Nunchi starts the agent. Guarding what the
-  agent's own commands can still read is the job of the harness's sandbox and
-  settings; each active integration's README names them.
+- **D2, decided** (Zoe, 2026-10-11: "Wouldn't this be true of *any* keys
+  that the agent holds, and then should be something the agent should
+  handle?"): keys the agent can reach are the harness's to protect. Nunchi
+  keeps its own keys out of the room, and out of the agent's environment when
+  Nunchi starts the agent. Guarding what the agent's own commands can still
+  read is the job of the harness's sandbox and settings; each active
+  integration's README names them.
 - **Claude Code keeps Nunchi's own Discord transport**
   ([#69](https://github.com/mentatzoe/nunchi/issues/69),
   [#70](https://github.com/mentatzoe/nunchi/issues/70)). Claude Code's
