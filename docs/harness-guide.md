@@ -57,7 +57,9 @@ guard. An adapter that decides any of that is a bug, even when it works.
   pinned harness version, never against anyone's own setup.
 - **Secrets stay out of the room.** Keep Nunchi's credentials out of the
   agent's view. Every room action passes the secret guard, in the agent's
-  turn and again at the room's host.
+  turn and again at the room's host. What the agent's commands can still
+  reach is the harness's to protect (D2, `AGENTS.md`); name the harness's
+  sandbox setting in your README (step 2).
 
 ## Choose a shape
 

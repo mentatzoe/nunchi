@@ -23,20 +23,24 @@ the documentation current. Each integration documents itself under
 
 ## Habits
 
-- Before changing the core, ask two questions: does this help an agent read
-  the room across a multi-turn conversation, and will every harness get it
-  through the same interfaces?
-- When recommending between options, lead with the one that makes the
-  conversation more social, even when it is the larger change, and state its
-  cost. If you catch yourself preferring an option because it is smaller or
-  fits today's contract, check it against `docs/behavior.md` first (Zoe,
-  2026-10-05; see `AGENTS.md`, Working style).
-- Treat what `docs/behavior.md` and `AGENTS.md` already state as decided, and
-  build it. Ask Zoe only about choices they leave open (2026-10-05: the
-  agent's own "mhm" was already settled).
+- If you catch yourself preferring an option because it is smaller or fits
+  today's contract, check it against `docs/behavior.md` first (Zoe,
+  2026-10-05). The rule for recommending is in `AGENTS.md`, Working style.
+- Before asking Zoe, check what `AGENTS.md` (Delivery rules) and
+  `docs/behavior.md` already decide (2026-10-05: the agent's own "mhm" was
+  already settled).
 - When briefing subagents, give them the goal of the task, not only the
   mechanism, and point them to `AGENTS.md` instead of restating it.
 - Say plainly when a review is a self-review.
+
+## Exec summary
+
+Zoe keeps a living exec summary of Nunchi in claude.ai: status, what is
+decided, what is pending, and findings. She gives a session its link. Never
+write the link into this repository, its issues or its pull requests: all
+are public. Keep the summary current at each milestone of your work. When
+Zoe decides something there, record it in the repository too (`AGENTS.md`,
+Working style), because other agents cannot read the summary.
 
 ## Commands
 
@@ -46,6 +50,5 @@ python3 -m evals.verdict_suite.runner --list
 python3 -m evals.behavior.run --dry-run
 ```
 
-The core is Python 3.11+ and standard-library only. Live calls need explicit
-provider and platform credentials and must record the installed version,
-identity, configuration, command, and complete result.
+The core is Python 3.11+ and standard-library only. Live runs follow
+`AGENTS.md`, Verification.

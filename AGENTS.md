@@ -42,10 +42,6 @@ Reading the room means:
   directly or says nothing. It never sends a meta-answer about its attention.
 - **When unsure, pay attention.** Uncertainty wakes or defers. Wrongly
   suppressing something that mattered is the worst error.
-
-Today's code does not yet behave this way in several places; the table at the
-end of `docs/behavior.md` lists where. Treat each difference as a gap to close,
-not as the intended behavior.
 - **Context is bounded and honest.** The participant sees a bounded, truthful
   snapshot of the room, including what is missing, and its own earlier turns
   as factual history.
@@ -53,6 +49,10 @@ not as the intended behavior.
   anyone else's. A participant's own messages never wake it.
 - **Continuity without revival.** Restarts and backfill restore facts, never
   missed moments or stale turns.
+
+Today's code does not yet behave this way in several places; the table at the
+end of `docs/behavior.md` lists where. Treat each difference as a gap to close,
+not as the intended behavior.
 
 ## One library, every harness
 
@@ -87,6 +87,19 @@ one vendor, the core needs a neutral interface instead.
   whether to ask the harness's maintainers.
 - **Independent evidence.** Tests, evaluations, and benchmarks run on clean,
   pinned installs of each harness, never on anyone's own setup.
+- **D2, decided** (Zoe, 2026-10-11): keys the agent can reach are the
+  harness's to protect. Nunchi keeps its own keys out of the room, and out of
+  the agent's environment when Nunchi starts the agent. Guarding what the
+  agent's own commands can still read is the job of the harness's sandbox and
+  settings; each active integration's README names them.
+- **Claude Code keeps Nunchi's own Discord transport**
+  ([#69](https://github.com/mentatzoe/nunchi/issues/69),
+  [#70](https://github.com/mentatzoe/nunchi/issues/70)). Claude Code's
+  official Discord channel plugin acts in the room before Nunchi decides and
+  drops other agents' messages
+  ([README](integrations/claude-code/README.md#how-it-works)). The gate
+  reaches Claude Code only through its public extension points, a plugin and
+  the `stream-json` input mode, so Claude Code itself stays stock.
 - **The Hermes plugin is parked** (Zoe and Claude as lead engineer,
   2026-10-10). It injects a turn of its own instead of riding Hermes's native
   flow, so Hermes's thread, session and identity settings never apply to
@@ -113,6 +126,9 @@ one vendor, the core needs a neutral interface instead.
 6. Source, schemas, tests, evaluations, evidence, and installed runtimes for
    what actually exists and works.
 
+Re-read this file and `docs/behavior.md` after each context compaction, when
+your session replaces its earlier history with a summary.
+
 Code and reproducible behavior determine implementation truth. Specs under
 `specs/` are reference material, not work authorization.
 
@@ -132,6 +148,10 @@ Code and reproducible behavior determine implementation truth. Specs under
 
 - Start with the product outcome. Treat design, version, installation, and
   process choices as changeable unless Zoe explicitly fixed them.
+- Check each change against three questions. Does it help the agent read a
+  live room of several people and agents? Does it follow each harness's own
+  plugin rules and settings? Does every harness get it once, from the core,
+  through the same interfaces?
 - Bugs in an implementation are bugs to repair, not proof that the approach
   cannot work. Test practical repairs and alternatives before declaring a
   fundamental blocker.
@@ -144,6 +164,8 @@ Code and reproducible behavior determine implementation truth. Specs under
   concrete repair that produces the intended behavior.
 - Documentation and status reports lead with the truth: done, not done,
   working with a named limitation, or failed. Supporting detail follows.
+- Record Zoe's decisions in her words, with the date, in the file that holds
+  the rule. When a decision changes earlier advice, say what it replaces.
 - Stay technical but concise. Prefer plain language; avoid jargon,
   doublespeak, inflated severity, and process theatre.
 - Prefer simple systems over clever ones, and consider edge cases from the
@@ -151,7 +173,20 @@ Code and reproducible behavior determine implementation truth. Specs under
 
 ## Delivery rules
 
-- Work on the earliest missing behavior the product needs.
+- Work on the earliest missing behavior the product needs, and build only
+  what the library needs for it.
+- The current milestone is the internal test track: Zoe's own machine, one
+  person, kept in-house (Zoe, 2026-10-10). Claude Code goes first, then Codex
+  (Claude's order as lead engineer).
+- Before building a step, price it in days, lines of code and credits (the
+  model and CI spend it takes). Name the eval arm that will show it working
+  (a setting of `evals/behavior`, or a rehearsal run), and read the plugin
+  rules of each harness it touches (Claude as lead engineer, 2026-10-11,
+  after step 9f ran days over).
+- Write no more rehearsal code until a live run finds something that needs it
+  (Claude, 2026-10-11). Zoe, 2026-10-18: "I'd almost want to try these live
+  rather than keep building an eval library";
+  [#174](https://github.com/mentatzoe/nunchi/issues/174).
 - When a shared interface changes, run every consumer's tests in the same PR
   and fix or flag what breaks.
 - A stale assignment, previous session owner, missing process artifact,
@@ -160,9 +195,11 @@ Code and reproducible behavior determine implementation truth. Specs under
   continue other unblocked product work. Stop only when no safe in-scope work
   remains, and state the concrete dependency.
 - Do not narrow supported behavior, redefine completion, or drop a required
-  surface without Zoe's explicit decision. Ask Zoe only when a choice
-  materially changes product behavior, supported surfaces, security
-  boundaries, or requires an irreversible external action.
+  surface without Zoe's explicit decision. What this file and
+  `docs/behavior.md` state is decided: build it. Ask Zoe only when a choice
+  materially changes product behavior or supported surfaces and they leave
+  it open, or when it touches security boundaries or requires an
+  irreversible external action.
 - Plans, labels, reviews, and evidence files do not substitute for working
   behavior.
 - Preserve user changes and avoid destructive operations outside the requested
@@ -224,3 +261,9 @@ evaluation across realistic multi-turn conversations
 models. Live provider and
 platform runs need explicit credentials and must record the installed version,
 identity, configuration, command, and complete result.
+
+Run records from Zoe's test server may be published in this repository, which
+is public, once a scan finds none of the run's keys in them (Zoe,
+2026-10-18). Run `python3 -m evals.rehearsal.scan --out <records> --env
+<variable>`, with one `--env` for each key the run used. A hit deletes the
+records.
