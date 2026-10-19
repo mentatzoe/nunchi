@@ -98,7 +98,7 @@ SCHEMA_FILES = {
 
 INTERFACE_VERSIONS = {
     "attention-request": ("I-010A", "AttentionRequestV2", 9),
-    "attention-decision": ("I-010B", "AttentionDecisionV2", 9),
+    "attention-decision": ("I-010B", "AttentionDecisionV2", 10),
     "participant-wake": ("I-010C", "ParticipantWakeV2", 16),
     "context-continuation": ("I-010D", "ContextContinuationV2", 2),
     "attention-receipt": ("I-010E", "AttentionReceiptV2", 6),
@@ -147,8 +147,8 @@ LEGACY_ACK_VALVES = ("capability-defer",)
 LEGACY_ACK_CAUSES = ("ack-disabled", "ack-unsupported")
 VERDICT_KEYS = ("PASS", "ACK", "ASK", "SPEAK")
 # The typed answers behind every status-ok decision (@5, #94 step 4; asks
-# and responds_to since @6, step 5).
-ANSWER_YES_NO = ("conversation", "asks", "answered", "mid_thought", "adds_something")
+# and responds_to since @6, step 5; adds_something gone since @10).
+ANSWER_YES_NO = ("conversation", "asks", "answered", "mid_thought")
 ANSWER_POINTERS = ("answered_by", "responds_to")
 # Asked only when the request lists unattended messages (@8, #94 step 6).
 ANSWER_OPTIONAL_POINTERS = ANSWER_POINTERS + ("calls_for_participant",)
@@ -168,7 +168,6 @@ def make_answers(**overrides: Any) -> dict[str, Any]:
         "asks": 0.8,
         "answered": 0.05,
         "mid_thought": 0.05,
-        "adds_something": 0.8,
         "move": {"speak": 0.7, "mhm": 0.1, "wait": 0.15, "stay_quiet": 0.05},
     }
     answers.update(overrides)
@@ -3288,7 +3287,7 @@ def make_decision_ok(
         "answers": make_answers(),
     }
     if classifier == LEGACY_ACK:
-        # Only to build a legacy receipt: an I-010B@9 decision rejects it.
+        # Only to build a legacy receipt: an I-010B decision rejects it since @9.
         doc["ack"] = {
             "reaction": "👂",
             "policy_provenance": "trusted:ack-policy/default@1",

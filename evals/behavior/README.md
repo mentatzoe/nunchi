@@ -336,7 +336,6 @@ message (`src/nunchi/attention_questions.py`):
 - who is it addressed to;
 - has someone already answered it, and with which message;
 - is the author mid-thought;
-- does the participant have something to add;
 - which move fits: speak, mhm, wait, or stay quiet.
 
 Chat models answer them as one JSON object through the OpenAI-compatible

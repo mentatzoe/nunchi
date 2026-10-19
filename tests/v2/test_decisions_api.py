@@ -74,7 +74,6 @@ def answers(
     answered_by="none",
     responds_to="none",
     mid_thought=0.1,
-    adds=0.8,
     conversation=0.95,
 ):
     probabilities = dict.fromkeys(MOVES, 0.0)
@@ -92,7 +91,6 @@ def answers(
         "answered_by": {"type": "choice", "choice": answered_by, "confidence": 0.9, "probabilities": {answered_by: 0.9}},
         "responds_to": {"type": "choice", "choice": responds_to, "confidence": 0.9, "probabilities": {responds_to: 0.9}},
         "mid_thought": {"type": "noul", "noul": mid_thought},
-        "adds_something": {"type": "noul", "noul": adds},
         "move": {
             "type": "choice",
             "choice": max(probabilities, key=probabilities.get),

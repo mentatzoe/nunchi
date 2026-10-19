@@ -143,16 +143,6 @@ def attention_questions(name: str, *, unattended: bool = False) -> dict[str, dic
             "yes": "The author is building up to a point, telling a story, or listing things, and has more to say.",
             "no": "The author's thought is complete, or the message stands on its own.",
         },
-        "adds_something": {
-            "step": 2,
-            "kind": YES_NO,
-            "ask": (
-                f"Going by its instructions, does {name} know something here that nobody "
-                "has said yet?"
-            ),
-            "yes": f"{name}'s role or knowledge gives it an answer, a fact, or a view the conversation does not have yet.",
-            "no": f"What {name} knows about this has already been said, or it knows nothing about it.",
-        },
         "move": {
             "step": 2,
             "kind": CHOICE,
@@ -387,7 +377,6 @@ def validate_answers(
         "asks": asks,
         "answered": _answered(raw["answered"], asks),
         "mid_thought": _yes_no(raw["mid_thought"], "mid_thought"),
-        "adds_something": _yes_no(raw["adds_something"], "adds_something"),
         "move": _distribution(raw["move"], MOVES, "move"),
     }
     for key in ANSWER_POINTERS:
@@ -455,7 +444,6 @@ def answer_reasons(answers: Mapping[str, Any]) -> list[str]:
             reasons.append(f"{key} {answers[key]}")
     reasons += [
         f"mid_thought {answers['mid_thought']:.2f}",
-        f"adds_something {answers['adds_something']:.2f}",
         f"move {move} {answers['move'][move]:.2f}",
     ]
     return reasons
@@ -607,16 +595,6 @@ def fact_notes(answers: Mapping[str, Any], projection: Mapping[str, Any]) -> lis
                 "evidence_event_ids": [trigger],
             }
         )
-    if answers["adds_something"] >= 0.5:
-        notes.append(
-            {
-                "note": (
-                    "You may know something here that nobody has said yet "
-                    f"({answers['adds_something']:.2f})."
-                ),
-                "evidence_event_ids": [trigger],
-            }
-        )
     return notes
 
 
@@ -693,7 +671,6 @@ def answers_leaning(disposition: str, *, close: bool = False) -> dict[str, Any]:
             "answered_by": None,
             "responds_to": None,
             "mid_thought": 0.0,
-            "adds_something": 0.0,
             "move": {"speak": 0.0, "mhm": 0.0, "wait": 0.1, "stay_quiet": 0.9},
         }
     move = {
@@ -713,6 +690,5 @@ def answers_leaning(disposition: str, *, close: bool = False) -> dict[str, Any]:
         "answered_by": None,
         "responds_to": None,
         "mid_thought": 0.8 if disposition == "mhm" else 0.05,
-        "adds_something": 0.8 if disposition == "WAKE" else 0.3,
         "move": move,
     }

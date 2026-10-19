@@ -143,7 +143,7 @@ class ValidationTests(unittest.TestCase):
             leaning(conversation=1.5),
             leaning(conversation=-0.1),
             leaning(conversation=math.nan),
-            leaning(adds_something="high"),
+            leaning(mid_thought="high"),
             leaning(answered={"probability": 0.9}),
             leaning(answered={"yes": 0.7}),
             leaning(answered={"yes": 2, "no": 0}),
@@ -255,11 +255,12 @@ class RouteTests(unittest.TestCase):
 
     def test_the_questions_do_not_make_usefulness_the_bar(self):
         # docs/behavior.md, Zoe, 2026-10-19: the idea is social activations for agents, not "only contribute
-        # when you have something useful". Knowing something nobody has said is a fact, and staying quiet is
-        # a move, not a verdict that nothing is needed.
+        # when you have something useful". Attention cannot know what the participant knows, so it no longer
+        # asks (I-010B@10), and staying quiet is a move, not a verdict that nothing is needed.
         profile = foundation()[0].attention.profile
         prompt = participant_attention_prompt(profile)
-        self.assertIn("know something here that nobody has said yet?", prompt)
+        self.assertNotIn("adds_something", prompt)
+        self.assertNotIn("nobody has said", prompt)
         self.assertIn("stay_quiet (Let this moment pass with no message and no reaction from", prompt)
         self.assertNotIn("useful", prompt)
         self.assertNotIn("Nothing is needed", prompt)

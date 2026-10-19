@@ -24,7 +24,7 @@ WAKE_SOURCES = ("WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS")
 # The portable interfaces and their versions, as `nunchi probe` reports them.
 INTERFACE_VERSIONS = {
     "I-010A": 9,
-    "I-010B": 9,
+    "I-010B": 10,
     "I-010C": 16,
     "I-010D": 2,
     "I-010E": 6,
@@ -584,7 +584,6 @@ ANSWER_QUESTIONS = (
     "answered_by",
     "responds_to",
     "mid_thought",
-    "adds_something",
     "move",
 )
 # Pointer answers are optional: no message, or none the model was shown.
@@ -592,7 +591,7 @@ ANSWER_POINTERS = ("answered_by", "responds_to")
 # Asked only when the request lists unattended messages (@8, #94 step 6):
 # which of them still calls for the participant.
 UNATTENDED_POINTER = "calls_for_participant"
-_ANSWER_YES_NO = ("conversation", "asks", "answered", "mid_thought", "adds_something")
+_ANSWER_YES_NO = ("conversation", "asks", "answered", "mid_thought")
 _ANSWER_CHOICES = {"addressee": ANSWER_ADDRESSEES, "move": ANSWER_MOVES}
 
 

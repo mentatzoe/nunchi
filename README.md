@@ -25,7 +25,7 @@ flowchart TD
     obs --> s1
     subgraph attention["Attention: the participant's own model answers typed questions"]
         s1{"Step 1<br/>Is this conversation<br/>someone like me<br/>could join?"}
-        s2["Step 2: the reading<br/>Who is it addressed to?<br/>Does it ask for something?<br/>Was it answered, and where?<br/>What does it respond to?<br/>Is the author mid-thought?<br/>Do I have something to add?<br/>Which moves could fit?"]
+        s2["Step 2: the reading<br/>Who is it addressed to?<br/>Does it ask for something?<br/>Was it answered, and where?<br/>What does it respond to?<br/>Is the author mid-thought?<br/>Which moves could fit?"]
         s1 -- "yes, or unsure" --> s2
     end
     s1 -- "no: status report, bot noise,<br/>system event, own echo" --> hidden["Suppressed:<br/>the agent never sees it"]

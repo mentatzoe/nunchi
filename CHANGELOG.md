@@ -1042,21 +1042,19 @@ behavior of the core, Claude Code, Codex or the plugin.
   opposite:
   - **The social guide** (both turn prompts) said to speak "when you have
     something that serves the moment", and that holding back fits "when
-    someone already answered". It now says people take part for social
-    reasons, not only when they have something new to say: they answer, ask,
-    agree, correct, thank, joke, say they were looking into it too, check what
-    someone meant, or follow up on what they said they would do. It also says
-    that saying nothing is a normal choice, that the agent neither dominates
-    nor vanishes, that the addressee gets the first chance to answer, and that
-    the agent's instructions may set a stricter or looser bar.
-  - **Attention's questions.** `adds_something` asked whether the agent has
-    "something useful to add here that nobody has said yet", with "the topic
-    is outside its role" as a no. It now asks whether the agent knows
-    something here that nobody has said yet; the key and the contract are
-    unchanged. Staying quiet was "Nothing is needed from" the agent; it is now
-    "Let this moment pass with no message and no reaction". The reading the
-    library writes from the answers says "You may know something here that
-    nobody has said yet".
+    someone already answered". It now says people join in for social
+    reasons, not only to add something new: they agree, joke, thank, correct
+    someone, check what someone meant, or follow up on what they said they
+    would do. It also says that saying nothing is a normal choice, that the
+    agent neither dominates nor vanishes, and that the addressee gets the
+    first chance to answer. It ends "Your instructions may set a different
+    bar".
+  - **Attention's questions.** `adds_something`, whether the agent has
+    "something useful to add here that nobody has said yet", is removed
+    (AttentionDecisionV2@10): it decided nothing, attention cannot know what
+    the agent knows, and it kept the usefulness bar alive. Staying quiet was
+    "Nothing is needed from" the agent; it is now "Let this moment pass with
+    no message and no reaction".
   - **Profiles.** The behavior suite's five profiles, and the six litmus
     scenes that copy them, said "Contribute when you can add something
     useful; you don't need to answer everything". The example operator profile

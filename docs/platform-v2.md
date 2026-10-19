@@ -190,9 +190,8 @@ could take part in; a message addressed to someone else is still
 conversation. Step 2 asks who it is addressed to, whether it asks someone
 for something, whether it was already answered and by which message, which
 earlier message it answers or responds to, whether its author is
-mid-thought, whether the participant has something to add, and which kinds
-of response could fit. The participant's memory builds its threads from the
-asks and the pointers (#94 step 5). Since #94 step 6 the judgment also
+mid-thought, and which kinds of response could fit. The participant's
+memory builds its threads from the asks and the pointers (#94 step 5). Since #94 step 6 the judgment also
 carries that memory, the same facts the participant's turn gets, so it reads
 a message as the participant would: a CI line it promised to report on
 concerns it even when nobody addresses it and the promise has left the
@@ -215,7 +214,6 @@ There are two routes, and both produce the same answers:
     "answered_by": null,
     "responds_to": null,
     "mid_thought": 0.05,
-    "adds_something": 0.7,
     "move": {"speak": 0.3, "mhm": 0.0, "wait": 0.6, "stay_quiet": 0.1},
     "notes": [{"note": "Zoe asked Castor, who has not answered yet.", "evidence_event_ids": ["discord:message:123"]}]
   }
