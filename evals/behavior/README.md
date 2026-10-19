@@ -7,47 +7,97 @@ Each scene is a short conversation plus the moments to judge in it.
 
 ## The scene format being adopted
 
+**Status: proposed by Claude, 2026-10-19, for Zoe's review**
+([plan](https://github.com/mentatzoe/nunchi/issues/211)).
+
 Zoe, 2026-10-19, on what a scene is for: "given this hypothetical scenario
 that we have an expectation of how the Nunchi library (and related agent
 runners) should behave, is the response what we would expect?" And: "I don't
 think that having fixed rehearsals is a bad thing, by the way. It helps
 isolate specific behaviours."
 
+Each scene asks Nunchi one question, in the form Zoe uses: does Nunchi let
+the agent understand something the room has made clear? For example, that a
+thought is still in progress, or that the agent said it would do something.
 The format was worked out with Zoe on
-[#178](https://github.com/mentatzoe/nunchi/issues/178). Every scene is being
-rebuilt to it ([#136](https://github.com/mentatzoe/nunchi/issues/136)); until
-then the files use the older format under "What a scene says".
+[#178](https://github.com/mentatzoe/nunchi/issues/178). Each scene has an
+issue under [#136](https://github.com/mentatzoe/nunchi/issues/136) that shows
+the scene itself. Until a scene is rebuilt, its file uses the older format
+under "What a scene says".
 
+### Parts
+
+- **The question.** One line, as above.
 - **Who is participating.** Name and type only: the protagonist (the agent
   under test) and the supporting cast.
-- **What happens in the room.** The transcript in three parts: before the
-  turn (a history of tens of messages, so the scene has a past), what starts
-  the turn, and what arrives during it. A scene is one turn of the
-  protagonist.
+- **What happens in the room.** Three parts: before the turn, what starts the
+  turn, and what arrives during it. A scene is one turn of the protagonist.
 - **What a participant would know by now.** Facts from the history, each
   pointing at its messages. Facts, not instructions.
 - **What the protagonist sees.** A sequence diagram of the turn, using the
-  harness contract's generic names rather than one harness's, and the exact
-  package Nunchi builds at each step; then a table of which facts reach the
-  protagonist, and how.
-- **What would be socially acceptable.** The range of moves people would make
-  in that room, with examples that are "not gospel". No moral judgment, and
-  no usefulness bar.
+  harness contract's generic names; the package Nunchi builds at each step;
+  and a table of which facts reach the protagonist, and how: in the window,
+  in memory, by looking back, or not at all. Most scenes share one diagram;
+  it changes only when the turn's shape does.
+- **What would be socially acceptable.** Examples of moves people would make
+  in that room, which are "not gospel", and signs that the participant missed
+  the room, each tied to a fact: it breaks a norm set earlier, answers as if
+  nobody had spoken, or goes quiet because room text told it to. There is no
+  single right answer, no moral judgment and no usefulness bar. Saying nothing
+  is one move among others.
 
-Names. Zoe, 2026-10-19: "Maybe "Claude-Code", "Codex" or "Hermes" so that
-people don't have to be translating... and we could have a scene with
-multiple humans, called Alice, Bob, etc..."
+### Two kinds of check
+
+- **Reaches the agent.** Whether the facts the question is about reach the
+  protagonist, read from the packages. This is deterministic: the same scene
+  and the same library give the same answer. Where a fact reaches the agent
+  only through attention's judgments, the scene says so
+  ([#192](https://github.com/mentatzoe/nunchi/issues/192)).
+- **What the agent does.** Judged against the examples and the signs of
+  missing the room, by a person or a judge model.
+
+### History
+
+- Tens of messages, with real gaps in time, the protagonist's own earlier
+  lines, people and agents talking to each other, and side threads.
+- When the question is about carrying something forward, the messages it
+  depends on fall outside the newest 24, the window the agent sees without
+  asking, and the scene names them.
+- A scene is a window into a fixed transcript: what the protagonist sees must
+  not depend on how attention judged the earlier messages. Until #192 is
+  fixed, a scene that depends on it says so.
+- New words and new names. A pattern may come from a real session; captures
+  shared privately stay private.
+
+### Names
+
+Zoe, 2026-10-19: "Maybe "Claude-Code", "Codex" or "Hermes" so that people
+don't have to be translating... and we could have a scene with multiple
+humans, called Alice, Bob, etc..."
 
 - People are Alice, Bob, Carol and so on.
-- Agents are named after harnesses: Claude-Code, Codex, Hermes. When another
-  harness plays the protagonist, the runner swaps the names, so each agent is
-  called by its own harness's name.
+- Agents are named after harnesses: Claude-Code, Codex, Hermes. The
+  protagonist is Claude-Code unless the scene says otherwise. When another
+  harness plays it, the runner swaps the two names throughout, so each agent
+  is called by its own harness's name.
 
-A scene is a window into a fixed transcript: what the protagonist sees must
-not depend on how attention judged the earlier messages
-([#192](https://github.com/mentatzoe/nunchi/issues/192)). Histories follow the
-shape of real sessions with new words; captures shared privately stay
-private.
+### More than one person
+
+Several scenes have two or more people: #186, #202, #206, #207, #208, #209 and
+#210.
+
+### The scene file
+
+- One file per scene, `evals/scenes/<id>.json`, kept apart from today's
+  runner so its tests keep passing until the new evals replace it.
+- It holds the question, the cast, the messages (author, time, text, replies,
+  mentions, reactions), the turn (the message that starts it and those that
+  arrive during it), the facts, the "reaches the agent" checks, and the
+  acceptable examples and signs.
+- A variant that changes one detail, such as a status line posted by a person
+  instead of a bot, is a second file under the same issue.
+- The issue shows the scene as the file has it. A script renders the packages
+  from the file at a given commit; nobody writes packages by hand.
 
 ## Where evaluation is going
 
