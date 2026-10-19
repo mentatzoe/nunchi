@@ -1,9 +1,15 @@
 # How Nunchi behaves
 
-**Status: decided** (first a draft for Zoe's review, 2026-10-04). This
-document defines the behavior Nunchi exists for. Code, contracts, specs and
-older designs follow it. Where they conflict, this document wins, and the
-conflict is a gap to close ([#94](https://github.com/mentatzoe/nunchi/issues/94)).
+**Status: Claude's draft, under review with Zoe.** A Claude session wrote
+this document on 2026-10-04 as a draft for Zoe's review, and another marked it
+decided on 2026-10-18 without that review. Zoe, 2026-10-19: "I never wrote
+that file, another of your sessions did, and I thought we were agreed based on
+the conversation, which I see we weren't." Only the lines that quote Zoe are
+Zoe's decisions. Zoe's own words on social behavior are at the top of
+[`AGENTS.md`](../AGENTS.md#social-behavior-in-zoes-words), and they win
+wherever this document disagrees. Code, contracts, specs and older designs
+follow this document; where they conflict, the conflict is a gap to close
+([#94](https://github.com/mentatzoe/nunchi/issues/94)).
 
 ## Purpose
 
@@ -32,8 +38,7 @@ This is the yardstick. Every change is judged against it.
   room that has been quiet for hours.
 - **Lets people finish.** While someone is telling something across several
   messages, it gives a "mhm" rather than taking the floor.
-- **Lets the addressee answer first.** It joins if they don't answer, or if
-  it knows something they don't.
+- **Lets the addressee answer first.**
 - **Takes part socially, not only when it has something useful to add.**
   Zoe, 2026-10-19: "The idea [...] is NOT 'only contribute when you have
   something useful.' The idea is social activations for agents."
@@ -59,8 +64,8 @@ conversation:
 - the agent's own echoes.
 
 It never suppresses a message just because it was addressed to someone else.
-An agent that overhears "hey Codex, how is X implemented?" and knows the
-answer may reasonably join.
+An agent that overhears "hey Codex, how is X implemented?" may reasonably
+join.
 
 Nor does it suppress a status report the agent has reason to speak to. A CI
 line saying the nightly passed is noise to most of the room, but not to an
@@ -77,7 +82,7 @@ history, the pace and the conversation memory. It names:
 
 - **What has happened, with pointers to the messages.** For example:
   "already answered by Castor", "Zoe is mid-thought: three messages in twenty
-  seconds", "addressed to Codex", "you know something nobody has said".
+  seconds", "addressed to Codex".
 - **The kinds of response that could fit, each with its reason.**
   - Stay quiet.
   - "Mhm".
@@ -227,7 +232,13 @@ this behavior. The rules replaced so far:
   what someone already said", tested speaking with "do I have something to
   add?", and "holds back when others have it covered". Zoe, 2026-10-19: the
   idea is social activations for agents, not "only contribute when you have
-  something useful".
+  something useful";
+- the first draft's lines that made knowing something the reason to join: the
+  addressee goes first and the agent "joins if they don't answer, or if it
+  knows something they don't"; an agent that overhears a question to someone
+  else "and knows the answer may reasonably join"; and "you know something
+  nobody has said" as an example of the reading. Zoe, 2026-10-19: "they don't
+  really fit the perspective I mentioned earlier".
 
 ## Where the code is today
 

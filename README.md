@@ -6,8 +6,11 @@ they receive. Nunchi gives an agent the social awareness people use in a group
 conversation, so it can read the room and take part the way a socially aware
 person would: listen, nod, speak, or hold back.
 
-[`docs/behavior.md`](docs/behavior.md) defines that behavior.
-[Issue #94](https://github.com/mentatzoe/nunchi/issues/94) records where V2
+Zoe's own words on that behavior open
+[`AGENTS.md`](AGENTS.md#social-behavior-in-zoes-words): agents take part
+socially, not only when they have something useful to add.
+[`docs/behavior.md`](docs/behavior.md) describes it in more detail, as a draft
+under review. [Issue #94](https://github.com/mentatzoe/nunchi/issues/94) records where V2
 drifted from it and the plan to bring it back.
 
 ## At a glance
