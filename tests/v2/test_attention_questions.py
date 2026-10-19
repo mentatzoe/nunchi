@@ -253,6 +253,17 @@ class RouteTests(unittest.TestCase):
         self.assertIn("Give its id, or null if it responds to none.", prompt)
         self.assertIn('never true, false, "yes", or "no"', prompt)
 
+    def test_the_questions_do_not_make_usefulness_the_bar(self):
+        # docs/behavior.md, Zoe, 2026-10-19: the idea is social activations for agents, not "only contribute
+        # when you have something useful". Knowing something nobody has said is a fact, and staying quiet is
+        # a move, not a verdict that nothing is needed.
+        profile = foundation()[0].attention.profile
+        prompt = participant_attention_prompt(profile)
+        self.assertIn("know something here that nobody has said yet?", prompt)
+        self.assertIn("stay_quiet (Let this moment pass with no message and no reaction from", prompt)
+        self.assertNotIn("useful", prompt)
+        self.assertNotIn("Nothing is needed", prompt)
+
 
 class ContractTests(unittest.TestCase):
     def decision(self, **changes):

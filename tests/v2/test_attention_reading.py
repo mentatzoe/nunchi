@@ -201,7 +201,7 @@ class ReadingTests(unittest.TestCase):
         self.assertEqual(
             [
                 note("The judged message is addressed to you, and it asks for something (0.80; asks 0.80).", "e1"),
-                note("You may know something useful that nobody has said yet (0.80).", "e1"),
+                note("You may know something here that nobody has said yet (0.80).", "e1"),
                 moves("WAKE"),
             ],
             wakes[0]["attention"]["advice"],

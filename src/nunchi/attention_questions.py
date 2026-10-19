@@ -147,11 +147,11 @@ def attention_questions(name: str, *, unattended: bool = False) -> dict[str, dic
             "step": 2,
             "kind": YES_NO,
             "ask": (
-                f"Given its instructions, does {name} have something useful to add here "
-                "that nobody has said yet?"
+                f"Going by its instructions, does {name} know something here that nobody "
+                "has said yet?"
             ),
-            "yes": f"{name}'s role or knowledge gives it a relevant answer, fact, question, or view the conversation lacks.",
-            "no": f"{name} has nothing new to add, or the topic is outside its role.",
+            "yes": f"{name}'s role or knowledge gives it an answer, a fact, or a view the conversation does not have yet.",
+            "no": f"What {name} knows about this has already been said, or it knows nothing about it.",
         },
         "move": {
             "step": 2,
@@ -164,7 +164,7 @@ def attention_questions(name: str, *, unattended: bool = False) -> dict[str, dic
                 "speak": "Say something to the room: an answer, a question, an opinion, or anything else.",
                 "mhm": "A quick acknowledgement, like a nod or 'mhm', that shows it is following without taking the floor.",
                 "wait": "Hold off for now: let the addressee answer first, or let the speaker finish.",
-                "stay_quiet": f"Nothing is needed from {name} here.",
+                "stay_quiet": f"Let this moment pass with no message and no reaction from {name}.",
             },
         },
     }
@@ -611,7 +611,7 @@ def fact_notes(answers: Mapping[str, Any], projection: Mapping[str, Any]) -> lis
         notes.append(
             {
                 "note": (
-                    "You may know something useful that nobody has said yet "
+                    "You may know something here that nobody has said yet "
                     f"({answers['adds_something']:.2f})."
                 ),
                 "evidence_event_ids": [trigger],
