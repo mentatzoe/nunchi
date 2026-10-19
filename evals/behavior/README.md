@@ -5,87 +5,10 @@ the top of [`AGENTS.md`](../../AGENTS.md#social-behavior-in-zoes-words)
 describe it; [`docs/behavior.md`](../../docs/behavior.md) is a fuller draft.
 Each scene is a short conversation plus the moments to judge in it.
 
-## The scene spec
+## Scene spec
 
-**Status: agreed with Zoe, 2026-10-19.** Zoe, on the spec below: "LGTM! So
-this is the scene spec I'd expect." It replaces the format worked out on
-[#178](https://github.com/mentatzoe/nunchi/issues/178) and the earlier account
-of what a scene is for, which Zoe described as backfilling: "I never invented
-them. I was backfilling based on something that had been decided." The
-scenes under [#136](https://github.com/mentatzoe/nunchi/issues/136) are still
-to be gone through with Zoe under this spec. The files in this suite use the
-older format under "What a scene says".
-
-### Purpose
-
-Zoe, 2026-10-19:
-
-- "I think that the point of these scenes is to provide a repeatable-ish
-  behavioral eval for a social situation."
-- "Scenes are a way to see if the library behaves as it should, or it
-  provides the social context that it should. Behaviorally."
-
-Not settled: whether checking that the facts reach the agent belongs in
-ordinary tests rather than in scenes. Zoe: "That feels to me more like a unit
-test or an integration test or, you know, it's not really a behavioral test,
-is it?" Later the same day: "I *think*."
-
-### Goals
-
-Zoe, 2026-10-19:
-
-- "What I want us to have is to have a way to flag and capture regression
-  tests."
-- A way to capture "whenever something has been compressed beyond
-  understanding", meaning "for the implementation of the library. Which is
-  the correction that has kept happening." One example ("this is just an
-  example"): a library that provides social behaviors turning into "only
-  contribute when you have something important to contribute, which is the
-  failure mode that I keep correcting."
-- A scene must not compress Zoe's intent either; the moves the old scenes
-  expected built the usefulness bar back in. Zoe: "Obviously. I don't think
-  it *implies* it. I think I'm stating it explicitly."
-
-### Spec
-
-A scene has:
-
-- **A description.**
-- **Static components:**
-  - Supporting participants.
-  - Transcript / history.
-  - Timeline: "key points in time for the scene, and previous library
-    packages if not starting cold."
-  - Background: "any context that could be assumed to be part of the scene
-    if it happened live (e.g. Room description)".
-  - The library's configuration, such as the attention model, the window
-    size and the profile.
-- **Dynamic components:**
-  - The active participant, "in the closest form to its production form".
-  - "A version of the library (frozen/packaged)".
-- **The purpose of the scene, i.e., what's being judged:**
-  - Expected / acceptable outcomes.
-  - Undesirable outcomes.
-
-Not part of a scene:
-
-- Scoring and running. Zoe: "I don't think scoring and running should be
-  part of the scene spec, as that's more in the eval design itself. If all
-  runs have "Charlie should always nod" as desirable behaviour, this will be
-  true whether k is 1 or 111."
-- A rubric. Zoe: "maybe this doesn't belong here, and just the acceptable
-  outcomes / undesirable outcomes should be considered."
-
-### Names and captures
-
-Zoe, 2026-10-19: "Maybe "Claude-Code", "Codex" or "Hermes" so that people
-don't have to be translating... and we could have a scene with multiple
-humans, called Alice, Bob, etc..." People are Alice, Bob, Carol and so on;
-agents are named after their harnesses: Claude-Code, Codex, Hermes.
-
-Captures Zoe shares stay private. Zoe, 2026-10-19: "I'd rather if the details
-behind the capture were kept privately, and you just analysed the different
-patterns that happen in the conversation between the participants."
+New scenes follow [`docs/evaluations/scene-spec.md`](../../docs/evaluations/scene-spec.md).
+The files in this suite still use the older format under "What a scene says".
 
 ## Where evaluation is going
 
