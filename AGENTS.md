@@ -191,7 +191,9 @@ Code and reproducible behavior determine implementation truth. Specs under
   merges into `main` as it lands, before live proof. A current `main` is not a
   claim that V2 is complete.
 - Work on a short-lived branch from current `main`, open a PR, merge when CI is
-  green, and delete the branch. Do not keep long-lived side branches.
+  green, and delete the branch. Do not keep long-lived side branches. Zoe,
+  2026-10-19: "Always merge"; "my expectation is that what we're doing here
+  is final, if it's just in a dangling branch, that never makes it."
 - Scale review to the size and risk of the change. A self-review with
   subagents is acceptable; say plainly that it is one. Cross-family
   independent review is not required for day-to-day delivery.
@@ -317,7 +319,11 @@ an agent reads the room well is a behavioral question; it needs behavioral
 evaluation across realistic multi-turn conversations
 ([#86](https://github.com/mentatzoe/nunchi/issues/86)). The scenes are in
 `evals/behavior/`; the manual `behavior-eval` workflow runs them against real
-models. Live provider and
+models. Zoe, 2026-10-19: "we should probably note we wanted to adopt DeepEval
+or something that isn't reinventing the wheel for evals - and ways to test
+with the library compiled and a cli, not just by code"
+([#174](https://github.com/mentatzoe/nunchi/issues/174);
+[`evals/behavior/README.md`](evals/behavior/README.md#where-evaluation-is-going)). Live provider and
 platform runs need explicit credentials and must record the installed version,
 identity, configuration, command, and complete result.
 

@@ -52,6 +52,9 @@ the documentation current. Each integration documents itself under
 - When briefing subagents, give them the goal of the task, not only the
   mechanism, and point them to `AGENTS.md` instead of restating it.
 - Say plainly when a review is a self-review.
+- Finish work merged: open the PR and merge it when CI is green. Zoe,
+  2026-10-19: "Always merge"; "if it's just in a dangling branch, that never
+  makes it."
 
 ## Exec summary
 
