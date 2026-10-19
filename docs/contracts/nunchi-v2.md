@@ -303,10 +303,10 @@ A tagged host-facing union on `status`:
   whether the participant had something to add that nobody had said yet.
   It decided nothing (the disposition comes only from `conversation` and
   `move`), the attention model cannot know what the participant knows, and
-  it kept alive a bar of taking part only when useful, which the participant
-  does not have: it takes part socially. `@10` removes the answer; answers
-  that carry it no longer validate. This is a breaking change to a closed
-  object.
+  it kept alive the idea that a participant takes part only when it has
+  something useful; a participant takes part socially. `@10` removes the
+  answer; answers that carry it no longer validate. This is a breaking
+  change to a closed object.
 - **`answers` (@5)** — required on `status: ok` (Zoe, 2026-10-05, #94
   step 4). The model answers fixed typed questions about the judged
   message, and the core decides from them. Step 1: `conversation`, the
@@ -316,8 +316,8 @@ A tagged host-facing union on `status`:
   `someone_else`, `nobody`), `answered` and the optional `answered_by`
   pointer to the supplied message that answered it, `mid_thought`
   (`adds_something` too until @10), and `move` (`speak`, `mhm`, `wait`,
-  `stay_quiet`): the most likely move selects `WAKE` for speak, and `DEFER` for a mhm (since
-  @9; `ACK` before), wait, and stay quiet,
+  `stay_quiet`): the most likely move selects `WAKE` for speak, and
+  `DEFER` for a mhm (since @9; `ACK` before), wait, and stay quiet,
   with ties going to the move that pays more attention. Since @6 (#94 step
   5) step 2 also asks `asks`, whether the judged message asks someone in the
   room for something, and the optional `responds_to` pointer to the earlier
@@ -762,6 +762,7 @@ the judged message is not conversation):
   "answers": {
     "conversation": 0.05,
     "addressee": {"participant": 0.0, "room": 0.0, "someone_else": 0.0, "nobody": 1.0},
+    "asks": 0.0,
     "answered": 0.0,
     "mid_thought": 0.0,
     "move": {"speak": 0.0, "mhm": 0.0, "wait": 0.1, "stay_quiet": 0.9}
@@ -785,6 +786,7 @@ routing audit records its effective width):
   "answers": {
     "conversation": 0.47,
     "addressee": {"participant": 0.1, "room": 0.2, "someone_else": 0.1, "nobody": 0.6},
+    "asks": 0.1,
     "answered": 0.1,
     "mid_thought": 0.1,
     "move": {"speak": 0.1, "mhm": 0.05, "wait": 0.15, "stay_quiet": 0.7}
