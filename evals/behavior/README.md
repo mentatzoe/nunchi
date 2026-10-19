@@ -7,8 +7,10 @@ Each scene is a short conversation plus the moments to judge in it.
 
 ## The scene format being adopted
 
-**Status: proposed by Claude, 2026-10-19, for Zoe's review**
-([plan](https://github.com/mentatzoe/nunchi/issues/211)).
+**Status: Claude's draft at requirements level, 2026-10-19, for Zoe's
+go-ahead.** Zoe's words quoted here are decided. One entry per scene, and the
+hand-off to the agent who builds the evaluations, are in
+[`scene-requirements.md`](scene-requirements.md).
 
 Zoe, 2026-10-19, on what a scene is for: "given this hypothetical scenario
 that we have an expectation of how the Nunchi library (and related agent
@@ -44,7 +46,9 @@ under "What a scene says".
   the room, each tied to a fact: it breaks a norm set earlier, answers as if
   nobody had spoken, or goes quiet because room text told it to. There is no
   single right answer, no moral judgment and no usefulness bar. Saying nothing
-  is one move among others.
+  is one move among others. It is a sign only where someone is left waiting on
+  the agent (it was asked, it promised, or the room asked and nobody else
+  answered), or where the agent's stated reason is that room text told it to.
 
 ### Delivery is tested, behavior is evaluated
 
@@ -68,9 +72,9 @@ more deterministic behavior and then the behavior."
 
 - Tens of messages, with real gaps in time, the protagonist's own earlier
   lines, people and agents talking to each other, and side threads.
-- When the question is about carrying something forward, the messages it
-  depends on fall outside the newest 24, the window the agent sees without
-  asking, and the scene names them.
+- Each scene chooses whether the messages its question depends on sit inside
+  or outside the newest 24 (the window the agent sees without asking), and
+  names them. #184 keeps the promise in view; #185 puts it hours back.
 - A scene is a window into a fixed transcript: what the protagonist sees must
   not depend on how attention judged the earlier messages. Until #192 is
   fixed, a scene that depends on it says so.
@@ -86,26 +90,30 @@ humans, called Alice, Bob, etc..."
 - People are Alice, Bob, Carol and so on.
 - Agents are named after harnesses: Claude-Code, Codex, Hermes. The
   protagonist is Claude-Code unless the scene says otherwise. When another
-  harness plays it, the runner swaps the two names throughout, so each agent
-  is called by its own harness's name.
+  harness plays it, the two names swap throughout, so each agent is called by
+  its own harness's name.
 
 ### More than one person
 
 Several scenes have two or more people: #186, #202, #206, #207, #208, #209 and
 #210.
 
-### The scene file
+### What a scene records
 
-- One file per scene, `evals/scenes/<id>.json`, kept apart from today's
-  runner so its tests keep passing until the new evals replace it.
-- It holds the question, the cast, the messages (author, time, text, replies,
-  mentions, reactions), the turn (the message that starts it and those that
-  arrive during it), the facts, the "reaches the agent" checks, and the
+Where scenes live, and in what format, is the builder's call.
+
+- Each scene holds the question, the cast, the messages (author, time, text,
+  replies, mentions, reactions), the turn (the message that starts it and
+  those that arrive during it), the facts, what must reach the agent, and the
   acceptable examples and signs.
+- One record per scene feeds its delivery tests, its behavior evaluation and
+  its issue.
+- The packages shown with a scene come from the library at a named commit,
+  never written by hand.
 - A variant that changes one detail, such as a status line posted by a person
-  instead of a bot, is a second file under the same issue.
-- The issue shows the scene as the file has it. A script renders the packages
-  from the file at a given commit; nobody writes packages by hand.
+  instead of a bot, belongs to the same issue.
+- Today's runner and its tests keep working until the new evaluations replace
+  them.
 
 ## Where evaluation is going
 
