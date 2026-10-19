@@ -28,7 +28,6 @@ class DemoAttention:
             "answered": 0.02,
             "answered_by": None,
             "mid_thought": 0.05,
-            "adds_something": 0.9,
             "move": {"speak": 0.95, "mhm": 0.02, "wait": 0.02, "stay_quiet": 0.01},
             "notes": [
                 {

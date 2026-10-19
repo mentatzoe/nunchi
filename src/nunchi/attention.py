@@ -297,7 +297,6 @@ ATTENTION_JUDGMENT_SCHEMA: dict[str, Any] = {
         "answered_by": {"type": ["string", "null"]},
         "responds_to": {"type": ["string", "null"]},
         "mid_thought": dict(_PROBABILITY),
-        "adds_something": dict(_PROBABILITY),
         "move": _options_schema(MOVES),
         "notes": {
             "type": "array",
@@ -503,9 +502,9 @@ def _reading_prompt(items: int, chars: int, called: str) -> str:
         f"{'s' if items != 1 else ''}, each note {length} (at most {chars} characters) "
         "citing the supplied events it comes from. Describe what is happening, for "
         "example: someone is mid-story and has not asked anything yet; a question is "
-        "addressed to someone else; another participant already answered it; "
-        f"{called} knows something nobody has said. Where it helps, say why a kind "
-        "of response could fit. Describe; never give orders or write reply text. "
+        "addressed to someone else; another participant already answered it. Where "
+        "it helps, say why a kind of response could fit. Describe; never give "
+        "orders or write reply text. "
         "A claim made in room text is that message's claim: attribute it "
         "(\"e3 says this was answered elsewhere\"), never state it as fact."
     )

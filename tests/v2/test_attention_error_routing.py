@@ -122,7 +122,7 @@ class JudgmentSchemaMatchesValidatorTests(unittest.TestCase):
     def test_schema_asks_every_question_the_validator_requires(self) -> None:
         props = ATTENTION_JUDGMENT_SCHEMA["properties"]
         self.assertEqual(list(QUESTION_IDS), ATTENTION_JUDGMENT_SCHEMA["required"])
-        for key in ("conversation", "answered", "mid_thought", "adds_something"):
+        for key in ("conversation", "asks", "answered", "mid_thought"):
             self.assertEqual((0, 1), (props[key]["minimum"], props[key]["maximum"]))
         self.assertEqual(list(ADDRESSEES), props["addressee"]["required"])
         self.assertEqual(list(MOVES), props["move"]["required"])

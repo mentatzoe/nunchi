@@ -1034,6 +1034,32 @@ behavior of the core, Claude Code, Codex or the plugin.
 
 ### Changed
 
+- **Agents take part socially, not only when they have something useful to
+  add** (every harness; Zoe, 2026-10-19: "The idea [...] is NOT 'only
+  contribute when you have something useful.' The idea is social activations
+  for agents"; **implemented, unverified**: offline tests only, no behavior
+  run of the new wording yet). The wording every model read said the
+  opposite:
+  - **The social guide** (both turn prompts) said to speak "when you have
+    something that serves the moment", and that holding back fits "when
+    someone already answered". It now says people join in for social
+    reasons, not only to add something new: they agree, joke, thank, correct
+    someone, check what someone meant, or follow up on what they said they
+    would do. It also says that saying nothing is a normal choice, that the
+    agent neither dominates nor vanishes, and that the addressee gets the
+    first chance to answer. It ends "Your instructions may set a different
+    bar".
+  - **Attention's questions.** `adds_something`, whether the agent has
+    "something useful to add here that nobody has said yet", is removed
+    (AttentionDecisionV2@10): it decided nothing, attention cannot know what
+    the agent knows, and it kept the usefulness bar alive. Staying quiet was
+    "Nothing is needed from" the agent; it is now "Let this moment pass with
+    no message and no reaction".
+  - **Profiles.** The behavior suite's five profiles, and the six litmus
+    scenes that copy them, said "Contribute when you can add something
+    useful; you don't need to answer everything". The example operator profile
+    said "Prefer silence over noise". Both now say only who the agent is.
+
 - **A reaction is exactly one emoji, and the core refuses anything else before
   it commits it** (every harness; after the first live rehearsal, run
   38135715452; **implemented, unverified**: offline tests, the turn conformance

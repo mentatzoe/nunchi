@@ -4,6 +4,24 @@ Follow `AGENTS.md`. It states the product goal (agents that read the room in a
 live, multi-turn conversation) and Zoe's current working decisions. This file
 adds only Claude-specific notes.
 
+## Social, not only useful
+
+Zoe, 2026-10-19: "The idea [...] is NOT 'only contribute when you have
+something useful.' The idea is social activations for agents." And: "Social
+behavior is not just contributing to something and being helpful, it is
+interacting socially, not to be productive necessarily." The rest of Zoe's
+words and examples are at the top of `AGENTS.md`.
+
+Claude sessions have put the usefulness bar back again and again: in
+`docs/behavior.md`'s yardstick, the turn prompt, an attention question, the
+eval profiles and a scene's expected moves. Before you write any of those,
+check your words against Zoe's.
+
+`docs/behavior.md` is a Claude draft, not Zoe's. Zoe, 2026-10-19: "I never
+wrote that file, another of your sessions did, and I thought we were agreed
+based on the conversation, which I see we weren't." Only its lines that quote
+Zoe are Zoe's decisions.
+
 ## Role
 
 Zoe treats Claude as lead engineer (2026-10-07): responsible for Nunchi as a
@@ -24,19 +42,24 @@ the documentation current. Each integration documents itself under
 ## Habits
 
 - If you catch yourself preferring an option because it is smaller or fits
-  today's contract, check it against `docs/behavior.md` first (Zoe,
-  2026-10-05). The rule for recommending is in `AGENTS.md`, Working style.
-- Before asking Zoe, check what `AGENTS.md` (Delivery rules) and
-  `docs/behavior.md` already decide (2026-10-05: the agent's own "mhm" was
-  already settled).
+  today's contract, check it against Zoe's words at the top of `AGENTS.md`
+  first (Zoe, 2026-10-05). The rule for recommending is in `AGENTS.md`,
+  Working style.
+- Before asking Zoe, check what Zoe has already decided: Zoe's words, quoted
+  with a date, in `AGENTS.md` and `docs/behavior.md` (2026-10-05: the agent's
+  own "mhm" was already settled). A line in either file that does not quote
+  Zoe is an agent's writing, not Zoe's decision.
 - When briefing subagents, give them the goal of the task, not only the
   mechanism, and point them to `AGENTS.md` instead of restating it.
 - Say plainly when a review is a self-review.
+- Finish work merged: open the PR and merge it when CI is green. Zoe,
+  2026-10-19: "Always merge"; "if it's just in a dangling branch, that never
+  makes it."
 
 ## Exec summary
 
-At Zoe's request, Claude keeps a living exec summary of Nunchi for her in
-claude.ai: status, what is decided, what is pending, and findings. She gives a
+At Zoe's request, Claude keeps a living exec summary of Nunchi for Zoe in
+claude.ai: status, what is decided, what is pending, and findings. Zoe gives a
 session its link, so a session started from `main` can keep it current. Never
 write the link into this repository, its issues or its pull requests: all
 are public. Keep the summary current at each milestone of your work. When

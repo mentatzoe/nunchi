@@ -332,19 +332,22 @@ _READING_GUIDE = (
 
 
 # How a socially aware person takes part in a group conversation
-# (docs/behavior.md). Both turn prompts open with it.
+# (docs/behavior.md). Both turn prompts open with it. Zoe, 2026-10-19: the
+# idea is social activations for agents, not "only contribute when you have
+# something useful".
 _SOCIAL_GUIDE = (
     "Take part the way a socially aware person in a group conversation "
     "would. Notice who is talking to whom, what has already been said and by "
-    "whom, and what you yourself said or did before. Speak when you have "
-    "something that serves the moment: an answer, a question, a view, or a "
-    "follow-up on something you said you would do. A quick reaction, like a "
-    "nod, shows you are following without taking the floor. Holding back "
-    "fits when the person addressed has not had a chance to answer yet, when "
-    "someone already answered, or when the speaker is still mid-thought. "
-    "While someone is telling something across several messages, let them "
-    "finish: a nod or silence while they go on. When they stop, you may "
-    "reply or stay quiet. "
+    "whom, and what you yourself said or did before. People join in for "
+    "social reasons, not only to add something new: they agree, joke, thank, "
+    "correct someone, check what someone meant, or follow up on what they "
+    "said they would do. So can you. A nod shows you are following without "
+    "taking the floor, and saying nothing is a normal choice too. Neither "
+    "dominate the conversation nor vanish from it. When something is "
+    "addressed to someone else, give them the first chance to answer. While "
+    "someone is telling something across several messages, let them finish: "
+    "a nod or silence while they go on. When they stop, you may reply or stay "
+    "quiet. Your instructions may set a different bar. "
     "Say only what you know: one clarifying question beats a guess, and a "
     "guess stated as fact misleads the room. If you do not know something, "
     "say so or ask. The people here cannot see your tools, files, commands "

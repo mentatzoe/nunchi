@@ -990,7 +990,7 @@ class PromptTests(unittest.TestCase):
         ):
             with self.subTest(prompt=prompt[:30]):
                 self.assertIn("socially aware person in a group conversation", prompt)
-                self.assertIn("a follow-up on something you said you would do", prompt)
+                self.assertIn("follow up on what they said they would do", prompt)
                 self.assertIn("memory.own_moves", prompt)
                 self.assertIn("memory.threads", prompt)
                 self.assertIn("with your reason at the time (why)", prompt)
@@ -1020,10 +1020,26 @@ class PromptTests(unittest.TestCase):
                     prompt,
                 )
                 self.assertNotIn("even if you already have one", prompt)
-                self.assertLess(
-                    prompt.index("or when the speaker is still mid-thought."),
-                    prompt.index("While someone is telling something across several messages"),
-                )
+
+    def test_the_agent_takes_part_socially_not_only_when_it_has_something_useful(self):
+        # docs/behavior.md, Zoe, 2026-10-19: "The idea [...] is NOT 'only contribute when you have
+        # something useful.' The idea is social activations for agents."
+        from nunchi.participant_model import participant_tool_turn_prompt, participant_turn_prompt
+
+        for prompt in (
+            participant_turn_prompt(PROFILE),
+            participant_tool_turn_prompt(PROFILE, tools={"send": "send", "context": "context"}),
+        ):
+            with self.subTest(prompt=prompt[:30]):
+                self.assertIn("People join in for social reasons, not only to add something new", prompt)
+                self.assertIn("they agree, joke, thank, correct someone, check what someone meant", prompt)
+                self.assertIn("So can you.", prompt)
+                self.assertIn("saying nothing is a normal choice too", prompt)
+                self.assertIn("Neither dominate the conversation nor vanish from it", prompt)
+                self.assertIn("give them the first chance to answer", prompt)
+                self.assertIn("Your instructions may set a different bar.", prompt)
+                self.assertNotIn("serves the moment", prompt)
+                self.assertNotIn("someone already answered", prompt)
 
     def test_the_agent_answers_as_a_person_in_the_room_and_can_keep_a_promise_about_what_is_posted(self):
         # Live, Claude Code and Codex answered "watch the nightly and report" with a question or a local command,

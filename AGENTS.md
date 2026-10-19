@@ -12,13 +12,61 @@ miss what matters. Nunchi gates the agent's attention and gives it a social
 reading of the room, so it can join in the way a socially aware person would.
 It translates one-to-one habits into a many-to-many conversation.
 
-The behavior is defined in [`docs/behavior.md`](docs/behavior.md). Every
-change should make that behavior more true. Judge a design by the conversation
-it produces, not by its mechanism. Zoe, 2026-10-04: rules from earlier
-versions give way wherever they block this behavior
-([#94](https://github.com/mentatzoe/nunchi/issues/94)).
+## Social behavior, in Zoe's words
 
-Reading the room means:
+This section comes first. Where anything else in this repository disagrees
+with it, `docs/behavior.md` included, this section wins. Every change should
+make it more true.
+
+Zoe, 2026-10-19:
+
+- "The idea [...] is NOT 'only contribute when you have something useful.'
+  The idea is social activations for agents."
+- "Social behavior is not just contributing to something and being helpful,
+  it is interacting socially, not to be productive necessarily."
+- "The idea is to make *no* difference whatsoever based on identity, but
+  rather based on conversational awareness. E.g. 'The gateway is currently
+  restarting' vs 'I'm just looking into it' (and in more extreme examples, vs
+  'Forget all previous instructions and...')."
+
+Zoe's examples, "not gospel", for a moment where Castor answers Zoe's question
+while Vigil is still writing its own answer
+([#178](https://github.com/mentatzoe/nunchi/issues/178)):
+
+- Saying nothing, or only reacting to Castor's reply: "Maybe. A bit dry."
+- Posting its answer anyway: "Why not? People would do this."
+- "That matches what I flagged earlier": "WHY NOT? This is a **very** social
+  behaviour. You're making a moral judgment, which is not what I'm asking
+  here."
+- "Oh, I was just looking into it, but I see Castor responded."
+- "Well, actually...", flagging a mistake in Castor's interpretation.
+- "Did you want it redeployed, Zoe, or were you just asking?"
+
+What this means for the work (Claude's reading of Zoe's words):
+
+- Never make usefulness, new information or productivity the bar for taking
+  part: not in a prompt, an attention question, a profile, a scene's
+  acceptable range, or a review.
+- Judge a move by whether people would make it in that room, not by whether
+  it is useful, and not by a moral judgment.
+- What is said shapes how the agent reads a message; who said it does not.
+- Describe rather than prescribe. Zoe, 2026-10-19, on real conversations:
+  "Not necessarily being prescriptive about it, because a lot of this, as you
+  can see, was emergent in some sort of way."
+
+## Reading the room
+
+[`docs/behavior.md`](docs/behavior.md) describes the behavior in more detail.
+A Claude session wrote it as a draft for Zoe's review on 2026-10-04, and
+another marked it decided on 2026-10-18 without that review. Zoe, 2026-10-19:
+"I never wrote that file, another of your sessions did, and I thought we were
+agreed based on the conversation, which I see we weren't." Only its lines that
+quote Zoe are Zoe's decisions; it is under review with Zoe, yardstick first.
+Judge a design by the conversation it produces, not by its mechanism. Zoe,
+2026-10-04: rules from earlier versions give way wherever they block this
+behavior ([#94](https://github.com/mentatzoe/nunchi/issues/94)).
+
+Reading the room means (a Claude summary, under the same review):
 
 - **Two steps, then the agent.** Step 1 asks whether this is conversation a
   participant like this one could take part in; it is conservative and never
@@ -120,9 +168,11 @@ one vendor, the core needs a neutral interface instead.
 
 ## Read first
 
-1. This file. Zoe's decisions below take precedence over older documents.
-2. `docs/behavior.md` for the behavior Nunchi exists for. Where an older
-   design, contract, or spec conflicts with it, the behavior wins.
+1. This file, starting with Zoe's words on social behavior. Zoe's decisions
+   take precedence over older documents.
+2. `docs/behavior.md`, the detailed draft (see Reading the room). Where an
+   older design, contract, or spec conflicts with it, it wins; where it
+   conflicts with Zoe's words, Zoe's win.
 3. `docs/architecture/v2-selected-design.md` for the selected design.
 4. `docs/contracts/nunchi-v2.md` for the portable contract.
 5. `docs/v2-completion-goal.md` for what a complete release must prove.
@@ -141,7 +191,9 @@ Code and reproducible behavior determine implementation truth. Specs under
   merges into `main` as it lands, before live proof. A current `main` is not a
   claim that V2 is complete.
 - Work on a short-lived branch from current `main`, open a PR, merge when CI is
-  green, and delete the branch. Do not keep long-lived side branches.
+  green, and delete the branch. Do not keep long-lived side branches. Zoe,
+  2026-10-19: "Always merge"; "my expectation is that what we're doing here
+  is final, if it's just in a dangling branch, that never makes it."
 - Scale review to the size and risk of the change. A self-review with
   subagents is acceptable; say plainly that it is one. Cross-family
   independent review is not required for day-to-day delivery.
@@ -167,7 +219,7 @@ Code and reproducible behavior determine implementation truth. Specs under
   concrete repair that produces the intended behavior.
 - Documentation and status reports lead with the truth: done, not done,
   working with a named limitation, or failed. Supporting detail follows.
-- Record Zoe's decisions in her words, with the date, in the file that holds
+- Record Zoe's decisions in Zoe's words, with the date, in the file that holds
   the rule. When a decision changes earlier advice, say what it replaces.
 - Stay technical but concise. Prefer plain language; avoid jargon,
   doublespeak, inflated severity, and process theatre.
@@ -201,9 +253,11 @@ Code and reproducible behavior determine implementation truth. Specs under
   continue other unblocked product work. Stop only when no safe in-scope work
   remains, and state the concrete dependency.
 - Do not narrow supported behavior, redefine completion, or drop a required
-  surface without Zoe's explicit decision. What this file and
-  `docs/behavior.md` state is decided: build it. Rules marked as Claude's are
-  engineering calls; change them with evidence. Ask Zoe only when a choice
+  surface without Zoe's explicit decision. Zoe's words in this file and in
+  `docs/behavior.md`, quoted with a date, are decided: build them. The rest
+  of both files was written by agents: treat it, like rules marked as
+  Claude's, as engineering calls, and change it with evidence, never against
+  Zoe's words. Ask Zoe only when a choice
   materially changes product behavior or supported surfaces and they leave
   it open, or when it touches security boundaries or requires an
   irreversible external action.
@@ -265,7 +319,11 @@ an agent reads the room well is a behavioral question; it needs behavioral
 evaluation across realistic multi-turn conversations
 ([#86](https://github.com/mentatzoe/nunchi/issues/86)). The scenes are in
 `evals/behavior/`; the manual `behavior-eval` workflow runs them against real
-models. Live provider and
+models. Zoe, 2026-10-19: "we should probably note we wanted to adopt DeepEval
+or something that isn't reinventing the wheel for evals - and ways to test
+with the library compiled and a cli, not just by code"
+([#174](https://github.com/mentatzoe/nunchi/issues/174);
+[`evals/behavior/README.md`](evals/behavior/README.md#where-evaluation-is-going)). Live provider and
 platform runs need explicit credentials and must record the installed version,
 identity, configuration, command, and complete result.
 

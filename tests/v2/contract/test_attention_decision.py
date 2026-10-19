@@ -1,5 +1,6 @@
-"""Contract tests for ``I-010B AttentionDecisionV2@9`` (slice 010, T003;
-reworked by T028 after rejection R2; @5 for #94 step 4, @6 for step 5, @7 and @8 for step 6).
+"""Contract tests for ``I-010B AttentionDecisionV2@10`` (slice 010, T003;
+reworked by T028 after rejection R2; @5 for #94 step 4, @6 for step 5, @7 and @8 for step 6,
+@10 for Zoe's 2026-10-19 removal of adds_something).
 
 @5 (Zoe, 2026-10-05) grounds every ``status: ok`` decision in the model's
 typed answers (``answers``): exactly the step 1 and step 2 questions, each a
@@ -225,7 +226,7 @@ class TypedAnswerCases(unittest.TestCase):
     """@5 (Zoe, 2026-10-05, #94 step 4): every ok decision carries the
     model's typed answers, exactly the questions with finite [0,1] values;
     the V1-era legacy confidence vector is gone. @6 adds asks and
-    responds_to."""
+    responds_to; @10 removes adds_something."""
 
     def test_every_ok_decision_requires_answers(self):
         for doc in (
@@ -253,6 +254,12 @@ class TypedAnswerCases(unittest.TestCase):
         for doc in (missing, no_asks, extra):
             assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
+    def test_adds_something_is_no_longer_allowed(self):
+        # @10 (Zoe, 2026-10-19): it decided nothing and kept a usefulness bar.
+        doc = make_decision_ok()
+        doc["answers"]["adds_something"] = 0.8
+        assert_schema_verdict(self, "attention-decision", doc, "invalid")
+
     def test_a_choice_names_exactly_its_options(self):
         missing = make_decision_ok()
         del missing["answers"]["move"]["wait"]
@@ -272,7 +279,7 @@ class TypedAnswerCases(unittest.TestCase):
                 assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_boundary_values_are_on_scale(self):
-        doc = make_decision_ok(answers=make_answers(conversation=0, answered=1, mid_thought=0.0, adds_something=1.0))
+        doc = make_decision_ok(answers=make_answers(conversation=0, answered=1, mid_thought=0.0, asks=1.0))
         assert_schema_verdict(self, "attention-decision", doc, "valid")
 
     def test_sentinel_decoded_non_finite_values_reject(self):

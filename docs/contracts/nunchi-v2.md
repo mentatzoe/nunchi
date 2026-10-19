@@ -11,7 +11,7 @@ live, integrated, or released status.
 `docs/architecture/v2-selected-design.md` preserve the field inventory selected
 from Aleph Vault at `c834e8c`; the external path is provenance, not a
 contributor dependency. The program-canonical interface names and versions
-(`I-010F` at `@1`; `I-010D` at `@2`; `I-010A` at `@9`; `I-010E` at `@6`; `I-010C` at `@16`; `I-010B` at `@9`) are this
+(`I-010F` at `@1`; `I-010D` at `@2`; `I-010A` at `@9`; `I-010E` at `@6`; `I-010C` at `@16`; `I-010B` at `@10`) are this
 slice's vocabulary layered over that inventory. A document the selected design
 declares valid that either validator rejects is a contract defect, never
 resolved by narrowing the corpus.
@@ -21,7 +21,7 @@ resolved by narrowing the corpus.
 | Interface | Version | Schema path |
 |---|---|---|
 | `I-010A AttentionRequestV2` | `@9` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
-| `I-010B AttentionDecisionV2` | `@9` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
+| `I-010B AttentionDecisionV2` | `@10` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
 | `I-010C ParticipantWakeV2` | `@16` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@2` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
 | `I-010E AttentionReceiptV2` | `@6` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
@@ -233,7 +233,7 @@ A truthful attention request represents:
   order are runtime-adapter-only. The attention prompt explains them, and
   I-010B@8 asks one more question, only on a request that has them.
 
-## I-010B AttentionDecisionV2@9
+## I-010B AttentionDecisionV2@10
 
 A tagged host-facing union on `status`:
 
@@ -299,6 +299,14 @@ A tagged host-facing union on `status`:
   2026-10-05), so `@9` removes all of them: a judgment whose most likely
   move is a "mhm" is `DEFER`, and the participant takes the turn. This is a
   breaking closed-union change; a `@9` consumer never receives ACK.
+- **`adds_something`, removed in @10 (Zoe, 2026-10-19).** `@5` asked
+  whether the participant had something to add that nobody had said yet.
+  It decided nothing (the disposition comes only from `conversation` and
+  `move`), the attention model cannot know what the participant knows, and
+  it kept alive the idea that a participant takes part only when it has
+  something useful; a participant takes part socially. `@10` removes the
+  answer; answers that carry it no longer validate. This is a breaking
+  change to a closed object.
 - **`answers` (@5)** — required on `status: ok` (Zoe, 2026-10-05, #94
   step 4). The model answers fixed typed questions about the judged
   message, and the core decides from them. Step 1: `conversation`, the
@@ -306,10 +314,10 @@ A tagged host-facing union on `status`:
   part in; only a value below 0.5 selects `SUPPRESS`, and the margin valve
   widens a near call to `DEFER`. Step 2: `addressee` (`participant`, `room`,
   `someone_else`, `nobody`), `answered` and the optional `answered_by`
-  pointer to the supplied message that answered it, `mid_thought`,
-  `adds_something`, and `move` (`speak`, `mhm`, `wait`, `stay_quiet`): the
-  most likely move selects `WAKE` for speak, and `DEFER` for a mhm (since
-  @9; `ACK` before), wait, and stay quiet,
+  pointer to the supplied message that answered it, `mid_thought`
+  (`adds_something` too until @10), and `move` (`speak`, `mhm`, `wait`,
+  `stay_quiet`): the most likely move selects `WAKE` for speak, and
+  `DEFER` for a mhm (since @9; `ACK` before), wait, and stay quiet,
   with ties going to the move that pays more attention. Since @6 (#94 step
   5) step 2 also asks `asks`, whether the judged message asks someone in the
   room for something, and the optional `responds_to` pointer to the earlier
@@ -754,9 +762,9 @@ the judged message is not conversation):
   "answers": {
     "conversation": 0.05,
     "addressee": {"participant": 0.0, "room": 0.0, "someone_else": 0.0, "nobody": 1.0},
+    "asks": 0.0,
     "answered": 0.0,
     "mid_thought": 0.0,
-    "adds_something": 0.0,
     "move": {"speak": 0.0, "mhm": 0.0, "wait": 0.1, "stay_quiet": 0.9}
   }
 }
@@ -778,9 +786,9 @@ routing audit records its effective width):
   "answers": {
     "conversation": 0.47,
     "addressee": {"participant": 0.1, "room": 0.2, "someone_else": 0.1, "nobody": 0.6},
+    "asks": 0.1,
     "answered": 0.1,
     "mid_thought": 0.1,
-    "adds_something": 0.2,
     "move": {"speak": 0.1, "mhm": 0.05, "wait": 0.15, "stay_quiet": 0.7}
   }
 }
@@ -825,7 +833,8 @@ is `I-010A@8`, `I-010C@15`, `I-010D@2` and `I-010E@6`; and `memory` is carried
 by `I-010A` and `I-010C`, so the `about_event_id` a `message` own move may carry
 (additive) is `I-010A@9` and `I-010C@16`; and the participant's `reaction` action, which must be exactly one emoji and is refused before anything is committed (2026-10-11), is `I-040A@5`, with `I-040D@3` unchanged in shape (its `react` call answers the refusal). `I-010B@5` replaced the
 `legacy_verdict_confidences` vector, fixed for `@1` through `@4` (FR-007),
-with the required typed `answers`, and `@6` made `asks` a required answer; margin retirement still flips only the
+with the required typed `answers`, `@6` made `asks` a required answer, and
+`@10` removed the answer `adds_something`; margin retirement still flips only the
 reported `margin_status`, never the schema. Each runtime must pass its adapter against the same contract corpus
 before integration.
 Evidence for the contract runs lives at
