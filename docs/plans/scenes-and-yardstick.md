@@ -37,6 +37,8 @@ what a scene is or what counts as social.
 - [ ] Two worked examples follow it: #178, and #208.
 - [ ] All 29 kept scenes are written to the spec, each with its file in the
   repo and its issue showing the scene.
+- [ ] Each scene's delivery checks run as integration tests in CI; gaps are
+  recorded on #192.
 - [ ] Zoe has reviewed each scene.
 - [ ] #199 is marked parked, and the 54 other litmus scenes are moved to a
   separate first-filter data set.
@@ -53,9 +55,9 @@ what a scene is or what counts as social.
 |---|---|---|---|
 | 1 | Agree the scene spec, open question by open question (below) | Zoe and Claude, in conversation | In progress. Draft in [#212](https://github.com/mentatzoe/nunchi/pull/212) |
 | 2 | Review #208, the second worked example | Zoe, with Claude | Drafted and posted; waiting on Zoe |
-| 3 | A script that renders each scene's packages from its file | Claude | Not started. About half a day and 250 lines, no model spend |
-| 4 | Move #178 and #208 to the agreed file shape | Claude | Not started; needs step 1 |
-| 5 | Draft the other 27 scenes: a workflow of up to 8 agents, 3 or 4 scenes each, briefed with `AGENTS.md`, the spec, this plan and each scene's issue | Subagents; Claude reviews every scene before posting | Not started; needs steps 1 to 4. Ask Zoe before running it, with its cost |
+| 3 | The scene file shape, a script that renders each scene's packages, and a small harness that runs a scene's delivery checks as tests | Claude | Not started. About a day and 400 lines, no model spend |
+| 4 | Move #178 and #208 to the file shape, with their delivery tests | Claude | Not started; needs step 1 |
+| 5 | Draft the other 27 scenes (file, issue body, delivery tests): a workflow of up to 8 agents, 3 or 4 scenes each, briefed with `AGENTS.md`, the spec, this plan and each scene's issue | Subagents; Claude reviews every scene before posting | Not started; needs steps 1 to 4. Ask Zoe before running it, with its cost |
 | 6 | Review the scenes | Zoe | Not started |
 | 7 | Go through the yardstick in `docs/behavior.md`, line by line | Zoe and Claude, in conversation | Not started |
 | 8 | Adjust any scene the yardstick changes | Claude | Not started |
@@ -128,23 +130,27 @@ All from Zoe, 2026-10-19, unless marked otherwise.
   "no worries about it in this session. But yes, many worries about it even
   though not immediate" (#192).
 - **Merging.** "Always merge."
+- **Delivery is tested, behavior is evaluated.** "That feels to me more like a
+  unit test or an integration test or, you know, it's not really a behavioral
+  test, is it? I think that we need to separate whether the thing works,
+  right? Like, you know, the sort of more deterministic behavior and then the
+  behavior." Delivery checks become integration tests in CI with fixed
+  attention answers; the behavior is judged with a live model.
 
 ## Open questions for step 1, in order
 
-1. **What a scene checks.** Does "let the agent understand X" mean delivery
-   only (does X reach the agent?), or delivery plus what the agent does with
-   it? Asked 2026-10-19; not yet answered.
-2. **Signs it missed the room.** Keep this part? Each sign is tied to a fact
+1. **Signs it missed the room.** Keep this part? Each sign is tied to a fact
    in the scene. First draft in #208. "Treats it as none of its business"
    may read as prescribing.
-3. **History.** Tens of messages per scene. When a scene is about carrying
+2. **History.** Tens of messages per scene. When a scene is about carrying
    something forward, should the facts it depends on sit outside the
    24-message window on purpose?
-4. **The scene file.** One file per scene in `evals/scenes/<id>.json`,
+3. **The scene file.** One file per scene in `evals/scenes/<id>.json`,
    separate from today's runner, with packages produced by a script.
-5. **Scripted attention.** The packages shown in issues use attention answers
-   written for the run, and a live run uses the model's own. Is that fine for
-   review, as long as each scene says where it depends on them?
+4. **Scripted attention.** The packages shown in issues, and the delivery
+   tests, use fixed attention answers; the behavior evaluation uses the
+   model's own. Is that fine, as long as each scene says where delivery
+   depends on them?
 
 ## Findings so far
 

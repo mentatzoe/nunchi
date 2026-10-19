@@ -46,15 +46,23 @@ under "What a scene says".
   single right answer, no moral judgment and no usefulness bar. Saying nothing
   is one move among others.
 
-### Two kinds of check
+### Delivery is tested, behavior is evaluated
 
-- **Reaches the agent.** Whether the facts the question is about reach the
-  protagonist, read from the packages. This is deterministic: the same scene
-  and the same library give the same answer. Where a fact reaches the agent
-  only through attention's judgments, the scene says so
-  ([#192](https://github.com/mentatzoe/nunchi/issues/192)).
-- **What the agent does.** Judged against the examples and the signs of
-  missing the room, by a person or a judge model.
+Zoe, 2026-10-19: "That feels to me more like a unit test or an integration
+test or, you know, it's not really a behavioral test, is it? I think that we
+need to separate whether the thing works, right? Like, you know, the sort of
+more deterministic behavior and then the behavior."
+
+- **Delivery, as tests.** Whether the facts the question depends on reach the
+  agent: in the window, in memory, by looking back, or during the turn. This
+  is deterministic, so each scene's delivery checks are ordinary integration
+  tests in the repo's suite, run in CI with fixed attention answers. Where
+  Nunchi falls short today, the gap is recorded
+  ([#192](https://github.com/mentatzoe/nunchi/issues/192)), not hidden.
+- **Behavior, as an evaluation.** What the agent does with what reached it,
+  judged with a live model against the scene's acceptable examples and its
+  signs of missing the room. This is the part the eval framework takes over
+  ([#174](https://github.com/mentatzoe/nunchi/issues/174)).
 
 ### History
 
