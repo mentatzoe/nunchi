@@ -10,7 +10,7 @@
 **Input**: The repository-owned selected design at
 `docs/architecture/v2-selected-design.md` and contract reference at
 `docs/contracts/nunchi-v2.md`, preserving Aleph Vault provenance `bdd1ebb` and
-`c834e8c`, plus Zoe's 2026-07-20 implementation clarification on
+`c834e8c`, plus the maintainer's 2026-07-20 implementation clarification on
 live-conversation freshness and provenance-bound privileged actions.
 
 **Program**: `001-nunchi-v2-program`
@@ -222,7 +222,7 @@ one atomic V2 cutover.
 `v2-integrator`; assurance hands its blocking report to `v2-integrator`.
 
 **Acceptance ownership**: `v2-integrator` is the slice-level acceptance owner
-for `010`–`100`; Zoe is the acceptance owner for `110`. Slice-level acceptance
+for `010`–`100`; the maintainer is the acceptance owner for `110`. Slice-level acceptance
 does not stand in for a named consumer's acceptance. Before a dependent becomes
 `READY`, its assigned owner records acceptance of every exact upstream commit,
 interface version, and packet that dependency supplies.
@@ -445,7 +445,7 @@ docs/                          # truthful product/integration/security/evaluatio
 
 Every implementing slice reviews `README.md` and its affected ordinary docs.
 Known files are named exactly; generic directory scope is invalid. Slice task
-progress stays dormant until Zoe's external grant is recorded at
+progress stays dormant until the maintainer's external grant is recorded at
 `evidence/governance/v2-implementation-authorization.md` as one complete record
 enumerating exactly slices `010` through `110`; the record documents but cannot
 grant authority, and each bound slice still passes readiness independently.
@@ -501,7 +501,7 @@ the corresponding workflow gates. The assigned `v2-integrator` is the
 designated recorder for every slice decision: on acceptance it writes immutable
 `slice-acceptance.md`, and on rejection it appends a `REJECTED` decision to
 `slice-handoff.md`, always with `Recorded by: v2-integrator`. For `010`–`100`
-the integrator is also the acceptance owner; for `110`, Zoe remains the decision
+the integrator is also the acceptance owner; for `110`, the maintainer remains the decision
 owner and `Accepted by`/`Rejected by`. The source owner returns the slice
 declaration to `ACTIVE` after rejection. Repair in the required new bound run
 appends a new candidate and handoff attempt—no earlier entry is deleted or
@@ -526,7 +526,7 @@ The activation directories are `evidence/v2/contract/`,
 `evidence/v2/hermes/`, `evidence/v2/claude-code/`, `evidence/v2/codex/`,
 `evidence/v2/adapters/`, `evidence/v2/security/`, and
 `evidence/v2/parity/`. The program tail adjacent to slice `110` requires the
-assigned integrator to copy Zoe's decision into slice acceptance/rejection
+assigned integrator to copy the maintainer's decision into slice acceptance/rejection
 evidence and, on acceptance, the assigned program owner to copy that decision
 only into `evidence/v2/parity/cutover-acceptance.md` with
 `Recorded by: v2-program-owner`. The assigned integrator records the exact
@@ -567,7 +567,7 @@ append-only compatibility re-attestation passes against the exact new effective
 commit and packet; incompatibility requires replacement and never rewrites
 historical acceptance.
 For slice `110`, `v2-integrator` prepares the packet
-and moves it through `CONVERGED` and `HANDOFF_READY`; only Zoe may decide on the
+and moves it through `CONVERGED` and `HANDOFF_READY`; only the maintainer may decide on the
 exact atomic candidate, and the assigned integrator records that decision and
 then moves the slice declaration to `ACCEPTED` or back to `ACTIVE`.
 

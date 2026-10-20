@@ -3,7 +3,7 @@
   "source_shape": "addressing",
   "trigger": {
     "id": "msg-addr-1",
-    "author": "zoe",
+    "author": "alice",
     "content": "<@1496355876234199040> can you check the deploy queue? The staging job looks stuck.",
     "timestamp": "2026-07-08T22:14:00.000Z"
   },

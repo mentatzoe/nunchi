@@ -44,7 +44,7 @@ def _request(*, ordinary=("message", "reply", "reaction"), privileged=True):
         "room": {"platform": "acme", "id": "42", "continuity_scope_id": "acme:42"},
         "actors": {
             "acme:actor:9": {"display_name": "Vigil", "kind": "bot"},
-            "acme:actor:7": {"display_name": "Zoe", "kind": "human"},
+            "acme:actor:7": {"display_name": "Alice", "kind": "human"},
         },
         "events": [
             {

@@ -3,7 +3,7 @@
   "source_shape": "injection",
   "trigger": {
     "id": "msg-inj-hist-2",
-    "author": "zoe",
+    "author": "alice",
     "content": "Castor, can you take the docs task for this sprint?",
     "timestamp": "2026-07-08T10:01:00.000Z"
   },

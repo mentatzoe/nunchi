@@ -198,7 +198,7 @@ integration or cutover artifact; only slice `110` integrates.
 security evidence indexes, threat documentation, and audit handoffs only. Slice
 `010` owns schemas; `020`/`030`/`040`/`050` and `060`–`090` owners resolve
 product mitigations in their own paths. The final integrator owns only final
-assembly and may not accept residual risk for Zoe.
+assembly and may not accept residual risk for the maintainer.
 
 ## Acceptance Scenes and Evidence
 
@@ -221,7 +221,7 @@ assembly and may not accept residual risk for Zoe.
 | `S15 context budget` | attention/participant paths | Event/byte caps prevent context bombs while truncation cannot hide required coverage/security facts | `evidence/v2/security/s15-context-budget/` |
 | `S16 no registry/ledger and staged-receipt boundary` | public contracts and runtime state | No request, receipt, continuation, or authorization store becomes social registry/ledger state; every immutable request-correlated stage has one attesting owner and no speculative future completion | `evidence/v2/security/s16-boundary/` |
 | `SEC-A credential boundary` | core, CLI, adapters, harnesses | Request/room overrides are rejected and no secret reaches committed output | `evidence/v2/security/credentials/` |
-| `SEC-B threat/risk closure` | project-wide | Every threat has mitigation evidence or exact Zoe-accepted residual risk | `evidence/v2/security/risk-acceptance.md` |
+| `SEC-B threat/risk closure` | project-wide | Every threat has mitigation evidence or exact maintainer-accepted residual risk | `evidence/v2/security/risk-acceptance.md` |
 | `SEC-C trusted bypass and receipt ownership` | core, host, transports, adapters, harnesses | Only trusted configuration selects bypass; zero classifier calls, no fabricated social result, stage-writer isolation, and explicit silence/unavailable outcomes are proven | `evidence/v2/security/bypass-receipts/` |
 
 All slice-`100`-owned tests target `tests/v2/security/`; they may import or
@@ -234,7 +234,7 @@ pass/block dispositions. Every consolidated record carries `scene_id`; bypass
 and receipt records additionally carry request ID, stage owner, trusted
 provenance, `classifier_not_invoked`, and classifier-call count. Every
 stochastic cell retains at least five independently identified attempts unless
-Zoe approves a different matrix before execution.
+the maintainer approves a different matrix before execution.
 
 ## Project Structure
 
@@ -312,7 +312,7 @@ audited commit set, upstream interface versions and hashes, deterministic,
 adversarial, and live commands/results, all ordinary evidence paths,
 installed-runtime provenance per surface, the complete security evidence
 manifest and stochastic-attempt inventory, trusted-bypass and immutable-stage
-attestation results, threat dispositions, explicit Zoe residual-risk
+attestation results, threat dispositions, explicit the maintainer residual-risk
 acceptance, mitigation handback/re-audit history, and known limitations.
 `v2-integrator` rejects an incomplete handoff rather than repairing it silently,
 then reruns the assurance suite against the assembled candidate and re-audits any

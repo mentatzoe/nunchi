@@ -3,7 +3,7 @@
   "source_shape": "discord",
   "trigger": {
     "id": "msg-pilot-1747104742818",
-    "author": "zoe",
+    "author": "alice",
     "content": "Hi all, are you there?",
     "timestamp": "2026-05-13T00:32:22.818Z"
   },

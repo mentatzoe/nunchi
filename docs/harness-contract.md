@@ -1,6 +1,6 @@
 # Harness contract
 
-**Status: accepted by Zoe, 2026-10-07 ([#94](https://github.com/mentatzoe/nunchi/issues/94),
+**Status: accepted, 2026-10-07 ([#94](https://github.com/mentatzoe/nunchi/issues/94),
 steps 9a and 9b). Step 9c built the library's side.** The `Turn` is in the
 core (`nunchi.turn`), with both posting styles, and its local protocol is
 `nunchi.turn_server` (`I-040D`). The Claude Code gate and the one-reply style
@@ -17,7 +17,7 @@ marked *to verify*. A cell that fails becomes a gap in
 [#135](https://github.com/mentatzoe/nunchi/issues/135), and this contract
 changes with it.
 
-**The Hermes plugin is parked (Zoe and Claude as lead engineer, 2026-10-10).**
+**The Hermes plugin is parked (decided, 2026-10-10).**
 The code and its CI lanes stay, and there is no new Hermes work until it is
 unparked: it consumes each message and injects a turn of its own, so Hermes's
 native settings (threads, sessions, identity) never apply to Nunchi's turns
@@ -39,7 +39,7 @@ library owns everything up to the agent's turn, but not the turn itself:
   and the rule that silence counts only for a bound turn.
 - The older Hermes integration skipped the shared turn and patched Hermes
   internals instead, so it missed memory, catching up, looking again,
-  steering, outcome turns, and the newer attention routes. Zoe removed it on
+  steering, outcome turns, and the newer attention routes. The maintainer removed it on
   2026-10-11 ("delete, for now"). The Hermes plugin replaced it, and the
   plugin is parked (above).
 - The behavior eval measures the shared protocol, not what Claude Code runs.
@@ -183,13 +183,12 @@ class Room:                                        # harness-hosted entry point
     `model_text` attributes to the model, without its markers.
 
   Nothing else in a post changes. Native reasoning in other tags
-  (`<think>`, `<reasoning>`, `<thought>`) is the harness's job (Zoe's
-  decision), so the core reads no other tag and no code: a post that
+  (`<think>`, `<reasoning>`, `<thought>`) is the harness's job (decided), so the core reads no other tag and no code: a post that
   names or quotes a tag, in prose or code, is posted as written, and in
   tool and one-reply posting so is `<thinking>`. The turn's own tag
   (`<nunchi_participant_turn_v1>`) and its field names are posted as
-  written too; whether the library refuses the turn's tag is open (D6,
-  Zoe). `machinery_in` counts leaks for the conformance kit and the
+  written too; whether the library refuses the turn's tag is open (D6, for
+  the maintainer to decide). `machinery_in` counts leaks for the conformance kit and the
   behavior eval; it never refuses a post. `finish` splits the answer once
   and hands `prepare` what is left.
 - In the one-reply style a reply is one move, with no result to read
@@ -578,7 +577,7 @@ The plan for the kit, as accepted:
 ## Candidate gaps
 
 Each confirmed gap becomes an issue here, with the alternatives considered.
-None goes to a harness's maintainers without Zoe's decision.
+None goes to a harness's maintainers without the maintainer's decision.
 
 1. **Hermes, looking again before a final answer.** No public hook can hold
    or retry every final answer: `pre_verify` fires only after `write_file` or
@@ -662,7 +661,7 @@ None goes to a harness's maintainers without Zoe's decision.
     agent's private thinking with each answer. Gating with
     `group_allow_admin_from` limits who can; a denied command still gets a
     reply.
-    - **Decided (D4, Zoe and Claude as lead engineer, 2026-10-10):** Hermes's
+    - **Decided (D4, 2026-10-10):** Hermes's
       built-in commands stay Hermes's. The plugin never drops or rewrites them
       in the bound chat; operators restrict them with `group_allow_admin_from`.
       Nunchi sees neither the command nor Hermes's reply, and that stays a
@@ -721,7 +720,7 @@ None goes to a harness's maintainers without Zoe's decision.
     (and its other reasoning tag names) from the final answer, in any case
     and inside code too (`strip_think_blocks`): closed pairs, an unclosed
     tag at a line's start through the end, and every lone tag. Stripping
-    the model's native reasoning is the harness's job (Zoe's decision), but
+    the model's native reasoning is the harness's job (decided), but
     Hermes also strips tags from words meant for the room. An answer that
     names or quotes a tag (a code block with R1's raw `<think>` output, a
     JSX `<Reasoning>` component, "<think>plan</think> is how R1 marks its
@@ -803,13 +802,13 @@ thread without the room tools, which the integration treats as unbound.
 
 Each current integration stays until its replacement passes the conformance
 kit. It is then removed, with migration notes. The old Hermes integration is
-the exception: Zoe removed it on 2026-10-11, while its replacement is parked,
+the exception: the maintainer removed it on 2026-10-11, while its replacement is parked,
 so Hermes has no migration path and no supported path until the plugin is
 unparked.
 
 ## Where integrations live
 
-Decided (Zoe, 2026-10-07): in this repository for now. Each harness gets one
+Decided (2026-10-07): in this repository for now. Each harness gets one
 package and one optional install. The Hermes plugin can also be installed
 from its subdirectory with `hermes plugins install`. That keeps one source of
 truth for the contract and the conformance kit. An integration can move out

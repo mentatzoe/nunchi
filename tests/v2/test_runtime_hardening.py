@@ -60,7 +60,7 @@ class BoundedPersistenceTests(unittest.TestCase):
                 pipeline.observation.observe(
                     delivery_id=f"d{index}",
                     event=message(f"e{index}"),
-                    actors={"human:zoe": {"kind": "human"}},
+                    actors={"human:alice": {"kind": "human"}},
                 )
             self.assertEqual(3, len(path.read_text().splitlines()))
             restored, _, _, _ = foundation(
@@ -105,7 +105,7 @@ class BoundedPersistenceTests(unittest.TestCase):
         pipeline.observation.observe(
             delivery_id="d-small",
             event=message("e-small"),
-            actors={"human:zoe": {"display_name": "Zoe", "kind": "human"}},
+            actors={"human:alice": {"display_name": "Alice", "kind": "human"}},
         )
         request = pipeline.observation.build_snapshot("e-small")
         expected_bytes = len(
@@ -138,7 +138,7 @@ class BoundedPersistenceTests(unittest.TestCase):
         with self.assertRaises(SnapshotUnavailable):
             pipeline.observation.build_snapshot("e-large")
         dishonest = deepcopy(request)
-        dishonest["actors"]["human:zoe"]["display_name"] = "x" * 100_000
+        dishonest["actors"]["human:alice"]["display_name"] = "x" * 100_000
         with self.assertRaises(ValidationError):
             validate_attention_request(dishonest)
 
@@ -184,13 +184,13 @@ class BoundedPersistenceTests(unittest.TestCase):
                 first.handle_delivery(
                     delivery_id=f"d{index}",
                     event=message(f"e{index}"),
-                    actors={"human:zoe": {"kind": "human"}},
+                    actors={"human:alice": {"kind": "human"}},
                 )
             self.assertEqual(5, len(first_model.calls))
             in_process = first.handle_delivery(
                 delivery_id="d0",
                 event=message("e0"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
             self.assertEqual("exact-duplicate", in_process.observation.audit.outcome)
             self.assertEqual(5, len(first_model.calls))
@@ -202,7 +202,7 @@ class BoundedPersistenceTests(unittest.TestCase):
             replay = restored.handle_delivery(
                 delivery_id="d0",
                 event=message("e0"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
             self.assertEqual("exact-duplicate", replay.observation.audit.outcome)
             self.assertEqual([], restored_model.calls)
@@ -214,7 +214,7 @@ class BoundedPersistenceTests(unittest.TestCase):
             first.observation.observe(
                 delivery_id="d1",
                 event=message("e1"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
             audit = path.with_name(path.name + ".delivery-audit.jsonl")
             audit.write_text('{"kind":"invented"}\n')
@@ -241,7 +241,7 @@ class BoundedPersistenceTests(unittest.TestCase):
                     pipeline.handle_delivery(
                         delivery_id="d1",
                         event=message("e1"),
-                        actors={"human:zoe": {"kind": "human"}},
+                        actors={"human:alice": {"kind": "human"}},
                     )
             self.assertEqual((), pipeline.observation.retained_events())
             self.assertEqual([], model.calls)
@@ -268,7 +268,7 @@ class BoundedPersistenceTests(unittest.TestCase):
                     first.handle_delivery(
                         delivery_id="d1",
                         event=message("e1"),
-                        actors={"human:zoe": {"kind": "human"}},
+                        actors={"human:alice": {"kind": "human"}},
                     )
             self.assertEqual([], first_model.calls)
             replay_path = path.with_name(path.name + ".replay-reservations.jsonl")
@@ -282,7 +282,7 @@ class BoundedPersistenceTests(unittest.TestCase):
                 after_loss.observation.observe(
                     delivery_id=f"d{index}",
                     event=message(f"e{index}"),
-                    actors={"human:zoe": {"kind": "human"}},
+                    actors={"human:alice": {"kind": "human"}},
                 )
             restored, restored_model, _, _ = foundation(
                 persistence_path=path,
@@ -291,7 +291,7 @@ class BoundedPersistenceTests(unittest.TestCase):
             replay = restored.handle_delivery(
                 delivery_id="d1",
                 event=message("e1"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
             self.assertEqual("exact-duplicate", replay.observation.audit.outcome)
             self.assertEqual([], restored_model.calls)
@@ -310,12 +310,12 @@ class BoundedPersistenceTests(unittest.TestCase):
                     pipeline.handle_delivery(
                         delivery_id="d1",
                         event=message("e1"),
-                        actors={"human:zoe": {"kind": "human"}},
+                        actors={"human:alice": {"kind": "human"}},
                     )
             retry = pipeline.handle_delivery(
                 delivery_id="d1",
                 event=message("e1"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
             self.assertEqual("exact-duplicate", retry.observation.audit.outcome)
             self.assertEqual([], model.calls)
@@ -328,7 +328,7 @@ class BoundedPersistenceTests(unittest.TestCase):
             first.observation.observe(
                 delivery_id="d1",
                 event=message("e1"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
             request = first.observation.build_snapshot("e1")
             first.observation.mark_continuity_gap(
@@ -352,7 +352,7 @@ class BoundedPersistenceTests(unittest.TestCase):
             self.assertTrue(snapshot["coverage"]["has_gaps"])
             self.assertTrue(snapshot["coverage"]["has_restart_gap"])
             self.assertEqual("unknown", snapshot["coverage"]["continuity"])
-            # Zoe, 2026-10-10: a gap is a point in the room's timeline, not a
+            # Agreed, 2026-10-10: a gap is a point in the room's timeline, not a
             # lifetime flag. It is news until the agent has taken a turn whose
             # reading included it, and no restart finds it after that.
             self.assertEqual(1, len(snapshot["coverage"]["gaps"]))
@@ -378,7 +378,7 @@ class BoundedPersistenceTests(unittest.TestCase):
             pipeline.observation.observe(
                 delivery_id=f"d{index}",
                 event=message(f"e{index}"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
         request = pipeline.observation.build_snapshot("e4")
         continuation = request["continuation"]
@@ -434,7 +434,7 @@ class BoundedPersistenceTests(unittest.TestCase):
             pipeline.observation.observe(
                 delivery_id=f"d{index}",
                 event=message(f"e{index}"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
         request = pipeline.observation.build_snapshot("e3")
         continuation = request["continuation"]
@@ -474,7 +474,7 @@ class BoundedPersistenceTests(unittest.TestCase):
             pipeline.observation.observe(
                 delivery_id=f"d{index}",
                 event=message(f"e{index}"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
         first = pipeline.observation.build_snapshot("e3")["continuation"]
         for _ in range(9):
@@ -538,12 +538,12 @@ class HostMediationTests(unittest.TestCase):
             pipeline.observation.observe(
                 delivery_id=f"d{index}",
                 event=message(f"e{index}"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
         outcome = pipeline.handle_delivery(
             delivery_id="d3",
             event=message("e3"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         serialized = json.dumps(pages)
         for forbidden in (
@@ -587,12 +587,12 @@ class HostMediationTests(unittest.TestCase):
             pipeline.observation.observe(
                 delivery_id=f"d{index}",
                 event=message(f"e{index}"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
         outcome = pipeline.handle_delivery(
             delivery_id="d4",
             event=message("e4"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         opportunity = outcome.opportunities[0]
         self.assertEqual("failed", opportunity.transport.delivery)
@@ -636,12 +636,12 @@ class HostMediationTests(unittest.TestCase):
         pipeline.observation.observe(
             delivery_id="d0",
             event=message("e0"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         outcome = pipeline.handle_delivery(
             delivery_id="d1",
             event=message("e1"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         self.assertEqual("sent", outcome.opportunities[0].transport.delivery)
         self.assertEqual("e0", transport.calls[0][0]["origin_event_id"])
@@ -659,7 +659,7 @@ class HostMediationTests(unittest.TestCase):
         outcome = pipeline.handle_delivery(
             delivery_id="d1",
             event=message("e1"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         self.assertEqual("failed", outcome.opportunities[0].transport.delivery)
         self.assertEqual([], transport.calls)
@@ -675,7 +675,7 @@ class HostMediationTests(unittest.TestCase):
         outcome = first.handle_delivery(
             delivery_id="d1",
             event=message("room-one-event"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         self.assertEqual("failed", outcome.opportunities[0].transport.delivery)
         self.assertEqual([], first_transport.calls)
@@ -1136,7 +1136,7 @@ class ThreadsInRoomTests(unittest.TestCase):
 
     def test_a_message_in_a_thread_is_the_rooms_unless_the_binding_keeps_threads_out_of_it(self):
         """The rule is the library's, once: any harness that names a message's thread gets it."""
-        actors = {"human:zoe": {"kind": "human", "display_name": "Zoe"}}
+        actors = {"human:alice": {"kind": "human", "display_name": "Alice"}}
         for threads, outcome in ((True, "recorded"), (False, "route-rejected")):
             with self.subTest(threads_in_room=threads):
                 pipeline, *_ = foundation(binding=self.binding(threads_in_room=threads))
@@ -1319,7 +1319,7 @@ class ReferenceThreadHearingTests(unittest.TestCase):
 
         return types.SimpleNamespace(
             id=message_id, channel=channel, guild=types.SimpleNamespace(id=1),
-            author=types.SimpleNamespace(id=5, name="zoe", global_name="Zoe", display_name="Zoe", bot=False),
+            author=types.SimpleNamespace(id=5, name="alice", global_name="Alice", display_name="Alice", bot=False),
             content="hello", mentions=[], mention_everyone=False,
             created_at=datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc), reference=None,
         )

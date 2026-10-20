@@ -21,7 +21,7 @@ turnaware admit [--input PATH]
   "request_id": "optional-correlation-id",
   "trigger": {
     "id": "trigger-1",
-    "author": "zoe",
+    "author": "alice",
     "content": "Can turnaware-vigil take this?"
   },
   "context": [

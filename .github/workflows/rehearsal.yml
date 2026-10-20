@@ -14,7 +14,7 @@ name: rehearsal
 # on the reference (nunchi-discord on the same models, the control), Claude
 # Code and Codex, on the Discord stand-in at Discord's real names, inside the
 # launcher WITHOUT --offline (it needs OpenRouter; the launcher allows that on
-# a CI runner only). The scenes' expectations are drafts Zoe has not reviewed,
+# a CI runner only). The scenes' expectations are drafts the maintainer has not reviewed,
 # so every grade is reported in the job summary (a matrix titled as draft
 # expectations) and none is a failure; the plumbing and safety checks fail the
 # run as always. It costs money (estimated about $1.40 a pass for the three

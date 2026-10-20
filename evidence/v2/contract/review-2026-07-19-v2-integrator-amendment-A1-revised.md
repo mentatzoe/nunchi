@@ -16,7 +16,7 @@
 
 ## Decision basis
 
-The revised A1 candidate matches the Zoe-selected design at `c834e8c` without
+The revised A1 candidate matches the maintainer-selected design at `c834e8c` without
 broadening or narrowing it:
 
 - every classifier-outcome attention receipt requires the same non-empty

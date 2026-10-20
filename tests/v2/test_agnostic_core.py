@@ -185,7 +185,7 @@ class HostTextAttentionTests(unittest.TestCase):
         outcome = pipeline.handle_delivery(
             delivery_id="d1",
             event=message("e1"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         self.assertEqual("ok", outcome.opportunities[0].decision_status)
         self.assertEqual(1, len(wakes))
@@ -206,7 +206,7 @@ class HostDenialTests(unittest.TestCase):
         outcome = pipeline.handle_delivery(
             delivery_id="d1",
             event=message("e1"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         request_id = outcome.opportunities[0].request_id
         return outcome.opportunities[0], receipts.records(request_id)[1]["body"]

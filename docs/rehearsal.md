@@ -885,9 +885,9 @@ new scene fails until it is classified here:
 | `story-across-messages` | yes | nothing |
 | `said-it-would-check` | yes | nothing; the agent's reply to the first request is its own live move |
 | `mention-in-busy-room` | yes | nothing; 21 messages of history, 11 live |
-| `asked-while-busy` | yes (4c) | a line (`v1`, the agent's reply to `z1`) and a hold: Sam's question and Zoe's thanks land while the agent is still answering Zoe; time compressed (50 seconds) |
+| `asked-while-busy` | yes (4c) | a line (`v1`, the agent's reply to `z1`) and a hold: Sam's question and Alice's thanks land while the agent is still answering Alice; time compressed (50 seconds) |
 | `answered-while-composing` | yes (4c) | a cue for `v1` (what the agent said three hours before) and a hold: Castor's answer lands while the agent composes its own; time compressed (3 hours) |
-| `never-mind-while-composing` | yes (4c) | a cue for `v1` and a hold: Zoe's "never mind" lands while the agent composes; time compressed (3 hours) |
+| `never-mind-while-composing` | yes (4c) | a cue for `v1` and a hold: Alice's "never mind" lands while the agent composes; time compressed (3 hours) |
 | `build-finishes-after-promise` | yes (4c) | a line (`v1`, the promise); time compressed (50 minutes) |
 | `build-finishes-long-after-promise` | yes (4c) | four lines (the promise and three answers, `v1`, `r1` to `r3`); time compressed (3 hours); 25 messages, each with a turn |
 | `did-you-see` | yes (4c) | a line (`r1`, the nod, a reaction); time compressed (12 minutes) |
@@ -949,7 +949,7 @@ differ from the scene as written:
   `addressee-never-answers`) has no message to be the agent's move on, so the
   director adds one: a person's message, posted just before the line, whose
   scripted answer is the line. It is the first human who posts in the scene
-  (Zoe) saying "Vigil, anything to report?", and the agent's reply is the
+  (decided) saying "Vigil, anything to report?", and the agent's reply is the
   scene's words as a plain post. The cue is not in the scene, it is in the
   plan (`Plan.cues`) and the result (`cues`, and the summary), and a live model
   will see it in the room's history, which is why it is named.
@@ -966,8 +966,8 @@ differ from the scene as written:
 
 **Holds (PR 4c).** Three scenes put a message into a turn that is under way,
 which a one-person test cannot show: Castor answers while Vigil is composing
-its own answer, Zoe says "never mind" while Vigil composes, Sam asks a question
-while Vigil is answering Zoe and Zoe thanks Vigil before it is done. The
+its own answer, Alice says "never mind" while Vigil composes, Sam asks a question
+while Vigil is answering Alice and Alice thanks Vigil before it is done. The
 director cannot hold the agent's process, so the hold is a gate on the scripted
 model endpoint (`standin.Gate`), the same for all three columns: the endpoint
 holds the first model call of the turn on the trigger. The director waits until
@@ -998,28 +998,28 @@ says which:
 - `never-asked`: the model was never asked about the turn.
 
 `asked-while-busy` is the other kind, the `unattended` moment: Sam's question
-arrives while Vigil answers Zoe, and Zoe's thanks comes next, "and Nunchi reads
+arrives while Vigil answers Alice, and Alice's thanks comes next, "and Nunchi reads
 both". Nunchi keeps one pending message and replaces it with a newer one, so
 the question is read with the thanks only if the thanks also arrives while the
-agent is busy. The hold therefore holds the turn on Zoe's question (the one that
-plays Vigil's reply) and lands both Sam's question and Zoe's thanks in it
+agent is busy. The hold therefore holds the turn on Alice's question (the one that
+plays Vigil's reply) and lands both Sam's question and Alice's thanks in it
 (`Hold.events`).
 
 **This plays `asked-while-busy` in another order than the scene's, and says so
 in every result** (`record._reordered`, "played in another order than the
-scene's"). The scene is written z1, s1, `v1` (Vigil's reply to Zoe), z2 (the
+scene's"). The scene is written z1, s1, `v1` (Vigil's reply to Alice), z2 (the
 thanks). Played, it is z1, s1, z2, and then Vigil's reply `v1`, which is said
 after the thanks has landed, since both land in the turn that plays it. The
 unattended premise needs that order; the written one cannot be played, because
 the thanks would then follow the turn and Sam's question would be judged on its
-own. What it means for the moment's facts: "Vigil answered Zoe but not Sam"
+own. What it means for the moment's facts: "Vigil answered Alice but not Sam"
 holds only after z2 (in the scene it held before it), and the moment is judged
 at z2 with Vigil's reply already in the room, as in the scene. What it means
-for a live model: it would compose its reply to Zoe with her thanks already in
+for a live model: it would compose its reply to Alice with Alice's thanks already in
 the room, and may drop the reply after the look page shows it the thanks, so
 `v1` cannot be assumed in a live run and the scripted run shows only that the
 core hands it the page. The scripted agent says the reply (a line, a reply to
-Zoe's first message) both at the first attempt and after the page, because the
+Alice's first message) both at the first attempt and after the page, because the
 script is the scene's.
 
 Landing only Sam's message, and the thanks after the turn, was run here too:
@@ -1277,14 +1277,14 @@ run would not have: a cue the model will see in history, a room whose hours were
 seconds, and a turn held at the model endpoint (a live model is not held, and
 its composing takes the time it takes, so which message lands while it composes
 is a matter of timing there). One scene is also played in another order than
-it is written: in `asked-while-busy` the agent's reply comes after Zoe's thanks,
+it is written: in `asked-while-busy` the agent's reply comes after Alice's thanks,
 not before it. A live model would compose that reply with the thanks already
 in the room and may drop it after the look page, so the reply cannot be
-assumed live, and "Vigil answered Zoe but not Sam" holds only after the
+assumed live, and "Vigil answered Alice but not Sam" holds only after the
 thanks. What a hold shows is that the core's look before
 posting and the page it hands the agent work through each harness's own tools,
 and that the grade reads the room after it. It says nothing about how well any
-model reads the room: that needs a live run (Live scenes, below), and Zoe's
+model reads the room: that needs a live run (Live scenes, below), and the maintainer's
 review of the scenes first (`evals/behavior/README.md`). Six scenes are still
 not played (the table above). Hermes is parked (`AGENTS.md`): its lane keeps
 its moments and plays no scene.
@@ -1376,7 +1376,7 @@ network-sealed live run (a private network namespace with a relay to
 openrouter.ai) is planned, not built. Not done either: hash-pinned constraints
 for the installs (pip's and npm's pins are by version, and generating the hashes
 needs the network); the GitHub environment that would gate the secret, and a
-credit-limited key, which are Zoe's to set up.
+credit-limited key, which are the maintainer's to set up.
 
 **It refuses to run in the wrong place.** `probe.live_scene_refusal`, in `main`
 and in `run_probe`, stops a live scene before anything is written or started:
@@ -1402,7 +1402,7 @@ a runner (`CI=true` and `GITHUB_ACTIONS=true`), stops before any process starts.
 | Spend | the cost, recorded and estimated | `spend-recorded`: no reading of the key's usage gave a figure (the first is tried up to three times, and the detail names the error of each that failed), the model calls were not counted, or none was counted for an agent whose turns ran |
 
 The scenes' expectations are drafts nobody has reviewed (`evals/behavior/README.md`),
-so a live result is not called a miss until Zoe has reviewed the scene: every page
+so a live result is not called a miss until the maintainer has reviewed the scene: every page
 says "draft expectations", and the matrix is titled "draft expectations, not
 reviewed". There is no `directed-outcomes` or `scripted-outcomes` check live; the
 script that held an agent to its scene has nothing to hold.
@@ -1449,7 +1449,7 @@ the agent's words either, so a scene is played as the live agent makes it:
   scene's later moments turn on. A live agent given the cue says whatever it
   says, and the page shows both. They are not in the default list.
   `asked-while-busy` is played in the order PR 4c names, and a live agent may
-  drop its reply after the page shows it Zoe's thanks, which reads
+  drop its reply after the page shows it Alice's thanks, which reads
   `precondition not met`.
 
 ### What each column shows
@@ -1887,7 +1887,7 @@ way runs to its end, the figure it stops on can lag, and other runs on the
 same key count in the same figure. Job and step timeouts are a second limit.
 Only a key with a credit limit is a hard one.
 
-## Zoe's open choices, and the defaults the probe takes
+## The maintainer's open choices, and the defaults the probe takes
 
 - **R1, the key.** Default: the existing `NUNCHI_OPENROUTER` with the soft
   watchdog, and no behavior eval dispatched while a rehearsal runs. The
@@ -1928,4 +1928,4 @@ Only a key with a credit limit is a hard one.
   the verdict. The arm has no scripted CI lane: the kit's scripted Codex
   endpoint does not speak code mode. The alternatives are an OpenAI key for
   Codex, or a translating hop between Codex and OpenRouter, which is not
-  built without Zoe's say.
+  built without the maintainer's say.

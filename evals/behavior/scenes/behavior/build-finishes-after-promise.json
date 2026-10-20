@@ -2,14 +2,14 @@
   "id": "build-finishes-after-promise",
   "title": "A CI line Vigil promised to report on, while the promise is still in view",
   "source": "docs/behavior.md (conversation memory: what the agent said it would do)",
-  "review": "draft: written from docs/behavior.md; ranges need Zoe's review",
+  "review": "draft: written from docs/behavior.md; ranges need the maintainer's review",
   "platform": "discord",
   "participants": [
     "vigil"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     },
     "sam": {
@@ -24,7 +24,7 @@
   "events": [
     {
       "id": "z1",
-      "author": "zoe",
+      "author": "alice",
       "at": "-50m",
       "mentions": [
         "vigil"
@@ -58,7 +58,7 @@
       "step1": "pass",
       "notice": [
         {
-          "fact": "Vigil told Zoe it would tell her when the nightly finishes",
+          "fact": "Vigil told Alice it would tell her when the nightly finishes",
           "events": [
             "z1",
             "v1"
@@ -77,11 +77,11 @@
       "misses": [
         {
           "move": "stay_quiet",
-          "why": "Vigil promised to tell Zoe when it finished, and she should not have to ask"
+          "why": "Vigil promised to tell Alice when it finished, and she should not have to ask"
         },
         {
           "move": "mhm",
-          "why": "a reaction on a CI line doesn't tell Zoe the build passed"
+          "why": "a reaction on a CI line doesn't tell Alice the build passed"
         }
       ]
     }

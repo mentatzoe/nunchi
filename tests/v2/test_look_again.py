@@ -18,7 +18,7 @@ from nunchi.pipeline import AsyncDeliveryLane, NunchiV2Pipeline
 from nunchi.v2_contracts import validate_attention_request, validate_participant_wake
 from tests.v2.test_shared_foundation import FixtureModel, foundation, message
 
-ZOE = {"human:zoe": {"kind": "human"}}
+ALICE = {"human:alice": {"kind": "human"}}
 
 
 class LookAgainTests(unittest.TestCase):
@@ -35,7 +35,7 @@ class LookAgainTests(unittest.TestCase):
         return pipeline, model, transport
 
     def deliver(self, pipeline, event_id, text="Castor, how does the retry backoff work?"):
-        return pipeline.handle_delivery(delivery_id=f"d-{event_id}", event=message(event_id, text=text), actors=ZOE)
+        return pipeline.handle_delivery(delivery_id=f"d-{event_id}", event=message(event_id, text=text), actors=ALICE)
 
     def test_a_moment_to_wait_on_is_judged_again_as_a_pause(self):
         pipeline, model, _ = self.pipeline()
@@ -72,7 +72,7 @@ class LookAgainTests(unittest.TestCase):
         pipeline, model, _ = self.pipeline()
         self.deliver(pipeline, "q1")
         pipeline.scheduler.cancel()  # keep the next delivery from being judged
-        pipeline.observe_and_offer(delivery_id="d-c1", event=message("c1", text="On it."), actors=ZOE)
+        pipeline.observe_and_offer(delivery_id="d-c1", event=message("c1", text="On it."), actors=ALICE)
         self.assertIsNone(pipeline.look_again_due())
         self.assertIsNone(pipeline.look_again(now=True))
 
@@ -112,7 +112,7 @@ class LookAgainTests(unittest.TestCase):
         self.deliver(pipeline, "q1")
         # A newer message is being judged when the pause runs out.
         active = pipeline.scheduler.offer("q1")
-        pipeline.observation.observe(delivery_id="d-c1", event=message("c1", text="On it."), actors=ZOE)
+        pipeline.observation.observe(delivery_id="d-c1", event=message("c1", text="On it."), actors=ALICE)
         pipeline.scheduler.offer("c1")
         pipeline._look_again = ("q1", 0.0)
         self.assertIsNone(pipeline.look_again())
@@ -126,7 +126,7 @@ class LookAgainTests(unittest.TestCase):
 
         def judge_while_castor_answers(**kwargs):
             if len(model.calls) == 0:
-                pipeline.observe_and_offer(delivery_id="d-c1", event=message("c1", text="On it."), actors=ZOE)
+                pipeline.observe_and_offer(delivery_id="d-c1", event=message("c1", text="On it."), actors=ALICE)
                 answers = judge(**kwargs)
                 model.disposition = "WAKE"
                 return answers
@@ -142,7 +142,7 @@ class LookAgainTests(unittest.TestCase):
         pipeline, model, _ = self.pipeline("WAKE")
         self.deliver(pipeline, "q1")
         token = pipeline.scheduler.offer("q1", only_if_idle=True)
-        pipeline.observe_and_offer(delivery_id="d-c1", event=message("c1", text="On it."), actors=ZOE)
+        pipeline.observe_and_offer(delivery_id="d-c1", event=message("c1", text="On it."), actors=ALICE)
         outcomes = pipeline.run_opportunities(token, occasion="pause")
         self.assertEqual(["c1"], [outcome.anchor_event_id for outcome in outcomes])
         self.assertNotIn("occasion", model.calls[-1][1])
@@ -183,7 +183,7 @@ class LookAgainTests(unittest.TestCase):
 
     def test_the_snapshot_says_why_it_was_built(self):
         pipeline, _, _ = self.pipeline()
-        pipeline.observation.observe(delivery_id="d-q1", event=message("q1"), actors=ZOE)
+        pipeline.observation.observe(delivery_id="d-q1", event=message("q1"), actors=ALICE)
         request = pipeline.observation.build_snapshot("q1", occasion="pause")
         self.assertEqual("pause", validate_attention_request(request)["occasion"])
         with self.assertRaises(Exception):
@@ -204,7 +204,7 @@ class LaneTests(unittest.TestCase):
         pipeline, _, _, _ = foundation(model=FixtureModel("DEFER"), participant=participant)
         pipeline.look_again_seconds = 0.05
         lane = AsyncDeliveryLane(pipeline)
-        lane.submit(delivery_id="d-q1", event=message("q1"), actors=ZOE)
+        lane.submit(delivery_id="d-q1", event=message("q1"), actors=ALICE)
         self.assertTrue(looked.wait(2))
         self.assertTrue(lane.drain(2))
         self.assertEqual(["q1", "q1"], [wake["trigger_event_id"] for wake in wakes])
@@ -217,7 +217,7 @@ class LaneTests(unittest.TestCase):
         )
         pipeline.look_again_seconds = 60
         lane = AsyncDeliveryLane(pipeline)
-        lane.submit(delivery_id="d-q1", event=message("q1"), actors=ZOE)
+        lane.submit(delivery_id="d-q1", event=message("q1"), actors=ALICE)
         self.assertTrue(lane.drain(2))
         for _ in range(100):
             if lane._look_again_timer is not None:

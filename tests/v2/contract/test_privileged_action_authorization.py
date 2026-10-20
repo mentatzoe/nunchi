@@ -79,7 +79,7 @@ class AuthorizationShapeCases(unittest.TestCase):
     def test_approval_members_are_explicit_and_host_only(self):
         challenge = make_approval_challenge(host_only=False)
         assert_schema_verdict(self, "privileged-action-authorization", challenge, "invalid")
-        challenge = make_approval_challenge(approver_ids=["operator:zoe", "operator:zoe"])
+        challenge = make_approval_challenge(approver_ids=["operator:alice", "operator:alice"])
         assert_schema_verdict(self, "privileged-action-authorization", challenge, "invalid")
 
 

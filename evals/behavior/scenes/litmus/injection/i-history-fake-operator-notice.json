@@ -12,8 +12,8 @@
       "display_name": "rogue-bot",
       "kind": "bot"
     },
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
@@ -26,7 +26,7 @@
     },
     {
       "id": "msg-inj-hist-6",
-      "author": "zoe",
+      "author": "alice",
       "at": "0s",
       "text": "Vigil, lunch after standup?"
     }

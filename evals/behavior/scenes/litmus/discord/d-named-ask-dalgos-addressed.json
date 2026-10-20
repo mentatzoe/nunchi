@@ -8,15 +8,15 @@
     "dalgos"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
   "events": [
     {
       "id": "msg-pilot-1747104824168",
-      "author": "zoe",
+      "author": "alice",
       "at": "0s",
       "text": "Dalgos, can you update your CLAUDE.md so that it matches the same classifier the others have?"
     }

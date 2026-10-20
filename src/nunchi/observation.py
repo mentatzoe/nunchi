@@ -140,7 +140,7 @@ class ObservationResult:
 
 @dataclass(frozen=True)
 class _Gap:
-    """A point in the room's timeline where continuity was lost (Zoe, 2026-10-10).
+    """A point in the room's timeline where continuity was lost (agreed, 2026-10-10).
 
     ``at`` is the room's time when it was declared, to the millisecond, and
     is what names the gap in coverage and in the sentence. ``arrival`` is the
@@ -369,7 +369,7 @@ class ObservationProvider:
         self._arrival_seq = 0
         self._arrival_by_id: dict[str, int] = {}
         # The gaps in the room's timeline that the agent has not been told
-        # about yet (Zoe, 2026-10-10). A gap is a point, not a lifetime flag:
+        # about yet (agreed, 2026-10-10). A gap is a point, not a lifetime flag:
         # it is news until the agent takes a turn whose reading included it
         # (`gaps_told`). ``self._continuity`` is the integration's declared
         # continuity; it is what coverage reports when no gap is in view.
@@ -694,7 +694,7 @@ class ObservationProvider:
         self._accounted_replays.add(pair)
         return True
 
-    # -- gaps: points in the room's timeline (Zoe, 2026-10-10) -----------------
+    # -- gaps: points in the room's timeline (agreed, 2026-10-10) -----------------
 
     def _with_gap_here(self) -> list[_Gap]:
         """The gaps that are news, with one added where the room is now."""
@@ -1216,7 +1216,7 @@ class ObservationProvider:
                 raise SnapshotUnavailable("retained event actor metadata is incomplete")
             actors = deepcopy(raw_actors)
             # The gaps this window reaches or crosses that the agent has not
-            # been told about (Zoe, 2026-10-10).
+            # been told about (agreed, 2026-10-10).
             gap_facts = self._gap_coverage(event["id"] for event in events)
             coverage: dict[str, Any] = {
                 "max_events": self.limits.snapshot_events,

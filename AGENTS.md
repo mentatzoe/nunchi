@@ -122,7 +122,7 @@ one vendor, the core needs a neutral interface instead.
   pointing users to the harness's own settings; they never reimplement it
   (agreed, 2026-10-10).
 - **Missing extension points.** When a harness lacks one we need, open an
-  issue here first, with the gap and the alternatives considered. Zoe decides
+  issue here first, with the gap and the alternatives considered. The maintainer decides
   whether to ask the harness's maintainers.
 - **Independent evidence.** Tests, evaluations, and benchmarks run on clean,
   pinned installs of each harness, never on anyone's own setup.
@@ -222,7 +222,7 @@ Code and reproducible behavior determine implementation truth. Specs under
   what the library needs for it.
 - The current milestone is every rehearsal left in step 9f of
   [#94](https://github.com/mentatzoe/nunchi/issues/94) (4e, PR 5 and PR 6),
-  then the internal test track: Zoe's own machine, one person, kept in-house.
+  then the internal test track: the maintainer's own machine, one person, kept in-house.
   All rehearsals are kept (agreed, 2026-10-10). Claude Code goes first, then
   Codex (Claude's order as lead engineer).
 - Before building a step, price it in days, lines of code and credits (the
@@ -243,11 +243,11 @@ Code and reproducible behavior determine implementation truth. Specs under
   continue other unblocked product work. Stop only when no safe in-scope work
   remains, and state the concrete dependency.
 - Do not narrow supported behavior, redefine completion, or drop a required
-  surface without Zoe's explicit decision. Lines in this file and in
+  surface without the maintainer's explicit decision. Lines in this file and in
   `docs/behavior.md` marked agreed or decided, with a date, are decided:
   build them. The rest of both files was written by agents: treat it, like
   rules marked as Claude's, as engineering calls, and change it with
-  evidence, never against a decision. Ask Zoe only when a choice materially
+  evidence, never against a decision. Ask the maintainer only when a choice materially
   changes product behavior or supported surfaces and no decision covers it,
   or when it touches security boundaries or requires an irreversible
   external action.
@@ -262,7 +262,7 @@ Say which checks have passed.
 
 ## Ownership
 
-Zoe owns product scope and the final completion decision. Engineering work is
+The maintainer owns product scope and the final completion decision. Engineering work is
 not divided by agent, model family, or harness: whoever takes a task carries
 it through the core and every integration it affects, and anyone may change
 any part of this repository. Review each other's work on its merits.
@@ -319,7 +319,7 @@ New scenes follow
 provider and platform runs need explicit credentials and must record the
 installed version, identity, configuration, command, and complete result.
 
-Records of test runs on Zoe's test server, which carries test talk only, may
+Records of test runs on the maintainer's test server, which carries test talk only, may
 be published in this repository, which is public, once a scan finds none of
 the run's keys in them (agreed, 2026-10-18). Run
 `python3 -m evals.rehearsal.scan --out <records> --env

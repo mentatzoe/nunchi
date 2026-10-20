@@ -10,7 +10,7 @@ guide alone. Where the guide falls short, the guide is fixed. Two tests so
 far: separate agents built the Hermes plugin and the Codex app-server
 integration from it, and this version carries what they found.
 
-**The Hermes plugin is parked** (Zoe and Claude as lead engineer, 2026-10-10):
+**The Hermes plugin is parked** (decided, 2026-10-10):
 the code and its CI lanes stay, and there is no new Hermes work until it is
 unparked. It consumes each message and injects a turn of its own, so Hermes's
 native settings never apply to Nunchi's turns
@@ -51,7 +51,7 @@ guard. An adapter that decides any of that is a bug, even when it works.
   or what the agent says, the library is missing something. Open an issue
   here.
 - **A missing extension point is an issue here first**, with the alternatives
-  considered. Nobody asks a harness's maintainers for a change without Zoe's
+  considered. Nobody asks a harness's maintainers for a change without the maintainer's
   decision.
 - **Clean, pinned installs.** Prove the adapter against a fresh install of a
   pinned harness version, never against anyone's own setup.
@@ -128,8 +128,7 @@ plays (Prove it); what it shows on people's messages, its prompts and
 command replies belong in your own tests.
 
 A harness's built-in commands stay the harness's, and so do its replies to
-them: an integration never drops or rewrites them (decision D4, Zoe and Claude
-as lead engineer, 2026-10-10). Point operators to the harness's own way of
+them: an integration never drops or rewrites them (decision D4, 2026-10-10). Point operators to the harness's own way of
 limiting who can run them (for Hermes, `group_allow_admin_from`), and record
 that the agent's memory misses the command and the reply. A raw platform
 listener, or any wrapper around the harness's own message handling, is not an
@@ -467,7 +466,7 @@ a marker was left out of its post and what the room got. Pass it through
 unchanged.
 
 The library does not touch the model's native reasoning in any tag: your
-harness handles it (Zoe's decision). If your harness hands tool arguments
+harness handles it (decided). If your harness hands tool arguments
 or answers over with the model's reasoning in them, strip it there.
 
 You register the tools once, but each turn offers only some: `turn.tool_names`
@@ -538,7 +537,7 @@ with [SILENT]`, `For example: [SILENT]`, `Done. **[SILENT]**`.
   library takes every such block out (in any case, closed or running to
   the end of the answer) and keeps it as the move's reason, as it always
   has. It reads no other tag: the model's native reasoning (`<think>` and
-  the like) is your harness's to strip (Zoe's decision). If your harness
+  the like) is your harness's to strip (decided). If your harness
   strips `<thinking>` before your output hook, recover the raw text from
   an earlier hook, or the reason is lost. Hand over the raw text when
   `split_private(raw, final_answer=True)[0] == split_private(answer,
@@ -780,7 +779,7 @@ room = Room(
   `DiscordRoomConnection.interrupted` (`discord_room.py`) and the transport
   does it for a route that may have missed something.
 
-  The library turns the gap into words (Zoe, 2026-10-10: "A plain sentence at
+  The library turns the gap into words (agreed, 2026-10-10: "A plain sentence at
   the gap"). A gap is a point in the room's timeline, with the time and the
   arrival position where continuity was lost, not a flag for the life of the
   room. When what the agent reads (its window, or a page it asks for) runs up

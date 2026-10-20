@@ -191,7 +191,7 @@ class RouteTests(unittest.TestCase):
         outcome = pipeline.handle_delivery(
             delivery_id="d-e1",
             event=message("e1", text="Vigil, could you look at this?"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         return outcome.opportunities[0], wakes, pipeline
 
@@ -221,7 +221,7 @@ class RouteTests(unittest.TestCase):
         pipeline.handle_delivery(
             delivery_id="d-e1",
             event=message("e1", text="Vigil, could you look at this?"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         (decision,) = decisions
         self.assertEqual("DEFER", decision["effective_disposition"])
@@ -254,7 +254,7 @@ class RouteTests(unittest.TestCase):
         self.assertIn('never true, false, "yes", or "no"', prompt)
 
     def test_the_questions_do_not_make_usefulness_the_bar(self):
-        # docs/behavior.md, Zoe, 2026-10-19: the idea is social activations for agents, not "only contribute
+        # docs/behavior.md, agreed, 2026-10-19: the idea is social activations for agents, not "only contribute
         # when you have something useful". Attention cannot know what the participant knows, so it no longer
         # asks (I-010B@10), and staying quiet is a move, not a verdict that nothing is needed.
         profile = foundation()[0].attention.profile

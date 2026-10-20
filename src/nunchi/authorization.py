@@ -557,7 +557,7 @@ class AuthorizationCoordinator:
         self._proposals: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._noting: dict[str, Any] | None = None
         # Told when an approved action settles after the participant's turn,
-        # so the participant can say so itself (Zoe, #90 decision 2 on #94).
+        # so the participant can say so itself (#90, decision 2 on #94).
         self._outcome_listeners: list[Callable[[Mapping[str, Any]], None]] = []
         self._lock = threading.RLock()
 

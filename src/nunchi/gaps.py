@@ -1,4 +1,4 @@
-"""A continuity gap, said in one plain sentence (Zoe, 2026-10-10).
+"""A continuity gap, said in one plain sentence (agreed, 2026-10-10).
 
 A gap is a point in the room's timeline where Nunchi may have missed
 messages: a restart, a lost connection, a failed delivery. It is not a

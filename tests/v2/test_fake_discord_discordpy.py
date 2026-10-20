@@ -38,7 +38,7 @@ except ImportError:  # the stdlib suite runs without it
     discord = None
 
 WORLD = {
-    "people": ["zoe", "kim"],
+    "people": ["alice", "kim"],
     "bots": {"dpy": {"roles": ["helpers"]}, "boss": {"roles": ["admin"]}},
     "roles": {"admin": ["ADMINISTRATOR"], "helpers": []},
     "channels": {
@@ -107,7 +107,7 @@ class DiscordPyTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.fd.verdict()["bots"]["dpy"]["chunks"], 1)
         world, me = self.fd.world, self.fd.world.member("dpy").id
         for parent in ("room", "announce"):  # a thread takes its parent's, with SEND_MESSAGES_IN_THREADS for the implicit rule
-            self.fd.create_thread("zoe", parent, f"{parent}-thread")
+            self.fd.create_thread("alice", parent, f"{parent}-thread")
             await self.next("thread_create")
         kim = self.guild.get_member(int(world.member("kim").id))
         for name in [*WORLD["channels"], "room-thread", "announce-thread"]:
@@ -130,7 +130,7 @@ class DiscordPyTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_messages_reactions_and_replies_read_as_on_discord(self):
         me, room = self.client.user, self.channel("room")
-        posted = self.fd.post("zoe", "room", f"<@{me.id}> hello, @everyone")
+        posted = self.fd.post("alice", "room", f"<@{me.id}> hello, @everyone")
         (message,) = await self.next("message")
         self.assertIsInstance(message.author, discord.Member)  # a missing member key would leave a bare User, silently
         self.assertIn("room", [role.name for role in message.author.roles])
@@ -148,7 +148,7 @@ class DiscordPyTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((echo.id, echo.author, echo.nonce), (sent.id, me, sent.nonce))
         self.assertIsNotNone(echo.nonce)
 
-        reply = await message.reply("hi Zoe", mention_author=False)
+        reply = await message.reply("hi Alice", mention_author=False)
         (echo,) = await self.next("message")
         for seen in (reply, echo):
             self.assertEqual((seen.type, seen.reference.message_id, seen.mentions), (discord.MessageType.reply, message.id, []))
@@ -163,7 +163,7 @@ class DiscordPyTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(discord.HTTPException) as refused:
             await message.add_reaction("mhm")
         self.assertEqual((refused.exception.status, refused.exception.code), (400, 10014))
-        self.fd.post("zoe", "no-react", "react here")
+        self.fd.post("alice", "no-react", "react here")
         (target,) = await self.next("message")
         with self.assertRaises(discord.Forbidden) as forbidden:
             await target.add_reaction("👀")
@@ -173,12 +173,12 @@ class DiscordPyTest(unittest.IsolatedAsyncioTestCase):
     async def test_the_routes_hermes_calls_are_read_by_discord_py(self):
         """History, one message, a reaction read back, the slash-command sync and the application's flags: what `hermes gateway run` asks of Discord."""
         room = self.channel("room")
-        ids = [int(self.fd.post("zoe", "room", f"message {number}")["id"]) for number in range(3)]
+        ids = [int(self.fd.post("alice", "room", f"message {number}")["id"]) for number in range(3)]
         found = [m async for m in room.history(limit=2, before=discord.Object(ids[2]))]
         self.assertEqual([m.id for m in found], [ids[1], ids[0]], "newest first, before the id")
         self.assertEqual([m.content for m in found], ["message 1", "message 0"])
         message = await room.fetch_message(ids[0])
-        self.assertEqual((message.content, message.author.name), ("message 0", "zoe"))
+        self.assertEqual((message.content, message.author.name), ("message 0", "alice"))
         await message.add_reaction("👍")
         read_back = await room.fetch_message(ids[0])
         self.assertEqual([(str(r.emoji), r.count, r.me) for r in read_back.reactions], [("👍", 1, True)])
@@ -210,7 +210,7 @@ class DiscordPyTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_reconnect_resumes_the_session(self):
         self.fd.gateway("dpy", "reconnect")
         await self.next("resumed")
-        self.fd.post("zoe", "room", "after the resume")
+        self.fd.post("alice", "room", "after the resume")
         (message,) = await self.next("message")
         self.assertEqual(message.content, "after the resume")
         bot = self.fd.verdict()["bots"]["dpy"]
@@ -219,9 +219,9 @@ class DiscordPyTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_session_discord_ends_starts_afresh_and_what_was_missed_is_gone(self):
         self.fd.gateway("dpy", "close", code=4009)  # "session timed out": Discord answers the RESUME with op 9
-        self.fd.post("zoe", "room", "said while the session was gone")
+        self.fd.post("alice", "room", "said while the session was gone")
         await self.next("ready")
-        self.fd.post("zoe", "room", "after the new session")
+        self.fd.post("alice", "room", "after the new session")
         (message,) = await self.next("message")
         self.assertEqual(message.content, "after the new session")
         bot = self.fd.verdict()["bots"]["dpy"]

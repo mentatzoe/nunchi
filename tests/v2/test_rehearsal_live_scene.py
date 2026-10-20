@@ -397,7 +397,7 @@ def _reply_to_the_promise(prompt: str):
     return 0.0, {"move": "post", "text": "The nightly passed: 2,311 tests, 0 failures."}
 
 
-PROMISE_HEARS = lambda raw, scene: raw["id"] in ("z1", "c1")  # noqa: E731  Zoe's request, and the CI line the promise is about
+PROMISE_HEARS = lambda raw, scene: raw["id"] in ("z1", "c1")  # noqa: E731  Alice's request, and the CI line the promise is about
 
 
 class LineTest(DirectorCase):
@@ -417,7 +417,7 @@ class LineTest(DirectorCase):
         self.assertNotIn("precondition", item)
         self.assertEqual(checks.FITS, played["outcome"])
         self.assertEqual(
-            ["Vigil told Zoe it would tell her when the nightly finishes", "this CI line says the nightly finished and passed"], item["facts"],
+            ["Vigil told Alice it would tell her when the nightly finishes", "this CI line says the nightly finished and passed"], item["facts"],
             "the moment's own facts, in the scene's words, in the order `cited` reads them",
         )
 
@@ -503,11 +503,11 @@ class LineTest(DirectorCase):
 
 
 def _during_scene():
-    """Zoe asks Vigil; Sam answers while Vigil composes: a message that must land in the agent's turn."""
+    """Alice asks Vigil; Sam answers while Vigil composes: a message that must land in the agent's turn."""
 
     return _scene(
         [
-            {"id": "q1", "author": "zoe", "at": "-30s", "mentions": ["vigil"], "text": "Vigil, why did last night's deploy fail?"},
+            {"id": "q1", "author": "alice", "at": "-30s", "mentions": ["vigil"], "text": "Vigil, why did last night's deploy fail?"},
             {"id": "a1", "author": "sam", "at": "-10s", "reply_to": "q1", "text": "It was the expired certificate."},
         ],
         [{**_moment("q1", ["stay_quiet", "mhm"], ["speak"]), "during_turn": ["a1"]}],
@@ -600,7 +600,7 @@ class HoldTest(DirectorCase):
 
 
 class UnattendedHoldTest(DirectorCase):
-    """`asked-while-busy`: Sam's question and Zoe's thanks land in the turn on Zoe's first question, and are read as one moment."""
+    """`asked-while-busy`: Sam's question and Alice's thanks land in the turn on Alice's first question, and are read as one moment."""
 
     SCENE = "asked-while-busy"
 
@@ -610,7 +610,7 @@ class UnattendedHoldTest(DirectorCase):
         leg, spec, played = self.play(scene, lambda prompt: (0.6, {"move": "reply", "text": "Done."}), hears=hears, reach_latency=0.1, shown=lambda ids, since: list(ids))
         leg.observes_unattended = observes
         if lists:
-            # The turn on Zoe's thanks (z2) took Sam's question (s1) as unattended, as the host's wake says.
+            # The turn on Alice's thanks (z2) took Sam's question (s1) as unattended, as the host's wake says.
             first, second = played["deliveries"][1]["event_id"], played["deliveries"][2]["event_id"]
             for turn in leg.invocations:
                 if turn["trigger"] == second:
@@ -692,7 +692,7 @@ class JudgeTest(unittest.TestCase):
         b1 = played["deliveries"][1]["event_id"]
         leg = _live_leg(
             [{"request_id": "r9", "trigger": played["deliveries"][0]["event_id"], "source": "WAKE"}],
-            [{"request_id": "r9", "kind": "message", "text": "Morning, Zoe.", "delivery": "sent", "delivered": True}],
+            [{"request_id": "r9", "kind": "message", "text": "Morning, Alice.", "delivery": "sent", "delivered": True}],
             [{"trigger": b1, "disposition": "SUPPRESS", "evidence": [b1]}],
         )
         directed.judge_scene(leg, played, scene)
@@ -1231,7 +1231,7 @@ class ProbeTest(unittest.TestCase):
 
 
 def _live_run(*, harness="claude-code", reply=True, status="pass", failed=(), spent=0.1, estimated=0.2, calls=(5, 7), exit_text=None, delivered=True) -> dict:
-    """A live run of `build-finishes-after-promise` as the probe records it: the agent's reply to Zoe (or not), then the CI line."""
+    """A live run of `build-finishes-after-promise` as the probe records it: the agent's reply to Alice (or not), then the CI line."""
 
     scene = _scene_of("build-finishes-after-promise")
     played = _live_played(scene)
@@ -1273,7 +1273,7 @@ class SummaryTest(unittest.TestCase):
         self.assertIn("### What the agent did, and the facts attention cited", text)
         self.assertIn("the nightly finishes: message \"The nightly passed.\".", text)
         self.assertIn("  - cited: this CI line says the nightly finished and passed", text)
-        self.assertIn("  - not cited: Vigil told Zoe it would tell her when the nightly finishes", text, "z1 and v1 are not in attention's evidence for c1")
+        self.assertIn("  - not cited: Vigil told Alice it would tell her when the nightly finishes", text, "z1 and v1 are not in attention's evidence for c1")
         self.assertIn(
             "the scene has the agent's earlier line v1 (reply \"Sure, I'll tell you when it finishes.\", on z1). The live agent did this instead: "
             "reply 'Will do.' about", text,

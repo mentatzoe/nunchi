@@ -89,10 +89,10 @@ def minimal(**changes):
         "review": "draft",
         "platform": "discord",
         "participants": ["vigil"],
-        "actors": {"zoe": {"display_name": "Zoe", "kind": "human"}},
+        "actors": {"alice": {"display_name": "Alice", "kind": "human"}},
         "events": [
-            {"id": "m1", "author": "zoe", "at": "-1m", "text": "Hi"},
-            {"id": "m2", "author": "zoe", "at": "0s", "text": "Vigil?", "mentions": ["vigil"]},
+            {"id": "m1", "author": "alice", "at": "-1m", "text": "Hi"},
+            {"id": "m2", "author": "alice", "at": "0s", "text": "Vigil?", "mentions": ["vigil"]},
         ],
         "moments": [{"event": "m2", "step1": "pass", "fitting": ["speak"]}],
     }
@@ -170,8 +170,8 @@ class SceneFileTests(unittest.TestCase):
             },
             "reply forward": {
                 "events": [
-                    {"id": "m1", "author": "zoe", "text": "Hi", "reply_to": "m2"},
-                    {"id": "m2", "author": "zoe", "text": "Vigil?"},
+                    {"id": "m1", "author": "alice", "text": "Hi", "reply_to": "m2"},
+                    {"id": "m2", "author": "alice", "text": "Vigil?"},
                 ]
             },
             "unknown author": {
@@ -269,7 +269,7 @@ class JudgeMomentTests(unittest.TestCase):
         self.assertEqual(timedelta(hours=7), times["m1"] - times["n3"])
 
     def test_a_pause_after_a_judgment_to_wait_is_looked_at_again(self):
-        # #94 step 6: Zoe asked Castor; attention read it as a moment to
+        # #94 step 6: Alice asked Castor; attention read it as a moment to
         # wait on, and five quiet minutes later Nunchi judges it again.
         record, model = self.judge("addressee-first", 1, "DEFER")
         self.assertTrue(record["looked_again"])
@@ -401,7 +401,7 @@ class AgentTurnTests(unittest.TestCase):
         self.assertEqual("fits", record["grade"]["visible"])
 
     def test_the_record_says_how_the_agent_got_its_turn(self):
-        record, _ = self.judge("story-across-messages", 2, "WAKE", speaks, reading="Zoe has finished her story")
+        record, _ = self.judge("story-across-messages", 2, "WAKE", speaks, reading="Alice has finished her story")
         # The model's note, then the kinds of response that could fit.
         self.assertEqual({"source": "WAKE", "reading_items": 2}, record["agent"]["attention"])
         self.assertEqual("WAKE", run.turn_source(record))
@@ -410,18 +410,18 @@ class AgentTurnTests(unittest.TestCase):
         def waits_then_answers(wake):
             if wake.get("occasion") == "pause":
                 return dict(speaks(wake), why="Castor never answered.")
-            return {"kind": "silence", "why": "Zoe asked Castor; waiting for him."}
+            return {"kind": "silence", "why": "Alice asked Castor; waiting for him."}
 
         record, agent = self.judge("addressee-first", 1, "DEFER", waits_then_answers)
         self.assertEqual(("speak", "fits"), (record["result"], record["grade"]["visible"]))
         self.assertEqual(
-            [{"event": "q1", "move": "stay_quiet", "why": "Zoe asked Castor; waiting for him."}],
+            [{"event": "q1", "move": "stay_quiet", "why": "Alice asked Castor; waiting for him."}],
             record["memory_replay"]["played"],
         )
         wake, _ = agent.turns[-1]
         self.assertEqual("pause", wake["occasion"])
         (silence,) = [move for move in wake["memory"]["own_moves"] if move["kind"] == "silence"]
-        self.assertEqual("Zoe asked Castor; waiting for him.", silence["why"])
+        self.assertEqual("Alice asked Castor; waiting for him.", silence["why"])
         self.assertEqual(300, wake["pace"]["judged_seconds_ago"])
 
     def test_the_agent_reports_an_approved_action_after_the_pause(self):
@@ -438,7 +438,7 @@ class AgentTurnTests(unittest.TestCase):
                 self.assertEqual(("speak", "fits"), (record["result"], record["grade"]["visible"]))
                 wake, _ = agent.turns[-1]
                 self.assertEqual("z1", wake["trigger_event_id"])
-                # Zoe asked 10 minutes before the scene's end, then 10 quiet minutes passed.
+                # Alice asked 10 minutes before the scene's end, then 10 quiet minutes passed.
                 self.assertEqual(20 * 60, wake["pace"]["judged_seconds_ago"])
 
     def test_no_look_again_after_the_agent_already_spoke(self):
@@ -455,7 +455,7 @@ class AgentTurnTests(unittest.TestCase):
         def by_moment(wake):
             trigger = wake["trigger_event_id"]
             if trigger == "s2":
-                return {"kind": "silence", "why": "Zoe is mid-story."}
+                return {"kind": "silence", "why": "Alice is mid-story."}
             if trigger == "s4":
                 return dict(reacts(wake), why="Following along.")
             return speaks(wake)
@@ -463,18 +463,18 @@ class AgentTurnTests(unittest.TestCase):
         record, agent = self.judge("story-across-messages", 2, "WAKE", by_moment)
         self.assertEqual(("speak", "fits"), (record["result"], record["grade"]["visible"]))
         self.assertEqual(
-            [{"event": "s2", "move": "stay_quiet", "why": "Zoe is mid-story."},
+            [{"event": "s2", "move": "stay_quiet", "why": "Alice is mid-story."},
              {"event": "s4", "move": "mhm", "why": "Following along."}],
             record["memory_replay"]["played"],
         )
         wake, _ = agent.turns[-1]
         self.assertEqual(
-            [("silence", "s2", "Zoe is mid-story."), ("reaction", "s4", "Following along.")],
+            [("silence", "s2", "Alice is mid-story."), ("reaction", "s4", "Following along.")],
             [(move["kind"], move["about_event_id"], move.get("why")) for move in wake["memory"]["own_moves"]],
         )
         # The agent's earlier reaction is in the room as its own.
         self.assertIn("vigil-played-s4-1", [event["id"] for event in wake["events"]])
-        self.assertEqual(["Zoe is mid-story.", "Following along."], record["agent"]["memory_reasons"])
+        self.assertEqual(["Alice is mid-story.", "Following along."], record["agent"]["memory_reasons"])
         # A played turn that fails says so, and the judged turn still runs.
         def fails_first(wake):
             if wake["trigger_event_id"] == "s2":
@@ -498,7 +498,7 @@ class AgentTurnTests(unittest.TestCase):
             2,
             "WAKE",
             speaks_only_with_a_reading,
-            reading="Zoe has finished her story and asked for the next step",
+            reading="Alice has finished her story and asked for the next step",
             paired=True,
             replay=False,
         )
@@ -594,7 +594,7 @@ class AgentTurnTests(unittest.TestCase):
         agent = ReadsAll(None)
         agent.shown = []
         record, _ = self.judge(
-            "never-mind-while-composing", 0, "WAKE", None, reading="Zoe asked Vigil directly", paired=True, agent=agent
+            "never-mind-while-composing", 0, "WAKE", None, reading="Alice asked Vigil directly", paired=True, agent=agent
         )
         self.assertEqual(2, len(agent.turns))
         self.assertEqual(agent.shown[0], agent.shown[1])
@@ -858,7 +858,7 @@ class RunTests(unittest.TestCase):
         # The library takes the echoed wake marker out of the post; the turn's
         # field name is posted as written, and counted both times.
         record = self._final_answer_record(
-            '<thinking>Per memory.own_moves I owe Zoe this.</thinking>\n'
+            '<thinking>Per memory.own_moves I owe Alice this.</thinking>\n'
             '<nunchi_wake id="an-echoed-wake-id"/>\nPer own_moves, here is what I found.'
         )
         agent = record["agent"]
@@ -1144,7 +1144,7 @@ class UsageTests(unittest.TestCase):
         # The turn is at the scene's end, however long the replay took, after
         # seven quiet hours (#94 step 6).
         self.assertEqual((0, 7 * 3600), (wake["pace"]["judged_seconds_ago"], wake["pace"]["quiet_before_seconds"]))
-        # Zoe's two earlier messages were judged for the memory: her ask has
+        # Alice's two earlier messages were judged for the memory: her ask has
         # Vigil's reply as its response (the fixture says both ask).
         self.assertEqual({"judged": 2, "failed": 0, "usage": {"calls": 0}}, record["memory_replay"])
         self.assertEqual(
@@ -1159,7 +1159,7 @@ class UsageTests(unittest.TestCase):
 
     def test_a_question_asked_while_busy_is_read_with_the_newest(self):
         # asked-while-busy (#94 step 6): Sam's question arrived while Vigil was
-        # busy, so Zoe's thanks is judged as the newest, with it.
+        # busy, so Alice's thanks is judged as the newest, with it.
         scene = scene_by_id("asked-while-busy")
         agent = FakeAgent(lambda wake: None)
         job = run.Job(scene, 0, scene.participants[0], "fixture/model", 0)
@@ -1271,7 +1271,7 @@ class ToolTurnTests(unittest.TestCase):
         return [call for step in record["agent"]["tool_turn"]["steps"] for call in step["calls"]]
 
     def test_the_quiet_tool_ends_the_turn_in_silence_with_its_reason(self):
-        why = "Zoe is still telling it; I will let her finish."
+        why = "Alice is still telling it; I will let her finish."
         record, provider = self.play([calling("room_quiet", why=why)])
         self.assertFalse(record["provider_error"])
         self.assertEqual(1, len(provider.requests))
@@ -1351,7 +1351,7 @@ class ToolTurnTests(unittest.TestCase):
         self.assertNotIn("machinery_written", record["agent"])
 
     def test_an_answer_with_no_tool_call_is_silence_and_its_last_words_are_the_reason(self):
-        words = "Zoe is mid-story; nothing for me to add yet."
+        words = "Alice is mid-story; nothing for me to add yet."
         record, provider = self.play([{"role": "assistant", "content": words}])
         self.assertEqual(1, len(provider.requests))
         self.assertEqual(("stay_quiet", "agent", "fits"), (record["result"], record["by"], record["grade"]["visible"]))
@@ -1574,7 +1574,7 @@ class LitmusConversionTests(unittest.TestCase):
         self.assertEqual({"stay_quiet", "mhm"}, {miss["move"] for miss in moment["misses"]})
 
     def test_a_v1_ask_is_speaking(self):
-        # Zoe, 2026-10-05: ASK is too specific; speaking covers asking.
+        # Agreed, 2026-10-05: ASK is too specific; speaking covers asking.
         scene = self.convert("multica", "m-baseline-ask-ambiguous")
         self.assertEqual(["speak"], scene["moments"][0]["fitting"])
         with self.assertRaises(SceneError):

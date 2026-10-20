@@ -239,7 +239,7 @@ def attention_state(projection: Mapping[str, Any], instructions: str) -> dict[st
         state["earlier_messages_not_shown"] = True
     gap = gap_sentence_in(projection)
     if gap:
-        # The same sentence the participant's turn carries (Zoe, 2026-10-10).
+        # The same sentence the participant's turn carries (agreed, 2026-10-10).
         state["gap"] = gap
     if projection.get("pace"):
         state["pace"] = deepcopy(dict(projection["pace"]))

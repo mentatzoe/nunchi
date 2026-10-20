@@ -11,7 +11,7 @@
     {
       "id": "msg-chrome-todo-1",
       "type": "message",
-      "author": "zoe",
+      "author": "alice",
       "content": "aleph, track the remaining gate fixes as todos please.",
       "timestamp": "2026-07-08T21:30:00.000Z"
     }

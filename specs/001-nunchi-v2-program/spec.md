@@ -62,7 +62,7 @@ and `docs/contracts/nunchi-v2.md`; Aleph Vault PR 67 (`bdd1ebb`) and PR 68
   candidate/handoff attempt evidence; no
   planning table is a central mutable state or assignment registry.
 - `v2-integrator` is the slice-level acceptance owner for slices `010`–`100`;
-  Zoe is the acceptance owner for `110`. A source slice reaching `ACCEPTED`
+  the maintainer is the acceptance owner for `110`. A source slice reaching `ACCEPTED`
   does not imply every consumer accepted its packet: each dependent must record
   its own per-recipient upstream acceptance before becoming `READY`.
 
@@ -75,7 +75,7 @@ and `docs/contracts/nunchi-v2.md`; Aleph Vault PR 67 (`bdd1ebb`) and PR 68
 - **Integration handoff**: `v2-program-owner` coordinates slice order and
   verifies owner-authored readiness/evidence; each assigned slice participant
   activates and declares only its own lane. `v2-integrator` accepts explicit
-  handoffs for `010`–`100` and owns slice `110` assembly, while Zoe owns `110`
+  handoffs for `010`–`100` and owns slice `110` assembly, while the maintainer owns `110`
   acceptance.
 
 ## User Scenarios & Testing
@@ -244,7 +244,7 @@ and final parity gate.
   ordinary docs, execute exact `UPDATE`, evidence-backed `NO_IMPACT`, or
   owner-accepted `HANDOFF` dispositions, and pass documentation freshness
   before handoff.
-- **FR-025**: Checked slice implementation tasks MUST be rejected until Zoe's
+- **FR-025**: Checked slice implementation tasks MUST be rejected until the maintainer's
   external grant is validly recorded at
   `evidence/governance/v2-implementation-authorization.md` with explicit scope
   enumerating exactly slices `010` through `110`; a partial, extra, or
@@ -255,7 +255,7 @@ and final parity gate.
   handoffs, branch/worktree, interfaces, evidence targets, and handoff recipient
   without introducing a central mutable status registry.
 - **FR-027**: Slice-level `ACCEPTED` MUST mean acceptance by `v2-integrator` for
-  slices `010`–`100` and by Zoe for slice `110`; it MUST NOT imply another
+  slices `010`–`100` and by the maintainer for slice `110`; it MUST NOT imply another
   downstream recipient accepted unless that recipient's exact acceptance is
   recorded. Every dependent MUST record its own acceptance of every required
   current effective upstream commit and terminal or amendment packet before
@@ -285,7 +285,7 @@ and final parity gate.
   original activation; only a paused post-convergence fix with an unchanged task
   graph may resume its run. Later retries append new candidate and handoff
   entries. The program tail adjacent to slice `110` MUST
-  additionally require the assigned `v2-integrator` to durably copy Zoe's
+  additionally require the assigned `v2-integrator` to durably copy the maintainer's
   external decision into slice acceptance/rejection evidence, the assigned
   `v2-program-owner` to copy an acceptance into
   `evidence/v2/parity/cutover-acceptance.md`, and the assigned integrator to
@@ -392,14 +392,14 @@ and final parity gate.
   immutable activation/acceptance records and append-only candidate/handoff
   attempt streams, never a duplicated umbrella status table.
 - **SC-016**: Every `010`–`100` packet has an explicit integrator acceptance
-  record before its source slice is `ACCEPTED`, every `110` packet has Zoe's
+  record before its source slice is `ACCEPTED`, every `110` packet has the maintainer's
   explicit acceptance, and every dependent activation requires each upstream
   slice to be terminally `ACCEPTED` while also citing its own per-recipient
   acceptance of each exact packet through ordered full-SHA and matching
   consumer-owned evidence mappings.
 - **SC-017**: Every declared lifecycle transition cites the exact standard
   milestone record for that slice, and program `CUTOVER_VERIFIED` cites both
-  the program owner's record of Zoe's cutover decision and the complete
+  the program owner's record of the maintainer's cutover decision and the complete
   post-merge verification/final-documentation record.
 - **SC-018**: A rejected handoff preserves every prior candidate and handoff
   attempt, appends one attributable `REJECTED` decision, derives the source
@@ -432,7 +432,7 @@ and final parity gate.
 - All in-tree consumers migrate even if their eventual release/product tier is
   decided later.
 - The selected Vault design is complete enough for delivery planning; this
-  program does not reopen product choices already selected by Zoe.
+  program does not reopen product choices already selected by the maintainer.
 - V1 ordinary-path tests and evidence remain historical inputs, not V2 proof.
 
 ## Explicit Exclusions

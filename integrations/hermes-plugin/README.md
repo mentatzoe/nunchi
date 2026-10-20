@@ -1,7 +1,7 @@
 # Nunchi for Hermes: the `nunchi-room` plugin
 
 **Status: Parked (2026-10-10).** The code, its tests and its CI lanes stay and
-keep running. There is no new Hermes work until the plugin is unparked (Zoe
+keep running. There is no new Hermes work until the plugin is unparked (the maintainer
 and Claude as lead engineer). Why, what still works and how threads behave are
 in [Parked](#parked-2026-10-10); what unparking takes is in
 [Before unparking](#before-unparking). Where the plugin stood when it was
@@ -12,7 +12,7 @@ gateway, loaded from a throwaway `HERMES_HOME` through Hermes's own plugin
 discovery, with only the model scripted. On Discord they use Hermes's stock
 Discord adapter with fake discord.py channels, threads and messages, as
 Hermes's own tests do. It replaced the older Hermes
-integration, which patched Hermes at runtime; Zoe removed that integration on
+integration, which patched Hermes at runtime; the maintainer removed that integration on
 2026-10-11 ("delete, for now"), so Hermes has no other supported path until
 this plugin is unparked. Hermes's own gateway process
 (`hermes gateway run`), with this plugin and the settings below, has also run
@@ -40,7 +40,7 @@ identity) never apply to Nunchi's turns. And following Hermes's plugin rules
 for listing a plugin would cost the agent its mentions: the plugin reads them
 from the platform's own message object, which Hermes's docs say plugins do not
 get. A proper fix is a redesign that gates Hermes's own native turn instead of
-injecting one (Before unparking). Zoe's internal test track does not need it
+injecting one (Before unparking). The maintainer's internal test track does not need it
 yet, so the plugin is parked. Codex stays active, and every behavior stays in
 the core.
 
@@ -400,7 +400,7 @@ More setup on Discord:
     It is a private SQLite file, not an interface.
 
   What would fix it, to file here first (`AGENTS.md`, Missing extension points;
-  Zoe decides whether to ask Hermes): a post-delivery observer hook that gives
+  the maintainer decides whether to ask Hermes): a post-delivery observer hook that gives
   the platform id of each message sent and the run it belongs to (the
   `gateway_message_delivered` hook Hermes leaves for later); or a `send` verb
   on `ctx.platform_actions` that returns the id and takes a reply target and a
@@ -625,7 +625,7 @@ and `ctx` verbs, and sets no Hermes configuration itself) and fifteen things to
 fix or settle before the plugin is listed or unparked. Each line gives what is
 wrong and the Hermes doc that says so (paths under Hermes's `website/docs/`,
 line numbers at `a50406d9`). Its proposals, including "ask Hermes", follow
-`AGENTS.md`: an issue here first, and Zoe decides whether to ask Hermes.
+`AGENTS.md`: an issue here first, and the maintainer decides whether to ask Hermes.
 
 1. **Mentions and the bot flag come from `event.raw_message`.** Hermes does not
    ship raw SDK access to plugins, and documents `event.source.is_bot` for the

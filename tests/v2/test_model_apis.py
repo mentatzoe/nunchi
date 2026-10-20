@@ -237,7 +237,7 @@ class ConfigurationTests(unittest.TestCase):
                 outcome = pipeline.handle_delivery(
                     delivery_id="d-route",
                     event=message("e-route"),
-                    actors={"human:zoe": {"kind": "human"}},
+                    actors={"human:alice": {"kind": "human"}},
                 )
                 opportunity = outcome.opportunities[0]
                 self.assertEqual(("ok", "WAKE"), (opportunity.decision_status, opportunity.effective_disposition))

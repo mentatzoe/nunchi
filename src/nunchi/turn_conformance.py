@@ -20,7 +20,7 @@ Two scenarios, ``gap`` and ``final-gap``, start the room the way an
 integration must (`docs/harness-guide.md`): with a continuity gap declared
 before the first message. The turn that reads the room across it must say so
 in the library's one plain sentence, and the turn after the agent has taken
-one past it must not (Zoe, 2026-10-10).
+one past it must not (agreed, 2026-10-10).
 
 One scenario, ``launch-secret``, needs a secret the harness itself holds: the
 per-launch secret an integration's room tools call the library with. An
@@ -138,7 +138,7 @@ THOUGHT = "My plan: check the logs."
 # probes): the agent meant each for the room, and the room gets it as
 # written. The library reads no tag in a tool or one-reply post; in a final
 # answer it reads only the <thinking> the turn teaches, which these do not
-# hold. Native reasoning in other tags is the harness's job (Zoe).
+# hold. Native reasoning in other tags is the harness's job (decided).
 REAL_FINAL_ANSWERS = (
     "Here's what R1 returned:\n```\n<think>\nThe user wants a haiku.\n```",
     "Wrap the panel in it:\n```jsx\n<Reasoning>{text}</Reasoning>\n```",
@@ -153,7 +153,7 @@ REAL_POSTS = (
     "Try this:\n```python\ntext = text.replace('<thinking>', '')\n```",
     "Older prompts asked for <thinking> tags; you can strip them with a regex.",
     "思考は<thinking>タグの中に書きます。答えは外です。",
-    "I grep for <nunchi_wake in the logs.\n\n> Zoe: thanks!\nAgreed.",
+    "I grep for <nunchi_wake in the logs.\n\n> Alice: thanks!\nAgreed.",
 )
 # What the provider says when it refuses the agent's model call.
 MODEL_REFUSED = "conformance: the provider refused the request"

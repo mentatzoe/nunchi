@@ -2,7 +2,7 @@
   "id": "answered-by-someone-else",
   "title": "A question someone else already answered",
   "source": "docs/behavior.md",
-  "review": "draft: written from docs/behavior.md; ranges need Zoe's review",
+  "review": "draft: written from docs/behavior.md; ranges need the maintainer's review",
   "platform": "discord",
   "participants": ["vigil"],
   "actors": {

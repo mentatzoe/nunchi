@@ -2,14 +2,14 @@
   "id": "two-agents-one-question",
   "title": "Two agents about to answer the same question",
   "source": "docs/behavior.md",
-  "review": "draft: written from docs/behavior.md; ranges need Zoe's review. A pile-on shows only when the agent's turn is simulated.",
+  "review": "draft: written from docs/behavior.md; ranges need the maintainer's review. A pile-on shows only when the agent's turn is simulated.",
   "platform": "discord",
   "participants": ["vigil", "castor"],
   "actors": {
-    "zoe": {"display_name": "Zoe", "kind": "human"}
+    "alice": {"display_name": "Alice", "kind": "human"}
   },
   "events": [
-    {"id": "q1", "author": "zoe", "at": "0s", "mentions_room": true,
+    {"id": "q1", "author": "alice", "at": "0s", "mentions_room": true,
      "text": "@here quick one for the bots: what's the default timeout for the attention call?"}
   ],
   "moments": [
@@ -18,7 +18,7 @@
       "event": "q1",
       "step1": "pass",
       "notice": [
-        {"fact": "Zoe asked every bot in the room; one answer is enough", "events": ["q1"]}
+        {"fact": "Alice asked every bot in the room; one answer is enough", "events": ["q1"]}
       ],
       "fitting": ["speak", "wait", "stay_quiet"],
       "misses": []

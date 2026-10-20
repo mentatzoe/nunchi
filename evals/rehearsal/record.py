@@ -494,7 +494,7 @@ def _matrix_lines(run: Mapping[str, Any]) -> list[str]:
     lines = [
         "## Grade matrix (draft expectations, not reviewed)" if live else "## Grade matrix (draft expectations)",
         "",
-        "The scenes are drafts awaiting Zoe's review (`evals/behavior/README.md`): a grade compares the move with the draft's "
+        "The scenes are drafts awaiting the maintainer's review (`evals/behavior/README.md`): a grade compares the move with the draft's "
         "fitting moves and clear misses, and is not a finding about the model."
         + (" Here the agent is live, so every grade is reported and none is a failure, and its words are its own." if live else "")
         + f" Cell: {CELL_CODES}. Then the visible grade and step 1"
@@ -526,7 +526,7 @@ def _reordered(moment: Mapping[str, Any], hold: Mapping[str, Any]) -> list[str]:
     """A line that says the scene was played in another order than it is written, where a held turn made the agent's line come last.
 
     The messages that land in a held turn are posted before the agent's line the turn plays, so a scene that has that line
-    before one of them (`asked-while-busy`: the agent's reply, then Zoe's thanks) is played with it after. A live model composes
+    before one of them (`asked-while-busy`: the agent's reply, then Alice's thanks) is played with it after. A live model composes
     its reply with the later message already in the room and may drop it once the core has shown it the page.
     """
 

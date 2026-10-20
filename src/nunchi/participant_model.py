@@ -332,7 +332,7 @@ _READING_GUIDE = (
 
 
 # How a socially aware person takes part in a group conversation
-# (docs/behavior.md). Both turn prompts open with it. Zoe, 2026-10-19: the
+# (docs/behavior.md). Both turn prompts open with it. Agreed, 2026-10-19: the
 # idea is social activations for agents, not "only contribute when you have
 # something useful".
 _SOCIAL_GUIDE = (
@@ -514,7 +514,7 @@ def unattended_turn_note(request: Mapping[str, Any]) -> str:
 def gap_turn_note(request: Mapping[str, Any]) -> str:
     """When the turn's view reaches or crosses a gap, say so in one plain sentence; else ''.
 
-    Zoe, 2026-10-10: a gap is a point in the room's timeline, not a lifetime
+    Agreed, 2026-10-10: a gap is a point in the room's timeline, not a lifetime
     flag. The wake carries only the gaps its view reaches or crosses that the
     participant has not been told about (`coverage.gaps`), so the sentence is
     in this turn and, once the participant has taken it, in none after. The

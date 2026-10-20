@@ -1,6 +1,6 @@
 """The participant sees the room as it is now, and looks again before speaking.
 
-Zoe, 2026-10-05 (#94, plan step 3): the context the gate reads to decide and
+Agreed, 2026-10-05 (#94, plan step 3): the context the gate reads to decide and
 the history the agent reads during its own turn are separate things. The
 agent's view reads the live room, including messages that arrived after its
 turn began, never fails the turn, and shows messages, not verdicts. Before
@@ -24,7 +24,7 @@ from tests.v2.test_operator_protocol import PROFILE, opportunity, wake
 from tests.v2.test_shared_foundation import foundation, message
 
 
-ZOE = {"human:zoe": {"kind": "human"}}
+ALICE = {"human:alice": {"kind": "human"}}
 
 
 def observe(pipeline, event_id, **extra):
@@ -32,7 +32,7 @@ def observe(pipeline, event_id, **extra):
     pipeline.observation.observe(
         delivery_id=f"d-{event_id}",
         event=message(event_id, **extra),
-        actors=ZOE,
+        actors=ALICE,
     )
 
 
@@ -148,7 +148,7 @@ class HostRoomViewTests(unittest.TestCase):
             return None
 
         pipeline, _, transport, receipts = foundation(participant=participant)
-        outcome = pipeline.handle_delivery(delivery_id="d-e1", event=message("e1"), actors=ZOE)
+        outcome = pipeline.handle_delivery(delivery_id="d-e1", event=message("e1"), actors=ALICE)
         opportunity = outcome.opportunities[0]
         self.assertIsNone(opportunity.transport)
         self.assertEqual("There are no older messages.", pages[0]["note"])
@@ -169,7 +169,7 @@ class HostRoomViewTests(unittest.TestCase):
             }
 
         pipeline, _, transport, _ = foundation(participant=participant)
-        pipeline.handle_delivery(delivery_id="d-e1", event=message("e1"), actors=ZOE)
+        pipeline.handle_delivery(delivery_id="d-e1", event=message("e1"), actors=ALICE)
         self.assertEqual(["e2"], [event["id"] for event in seen["new"]["events"]])
         # Already seen through "new", so "after" has nothing to repeat.
         self.assertEqual([], seen["after"]["events"])

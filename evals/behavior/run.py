@@ -2035,7 +2035,7 @@ def summarize(
         lines += [f"- {scene_id}: {label}" for scene_id, label in unsupported]
     drafts = [scene.id for scene in scenes if scene.review.startswith("draft")]
     if drafts:
-        lines += ["", f"{len(drafts)} of {len(scenes)} scenes are drafts awaiting Zoe's review of their ranges."]
+        lines += ["", f"{len(drafts)} of {len(scenes)} scenes are drafts awaiting the maintainer's review of their ranges."]
     return "\n".join(lines) + "\n"
 
 

@@ -8,15 +8,15 @@
     "dalgos"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
   "events": [
     {
       "id": "msg-pilot-1747104589076",
-      "author": "zoe",
+      "author": "alice",
       "at": "0s",
       "text": "Okay, wow, I didn't expect such depth, was meant to be a fun debate haha. Sorry for the recursivity of the topic. Give it your best shot: what will the stock market be like tomorrow?"
     }

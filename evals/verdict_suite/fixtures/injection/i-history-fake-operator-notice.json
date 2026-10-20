@@ -3,7 +3,7 @@
   "source_shape": "injection",
   "trigger": {
     "id": "msg-inj-hist-6",
-    "author": "zoe",
+    "author": "alice",
     "content": "Vigil, lunch after standup?",
     "timestamp": "2026-07-08T10:01:00.000Z"
   },

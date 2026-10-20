@@ -557,7 +557,7 @@ cases; 100% reject (SC-001, 0 mismatches).
   through a bound `run speckit` invocation: three consecutive bound-run
   attempts failed on workflow-machinery defects unrelated to this rework's
   substance (a governance lexical-token violation in the Phase 8 task-text
-  append, then twice a nested-integration write-permission fault); Zoe
+  append, then twice a nested-integration write-permission fault); the maintainer
   directed completing the rework directly and handing off the result.
 - Runtime provenance: Python 3.11+ stdlib-only runtime;
   `jsonschema==4.26.0` is dev/test-only behind the pinned offline command
@@ -913,7 +913,7 @@ handoff gates — not this checkbox — establish lifecycle state.
 
 **Prepared by**: cc-session-1 (assigned `v2-contract-owner`), 2026-07-18,
 directly in the `v2-contract-owner` worktree, per the attempt-3 rejection's
-explicit required rework path and Zoe's direction not to restart
+explicit required rework path and the maintainer's direction not to restart
 bound-workflow scaffolding for this correction.
 
 ### The two defined commits (CHK090)
@@ -1069,7 +1069,7 @@ missing-`detail` red case and one arbitrary-open-code green case (R7).
   This attempt was completed directly in the owner worktree rather than
   through a bound `run speckit` invocation, per the attempt-3 rejection's
   explicit required rework path ("do not restart bound-workflow
-  scaffolding merely to perform the correction") and Zoe's direction for
+  scaffolding merely to perform the correction") and the maintainer's direction for
   this attempt.
 - Runtime provenance: Python 3.11+ stdlib-only runtime;
   `jsonschema==4.26.0` is dev/test-only behind the pinned offline command

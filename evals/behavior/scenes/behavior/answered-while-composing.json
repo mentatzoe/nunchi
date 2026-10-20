@@ -2,14 +2,14 @@
   "id": "answered-while-composing",
   "title": "Someone answers while the agent is still composing an answer it knows",
   "source": "docs/behavior.md (looking again before speaking, #94 step 3)",
-  "review": "draft: written for plan step 3; ranges need Zoe's review",
+  "review": "draft: written for plan step 3; ranges need the maintainer's review",
   "platform": "discord",
   "participants": [
     "vigil"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
@@ -22,7 +22,7 @@
     },
     {
       "id": "q1",
-      "author": "zoe",
+      "author": "alice",
       "at": "0s",
       "mentions_room": true,
       "text": "@here does anyone know why last night's deploy failed?"
@@ -50,7 +50,7 @@
           ]
         },
         {
-          "fact": "Zoe asked the whole room",
+          "fact": "Alice asked the whole room",
           "events": [
             "q1"
           ]

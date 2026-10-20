@@ -152,7 +152,7 @@ def _coverage(value: Any, path: str = "coverage") -> Mapping[str, Any]:
     )
     if "gaps" in doc:
         # Since I-010A@8 / I-010C@15: where this reading reaches or crosses a
-        # gap the participant has not been told about (Zoe, 2026-10-10).
+        # gap the participant has not been told about (agreed, 2026-10-10).
         gaps = doc["gaps"]
         if not isinstance(gaps, list) or not gaps:
             _fail(f"{path}.gaps", "must be a non-empty array")

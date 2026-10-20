@@ -87,7 +87,7 @@ release decision; no downstream implementation slice
   scenes, select or publish a release, or rewrite product documentation during
   planning or before valid slice activation.
 - The final integrator assembles and adjudicates the selected design; it MUST
-  NOT silently redesign an upstream interface, accept security risk for Zoe, or
+  NOT silently redesign an upstream interface, accept security risk for the maintainer, or
   add a V1 bridge to make integration easier.
 
 ## Interface Summary *(mandatory)*
@@ -112,11 +112,11 @@ release decision; no downstream implementation slice
     IDs and one authoritative evidence manifest;
   - a V2 release-readiness boundary containing truthful version, upgrade,
     documentation, evidence, and limitation state for a separate decision; and
-  - append-only slice candidate and handoff attempt streams for Zoe's separate
+  - append-only slice candidate and handoff attempt streams for the maintainer's separate
     repository-cutover decision; and
   - inputs to the umbrella program tail, which consumes the assigned
     integrator's slice-level copy and the assigned program owner's cutover-level
-    copy of Zoe's exact-candidate decision and has the integrator record the atomic
+    copy of the maintainer's exact-candidate decision and has the integrator record the atomic
     main merge and post-merge verification distinctly from release or promotion.
 - **Integration handoff**: Each upstream owner hands its exact reviewed commit,
   commands/results, interface versions, evidence, provenance, and limitations
@@ -334,7 +334,7 @@ release claim against the exact integrated candidate.
   stochastic/live re-audit before parity continues.
 - **FR-022**: After all slice gates pass, the assigned `v2-integrator` MUST
   append the exact candidate and handoff attempts and stop slice implementation at
-  `HANDOFF_READY`. The umbrella program tail MUST require Zoe's durable
+  `HANDOFF_READY`. The umbrella program tail MUST require the maintainer's durable
   exact-candidate acceptance, copied into slice evidence by the assigned
   `v2-integrator` and, on acceptance, into program cutover evidence only by
   `v2-program-owner`, before one atomic PR/merge to main. The merged candidate
@@ -346,7 +346,7 @@ release claim against the exact integrated candidate.
   documentation validation MUST land together in one docs/evidence-only
   follow-up commit/PR that changes no product source, schema, runtime, or
   behavior; only that complete follow-up establishes `CUTOVER_VERIFIED`.
-  Package release and promotion remain separate decisions. If Zoe rejects the
+  Package release and promotion remain separate decisions. If the maintainer rejects the
   packet, the integrator MUST append her `REJECTED` decision to the handoff stream, the slice
   MUST return to `ACTIVE`, and the owner MUST start a new bound run rather than
   resume the completed delivery run. All later attempts MUST append without
@@ -423,7 +423,7 @@ release claim against the exact integrated candidate.
 - **SC-011**: The assembled candidate passes the slice-`100` deterministic
   assurance rerun; every changed semantic/security hash has a recorded owner
   re-audit before cutover.
-- **SC-012**: One Zoe-accepted atomic PR lands the complete candidate on main and
+- **SC-012**: One maintainer-accepted atomic PR lands the complete candidate on main and
   the recorded merge SHA passes the full post-merge verification set without
   publishing or promoting a release.
 - **SC-013**: 100% of trusted bypass probes make zero classifier calls, invoke
@@ -444,7 +444,7 @@ release claim against the exact integrated candidate.
   dropping a required stage.
 - Platform facts genuinely unavailable from a native API may differ when the
   capability gap is explicit and tested.
-- A release/version go decision remains Zoe's; successful integration does not
+- A release/version go decision remains the maintainer's; successful integration does not
   itself publish a package or authorize promotion.
 
 ## Documentation Freshness
@@ -489,7 +489,7 @@ release claim against the exact integrated candidate.
 - **Handoff evidence**: `evidence/v2/parity/slice-candidate.md` and
   `evidence/v2/parity/slice-handoff.md` record the exact reviewed candidate,
   paths, validation, and reviewer before slice implementation stops at
-  `HANDOFF_READY`. The assigned integrator copies Zoe's acceptance into
+  `HANDOFF_READY`. The assigned integrator copies the maintainer's acceptance into
   `evidence/v2/parity/slice-acceptance.md`; the assigned program owner copies it
   into `evidence/v2/parity/cutover-acceptance.md`. The umbrella program tail records
   the accepted and merged candidate commits, `refs/heads/main`, exact main SHA,

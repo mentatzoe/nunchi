@@ -12,7 +12,7 @@ the clean-install lanes for Claude Code, Codex and the parked Hermes plugin
 pass, but no surface has live real-room proof since PR #67, and V2 is not
 released. The last release tag is `v0.2.0`.
 
-### Removed — the old Hermes integration (Zoe, 2026-10-11, "delete, for now")
+### Removed — the old Hermes integration (decided 2026-10-11, for now)
 
 **Hermes has no supported path until the Hermes plugin is unparked.** The old
 Hermes integration is deleted. It patched Hermes at runtime (its README
@@ -192,7 +192,7 @@ behavior of the core, Claude Code, Codex or the plugin.
   message was stored in memory without the message it answered:
   `ConversationMemory` gave `about_event_id` only to a reply, a reaction and a
   silence, so a later turn saw the promise's words but not that they answered
-  Zoe, and the ask's thread read unanswered. This contradicted the memory row
+  Alice, and the ask's thread read unanswered. This contradicted the memory row
   of `docs/behavior.md` on every column. Now the host keeps the origin
   (`origin_event_id`) of each message and reply it commits that went out
   (`ConversationMemory.record_origin`, at the commit point in
@@ -236,7 +236,7 @@ behavior of the core, Claude Code, Codex or the plugin.
   refuses a live scene off a CI runner (exit 2) and without the keys its column
   reads, under their own names (exit 3), before anything starts, and the Discord
   room refuses an offline launcher. **Grades are reported, never failed**: the
-  scenes' expectations are drafts Zoe has not reviewed. The plumbing and safety
+  scenes' expectations are drafts the maintainer has not reviewed. The plumbing and safety
   checks still fail the run, with `spend-recorded` added (no reading of the
   key's usage gave a figure, or the model calls were not counted). The agent's
   words are its own, so an earlier line of the agent's is its move on the
@@ -284,7 +284,7 @@ behavior of the core, Claude Code, Codex or the plugin.
   usage read is tried up to three times; the reference makes one preflight call
   with its participant's body before it starts; and a failed run's stderr tail
   is in the summary. Not done: hash-pinned constraints for the installs, the
-  GitHub environment and a credit-limited key (Zoe's), and a network-sealed live
+  GitHub environment and a credit-limited key (the maintainer's), and a network-sealed live
   run.
 
 - Directed behavior scenes where timing and the agent's own history matter
@@ -338,7 +338,7 @@ behavior of the core, Claude Code, Codex or the plugin.
   thanks must land while the agent is busy for Sam's message to be read with
   it; results say so. A live model would compose its reply with the thanks
   already in the room and may drop it after the look page, so the reply cannot
-  be assumed live, and "Vigil answered Zoe but not Sam" holds only after the
+  be assumed live, and "Vigil answered Alice but not Sam" holds only after the
   thanks. CI plays all eleven in the three jobs, each scene step under a
   timeout. The pause (`addressee-first`,
   `only-they-can-do-it`) is not played here. No live run yet.
@@ -373,7 +373,7 @@ behavior of the core, Claude Code, Codex or the plugin.
   test pins that a failed scene fails the step. Hermes is parked and plays
   none. No live run yet.
 - A continuity gap is a point in the room's timeline, told once in one plain
-  sentence (Zoe, 2026-10-10: "A plain sentence at the gap"; **implemented,
+  sentence (agreed, 2026-10-10: "A plain sentence at the gap"; **implemented,
   unverified**, offline tests only). Before, a restart, a lost connection or
   a failed delivery set a flag that never cleared and reached the agent only
   as a field in the turn's JSON (`coverage.has_restart_gap`), so after one
@@ -451,7 +451,7 @@ behavior of the core, Claude Code, Codex or the plugin.
   none; its lane is unchanged. No live run; the Claude Code and Codex columns
   are the entry above.
 - `binding.threads_in_room`, one per-room setting with the same name and
-  meaning in every harness (Zoe, 2026-10-10: "This should be configurable by
+  meaning in every harness (agreed, 2026-10-10: "This should be configurable by
   the user"): whether the threads opened under the room's channel are part of
   the room. **Implemented, unverified** (offline tests and the three Discord
   room lanes; no live room). The default, `true`: the agent hears a thread
@@ -1035,7 +1035,7 @@ behavior of the core, Claude Code, Codex or the plugin.
 ### Changed
 
 - **Agents take part socially, not only when they have something useful to
-  add** (every harness; Zoe, 2026-10-19: "The idea [...] is NOT 'only
+  add** (every harness; agreed, 2026-10-19: "The idea [...] is NOT 'only
   contribute when you have something useful.' The idea is social activations
   for agents"; **implemented, unverified**: offline tests only, no behavior
   run of the new wording yet). The wording every model read said the
@@ -1168,8 +1168,7 @@ behavior of the core, Claude Code, Codex or the plugin.
   or `unknown`) again; `has_gaps` is also true when the window skips events
   inside it, as before. A gap that is news but outside the window changes
   nothing until a reading reaches it. `tests/v2/test_runtime_hardening.py`'s
-  durable-gap test, which pinned the sticky flag, now pins the rule (Zoe,
-  2026-10-10). A delivery that was reserved and never recorded is a gap once,
+  durable-gap test, which pinned the sticky flag, now pins the rule (agreed, 2026-10-10). A delivery that was reserved and never recorded is a gap once,
   too: it is recorded as one in the delivery audit and no later restart finds
   it again. `docs/behavior.md` records the rule in one line.
 - Docs say what the code does. The harness guide, the contract and
@@ -1180,12 +1179,12 @@ behavior of the core, Claude Code, Codex or the plugin.
   `integrations/codex/README.md` no longer calls the older runner the only
   executable Codex integration. `tests/v2/test_turn.py` no longer imports the
   parked plugin.
-- **The Hermes plugin is parked (Zoe and Claude as lead engineer, 2026-10-10).**
+- **The Hermes plugin is parked (decided, 2026-10-10).**
   The code stays and its CI lanes keep running; there is no new Hermes work
   until it is unparked. Nunchi is a library that decides whether an agent takes
   a turn in a live room and gives it the room's reading; integrations are thin
   adapters on a harness's public extension points, and the harness owns
-  delivery (Zoe: an integration always complies with the harness's own plugin
+  delivery (decided: an integration always complies with the harness's own plugin
   rules and never rewrites or reimplements the harness; where the harness has
   native configuration, the plugin points the user to it). The Hermes plugin
   does not ride Hermes's native message flow: it consumes each message and
@@ -1231,7 +1230,7 @@ behavior of the core, Claude Code, Codex or the plugin.
   could not know. And in `mention-in-busy-room` the agent often stayed quiet
   for lack of findings.
 - The Claude Code participant hears what others post while it works (#94,
-  step 6; Zoe, 2026-10-06). After each tool call the main session makes in
+  step 6; agreed, 2026-10-06). After each tool call the main session makes in
   a room turn, the mod asks the gate what others posted since the session
   last looked, and a new message rides that tool's result as context the
   model reads. The core's room view gains a host-only `news` direction, like
@@ -1242,7 +1241,7 @@ behavior of the core, Claude Code, Codex or the plugin.
   and how a live session takes the update needs a live run
   (`docs/claude-code-live-run.md`, scene 7a).
 - The newest message after a busy turn is judged with the messages it
-  replaced, as one moment (#94, step 6; Zoe, 2026-10-06: a person catching
+  replaced, as one moment (#94, step 6; agreed, 2026-10-06: a person catching
   up reads the newest message and glances back). The attention request lists
   them newest first (`unattended_event_ids`, `I-010A AttentionRequestV2@6`),
   and attention answers one more question, only then: which of them still
@@ -1250,7 +1249,7 @@ behavior of the core, Claude Code, Codex or the plugin.
   AttentionDecisionV2@8`), on the chat and the typed route alike. Step 1
   never hides a moment that names one, the reading names that message first,
   and the turn lists them too (`I-010C ParticipantWakeV2@12`) and may reply
-  to any. Run 45 showed why: in `asked-while-busy`, with only Zoe's "Thanks!"
+  to any. Run 45 showed why: in `asked-while-busy`, with only Alice's "Thanks!"
   judged as the moment, Vigil answered Sam's mid-turn question 3 or 4 times
   in 10. Scenes can now mark events as `unattended`, and the suite feeds them
   through the scheduler while a turn runs.
@@ -1258,7 +1257,7 @@ behavior of the core, Claude Code, Codex or the plugin.
   (#94, step 6). Only the newest still gets the next opportunity, but before
   it is judged, up to 3 of the messages it replaced are judged for the memory
   alone (`MIDTURN_RECALL_LIMIT`), so a question Sam asks while Vigil is
-  answering Zoe starts a thread that the newest message's judgment and
+  answering Alice starts a thread that the newest message's judgment and
   Vigil's turn both see. Before, those messages were never judged and started
   no thread. Together they get one attention timeout, so a slow provider
   delays the newest by at most that. A failed judgment is skipped, and cancel
@@ -1270,7 +1269,7 @@ behavior of the core, Claude Code, Codex or the plugin.
   step 3). A binding field the result does carry must still match exactly,
   and an unknown one is refused. Runs 20 to 39 lost 16 agent turns, 15 of
   them posts, because the model dropped a field of its own turn's binding or
-  garbled one of its long IDs. Seven were the report Vigil owed Zoe in
+  garbled one of its long IDs. Seven were the report Vigil owed Alice in
   `build-finishes-long-after-promise`. The turn prompt and
   action schema now ask only for `request_id`; `nunchi.participant-turn`
   stays version 1, since every full binding is still accepted. They also
@@ -1285,21 +1284,21 @@ behavior of the core, Claude Code, Codex or the plugin.
   to 175 of 231 moments (run 37), and it still hid the promised CI line. Each of the agent's moves about a message now
   also says who wrote that message and what it said (`about_author_id`,
   `about_text`; `I-010C ParticipantWakeV2@11`), so "I'll tell you when it
-  finishes" still makes sense after Zoe's request has left the window. An
+  finishes" still makes sense after Alice's request has left the window. An
   action may reply or react to a message the turn's memory points at, as
   to one in its window: run 38 showed an agent replying to the request it
   remembered and being refused.
 - Step 1 no longer hides what the judgment itself would speak to (#94,
   step 6). A "not conversation" answer suppresses only when the judgment's
   most likely move is not to speak. Run 35 showed why: a CI line saying the
-  nightly passed, which Vigil had promised to report to Zoe, was read as
+  nightly passed, which Vigil had promised to report to Alice, was read as
   not conversation (about 0.1) while the most likely move was to speak
   (0.8 to 0.9), so all 20 judgments hid it from the agent. Two scenes
   measure it, `build-finishes-after-promise` (the promise in the window)
   and `build-finishes-long-after-promise` (the promise only in the agent's
   memory, 73 scenes).
 - The agent reports an approved action's outcome itself (#94, plan step 6;
-  Zoe, #90 decision 2 on #94). When an operator's approval settles a
+  #90, decision 2 on #94). When an operator's approval settles a
   privileged action after the agent's turn about it ended (done, failed,
   unknown, or denied at the recheck), the authorization coordinator tells
   its outcome listeners, and the delivery lane gives the agent a turn about
@@ -1363,7 +1362,7 @@ behavior of the core, Claude Code, Codex or the plugin.
   Any action of the shared turn protocol, silence included, may carry `why`:
   one short sentence in the agent's own words. The host strips it before
   anything is sent and keeps it in the agent's memory, so a later turn sees
-  "stayed quiet: Zoe asked Castor" and not only "stayed quiet"
+  "stayed quiet: Alice asked Castor" and not only "stayed quiet"
   (`I-010C ParticipantWakeV2@6`, at most 200 characters). A visible move gets
   its reason once the room shows it with the same words. The Claude Code
   participant keeps its reasons in its own session transcript and has no
@@ -1417,8 +1416,7 @@ behavior of the core, Claude Code, Codex or the plugin.
   efforts; `@off` turns reasoning off. The agent's calls cap their output at
   4096 tokens. The OpenAI-compatible participant model takes `extra_body`, and
   the OpenAI-compatible models keep their provider's last response.
-- Attention reads the room as typed questions (#94, plan step 4; Zoe,
-  2026-10-05). Step 1 asks whether the judged message is conversation a
+- Attention reads the room as typed questions (#94, plan step 4; agreed, 2026-10-05). Step 1 asks whether the judged message is conversation a
   participant like this one could take part in; only a "no" suppresses, and
   a message addressed to someone else is still conversation. Step 2 asks who
   it is addressed to, whether it was answered and by which message, whether
@@ -1441,7 +1439,7 @@ behavior of the core, Claude Code, Codex or the plugin.
   behavior run every chat model wrote some answers that way, which failed
   44% of chat-model judgments.
 - The agent sees the room as it is now, and looks again before speaking
-  (#94, plan step 3; Zoe, 2026-10-05). The gate's context and the agent's
+  (#94, plan step 3; agreed, 2026-10-05). The gate's context and the agent's
   own view are separate. During its turn the agent reads the live room:
   older messages, newer ones, or `new` for what others posted since it last
   looked, including messages that arrived after its turn began. Its history
@@ -1472,7 +1470,7 @@ behavior of the core, Claude Code, Codex or the plugin.
   default 400) set the prompt and cap what reaches the agent, so a shorter
   reading can trade detail for speed; the behavior suite's
   `--reading-items` and `--reading-chars` compare lengths.
-- The agent sends its own "mhm" by default (Zoe, 2026-10-05). The ACK policy
+- The agent sends its own "mhm" by default (agreed, 2026-10-05). The ACK policy
   is off by default, so an ACK judgment gives the agent a turn, with the
   reading saying why a nod could fit, instead of Nunchi adding 👂 itself.
   `ack.enabled: true` turns Nunchi's nod back on until step 7 of the plan
@@ -1640,7 +1638,7 @@ behavior of the core, Claude Code, Codex or the plugin.
     answer and the reason, and the answer is posted trimmed, as before.
   - Nothing else: the core reads no other tag and no code. Native
     reasoning (`<think>`, `<reasoning>`, `<thought>`) is the harness's job
-    (Zoe's decision), so a post that names or quotes any tag, in prose or
+    (decided), so a post that names or quotes any tag, in prose or
     code, is posted as written, and in tool and one-reply posting so is
     `<thinking>`.
 
@@ -1977,7 +1975,7 @@ behavior of the core, Claude Code, Codex or the plugin.
 - `HostStructuredParticipant` (#91).
 - The headless Claude Code runner (PR #32) and its real-binary scene runner
   (`evals/v2/claude_code/`), replaced by the gate and mod (#43).
-- Nunchi's own nod (#94 step 7; Zoe, 2026-10-05: every visible move is the
+- Nunchi's own nod (#94 step 7; agreed, 2026-10-05: every visible move is the
   agent's own). It had been off by default since #107. A judgment that leans
   to a "mhm" is now `DEFER`: the agent takes the turn and reacts itself if it
   wants to.
@@ -2039,18 +2037,18 @@ code or process is current.
   all eleven slices; a partial or extra-scope record is invalid for every slice.
   Its separate readiness gate verifies owner, dependencies, analysis, worktree,
   and activation evidence.
-- Zoe, or an assigner named in a durable Zoe delegation, assigns the program
+- The maintainer, or an assigner named in a durable maintainer delegation, assigns the program
   owner and slice occupants. The declaration and activation evidence carry
   `<participant identity> — evidence/governance/assignments/<record>.md`; that
   record contains `Assignee`, `Lane`, `Assigned by`, `Assigned on`, and
-  `Authority reference`, plus `Delegated by: Zoe` and `Delegation reference`
-  for a non-Zoe assigner. Assignment may precede
+  `Authority reference`, plus `Delegated by: the maintainer` and `Delegation reference`
+  for a non-maintainer assigner. Assignment may precede
   authority for planning but never grants implementation or readiness; no
   central assignment registry is introduced.
 - Slice state follows `PLANNED -> READY -> ACTIVE -> CONVERGED -> HANDOFF_READY
   -> ACCEPTED`. Each dependent independently accepts its required upstream
   handoffs before readiness; at slice level `v2-integrator` accepts `010`–`100`
-  and Zoe accepts `110`. Only slice `110` integrates. After its handoff, Zoe's
+  and the maintainer accepts `110`. Only slice `110` integrates. After its handoff, the maintainer's
   exact-candidate decision establishes slice `ACCEPTED` and program
   `CUTOVER_ACCEPTED`; one atomic merge remains verification-pending, and a
   docs/evidence-only follow-up combines exact-main verification with final

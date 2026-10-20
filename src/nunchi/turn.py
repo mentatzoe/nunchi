@@ -21,7 +21,7 @@ do inside its turn, once, so every integration gets the same behavior
   posting, whose turn teaches ``<thinking>``, the agent's ``<thinking>``
   blocks are never posted either and become the move's reason. Nothing else
   in a post changes: native reasoning in other tags is the harness's job
-  (Zoe), so the core reads no other tag and no code. A tool or one-reply
+  (decided), so the core reads no other tag and no code. A tool or one-reply
   post with nothing left is refused, never posted empty; a final answer
   with nothing left is silence;
 - secret values never reach the room.
@@ -114,7 +114,7 @@ _AROUND_MARKER = " \t\r*_~`\"'>"
 # In final-answer posting, the agent's own thinking in the tag the turn
 # teaches: never posted, and kept as its reason. An unclosed block runs to the
 # end of the answer. No other tag, and no code, is read: native reasoning is
-# the harness's job (Zoe).
+# the harness's job (decided).
 _NOTE = re.compile(r"<thinking>(.*?)(?:</thinking>|\Z)", re.S | re.I)
 MARKER_ONLY_REFUSAL = (
     "Refused: this post held only Nunchi's wake marker, which the room never "
@@ -185,7 +185,7 @@ def split_private(text: str | None, *, final_answer: bool = False) -> tuple[str,
 
     Nothing else changes. Thinking in other tags (``<think>``,
     ``<reasoning>``) is native reasoning, and handling it is the harness's
-    job (Zoe), so a post that names or quotes any tag, in prose or code, is
+    job (decided), so a post that names or quotes any tag, in prose or code, is
     posted as written; so is the turn's own tag (D6, open).
 
     Returns the text for the room and the thinking; either may be empty.
@@ -1137,7 +1137,7 @@ class Turn:
     def after_tool_call(self) -> str | None:
         """What others posted since the agent last looked, or None (steering).
 
-        Steering (#94 step 6; Zoe, 2026-10-06): after each tool call in a room
+        Steering (#94 step 6; agreed, 2026-10-06): after each tool call in a room
         turn the integration asks, and the answer goes with that tool's result
         as context the model reads, so the agent can fold a message that
         arrived mid-turn into what it is doing. Each message is shown once and

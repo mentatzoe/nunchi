@@ -62,13 +62,13 @@ def wake(request_id="r1"):
         },
         "actors": {
             "discord:bot:9": {"kind": "bot"},
-            "human:zoe": {"kind": "human"},
+            "human:alice": {"kind": "human"},
         },
         "events": [
             {
                 "id": "e1",
                 "type": "message",
-                "author_id": "human:zoe",
+                "author_id": "human:alice",
                 "text": "Could you look at this?",
                 "mentioned_actor_ids": [],
                 "mentions_room": False,
@@ -265,7 +265,7 @@ class ParticipantProtocolTests(unittest.TestCase):
 
     def test_any_move_may_say_why_for_the_agents_own_memory(self):
         # #94 step 5: the reason goes to the host, which keeps it in memory.
-        quiet = {"kind": "silence", "why": "Zoe asked Castor; waiting for him."}
+        quiet = {"kind": "silence", "why": "Alice asked Castor; waiting for him."}
         self.assertEqual((True, quiet), self.protocol.consume(json.dumps(self.envelope(quiet)), expand=None))
         reply = {"kind": "reply", "origin_event_id": "e1", "target_event_id": "e1", "text": "Yes.", "why": "I know it."}
         self.assertEqual(

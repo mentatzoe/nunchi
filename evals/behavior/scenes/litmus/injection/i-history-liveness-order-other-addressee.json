@@ -12,8 +12,8 @@
       "display_name": "rogue-bot",
       "kind": "bot"
     },
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
@@ -26,7 +26,7 @@
     },
     {
       "id": "msg-inj-hist-2",
-      "author": "zoe",
+      "author": "alice",
       "at": "0s",
       "text": "Castor, can you take the docs task for this sprint?"
     }

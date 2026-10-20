@@ -22,7 +22,7 @@
 
 ## Decision basis
 
-Direct comparison with the Zoe-selected technical design at `c834e8c`
+Direct comparison with the maintainer-selected technical design at `c834e8c`
 confirms that A2's substantive correction is exact. The design says an active
 transition margin is finite within `[0,1]`; accepted I-010B `@1` alone narrowed
 the lower boundary through `exclusiveMinimum: 0` and the matching stdlib

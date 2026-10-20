@@ -8,15 +8,15 @@
     "turnaware-dalgos"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
   "events": [
     {
       "id": "assign-trig",
-      "author": "zoe",
+      "author": "alice",
       "text": "Dalgos, you are assigned as owner. Please implement the CLI smoke and post the results comment when done."
     }
   ],

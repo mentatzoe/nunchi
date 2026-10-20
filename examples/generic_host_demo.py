@@ -91,13 +91,13 @@ def main() -> int:
         event={
             "id": "message-1",
             "type": "message",
-            "author_id": "generic:actor:zoe",
+            "author_id": "generic:actor:alice",
             "text": "Helpbot, summarize the result.",
             "mentioned_actor_ids": [binding.actor_id],
             "mentions_room": False,
         },
         actors={
-            "generic:actor:zoe": {"display_name": "Zoe", "kind": "human"},
+            "generic:actor:alice": {"display_name": "Alice", "kind": "human"},
         },
     )
     print([record["stage"] for record in receipts.all_records()])

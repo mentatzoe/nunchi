@@ -8,15 +8,15 @@
     "vigil"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
   "events": [
     {
       "id": "msg-pilot-1779407325793",
-      "author": "zoe",
+      "author": "alice",
       "at": "0s",
       "text": "Hey <@1494822530643398827> I need the codex-tpm in the Multica `sonste` project to be able to notify me via Discord using cc-connect to the channel `1507166911648239686`. Is this something you can help me with, or should I reach out through a different platform? (this could be a great test to see if the rest will stay silent or butt in :))",
       "mentions": [

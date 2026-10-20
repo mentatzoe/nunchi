@@ -3,7 +3,7 @@
   "source_shape": "discord",
   "trigger": {
     "id": "msg-trigger-dup",
-    "author": "zoe",
+    "author": "alice",
     "content": "Anyone want to weigh in on the cache thing?",
     "timestamp": "2026-05-13T01:32:00.000Z"
   },

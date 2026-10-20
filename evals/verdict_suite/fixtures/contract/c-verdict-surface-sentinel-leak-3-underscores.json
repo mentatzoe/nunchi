@@ -3,7 +3,7 @@
   "source_shape": "contract",
   "trigger": {
     "id": "any-trig",
-    "author": "zoe",
+    "author": "alice",
     "content": "Please confirm the rollout is done."
   },
   "context": [],

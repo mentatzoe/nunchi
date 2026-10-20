@@ -33,7 +33,7 @@ Integrations:
   sandbox, privileged actions disabled. It stays until
   `nunchi-codex-app-server-runner` passes live checks.
 
-Removed on 2026-10-11 (Zoe, "delete, for now"): `nunchi-hermes-dashboard` and
+Removed on 2026-10-11 (for now): `nunchi-hermes-dashboard` and
 `nunchi-hermes-lifecycle`, with the `hermes_agent.plugins` entry point, belonged
 to the old Hermes integration, which patched Hermes. The parked Hermes plugin
 ships no command and no entry point.

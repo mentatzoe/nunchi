@@ -190,7 +190,7 @@ class World:
             role_id = self.guild_id if name == "@everyone" else self._mint(created)
             self.roles[role_id] = Role(role_id, name, bits(granted), position)
         self.members: dict[str, Member] = {}
-        people = spec.get("people", ["zoe"])
+        people = spec.get("people", ["alice"])
         for name in people:
             extra = people[name].get("roles", []) if isinstance(people, dict) else []
             self._add(Member(self._mint(created), name, False, roles=self._role_ids(["room", *extra]), joined_at=joined))

@@ -74,7 +74,7 @@ from nunchi.room import RoomSettings
 from tests.v2.test_shared_foundation import foundation, message
 
 ROOT = Path(__file__).resolve().parents[2]
-WORLD = {"guild": "g", "people": ["zoe"], "bots": {"Vigil": {}}, "channels": {"room": {}, "other": {}}}
+WORLD = {"guild": "g", "people": ["alice"], "bots": {"Vigil": {}}, "channels": {"room": {}, "other": {}}}
 
 
 def _sdk_missing() -> str:
@@ -351,7 +351,7 @@ class ThreadEventTests(unittest.TestCase):
         "id": "301",
         "channel_id": "300",
         "guild_id": "1",
-        "author": {"id": "5", "username": "zoe"},
+        "author": {"id": "5", "username": "alice"},
         "content": "in the thread",
         "mentions": [],
         "mention_everyone": False,
@@ -492,7 +492,7 @@ class RunnerThreadTests(unittest.IsolatedAsyncioTestCase):
         return _dispatch(
             sequence,
             "MESSAGE_CREATE",
-            {"id": message_id, "channel_id": channel, "author": {"id": "5", "username": "zoe"}, "content": "hi", "mentions": []},
+            {"id": message_id, "channel_id": channel, "author": {"id": "5", "username": "alice"}, "content": "hi", "mentions": []},
         )
 
     @staticmethod
@@ -635,7 +635,7 @@ class Rig:
         return ["<gap>" if item["continuity_gap"] else item["event"].get("text") for item in self.session.received]
 
     async def post(self, channel: str, text: str) -> dict:
-        return await asyncio.to_thread(self.fd.post, "zoe", channel, text)
+        return await asyncio.to_thread(self.fd.post, "alice", channel, text)
 
     async def until(self, predicate, timeout: float = 10.0) -> bool:
         deadline = time.monotonic() + timeout
@@ -692,7 +692,7 @@ class ThreadRoomTests(unittest.IsolatedAsyncioTestCase):
         rig = Rig(self)
         await rig.start()
         self.addAsyncCleanup(rig.stop)
-        thread = (await asyncio.to_thread(rig.fd.create_thread, "zoe", "room", "details"))["id"]
+        thread = (await asyncio.to_thread(rig.fd.create_thread, "alice", "room", "details"))["id"]
         await rig.post("room", "in the room")
         await rig.post("details", "in the thread")
         await rig.post("details", "again in the thread")
@@ -710,7 +710,7 @@ class ThreadRoomTests(unittest.IsolatedAsyncioTestCase):
         rig = Rig(self)
         await rig.start()
         self.addAsyncCleanup(rig.stop)
-        await asyncio.to_thread(rig.fd.create_thread, "zoe", "other", "elsewhere")
+        await asyncio.to_thread(rig.fd.create_thread, "alice", "other", "elsewhere")
         await rig.post("elsewhere", "in another channel's thread")
         await rig.post("other", "in another channel")
         await rig.post("room", "in the room")
@@ -722,7 +722,7 @@ class ThreadRoomTests(unittest.IsolatedAsyncioTestCase):
         rig = Rig(self)
         await rig.start()
         self.addAsyncCleanup(rig.stop)
-        await asyncio.to_thread(rig.fd.create_thread, "zoe", "room", "details")
+        await asyncio.to_thread(rig.fd.create_thread, "alice", "room", "details")
         await rig.post("room", "before")
         self.assertTrue(await rig.until(lambda: len(rig.heard()) >= 2), rig.heard())
         await asyncio.to_thread(rig.fd.fault, "GET", "/channels/{channel}", 403, 5)
@@ -736,7 +736,7 @@ class ThreadRoomTests(unittest.IsolatedAsyncioTestCase):
         rig = Rig(self, threads_in_room=False)
         await rig.start()
         self.addAsyncCleanup(rig.stop)
-        await asyncio.to_thread(rig.fd.create_thread, "zoe", "room", "details")
+        await asyncio.to_thread(rig.fd.create_thread, "alice", "room", "details")
         await rig.post("details", "in the thread")
         await rig.post("room", "in the room")
         self.assertTrue(await rig.until(lambda: len(rig.heard()) >= 2), rig.heard())
@@ -795,8 +795,8 @@ class ThreadReplyTests(unittest.IsolatedAsyncioTestCase):
         threads = ThreadDirectory(rest, frozenset({self.room}))
         self.authorizer = ToolAuthorizer(secret=self.secret, participant_routes={"vigil": frozenset({self.room})}, threads=threads)
         self.executor = ToolExecutor(rest, SendBackstop(50, 10), authorizer=self.authorizer)
-        self.thread = (await asyncio.to_thread(self.fd.create_thread, "zoe", "room", "details"))["id"]
-        self.elsewhere = (await asyncio.to_thread(self.fd.create_thread, "zoe", "other", "elsewhere"))["id"]
+        self.thread = (await asyncio.to_thread(self.fd.create_thread, "alice", "room", "details"))["id"]
+        self.elsewhere = (await asyncio.to_thread(self.fd.create_thread, "alice", "other", "elsewhere"))["id"]
 
     def call(self, name: str, channel: str, **arguments):
         arguments = {"channel_id": channel, **arguments}
@@ -809,7 +809,7 @@ class ThreadReplyTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_the_host_may_post_and_react_in_a_thread_of_the_authorized_room(self):
-        asked = self.fd.post("zoe", "details", "a question in the thread")["id"]
+        asked = self.fd.post("alice", "details", "a question in the thread")["id"]
         sent, ok = await asyncio.to_thread(self.call, "reply_message", self.thread, message_id=asked, content="an answer")
         self.assertTrue(ok, sent)
         self.assertEqual(self.thread, sent["message"]["channel_id"])
@@ -923,7 +923,7 @@ class ThreadMoveFromTheTurnTests(unittest.TestCase):
 
     ROOM, THREAD, BOT = "200", "300", "9"
     IN_THREAD = "discord:message:301"
-    ACTORS = {"human:zoe": {"kind": "human"}}
+    ACTORS = {"human:alice": {"kind": "human"}}
     ALLOWED = ReactionCapability(supported=True, authenticated=True, operations=("add",), reactions=("*",), permissions_revision="t")
 
     def setUp(self) -> None:
@@ -1425,7 +1425,7 @@ class ConnectRaceTests(unittest.TestCase):
 
             def posting(register=register, text=text):
                 register()
-                transport.fd.post("zoe", "room", text)
+                transport.fd.post("alice", "room", text)
 
             connection.register = posting
             stop = transport.serve(connection)
@@ -1441,12 +1441,12 @@ class ConnectRaceTests(unittest.TestCase):
         client = connection.client
         client.connect()
         connection.register()  # registered; its stream is not open yet
-        before = transport.fd.post("zoe", "room", "sent while the client had no stream")
+        before = transport.fd.post("alice", "room", "sent while the client had no stream")
         self.assertTrue(_wait(lambda: "client-delivery-lost" in transport.outcomes()), transport.outcomes())
         self.assertNotIn("client-delivered", transport.outcomes(), "it was not journaled as delivered")
         stream = client.open_stream()
         transport.streams.append(stream)
-        transport.fd.post("zoe", "room", "sent once the stream is open")
+        transport.fd.post("alice", "room", "sent once the stream is open")
         heard: list[dict] = []
         _read(client, stream, heard)
         self.assertTrue(_wait(lambda: len(heard) >= 2), heard)
@@ -1469,7 +1469,7 @@ class StreamDeathTests(unittest.TestCase):
         runner.register()
         heard: list[dict] = []
         _read(client, stream, heard)
-        transport.fd.post("zoe", "room", "heard")
+        transport.fd.post("alice", "room", "heard")
         self.assertTrue(_wait(lambda: len(heard) >= 2), heard)
         self.assertEqual([True, False], [item["continuity_gap"] for item in heard[:2]])
         delivered = transport.outcomes().count("client-delivered")
@@ -1480,7 +1480,7 @@ class StreamDeathTests(unittest.TestCase):
             _wait(lambda: transport.outcomes().count("client-delivery-lost") > lost), "the transport noticed the stream end"
         )
         lost = transport.outcomes().count("client-delivery-lost")
-        transport.fd.post("zoe", "room", "while the runner is gone")
+        transport.fd.post("alice", "room", "while the runner is gone")
         # The gap that would have told it, and the message behind the gap, both fail to arrive; neither reads as delivered.
         self.assertTrue(_wait(lambda: transport.outcomes().count("client-delivery-lost") >= lost + 2, 10), transport.outcomes())
         self.assertEqual(delivered, transport.outcomes().count("client-delivered"), "nothing was journaled as delivered to a dead stream")
@@ -1490,7 +1490,7 @@ class StreamDeathTests(unittest.TestCase):
         transport.serve(second)
         self.assertTrue(_wait(lambda: second.marks), "the new runner is listening")
         time.sleep(0.3)
-        transport.fd.post("zoe", "room", "back")
+        transport.fd.post("alice", "room", "back")
         self.assertTrue(_wait(lambda: len(second.heard) >= 2), second.heard)
         self.assertEqual(["<gap>", ("back", None)], second.heard[:2])
 

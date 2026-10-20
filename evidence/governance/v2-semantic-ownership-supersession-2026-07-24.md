@@ -1,6 +1,6 @@
-# Zoe semantic V2 ownership supersession — 2026-07-24
+# Maintainer semantic V2 ownership supersession — 2026-07-24
 
-This record durably records the ownership map Zoe approved in Codex task
+This record durably records the ownership map the maintainer approved in Codex task
 `019f7f13-3e41-7022-b53f-85e4ce3b23a1` with:
 
 > LGTM. Can you apply the modifications?
@@ -8,16 +8,16 @@ This record durably records the ownership map Zoe approved in Codex task
 The approved proposal immediately preceding that instruction assigned stable
 product identities rather than session names, staffing labels, or bot accounts.
 
-**Decision owner**: Zoe
+**Decision owner**: the maintainer
 **Decision date**: 2026-07-24
 **Recorded by**: Codex
 **Source task**: 019f7f13-3e41-7022-b53f-85e4ce3b23a1
-**Authority reference**: Codex task `019f7f13-3e41-7022-b53f-85e4ce3b23a1` — Zoe's 2026-07-24 approval
+**Authority reference**: Codex task `019f7f13-3e41-7022-b53f-85e4ce3b23a1` — the maintainer's 2026-07-24 approval
 **Supersedes decision**: evidence/governance/v2-end-to-end-ownership-supersession-2026-07-23.md
 **Slice owners**: 010=Codex, 020=Codex, 030=Codex, 040=Codex, 050=Codex, 060=Aleph, 070=Claude, 080=Codex, 090=Codex, 100=Claude, 110=Codex
 **Program owner**: Codex
 **Program assignment record**: evidence/governance/assignments/codex-v2-program-owner-2026-07-24.md
-**Completion authority**: Zoe
+**Completion authority**: the maintainer
 **Current assignment records**: 010=evidence/governance/assignments/codex-v2-contract-owner-2026-07-23.md, 020=evidence/governance/assignments/codex-v2-observation-owner-2026-07-23.md, 030=evidence/governance/assignments/codex-v2-core-owner-2026-07-23.md, 040=evidence/governance/assignments/codex-v2-wake-owner-2026-07-23.md, 050=evidence/governance/assignments/codex-v2-transport-owner-2026-07-23.md, 060=evidence/governance/assignments/aleph-v2-hermes-owner-2026-07-24.md, 070=evidence/governance/assignments/claude-v2-claude-owner-2026-07-24.md, 080=evidence/governance/assignments/codex-v2-codex-owner-2026-07-24.md, 090=evidence/governance/assignments/codex-v2-adapters-owner-2026-07-24.md, 100=evidence/governance/assignments/claude-v2-security-owner-2026-07-24.md, 110=evidence/governance/assignments/codex-v2-integrator-2026-07-23.md
 
 `Codex`, `Aleph`, and `Claude` are stable product-owner identities. They are
@@ -29,7 +29,7 @@ bot accounts provide attribution only.
 Codex owns the program, shared foundations, its own runtime integration, the
 cross-platform reference-adapter surface, final integration, and cutover.
 Aleph owns the Hermes platform packet. Claude owns the Claude Code platform
-packet and the cross-product security-assurance closure. Zoe retains product
+packet and the cross-product security-assurance closure. The maintainer retains product
 scope and final completion authority without occupying the operational
 `v2-program-owner` lane.
 

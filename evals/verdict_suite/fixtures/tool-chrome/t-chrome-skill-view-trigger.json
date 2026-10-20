@@ -11,7 +11,7 @@
     {
       "id": "msg-chrome-skill-1",
       "type": "message",
-      "author": "zoe",
+      "author": "alice",
       "content": "aleph, can you pick up the receipts-log cleanup next?",
       "timestamp": "2026-07-08T21:14:00.000Z"
     }

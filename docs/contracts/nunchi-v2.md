@@ -159,7 +159,7 @@ A truthful attention request represents:
   per-event-type `event_visibility`, and since @8 optional `gaps`.
   `session-only` continuity and unknown visibility are never upgraded by
   inference.
-- **Gaps in view (@8, Zoe, 2026-10-10)** — a continuity gap is a point in the
+- **Gaps in view (@8, agreed, 2026-10-10)** — a continuity gap is a point in the
   room's timeline (the time and arrival position where the observation may
   have missed messages), not a lifetime flag. `has_gaps`, `has_restart_gap`
   and `continuity` describe the gaps that are still news *in this window*, and
@@ -207,7 +207,7 @@ A truthful attention request represents:
   so it is judged again as it stands now. `pace.judged_seconds_ago` then
   says how long the quiet has lasted. Since @4, `outcome` means an action
   the participant proposed was approved and has finished since its turn
-  about it ended (Zoe, #90 decision 2 on #94). The trigger is the message
+  about it ended (#90, decision 2 on #94). The trigger is the message
   the action was proposed about, or the newest retained event once that
   message has left the window. The participant gets a turn to tell the
   room itself, whatever the judgment reads (I-010B@7 `outcome-turn`).
@@ -224,7 +224,7 @@ A truthful attention request represents:
   message it answered, so the judgment can cite the request beside a promise
   (additive).
 - **Messages that arrived while the participant was busy (@6, #94 step 6;
-  Zoe, 2026-10-06)** — optional `unattended_event_ids`: 1 to 3 messages by
+  agreed, 2026-10-06)** — optional `unattended_event_ids`: 1 to 3 messages by
   others, in `events` and newest first, that arrived while the participant
   was busy with its previous turn and got no turn of their own. The trigger
   is the newest message that arrived meanwhile, and the judgment reads these
@@ -257,8 +257,7 @@ A tagged host-facing union on `status`:
   | `SUPPRESS -> DEFER` | `margin-defer` or `policy-defer` | `margin` (margin valve); `suppression-disabled`, `recoverability-unproven`, or `outcome-turn` (@7) (policy valve) |
   | `SUPPRESS -> SUPPRESS` | `none` | `none` |
 
-  Until @3, only `WAKE -> WAKE` could carry `attention_advice`. Zoe,
-  2026-10-05 (#94): the reading reaches the participant on every turn it
+  Until @3, only `WAKE -> WAKE` could carry `attention_advice`. Agreed, 2026-10-05 (#94): the reading reaches the participant on every turn it
   takes, so @4 allows it on every pair. A malformed item is dropped by the
   engine on its own and never fails the judgment.
 
@@ -295,11 +294,10 @@ A tagged host-facing union on `status`:
   disposition, the `ACK -> ACK` and `ACK -> DEFER` transitions, the
   `capability-defer` valve with the `ack-disabled` and `ack-unsupported`
   causes, and the `ack` authority audit, so Nunchi could react for the
-  participant. Every visible move is now the participant's own (Zoe,
-  2026-10-05), so `@9` removes all of them: a judgment whose most likely
+  participant. Every visible move is now the participant's own (agreed, 2026-10-05), so `@9` removes all of them: a judgment whose most likely
   move is a "mhm" is `DEFER`, and the participant takes the turn. This is a
   breaking closed-union change; a `@9` consumer never receives ACK.
-- **`adds_something`, removed in @10 (Zoe, 2026-10-19).** `@5` asked
+- **`adds_something`, removed in @10 (agreed, 2026-10-19).** `@5` asked
   whether the participant had something to add that nobody had said yet.
   It decided nothing (the disposition comes only from `conversation` and
   `move`), the attention model cannot know what the participant knows, and
@@ -307,7 +305,7 @@ A tagged host-facing union on `status`:
   something useful; a participant takes part socially. `@10` removes the
   answer; answers that carry it no longer validate. This is a breaking
   change to a closed object.
-- **`answers` (@5)** — required on `status: ok` (Zoe, 2026-10-05, #94
+- **`answers` (@5)** — required on `status: ok` (agreed, 2026-10-05, #94
   step 4). The model answers fixed typed questions about the judged
   message, and the core decides from them. Step 1: `conversation`, the
   probability that it is conversation a participant like this one could take
@@ -440,7 +438,7 @@ message is retained and is someone else's. A person remembers what they
 replied to, so the move still makes sense once the message has left the
 window; attention's request (I-010A@5) carries the same memory.
 
-Since @12 (#94 step 6; Zoe, 2026-10-06) the wake may carry
+Since @12 (#94 step 6; agreed, 2026-10-06) the wake may carry
 `unattended_event_ids`, copied from the attention request (I-010A@6) for
 those still in the fresh view: messages by others that arrived while the
 participant was busy with its previous turn and got no turn of their own,
@@ -486,7 +484,7 @@ reads unanswered; a promise is still not the thing done. The change is
 additive: a wake that carries no such pointer validates as before.
 Attention's request (I-010A@9) carries the same memory.
 
-Since @15 (Zoe, 2026-10-10) the wake's `coverage` carries `gaps` as the
+Since @15 (agreed, 2026-10-10) the wake's `coverage` carries `gaps` as the
 attention request's does (I-010A@8), computed for the fresh view the turn is
 built from: the continuity gaps still news that the view reaches or crosses.
 The turn then says it once, in one plain sentence after its notes, for every
@@ -524,7 +522,7 @@ pair that capability authorizes — a `oneOf` over two bare shapes with no
   `coverage`, and optional opaque `next_cursor` (absent means the binding
   is exhausted).
 
-Since @2 (Zoe, 2026-10-10) the page's `coverage` is the shared coverage shape of
+Since @2 (agreed, 2026-10-10) the page's `coverage` is the shared coverage shape of
 `I-010A@8`, so a page that reaches or crosses a continuity gap the participant
 has not been told about carries its optional `gaps`.
 
@@ -580,7 +578,7 @@ receipts. `@4` (#94 step 6) lets the attention stage record the I-010B@7
 `outcome-turn` widening. `@5` (#94 step 7) removes Nunchi's own nod: no new
 record carries an ACK disposition, ACK widening, `ack` audit, or ACK
 participant-host source. A record written before `@5` with those facts still
-validates, read-only, so an older journal loads. `@6` (Zoe, 2026-10-10): the
+validates, read-only, so an older journal loads. `@6` (agreed, 2026-10-10): the
 observation stage's `coverage` is the shared coverage shape of `I-010A@8`, so
 a record written while a continuity gap is in view carries its optional `gaps`;
 a record written before `@6` still validates.
@@ -729,7 +727,7 @@ verbatim (FR-014, `REQ-AUTH-001` in the authority-conformance corpus):
   "room": {"platform": "discord", "id": "152", "continuity_scope_id": "discord:channel:152", "name": "nunchi-room", "kind": "group"},
   "actors": {
     "discord:user:149": {"display_name": "Vigil", "kind": "bot"},
-    "discord:user:42": {"display_name": "Zoe", "kind": "human"}
+    "discord:user:42": {"display_name": "Alice", "kind": "human"}
   },
   "events": [
     {"id": "discord:message:201", "type": "message", "author_id": "discord:user:42", "timestamp": "2026-07-11T12:00:00Z", "text": "Could you review the latest flow?", "mentioned_actor_ids": [], "mentions_room": false},

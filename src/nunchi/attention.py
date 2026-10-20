@@ -346,7 +346,7 @@ _UNATTENDED_PROMPT = (
 )
 
 
-# A gap the window reaches or crosses (Zoe, 2026-10-10), said to a judgment
+# A gap the window reaches or crosses (agreed, 2026-10-10), said to a judgment
 # that has one in the same words the participant's turn carries. It states the
 # fact and Nunchi's words for it; it does not promise what the host will say,
 # since a host that gives the agent no library turn says nothing.
@@ -1180,7 +1180,7 @@ class AttentionEngine:
         if checked.get("occasion") == "outcome" and disposition == "SUPPRESS":
             # An approved action finished after the participant's turn about
             # it ended. The participant is the one who says so in the room,
-            # so the turn always reaches it, with the reading as advice (Zoe,
+            # so the turn always reaches it, with the reading as advice (the maintainer,
             # #90 decision 2 on #94).
             effective = "DEFER"
             valve = "policy-defer"

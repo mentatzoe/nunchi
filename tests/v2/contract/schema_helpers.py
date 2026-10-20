@@ -3171,7 +3171,7 @@ _BASE_REQUEST = {
     "room": {"platform": "discord", "id": "42", "continuity_scope_id": "discord:room:42#2026-07"},
     "actors": {
         "discord:9001": {"display_name": "Vigil", "kind": "bot"},
-        "discord:1001": {"display_name": "Zoe", "kind": "human"},
+        "discord:1001": {"display_name": "Alice", "kind": "human"},
         "discord:2002": {"display_name": "Vigil", "kind": "bot"},
         "discord:3003": {"display_name": "Sol", "kind": "bot"},
     },
@@ -3218,7 +3218,7 @@ _BASE_REQUEST = {
 }
 
 _BASE_ADVICE = {
-    "note": "Zoe addressed the participant directly about the deploy.",
+    "note": "Alice addressed the participant directly about the deploy.",
     "evidence_event_ids": ["e1"],
 }
 
@@ -3361,7 +3361,7 @@ def make_fetch_page(**overrides: Any) -> dict[str, Any]:
         "continuity_scope_id": "discord:room:42#2026-07",
         "direction": "before",
         "anchor_event_id": "e3",
-        "actors": {"discord:1001": {"display_name": "Zoe", "kind": "human"}},
+        "actors": {"discord:1001": {"display_name": "Alice", "kind": "human"}},
         "events": [
             {
                 "id": "e0",
@@ -3514,7 +3514,7 @@ def make_approval_challenge(**overrides: Any) -> dict[str, Any]:
         "approval_challenge_id": "approval-challenge-0001",
         "binding": _deep_copy(_BASE_AUTHORIZATION_BINDING),
         "policy_provenance": _deep_copy(_BASE_POLICY_PROVENANCE),
-        "approver_ids": ["operator:zoe"],
+        "approver_ids": ["operator:alice"],
         "expires_at": "2026-07-24T01:15:00Z",
         "host_only": True,
     }
@@ -3530,7 +3530,7 @@ def make_approval_completion(**overrides: Any) -> dict[str, Any]:
         "approval_completion_id": "approval-completion-0001",
         "approval_challenge_id": "approval-challenge-0001",
         "binding": _deep_copy(_BASE_AUTHORIZATION_BINDING),
-        "authenticated_approver_id": "operator:zoe",
+        "authenticated_approver_id": "operator:alice",
         "completed_at": "2026-07-24T01:05:00Z",
         "recheck": {
             "outcome": "ALLOW",

@@ -7,7 +7,7 @@ the target.
 
 ## Current truth (2026-10-04)
 
-V2 is partial and not live-verified. Since Zoe's 2026-10-04 decision, `main` is
+V2 is partial and not live-verified. Since the maintainer's 2026-10-04 decision, `main` is
 the working branch and holds V2; `integration/v2` is retired. Work merges into
 `main` as it lands, before live proof, so a current `main` is not a claim that
 V2 is complete. No surface has passed a live real-room check since PR
@@ -37,7 +37,7 @@ Nothing below is **verified**.
 No unverified platform (Hermes, Codex, or Claude Code) may be described as
 done, live, or parity-ready until its open gates pass.
 
-Hermes has no supported path today. Zoe removed the old Hermes integration on
+Hermes has no supported path today. The maintainer removed the old Hermes integration on
 2026-10-11 ("delete, for now"): it patched Hermes at runtime, which breaks the
 rule that an integration follows each harness's own plugin rules and never
 patches or reimplements the harness. The Hermes plugin stays parked, with its
@@ -47,7 +47,7 @@ it lacks. The Hermes issues [#38](https://github.com/mentatzoe/nunchi/issues/38)
 [#44](https://github.com/mentatzoe/nunchi/issues/44) tracked the removed
 integration's gates and gate nothing here until the plugin is unparked.
 
-Claude Code follows the design Zoe selected (#43): one Python gate per room,
+Claude Code follows the design the maintainer selected (#43): one Python gate per room,
 a dedicated Claude Code session per room that keeps the user's configuration,
 and a Nunchi mod in that session for the room tools. It replaced the headless
 subprocess runner (PR #32); the channel-plugin designs (PR #72, issue #77) are
@@ -61,7 +61,7 @@ Open gates:
 - [#57 Claude Code on every Nunchi adapter](https://github.com/mentatzoe/nunchi/issues/57);
 - [#58 Claude Code install and supervision](https://github.com/mentatzoe/nunchi/issues/58);
 - [#66 freeze one exact release candidate](https://github.com/mentatzoe/nunchi/issues/66);
-- [#78 Zoe grants: a persistent host machine for live rooms and services](https://github.com/mentatzoe/nunchi/issues/78);
+- [#78 the maintainer grants: a persistent host machine for live rooms and services](https://github.com/mentatzoe/nunchi/issues/78);
 - [#85 agent- and provider-agnostic core](https://github.com/mentatzoe/nunchi/issues/85);
 - [#86 behavioral evaluations](https://github.com/mentatzoe/nunchi/issues/86);
 - [#87 decision-model exploration](https://github.com/mentatzoe/nunchi/issues/87).
@@ -136,5 +136,5 @@ existing.
 ## Completion
 
 The project is complete only when every end condition in
-`v2-completion-goal.md` is true for one frozen, installable candidate and Zoe
+`v2-completion-goal.md` is true for one frozen, installable candidate and the maintainer
 accepts that exact result. Until then, report what is missing in plain words.

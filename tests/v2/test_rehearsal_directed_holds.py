@@ -86,14 +86,14 @@ class PlanTest(unittest.TestCase):
             item = directed.spec(scene_id)
             with self.subTest(scene=scene_id):
                 self.assertEqual(
-                    [{"id": "cue-v1", "author": "zoe", "mentions": ["vigil"], "text": "Vigil, anything to report?", "before": "v1"}],
+                    [{"id": "cue-v1", "author": "alice", "mentions": ["vigil"], "text": "Vigil, anything to report?", "before": "v1"}],
                     [dict(cue) for cue in item.plan.cues],
                 )
         for scene_id in set(SEVEN) - {"answered-while-composing", "never-mind-while-composing", "addressee-never-answers"}:
             self.assertEqual((), directed.spec(scene_id).plan.cues, "a line that answers a message needs no cue")
 
     def test_an_unattended_moment_holds_the_turn_the_agent_was_busy_with_and_the_moments_own_message_lands_in_it_too(self):
-        # Zoe's thanks arrives while Vigil is still answering her first question, with Sam's. Posted after that turn, Sam's message
+        # Alice's thanks arrives while Vigil is still answering her first question, with Sam's. Posted after that turn, Sam's message
         # would be judged on its own (one pending anchor, replaced only by a newer one), and the thanks would not read it as unattended.
         item = directed.spec("asked-while-busy")
         (hold,) = item.plan.holds
@@ -109,7 +109,7 @@ class PlanTest(unittest.TestCase):
             [
                 {"id": "v1", "author": "vigil", "at": "-60s", "text": "Heads up."},
                 {"id": "s1", "author": "sam", "at": "-30s", "mentions": ["vigil"], "text": "Vigil, and this?"},
-                {"id": "z2", "author": "zoe", "at": "0s", "text": "Thanks!"},
+                {"id": "z2", "author": "alice", "at": "0s", "text": "Thanks!"},
             ],
             [{**_moment("z2", ["speak"]), "unattended": ["s1"]}],
         )
@@ -121,7 +121,7 @@ class PlanTest(unittest.TestCase):
             self.assertEqual(("q1", "during-turn", "q1"), (hold.trigger, hold.kind, hold.moment))
         scene = _scene(
             [
-                {"id": "q1", "author": "zoe", "at": "-30s", "mentions": ["vigil"], "text": "Vigil, a question?"},
+                {"id": "q1", "author": "alice", "at": "-30s", "mentions": ["vigil"], "text": "Vigil, a question?"},
                 {"id": "v1", "author": "vigil", "at": "-10s", "reply_to": "q1", "text": "An answer."},
             ],
             [{**_moment("q1", ["stay_quiet"]), "during_turn": ["v1"]}],
@@ -132,7 +132,7 @@ class PlanTest(unittest.TestCase):
         def scene(hours):
             return _scene(
                 [
-                    {"id": "z1", "author": "zoe", "at": f"-{hours}h", "mentions": ["vigil"], "text": "Vigil, check the build?"},
+                    {"id": "z1", "author": "alice", "at": f"-{hours}h", "mentions": ["vigil"], "text": "Vigil, check the build?"},
                     {"id": "v1", "author": "vigil", "at": f"-{hours}h", "reply_to": "z1", "text": "Will do."},
                     {"id": "m1", "author": "sam", "at": "0s", "text": "Is it green?"},
                 ],
@@ -144,7 +144,7 @@ class PlanTest(unittest.TestCase):
         self.assertEqual((), directed.plan(scene(4)).reasons)
         # Without a line of the agent's nothing is compressed, so the quiet is kept (backdated) and the scene can be played.
         plain = _scene(
-            [{"id": "z1", "author": "zoe", "at": "-6h", "text": "Night all."}, {"id": "m1", "author": "sam", "at": "0s", "text": "Morning."}],
+            [{"id": "z1", "author": "alice", "at": "-6h", "text": "Night all."}, {"id": "m1", "author": "sam", "at": "0s", "text": "Morning."}],
             [_moment("m1", ["speak"])],
         )
         self.assertEqual((), directed.plan(plain).reasons)
@@ -153,9 +153,9 @@ class PlanTest(unittest.TestCase):
         item = directed.plan(
             _scene(
                 [
-                    {"id": "h1", "author": "zoe", "at": "-5h", "text": "Morning."},
-                    {"id": "h2", "author": "sam", "at": "-4h", "text": "Morning Zoe."},
-                    {"id": "z1", "author": "zoe", "at": "-3h", "mentions": ["vigil"], "text": "Vigil, check the build?"},
+                    {"id": "h1", "author": "alice", "at": "-5h", "text": "Morning."},
+                    {"id": "h2", "author": "sam", "at": "-4h", "text": "Morning Alice."},
+                    {"id": "z1", "author": "alice", "at": "-3h", "mentions": ["vigil"], "text": "Vigil, check the build?"},
                     {"id": "v1", "author": "vigil", "at": "-3h", "reply_to": "z1", "text": "Will do."},
                     {"id": "c1", "author": "sam", "at": "0s", "text": "Done."},
                 ],
@@ -168,10 +168,10 @@ class PlanTest(unittest.TestCase):
 
 def _unattended_scene(*, line: bool):
     events = [
-        {"id": "z1", "author": "zoe", "at": "-50s", "mentions": ["vigil"], "text": "Vigil, can you check?"},
+        {"id": "z1", "author": "alice", "at": "-50s", "mentions": ["vigil"], "text": "Vigil, can you check?"},
         {"id": "s1", "author": "sam", "at": "-35s", "mentions": ["vigil"], "text": "Vigil, and this?"},
         *([{"id": "v1", "author": "vigil", "at": "-20s", "reply_to": "z1", "text": "Checked."}] if line else []),
-        {"id": "z2", "author": "zoe", "at": "0s", "text": "Thanks!"},
+        {"id": "z2", "author": "alice", "at": "0s", "text": "Thanks!"},
     ]
     return _scene(events, [{**_moment("z2", ["speak"]), "unattended": ["s1"]}])
 
@@ -758,7 +758,7 @@ class DirectorTest(unittest.TestCase):
         played = directed.play_scene(leg, item.plan, 5.0)
         self.assertEqual(["cue-v1", "q1", "a1"], [delivery["scene_event"] for delivery in played["deliveries"]])
         self.assertTrue(played["deliveries"][0]["cue"])
-        self.assertEqual([{"id": "cue-v1", "author": "zoe", "mentions": ["vigil"], "text": "Vigil, anything to report?", "before": "v1"}], played["cues"])
+        self.assertEqual([{"id": "cue-v1", "author": "alice", "mentions": ["vigil"], "text": "Vigil, anything to report?", "before": "v1"}], played["cues"])
         # The script knows the cue's text as the message that triggers the line, and q1 as the moment.
         self.assertEqual("v1", item.script.line("Vigil, anything to report?").event)
         self.assertEqual("q1", item.script.moment("@here does anyone know why last night's deploy failed?").event)
@@ -1329,7 +1329,7 @@ class DocsTest(unittest.TestCase):
         text = " ".join((self.ROOT / "docs" / "rehearsal.md").read_text(encoding="utf-8").split())
         self.assertIn("holds only after z2", text)
         self.assertIn("may drop the reply after the look page", text)
-        self.assertNotIn("changes nothing about what it owes Zoe", text)
+        self.assertNotIn("changes nothing about what it owes Alice", text)
 
 
 if __name__ == "__main__":

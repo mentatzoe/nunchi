@@ -38,7 +38,7 @@ from evals.rehearsal.fake_discord import server
 from evals.rehearsal.fake_discord.control import FakeDiscord
 
 ROOT = Path(__file__).resolve().parents[2]
-WORLD = {"people": ["zoe"], "bots": {"vigil": {}}, "channels": {"room": {}}}
+WORLD = {"people": ["alice"], "bots": {"vigil": {}}, "channels": {"room": {}}}
 OPENSSL = shutil.which("openssl")
 
 
@@ -343,7 +343,7 @@ from evals.rehearsal import preflight
 from evals.rehearsal.fake_discord.control import FakeDiscord
 
 net = json.loads(Path(os.environ["NUNCHI_DISCORD_NET"]).read_text())
-fd = FakeDiscord({"people": ["zoe"], "bots": {"vigil": {}}, "channels": {"room": {}}}, port=443,
+fd = FakeDiscord({"people": ["alice"], "bots": {"vigil": {}}, "channels": {"room": {}}}, port=443,
                  tls=(net["tls"]["cert"], net["tls"]["key"])).start()
 
 async def hello():

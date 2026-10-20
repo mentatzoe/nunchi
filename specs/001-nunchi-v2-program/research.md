@@ -162,7 +162,7 @@ and resembles the social-state mechanisms the product explicitly rejects).
 ## Decision 11: Slice acceptance and downstream consumption are separate
 
 **Decision**: `v2-integrator` is the slice-level acceptance owner for slices
-`010`–`100`; Zoe is the acceptance owner for slice `110`. Every declared
+`010`–`100`; the maintainer is the acceptance owner for slice `110`. Every declared
 downstream owner also records its own acceptance of the exact upstream commit,
 interfaces, and packet before its dependent slice becomes `READY`. A source
 slice's `ACCEPTED` state never implies that every consumer has accepted unless

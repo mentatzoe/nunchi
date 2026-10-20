@@ -39,7 +39,7 @@ class SharedDeadlineRaceTests(unittest.TestCase):
                 return fixtures.PolicySnapshot(
                     "policy", "approval", (replace(
                         case.rule, direct_allow=False, impact="high",
-                    ),), ("operator:zoe",),
+                    ),), ("operator:alice",),
                 )
 
         coordinator = case.coordinator(policy=DelayedPolicy())
@@ -57,7 +57,7 @@ class SharedDeadlineRaceTests(unittest.TestCase):
                 if pending:
                     coordinator.complete_authenticated_approval(
                         approval_challenge_id=pending[0]["challenge"]["approval_challenge_id"],
-                        authenticated_approver_id="operator:zoe",
+                        authenticated_approver_id="operator:alice",
                     )
                 before_host_resumes["effects"] = len(case.native_calls)
                 return result
@@ -96,7 +96,7 @@ class SharedDeadlineRaceTests(unittest.TestCase):
         }
         outcome = case.pipeline.handle_delivery(
             delivery_id="d2", event=fixtures.message("e2"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         self.assertEqual((), before_host_resumes["pending"])
         self.assertEqual(0, before_host_resumes["effects"])
@@ -116,14 +116,14 @@ class SharedDeadlineRaceTests(unittest.TestCase):
         }
         return case.pipeline.handle_delivery(
             delivery_id="d2", event=fixtures.message("e2"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
 
     def _approval(self):
         self.case.policy.replace(fixtures.PolicySnapshot(
             "policy", "approval", (replace(
                 self.case.rule, direct_allow=False, impact="high",
-            ),), ("operator:zoe",),
+            ),), ("operator:alice",),
         ))
         coordinator = self.case.coordinator()
         outcome = self._host_proposal(coordinator)
@@ -138,7 +138,7 @@ class SharedDeadlineRaceTests(unittest.TestCase):
     def _approve(self, coordinator, challenge):
         return coordinator.complete_authenticated_approval(
             approval_challenge_id=challenge,
-            authenticated_approver_id="operator:zoe",
+            authenticated_approver_id="operator:alice",
         )
 
     def _expire_on_record(self, kind):
@@ -200,7 +200,7 @@ class SharedDeadlineRaceTests(unittest.TestCase):
         self.case.policy.replace(fixtures.PolicySnapshot(
             "policy", "approval", (replace(
                 self.case.rule, direct_allow=False, impact="high",
-            ),), ("operator:zoe",),
+            ),), ("operator:alice",),
         ))
         coordinator = self.case.coordinator()
         result = coordinator.execute_proposal(
@@ -303,7 +303,7 @@ class SharedDeadlineRaceTests(unittest.TestCase):
         self.case.policy.replace(fixtures.PolicySnapshot(
             "policy", "idempotent", (replace(
                 self.case.rule, target_idempotency=True,
-            ),), ("operator:zoe",),
+            ),), ("operator:alice",),
         ))
         coordinator = self.case.coordinator(result=fixtures.TransportResult("unknown"))
         first = coordinator.execute_proposal(
@@ -349,7 +349,7 @@ class SharedDeadlineRaceTests(unittest.TestCase):
         self.case.pipeline.host.participant = participant
         outcome = self.case.pipeline.handle_delivery(
             delivery_id="d2", event=fixtures.message("e2"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         result = outcome.opportunities[0].transport
         assert result is not None

@@ -1050,7 +1050,7 @@ class HermesGatewayTest(unittest.TestCase):
         # Hermes strips <thinking> itself; the plugin hands the library the raw
         # answer, which takes the echoed marker out and keeps the taught
         # thinking as the reason. Native reasoning in another tag is Hermes's
-        # own to strip (Zoe), so the library keeps no reason for it.
+        # own to strip (decided), so the library keeps no reason for it.
         echoed = WAKE_MARKER.format("an-old-wake-id-from-history")
         for tag, why in (("thinking", "Plan: check the logs."), ("think", None)):
             with self.subTest(tag=tag):

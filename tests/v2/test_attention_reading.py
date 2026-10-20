@@ -1,6 +1,6 @@
 """Attention's reading of the room reaches the agent on every turn it takes.
 
-Zoe, 2026-10-05 (#94, plan step 2): the reading goes with WAKE and DEFER
+Agreed, 2026-10-05 (#94, plan step 2): the reading goes with WAKE and DEFER
 turns, it describes rather than orders, and a bad or empty reading never
 throws away a valid judgment. Since step 4 it is written from the model's
 typed answers: the model's own notes describe the moment (or, without
@@ -62,7 +62,7 @@ def deliver(pipeline, event_id, text="Vigil, could you look at this?"):
     return pipeline.handle_delivery(
         delivery_id=f"d-{event_id}",
         event=message(event_id, text=text),
-        actors={"human:zoe": {"kind": "human"}},
+        actors={"human:alice": {"kind": "human"}},
     )
 
 
@@ -88,7 +88,7 @@ class ReadingTests(unittest.TestCase):
 
     def test_a_bad_item_is_dropped_and_the_rest_reach_the_agent(self):
         reading = [
-            note("Zoe asked Vigil directly.", "e1"),
+            note("Alice asked Vigil directly.", "e1"),
             note("Cites a message the model never saw.", "e1", "made-up"),
             {"note": "", "evidence_event_ids": ["e1"]},
             {"note": "No citation.", "evidence_event_ids": []},
@@ -99,7 +99,7 @@ class ReadingTests(unittest.TestCase):
         self.assertEqual(("ok", "WAKE"), (opportunity.decision_status, opportunity.effective_disposition))
         (wake,) = wakes
         self.assertEqual(
-            [note("Zoe asked Vigil directly.", "e1"), note("A repeated citation is kept once.", "e1"), moves("WAKE")],
+            [note("Alice asked Vigil directly.", "e1"), note("A repeated citation is kept once.", "e1"), moves("WAKE")],
             wake["attention"]["advice"],
         )
 
@@ -112,7 +112,7 @@ class ReadingTests(unittest.TestCase):
         self.assertEqual(moves("WAKE"), advice[3])
 
     def test_a_defer_turn_carries_the_reading(self):
-        reading = [note("Zoe asked something nobody has answered yet; speaking could fit.", "e1")]
+        reading = [note("Alice asked something nobody has answered yet; speaking could fit.", "e1")]
         opportunity, wakes, _ = self.turn(ReadingModel("DEFER", reading))
         self.assertEqual("DEFER", opportunity.effective_disposition)
         (wake,) = wakes
@@ -124,13 +124,13 @@ class ReadingTests(unittest.TestCase):
     def test_a_mhm_the_agent_may_send_carries_the_reading(self):
         # Without a reaction capability the agent cannot react, but the
         # judgment still gives it the turn; the reading says why a mhm fits.
-        reading = [note("Zoe shared an update; a quick mhm could show Vigil is following.", "e1")]
+        reading = [note("Alice shared an update; a quick mhm could show Vigil is following.", "e1")]
         opportunity, wakes, _ = self.turn(ReadingModel("mhm", reading))
         self.assertEqual("DEFER", opportunity.effective_disposition)
         self.assertEqual(reading + [moves("mhm")], wakes[0]["attention"]["advice"])
 
     def test_the_agent_sends_its_own_mhm(self):
-        # Every visible move is the agent's own (Zoe, 2026-10-05; #94 step
+        # Every visible move is the agent's own (agreed, 2026-10-05; #94 step
         # 7): where the platform takes reactions, a judgment that leans to
         # a mhm is still the agent's turn, and Nunchi never reacts for it.
         transport = RecordingTransport(
@@ -142,7 +142,7 @@ class ReadingTests(unittest.TestCase):
                 permissions_revision="test:v1",
             )
         )
-        reading = [note("Zoe shared an update; a quick mhm could show Vigil is following.", "e1")]
+        reading = [note("Alice shared an update; a quick mhm could show Vigil is following.", "e1")]
         opportunity, wakes, _ = self.turn(ReadingModel("mhm", reading), transport=transport)
         self.assertEqual("DEFER", opportunity.effective_disposition)
         self.assertEqual("DEFER", wakes[0]["attention"]["source"])
@@ -170,7 +170,7 @@ class ReadingTests(unittest.TestCase):
                     pipeline.observation.observe(
                         delivery_id=f"d-n{index}",
                         event=message(f"n{index}", text=f"later message {index}"),
-                        actors={"human:zoe": {"kind": "human"}},
+                        actors={"human:alice": {"kind": "human"}},
                     )
 
             return arrive
@@ -185,15 +185,15 @@ class ReadingTests(unittest.TestCase):
             pipeline.observation.observe(
                 delivery_id=f"d-{event_id}",
                 event=message(event_id, text="earlier"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
         model = pipeline.attention.model
-        model.reading = [note("Zoe raised this earlier.", "o1"), note("Zoe asked Vigil directly.", "e1")]
+        model.reading = [note("Alice raised this earlier.", "o1"), note("Alice asked Vigil directly.", "e1")]
         model.during = newer_messages_arrive(pipeline)
         deliver(pipeline, "e1")
         (wake,) = wakes
         self.assertNotIn("o1", [event["id"] for event in wake["events"]])
-        self.assertEqual([note("Zoe asked Vigil directly.", "e1"), moves("WAKE")], wake["attention"]["advice"])
+        self.assertEqual([note("Alice asked Vigil directly.", "e1"), moves("WAKE")], wake["attention"]["advice"])
         self.assertEqual("e1", wake["attention"]["judged_through_event_id"])
 
     def test_without_notes_the_reading_is_written_from_the_answers(self):
@@ -258,7 +258,7 @@ class ReadingTests(unittest.TestCase):
 
 
 class ReadingLengthTests(unittest.TestCase):
-    """Zoe, 2026-10-05: the reading's length is configurable, to weigh it
+    """Agreed, 2026-10-05: the reading's length is configurable, to weigh it
     against latency and fit."""
 
     def test_the_policy_bounds_the_length(self):
@@ -301,7 +301,7 @@ class ReadingLengthTests(unittest.TestCase):
     def test_no_reading_asked_means_none_delivered(self):
         wakes = []
         pipeline, _, _, _ = foundation(
-            model=ReadingModel("WAKE", [note("Zoe asked Vigil directly.", "e1")]),
+            model=ReadingModel("WAKE", [note("Alice asked Vigil directly.", "e1")]),
             participant=lambda **turn: wakes.append(turn["wake"]) or None,
             policy=AttentionPolicy(reading_items=0),
         )

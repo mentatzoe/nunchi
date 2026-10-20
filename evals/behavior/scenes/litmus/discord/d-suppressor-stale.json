@@ -8,21 +8,21 @@
     "dalgos"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
   "events": [
     {
       "id": "msg-stop",
-      "author": "zoe",
+      "author": "alice",
       "at": "0s",
       "text": "!stop — closing the session for the day."
     },
     {
       "id": "msg-trigger-stale",
-      "author": "zoe",
+      "author": "alice",
       "at": "-30s",
       "text": "What's your take on the deploy plan?"
     }

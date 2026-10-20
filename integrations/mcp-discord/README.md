@@ -23,7 +23,7 @@ Closed params:
     "mentions_room": false
   },
   "actors": {
-    "discord:actor:789": {"display_name": "Zoe", "kind": "human"}
+    "discord:actor:789": {"display_name": "Alice", "kind": "human"}
   },
   "continuity_gap": false,
   "target_participant_id": "codex",

@@ -5,7 +5,7 @@ Date: 2026-07-24
 Result: passed for the shared foundation, shared Discord transport, CLI,
 Codex, and reference-adapter candidate. This record does not implement,
 exercise, approve, or arm Hermes or Claude Code, and it does not claim
-integration, release, or Zoe's final product acceptance.
+integration, release, or the maintainer's final product acceptance.
 
 ## Subject and identity
 

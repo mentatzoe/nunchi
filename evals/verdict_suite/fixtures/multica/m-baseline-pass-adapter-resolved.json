@@ -3,7 +3,7 @@
   "source_shape": "multica",
   "trigger": {
     "id": "ping-msg",
-    "author": "zoe",
+    "author": "alice",
     "content": "Can turnaware-vigil respond here?"
   },
   "context": [

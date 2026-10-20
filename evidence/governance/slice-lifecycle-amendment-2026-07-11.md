@@ -63,17 +63,17 @@ invalid for every slice. The independent slice-readiness gate then verifies
 assignment, accepted dependencies, clean analysis, isolated worktree, and
 activation evidence. Each dependent owner separately accepts its required
 upstream handoffs before its own slice becomes `READY`. At slice level,
-`v2-integrator` accepts slices `010`–`100`, while Zoe accepts slice `110`.
+`v2-integrator` accepts slices `010`–`100`, while the maintainer accepts slice `110`.
 Activation evidence records dependencies as ordered `slice=full-sha` commits
 and matching `slice=repo-relative-evidence-file` per-consumer acceptance
 references. Slice `110` is not ready until every slice `010`–`100` is itself
 `ACCEPTED`.
 
-Zoe, or an assigner named in a durable Zoe delegation, assigns the program
+The maintainer, or an assigner named in a durable maintainer delegation, assigns the program
 owner and slice occupants. Each declaration uses `<participant identity> —
 evidence/governance/assignments/<record>.md`. That record names `Assignee`,
-`Lane`, `Assigned by`, `Assigned on`, and `Authority reference`; a non-Zoe
-assigner additionally names `Delegated by: Zoe` and `Delegation reference`.
+`Lane`, `Assigned by`, `Assigned on`, and `Authority reference`; a non-maintainer
+assigner additionally names `Delegated by: the maintainer` and `Delegation reference`.
 Assignment may precede implementation authority for planning, but does not
 grant it or establish `READY`; no assignment registry is created.
 
@@ -88,7 +88,7 @@ Candidate commits exist in Git, and candidate evidence and handoff packets name
 exact existing ordinary-path files.
 
 Only slice `110` may assemble the cross-surface candidate. After it reaches
-`HANDOFF_READY`, Zoe makes the durable exact-candidate decision. The assigned
+`HANDOFF_READY`, the maintainer makes the durable exact-candidate decision. The assigned
 `v2-integrator` copies that decision into slice acceptance or rejection
 evidence; on acceptance, the assigned `v2-program-owner` copies it into the
 program cutover record. That establishes slice `ACCEPTED` and program

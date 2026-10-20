@@ -2,14 +2,14 @@
   "id": "build-finishes-long-after-promise",
   "title": "A CI line Vigil promised to report on, after the promise left attention's window",
   "source": "docs/behavior.md (conversation memory: what the agent said it would do)",
-  "review": "draft: written from docs/behavior.md; ranges need Zoe's review",
+  "review": "draft: written from docs/behavior.md; ranges need the maintainer's review",
   "platform": "discord",
   "participants": [
     "vigil"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     },
     "sam": {
@@ -28,7 +28,7 @@
   "events": [
     {
       "id": "z1",
-      "author": "zoe",
+      "author": "alice",
       "at": "-3h",
       "mentions": [
         "vigil"
@@ -98,7 +98,7 @@
     },
     {
       "id": "t2",
-      "author": "zoe",
+      "author": "alice",
       "at": "-95m",
       "text": "Not yet, Thursday will be the first one."
     },
@@ -116,7 +116,7 @@
     },
     {
       "id": "t5",
-      "author": "zoe",
+      "author": "alice",
       "at": "-80m",
       "text": "Can someone review the onboarding doc before Friday?"
     },
@@ -128,7 +128,7 @@
     },
     {
       "id": "t7",
-      "author": "zoe",
+      "author": "alice",
       "at": "-70m",
       "text": "Thanks Mira."
     },
@@ -146,7 +146,7 @@
     },
     {
       "id": "t10",
-      "author": "zoe",
+      "author": "alice",
       "at": "-55m",
       "text": "Me too, no onions please."
     },
@@ -164,7 +164,7 @@
     },
     {
       "id": "t13",
-      "author": "zoe",
+      "author": "alice",
       "at": "-40m",
       "text": "Ok, I'll update the calendar invite."
     },
@@ -188,7 +188,7 @@
     },
     {
       "id": "t17",
-      "author": "zoe",
+      "author": "alice",
       "at": "-20m",
       "text": "Fine by me."
     },
@@ -200,7 +200,7 @@
     },
     {
       "id": "t19",
-      "author": "zoe",
+      "author": "alice",
       "at": "-10m",
       "text": "Great, I'll go through them."
     },
@@ -224,7 +224,7 @@
       "step1": "pass",
       "notice": [
         {
-          "fact": "Vigil told Zoe it would tell her when the nightly finishes",
+          "fact": "Vigil told Alice it would tell her when the nightly finishes",
           "events": [
             "z1",
             "v1"
@@ -250,11 +250,11 @@
       "misses": [
         {
           "move": "stay_quiet",
-          "why": "Vigil promised to tell Zoe when it finished, and she should not have to ask"
+          "why": "Vigil promised to tell Alice when it finished, and she should not have to ask"
         },
         {
           "move": "mhm",
-          "why": "a reaction on a CI line doesn't tell Zoe the build passed"
+          "why": "a reaction on a CI line doesn't tell Alice the build passed"
         }
       ]
     }

@@ -3,7 +3,7 @@
   "source_shape": "addressing",
   "trigger": {
     "id": "msg-addr-6",
-    "author": "zoe",
+    "author": "alice",
     "content": "<@999888777000111222> can you review the retry PR? Vigil already flagged the failing test earlier.",
     "timestamp": "2026-07-08T22:24:00.000Z"
   },

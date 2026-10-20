@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010A AttentionRequestV2@9`` (slice 010, T002; #94 step 6: @2 adds the pace, @3 the pause occasion, @4 the outcome one, @5 the memory, @6 the unattended messages; #94 step 9d: @7 a message the harness posted; Zoe, 2026-10-10: @8 the gaps a window reaches; @9 a message points at the message it answered).
+"""Contract tests for ``I-010A AttentionRequestV2@9`` (slice 010, T002; #94 step 6: @2 adds the pace, @3 the pause occasion, @4 the outcome one, @5 the memory, @6 the unattended messages; #94 step 9d: @7 a message the harness posted; agreed, 2026-10-10: @8 the gaps a window reaches; @9 a message points at the message it answered).
 
 Red cases cover exact identity (S01), actor mentions versus
 ``mentions_room`` (S02), the runtime-adapter-only relational classes
@@ -93,10 +93,10 @@ class MemoryCases(unittest.TestCase):
     MEMORY = {
         "own_moves": [
             {"kind": "reply", "event_id": "v1", "about_event_id": "e1", "text": "I'll tell you when it finishes.",
-             "at": "2026-10-06T09:00:00.000Z", "why": "Zoe asked me to watch the nightly."},
+             "at": "2026-10-06T09:00:00.000Z", "why": "Alice asked me to watch the nightly."},
         ],
         "threads": [
-            {"event_id": "e1", "author_id": "human:zoe", "text": "Tell me when the nightly finishes?",
+            {"event_id": "e1", "author_id": "human:alice", "text": "Tell me when the nightly finishes?",
              "addressed_to": "participant", "responses": [
                  {"event_id": "v1", "author_id": "discord:bot:9", "text": "I'll tell you when it finishes."}]},
         ],
@@ -112,14 +112,14 @@ class MemoryCases(unittest.TestCase):
     def test_a_message_may_point_at_the_message_it_answered(self):
         # @9: the same memory as the turn's (I-010C@16), so the judgment can cite the ask beside the promise.
         posted = {"kind": "message", "event_id": "v1", "text": "I'll tell you when it finishes.",
-                  "about_event_id": "e1", "about_author_id": "human:zoe", "about_text": "Tell me when the nightly finishes?"}
+                  "about_event_id": "e1", "about_author_id": "human:alice", "about_text": "Tell me when the nightly finishes?"}
         assert_schema_verdict(self, "attention-request", dict(make_request(), memory={"own_moves": [posted]}), "valid")
         alone = {k: v for k, v in posted.items() if k != "about_event_id"}
         assert_schema_verdict(self, "attention-request", dict(make_request(), memory={"own_moves": [alone]}), "invalid")
 
 
 class UnattendedCases(unittest.TestCase):
-    """@6 (#94 step 6; Zoe, 2026-10-06): the newest is judged with what it replaced."""
+    """@6 (#94 step 6; agreed, 2026-10-06): the newest is judged with what it replaced."""
 
     def test_one_to_three_unique_ids_validate(self):
         assert_schema_verdict(self, "attention-request", dict(make_request(), unattended_event_ids=["e1"]), "valid")
@@ -129,7 +129,7 @@ class UnattendedCases(unittest.TestCase):
 
 
 class GapCases(unittest.TestCase):
-    """@8 (Zoe, 2026-10-10): coverage names the gaps in view that are still news, by when each was declared."""
+    """@8 (agreed, 2026-10-10): coverage names the gaps in view that are still news, by when each was declared."""
 
     def request(self, gaps):
         doc = make_request()
@@ -417,8 +417,8 @@ class LedgerAndV1RejectionCases(unittest.TestCase):
 
     V1_ENVELOPE = {
         "request_id": "fixture-speak",
-        "trigger": {"id": "trigger-speak", "author": "zoe", "content": "please implement"},
-        "context": [{"id": "ctx-1", "author": "zoe", "content": "assignment"}],
+        "trigger": {"id": "trigger-speak", "author": "alice", "content": "please implement"},
+        "context": [{"id": "ctx-1", "author": "alice", "content": "assignment"}],
         "agent": {"id": "turnaware-vigil", "role": "developer"},
         "surface": {"type": "issue-thread"},
     }

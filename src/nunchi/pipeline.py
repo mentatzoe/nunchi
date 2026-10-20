@@ -202,7 +202,7 @@ class NunchiV2Pipeline:
     alone, oldest first, so a question asked while the participant was busy
     starts a thread that the newest message's judgment and turn both see.
 
-    Outcome turns (Zoe, #90 decision 2 on #94): when an approved action
+    Outcome turns (#90, decision 2 on #94): when an approved action
     settles after the participant's turn about it ended, ``outcome_arrived``
     queues it, and ``report_outcomes`` gives the participant a turn about the
     message it was proposed for, with ``occasion: "outcome"``, so the
@@ -509,7 +509,7 @@ class NunchiV2Pipeline:
 
         Returns them, oldest first: the anchor's judgment reads them with it,
         as one moment, the way a person catching up reads the newest message
-        and glances back (Zoe, 2026-10-06).
+        and glances back (agreed, 2026-10-06).
         """
 
         with self._lifecycle_lock:

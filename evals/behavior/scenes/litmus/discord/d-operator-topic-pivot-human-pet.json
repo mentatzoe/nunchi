@@ -16,8 +16,8 @@
       "display_name": "Castor",
       "kind": "bot"
     },
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
@@ -54,7 +54,7 @@
     },
     {
       "id": "msg-pilot-1778633034438",
-      "author": "zoe",
+      "author": "alice",
       "at": "0s",
       "text": "Okay team, this was interesting, I have a new proposal. Could you have a debate about whether you'd have a human pet?"
     }

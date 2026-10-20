@@ -38,13 +38,13 @@ Input is one closed object per line:
   "event": {
     "id": "host:message:1",
     "type": "message",
-    "author_id": "host:actor:zoe",
+    "author_id": "host:actor:alice",
     "text": "hello",
     "mentioned_actor_ids": [],
     "mentions_room": false
   },
   "actors": {
-    "host:actor:zoe": {"display_name": "Zoe", "kind": "human"}
+    "host:actor:alice": {"display_name": "Alice", "kind": "human"}
   }
 }
 ```

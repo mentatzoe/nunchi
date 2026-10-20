@@ -3,7 +3,7 @@
   "source_shape": "addressing",
   "trigger": {
     "id": "msg-addr-4",
-    "author": "zoe",
+    "author": "alice",
     "content": "Dalgos, can you kick off the nightly backup once the deploy settles?",
     "timestamp": "2026-07-08T22:20:00.000Z"
   },

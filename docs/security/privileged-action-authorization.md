@@ -78,7 +78,7 @@ and the allow cannot outlive the expiry that recheck set.
   approval challenge. Once published, the challenge lives until its own
   `expires_at` (approval TTL, default 300 s), an explicit cancel, or restart.
   Restart drops pending approvals; they are never rebuilt from room history.
-- **The agent knows what became of its proposal** (Zoe, 2026-10-04, on
+- **The agent knows what became of its proposal** (agreed, 2026-10-04, on
   #94). The coordinator keeps the participant's 16 newest proposals with a
   status: `awaiting_approval`, `done`, `failed`, `unknown`, `denied`,
   `expired`, `withdrawn`, or `cancelled`. Each later turn shows the newest 3
@@ -86,7 +86,7 @@ and the allow cannot outlive the expiry that recheck set.
   prompted them, so nothing happens in the agent's name without it knowing.
   Nunchi never reports an outcome in the room; the agent does, in its own
   turn.
-- **The agent reports completion itself** (Zoe, #90 decision 2 on #94).
+- **The agent reports completion itself** (#90, decision 2 on #94).
   When an operator's approval settles the action (`done`, `failed`,
   `unknown`, or `denied` at the recheck), the coordinator tells its outcome
   listeners. The delivery lane then gives the agent a turn about the message
