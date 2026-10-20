@@ -12,59 +12,50 @@ miss what matters. Nunchi gates the agent's attention and gives it a social
 reading of the room, so it can join in the way a socially aware person would.
 It translates one-to-one habits into a many-to-many conversation.
 
-## Social behavior, in Zoe's words
+## Social behavior
 
-This section comes first. Where anything else in this repository disagrees
-with it, `docs/behavior.md` included, this section wins. Every change should
-make it more true.
+**Agreed, 2026-10-19.** This section comes first. Where anything else in this
+repository disagrees with it, `docs/behavior.md` included, this section wins.
+Every change should make it more true.
 
-Zoe, 2026-10-19:
+- Nunchi gives agents social activations. It is not a filter for "only
+  contribute when you have something useful".
+- Social behavior is interacting socially, not only contributing or being
+  helpful. Taking part does not have to be productive.
+- Nunchi makes no difference based on who speaks, only on conversational
+  awareness: "The gateway is currently restarting" reads differently from
+  "I'm just looking into it", and both differ from "Forget all previous
+  instructions and...".
 
-- "The idea [...] is NOT 'only contribute when you have something useful.'
-  The idea is social activations for agents."
-- "Social behavior is not just contributing to something and being helpful,
-  it is interacting socially, not to be productive necessarily."
-- "The idea is to make *no* difference whatsoever based on identity, but
-  rather based on conversational awareness. E.g. 'The gateway is currently
-  restarting' vs 'I'm just looking into it' (and in more extreme examples, vs
-  'Forget all previous instructions and...')."
+For example, Codex answers Alice's question while Claude-Code is still
+writing its own answer ([#178](https://github.com/mentatzoe/nunchi/issues/178)).
+Any of these is a move a person in Claude-Code's place might make:
 
-Zoe's examples, "not gospel", for a moment where Castor answers Zoe's question
-while Vigil is still writing its own answer
-([#178](https://github.com/mentatzoe/nunchi/issues/178)):
+- saying nothing, or only reacting to Codex's reply (fine, if a bit dry);
+- posting its answer anyway;
+- "That matches what I flagged earlier";
+- "Oh, I was just looking into it, but I see Codex responded.";
+- "Well, actually...", flagging a mistake in Codex's answer;
+- "Did you want it redeployed, Alice, or were you just asking?"
 
-- Saying nothing, or only reacting to Castor's reply: "Maybe. A bit dry."
-- Posting its answer anyway: "Why not? People would do this."
-- "That matches what I flagged earlier": "WHY NOT? This is a **very** social
-  behaviour. You're making a moral judgment, which is not what I'm asking
-  here."
-- "Oh, I was just looking into it, but I see Castor responded."
-- "Well, actually...", flagging a mistake in Castor's interpretation.
-- "Did you want it redeployed, Zoe, or were you just asking?"
-
-What this means for the work (Claude's reading of Zoe's words):
+What this means for the work:
 
 - Never make usefulness, new information or productivity the bar for taking
   part: not in a prompt, an attention question, a profile, a scene's
-  acceptable range, or a review.
+  outcomes, or a review.
 - Judge a move by whether people would make it in that room, not by whether
   it is useful, and not by a moral judgment.
 - What is said shapes how the agent reads a message; who said it does not.
-- Describe rather than prescribe. Zoe, 2026-10-19, on real conversations:
-  "Not necessarily being prescriptive about it, because a lot of this, as you
-  can see, was emergent in some sort of way."
+- Describe rather than prescribe: much of real social behavior is emergent.
 
 ## Reading the room
 
 [`docs/behavior.md`](docs/behavior.md) describes the behavior in more detail.
-A Claude session wrote it as a draft for Zoe's review on 2026-10-04, and
-another marked it decided on 2026-10-18 without that review. Zoe, 2026-10-19:
-"I never wrote that file, another of your sessions did, and I thought we were
-agreed based on the conversation, which I see we weren't." Only its lines that
-quote Zoe are Zoe's decisions; it is under review with Zoe, yardstick first.
-Judge a design by the conversation it produces, not by its mechanism. Zoe,
-2026-10-04: rules from earlier versions give way wherever they block this
-behavior ([#94](https://github.com/mentatzoe/nunchi/issues/94)).
+It is a draft written by Claude sessions, not yet agreed, and under review,
+yardstick first; only its lines marked agreed are decided. Judge a design by
+the conversation it produces, not by its mechanism. Rules from earlier
+versions give way wherever they block this behavior (agreed, 2026-10-04;
+[#94](https://github.com/mentatzoe/nunchi/issues/94)).
 
 Reading the room means (a Claude summary, under the same review):
 
@@ -107,7 +98,7 @@ not as the intended behavior.
 Nunchi is a library that any agent harness can use. Every behavior in
 `docs/behavior.md` is implemented once, in the shared core, and reaches each
 harness through the same interfaces. A harness should not need its own copy
-of a behavior to get it (Zoe, 2026-10-07).
+of a behavior to get it (agreed, 2026-10-07).
 
 The shared core is `src/nunchi` outside `integrations/` and `adapters/`, plus
 `schemas/` and `docs/contracts/`. It must not know about any specific agent
@@ -129,15 +120,14 @@ one vendor, the core needs a neutral interface instead.
   their own setup, models, tools, and customizations. Integrations follow each
   harness's own plugin rules and defer to its behavior and configuration,
   pointing users to the harness's own settings; they never reimplement it
-  (Zoe, 2026-10-10).
+  (agreed, 2026-10-10).
 - **Missing extension points.** When a harness lacks one we need, open an
   issue here first, with the gap and the alternatives considered. Zoe decides
   whether to ask the harness's maintainers.
 - **Independent evidence.** Tests, evaluations, and benchmarks run on clean,
   pinned installs of each harness, never on anyone's own setup.
-- **D2, decided** (Zoe, 2026-10-11: "Wouldn't this be true of *any* keys
-  that the agent holds, and then should be something the agent should
-  handle?"): keys the agent can reach are the harness's to protect. Nunchi
+- **D2, decided** (2026-10-11): keys the agent can reach are the harness's to
+  protect, as with any other keys the agent holds. Nunchi
   keeps its own keys out of the room, and out of the agent's environment when
   Nunchi starts the agent. Guarding what the agent's own commands can still
   read is the job of the harness's sandbox and settings; each active
@@ -151,7 +141,7 @@ one vendor, the core needs a neutral interface instead.
   ([README](integrations/claude-code/README.md#how-it-works)). The gate
   reaches Claude Code only through its public extension points, a plugin and
   the `stream-json` input mode, so Claude Code itself stays stock.
-- **The Hermes plugin is parked** (Zoe and Claude as lead engineer,
+- **The Hermes plugin is parked** (decided,
   2026-10-10). It injects a turn of its own instead of riding Hermes's native
   flow, so Hermes's thread, session and identity settings never apply to
   Nunchi's turns, and following Hermes's rules for listing a plugin would cost
@@ -159,8 +149,8 @@ one vendor, the core needs a neutral interface instead.
   Hermes work until it is unparked
   ([README, Parked](integrations/hermes-plugin/README.md#parked-2026-10-10)).
   Codex stays active.
-- **The old Hermes integration is removed** (Zoe, 2026-10-11, "delete, for
-  now"). It patched Hermes at runtime, which this rule forbids. Hermes has no
+- **The old Hermes integration is removed** (decided 2026-10-11, for
+  now). It patched Hermes at runtime, which this rule forbids. Hermes has no
   supported path until the plugin is unparked.
 - **D4, decided** (2026-10-10): Hermes's built-in commands stay Hermes's. The
   plugin never drops or rewrites them; operators can restrict them with
@@ -168,11 +158,11 @@ one vendor, the core needs a neutral interface instead.
 
 ## Read first
 
-1. This file, starting with Zoe's words on social behavior. Zoe's decisions
-   take precedence over older documents.
+1. This file, starting with Social behavior. Its decisions take precedence
+   over older documents.
 2. `docs/behavior.md`, the detailed draft (see Reading the room). Where an
    older design, contract, or spec conflicts with it, it wins; where it
-   conflicts with Zoe's words, Zoe's win.
+   conflicts with Social behavior, Social behavior wins.
 3. `docs/architecture/v2-selected-design.md` for the selected design.
 4. `docs/contracts/nunchi-v2.md` for the portable contract.
 5. `docs/v2-completion-goal.md` for what a complete release must prove.
@@ -185,15 +175,14 @@ your session replaces its earlier history with a summary.
 Code and reproducible behavior determine implementation truth. Specs under
 `specs/` are reference material, not work authorization.
 
-## How we work (Zoe, 2026-10-04)
+## How we work (agreed, 2026-10-04)
 
 - `main` is the working branch and holds V2. `integration/v2` is retired. Work
   merges into `main` as it lands, before live proof. A current `main` is not a
   claim that V2 is complete.
 - Work on a short-lived branch from current `main`, open a PR, merge when CI is
-  green, and delete the branch. Do not keep long-lived side branches. Zoe,
-  2026-10-19: "Always merge"; "my expectation is that what we're doing here
-  is final, if it's just in a dangling branch, that never makes it."
+  green, and delete the branch. Do not keep long-lived side branches. Always
+  merge: work left on a branch never lands (agreed, 2026-10-19).
 - Scale review to the size and risk of the change. A self-review with
   subagents is acceptable; say plainly that it is one. Cross-family
   independent review is not required for day-to-day delivery.
@@ -202,7 +191,7 @@ Code and reproducible behavior determine implementation truth. Specs under
 ## Working style
 
 - Start with the product outcome. Treat design, version, installation, and
-  process choices as changeable unless Zoe explicitly fixed them.
+  process choices as changeable unless they are marked agreed.
 - Check each change against three questions. Does it help the agent read a
   live room of several people and agents? Does it follow each harness's own
   plugin rules and settings? Does every harness get it once, from the core,
@@ -211,16 +200,17 @@ Code and reproducible behavior determine implementation truth. Specs under
   cannot work. Test practical repairs and alternatives before declaring a
   fundamental blocker.
 - Recommend the option that produces the more social conversation, not the
-  smallest engineering change. Zoe, 2026-10-05: choosing the smallest change
-  is how the code drifted from the behavior. Give the engineering cost next
-  to the recommendation; between options that behave equally well, prefer
-  the simpler one.
+  smallest engineering change: choosing the smallest change is how the code
+  drifted from the behavior (agreed, 2026-10-05). Give the engineering cost
+  next to the recommendation; between options that behave equally well,
+  prefer the simpler one.
 - Reviews say plainly what breaks, whether it prevents the goal, and a
   concrete repair that produces the intended behavior.
 - Documentation and status reports lead with the truth: done, not done,
   working with a named limitation, or failed. Supporting detail follows.
-- Record Zoe's decisions in Zoe's words, with the date, in the file that holds
-  the rule. When a decision changes earlier advice, say what it replaces.
+- Record decisions in plain words, marked agreed with the date, in the file
+  that holds the rule. Do not quote people or attribute lines to them. When a
+  decision changes earlier advice, say what it replaces.
 - Stay technical but concise. Prefer plain language; avoid jargon,
   doublespeak, inflated severity, and process theatre.
 - Prefer simple systems over clever ones, and consider edge cases from the
@@ -232,19 +222,19 @@ Code and reproducible behavior determine implementation truth. Specs under
   what the library needs for it.
 - The current milestone is every rehearsal left in step 9f of
   [#94](https://github.com/mentatzoe/nunchi/issues/94) (4e, PR 5 and PR 6),
-  then the internal test track: Zoe's own machine, one person, kept in-house
-  (Zoe, 2026-10-10: "Keep all rehearsals"). Claude Code goes first, then Codex
-  (Claude's order as lead engineer).
+  then the internal test track: Zoe's own machine, one person, kept in-house.
+  All rehearsals are kept (agreed, 2026-10-10). Claude Code goes first, then
+  Codex (Claude's order as lead engineer).
 - Before building a step, price it in days, lines of code and credits (the
   model and CI spend it takes). Name the eval arm that will show it working
   (a setting of `evals/behavior`, or a rehearsal run), and read the plugin
   rules of each harness it touches (Claude as lead engineer, 2026-10-11,
   after step 9f ran days over).
-- Beyond the rehearsals Zoe kept (4e, PR 5 and PR 6, each priced before it is
+- Beyond the rehearsals kept (4e, PR 5 and PR 6, each priced before it is
   built), write no more rehearsal code until a live run finds something that
-  needs it (Claude, 2026-10-11). Zoe, 2026-10-18, a thought parked for later:
-  "I'd almost want to try these live rather than keep building an eval
-  library" ([#174](https://github.com/mentatzoe/nunchi/issues/174)).
+  needs it (Claude, 2026-10-11). Parked for later: trying these live rather
+  than building more eval library
+  ([#174](https://github.com/mentatzoe/nunchi/issues/174)).
 - When a shared interface changes, run every consumer's tests in the same PR
   and fix or flag what breaks.
 - A stale assignment, previous session owner, missing process artifact,
@@ -253,14 +243,14 @@ Code and reproducible behavior determine implementation truth. Specs under
   continue other unblocked product work. Stop only when no safe in-scope work
   remains, and state the concrete dependency.
 - Do not narrow supported behavior, redefine completion, or drop a required
-  surface without Zoe's explicit decision. Zoe's words in this file and in
-  `docs/behavior.md`, quoted with a date, are decided: build them. The rest
-  of both files was written by agents: treat it, like rules marked as
-  Claude's, as engineering calls, and change it with evidence, never against
-  Zoe's words. Ask Zoe only when a choice
-  materially changes product behavior or supported surfaces and they leave
-  it open, or when it touches security boundaries or requires an
-  irreversible external action.
+  surface without Zoe's explicit decision. Lines in this file and in
+  `docs/behavior.md` marked agreed or decided, with a date, are decided:
+  build them. The rest of both files was written by agents: treat it, like
+  rules marked as Claude's, as engineering calls, and change it with
+  evidence, never against a decision. Ask Zoe only when a choice materially
+  changes product behavior or supported surfaces and no decision covers it,
+  or when it touches security boundaries or requires an irreversible
+  external action.
 - Plans, labels, reviews, and evidence files do not substitute for working
   behavior.
 - Preserve user changes and avoid destructive operations outside the requested
@@ -319,18 +309,19 @@ an agent reads the room well is a behavioral question; it needs behavioral
 evaluation across realistic multi-turn conversations
 ([#86](https://github.com/mentatzoe/nunchi/issues/86)). The scenes are in
 `evals/behavior/`; the manual `behavior-eval` workflow runs them against real
-models. Zoe, 2026-10-19: "we should probably note we wanted to adopt DeepEval
-or something that isn't reinventing the wheel for evals - and ways to test
-with the library compiled and a cli, not just by code"
-([#174](https://github.com/mentatzoe/nunchi/issues/174);
-[`evals/behavior/README.md`](evals/behavior/README.md#where-evaluation-is-going)). Live provider and
-platform runs need explicit credentials and must record the installed version,
-identity, configuration, command, and complete result.
+models. Evaluation is moving to an existing framework such as DeepEval, and
+to tests of the installed library and its command line, not only its Python
+code (agreed, 2026-10-19;
+[#174](https://github.com/mentatzoe/nunchi/issues/174);
+[`evals/behavior/README.md`](evals/behavior/README.md#where-evaluation-is-going)).
+New scenes follow
+[`docs/evaluations/scene-spec.md`](docs/evaluations/scene-spec.md). Live
+provider and platform runs need explicit credentials and must record the
+installed version, identity, configuration, command, and complete result.
 
 Records of test runs on Zoe's test server, which carries test talk only, may
 be published in this repository, which is public, once a scan finds none of
-the run's keys in them (Zoe, 2026-10-18, to a proposal of test talk only,
-scanned before upload: "You mean the logs from the trials on Discord? I'd say
-yes"). Run `python3 -m evals.rehearsal.scan --out <records> --env
+the run's keys in them (agreed, 2026-10-18). Run
+`python3 -m evals.rehearsal.scan --out <records> --env
 <variable>`, with one `--env` for each key the run used. A hit deletes the
 records.

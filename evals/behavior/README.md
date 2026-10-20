@@ -1,68 +1,26 @@
 # Behavior scenes
 
-These scenes check whether a participant reads the room, as Zoe's words at
-the top of [`AGENTS.md`](../../AGENTS.md#social-behavior-in-zoes-words)
-describe it; [`docs/behavior.md`](../../docs/behavior.md) is a fuller draft.
+These scenes check whether a participant reads the room, as Social behavior
+at the top of [`AGENTS.md`](../../AGENTS.md#social-behavior) describes it;
+[`docs/behavior.md`](../../docs/behavior.md) is a fuller draft.
 Each scene is a short conversation plus the moments to judge in it.
 
-## The scene format being adopted
+## Scene spec
 
-Zoe, 2026-10-19, on what a scene is for: "given this hypothetical scenario
-that we have an expectation of how the Nunchi library (and related agent
-runners) should behave, is the response what we would expect?" And: "I don't
-think that having fixed rehearsals is a bad thing, by the way. It helps
-isolate specific behaviours."
-
-The format was worked out with Zoe on
-[#178](https://github.com/mentatzoe/nunchi/issues/178). Every scene is being
-rebuilt to it ([#136](https://github.com/mentatzoe/nunchi/issues/136)); until
-then the files use the older format under "What a scene says".
-
-- **Who is participating.** Name and type only: the protagonist (the agent
-  under test) and the supporting cast.
-- **What happens in the room.** The transcript in three parts: before the
-  turn (a history of tens of messages, so the scene has a past), what starts
-  the turn, and what arrives during it. A scene is one turn of the
-  protagonist.
-- **What a participant would know by now.** Facts from the history, each
-  pointing at its messages. Facts, not instructions.
-- **What the protagonist sees.** A sequence diagram of the turn, using the
-  harness contract's generic names rather than one harness's, and the exact
-  package Nunchi builds at each step; then a table of which facts reach the
-  protagonist, and how.
-- **What would be socially acceptable.** The range of moves people would make
-  in that room, with examples that are "not gospel". No moral judgment, and
-  no usefulness bar.
-
-Names. Zoe, 2026-10-19: "Maybe "Claude-Code", "Codex" or "Hermes" so that
-people don't have to be translating... and we could have a scene with
-multiple humans, called Alice, Bob, etc..."
-
-- People are Alice, Bob, Carol and so on.
-- Agents are named after harnesses: Claude-Code, Codex, Hermes. When another
-  harness plays the protagonist, the runner swaps the names, so each agent is
-  called by its own harness's name.
-
-A scene is a window into a fixed transcript: what the protagonist sees must
-not depend on how attention judged the earlier messages
-([#192](https://github.com/mentatzoe/nunchi/issues/192)). Histories follow the
-shape of real sessions with new words; captures shared privately stay
-private.
+New scenes follow [`docs/evaluations/scene-spec.md`](../../docs/evaluations/scene-spec.md).
+The files in this suite still use the older format under "What a scene says".
 
 ## Where evaluation is going
 
-Zoe, 2026-10-19: "we should probably note we wanted to adopt DeepEval or
-something that isn't reinventing the wheel for evals - and ways to test with
-the library compiled and a cli, not just by code." And: "helpful to have a way
-to recapture from live trials." Earlier, 2026-10-18: "I'd almost want to try
-these live rather than keep building an eval library"
-([#174](https://github.com/mentatzoe/nunchi/issues/174)).
+Agreed, 2026-10-19 ([#174](https://github.com/mentatzoe/nunchi/issues/174)):
 
 - Measurement and regression move to an existing framework, such as
   DeepEval, rather than more of this runner.
 - Scenes run against the library as installed, the built package, and
   through its command line, not only by calling its Python code.
 - A conversation from a live trial can be recaptured as a scene.
+
+Parked for later: trying scenes live rather than building more eval library.
 
 ## What a scene says
 
@@ -102,7 +60,7 @@ Every scene starts as a draft (`"review": "draft: …"`):
 
 To review a scene, check its fitting moves and misses against how a socially
 aware person would act, add notice facts where they help, and set `review` to
-something like `"reviewed by Zoe, 2026-10-05"`. The converter never
+something like `"reviewed, 2026-10-05"`. The converter never
 overwrites an existing scene unless run with `--force`.
 
 ## Running
@@ -309,7 +267,7 @@ not posted. In final-answer posting a bare marker after a finished sentence
 is silence. In the envelope arm a marker after a sentence ("On it.
 [SILENT]") is posted as written, and counts as both. The rest is posted as
 written: another thinking tag such as `<think>` (the model's native
-reasoning is the harness's to strip, Zoe's decision, and the eval has no
+reasoning is the harness's to strip, as decided, and the eval has no
 harness), a field name, or the turn's tag (whether the library refuses a
 post that quotes it is still open, D6).
 
@@ -329,7 +287,7 @@ which never ran, is graded `not judged`. Each pause record's
 from a look again carries `occasion: "pause"`.
 
 A pause moment with an `outcome` is the turn an approved action starts when
-it settles after the pause (Zoe, #90 decision 2 on #94). The scene's own
+it settles after the pause (#90, decision 2 on #94). The scene's own
 events say the agent asked for approval; a scripted proposal stands in for
 the authorization coordinator, shows it awaiting approval in the agent's
 memory, and settles as the moment says. The agent then gets its outcome
