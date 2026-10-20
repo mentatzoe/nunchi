@@ -1,8 +1,8 @@
 # Behavior scenes
 
-These scenes check whether a participant reads the room, as Zoe's words at
-the top of [`AGENTS.md`](../../AGENTS.md#social-behavior-in-zoes-words)
-describe it; [`docs/behavior.md`](../../docs/behavior.md) is a fuller draft.
+These scenes check whether a participant reads the room, as Social behavior
+at the top of [`AGENTS.md`](../../AGENTS.md#social-behavior) describes it;
+[`docs/behavior.md`](../../docs/behavior.md) is a fuller draft.
 Each scene is a short conversation plus the moments to judge in it.
 
 ## Scene spec
@@ -12,18 +12,15 @@ The files in this suite still use the older format under "What a scene says".
 
 ## Where evaluation is going
 
-Zoe, 2026-10-19: "we should probably note we wanted to adopt DeepEval or
-something that isn't reinventing the wheel for evals - and ways to test with
-the library compiled and a cli, not just by code." And: "helpful to have a way
-to recapture from live trials." Earlier, 2026-10-18: "I'd almost want to try
-these live rather than keep building an eval library"
-([#174](https://github.com/mentatzoe/nunchi/issues/174)).
+Agreed, 2026-10-19 ([#174](https://github.com/mentatzoe/nunchi/issues/174)):
 
 - Measurement and regression move to an existing framework, such as
   DeepEval, rather than more of this runner.
 - Scenes run against the library as installed, the built package, and
   through its command line, not only by calling its Python code.
 - A conversation from a live trial can be recaptured as a scene.
+
+Parked for later: trying scenes live rather than building more eval library.
 
 ## What a scene says
 
@@ -63,7 +60,7 @@ Every scene starts as a draft (`"review": "draft: …"`):
 
 To review a scene, check its fitting moves and misses against how a socially
 aware person would act, add notice facts where they help, and set `review` to
-something like `"reviewed by Zoe, 2026-10-05"`. The converter never
+something like `"reviewed, 2026-10-05"`. The converter never
 overwrites an existing scene unless run with `--force`.
 
 ## Running
@@ -270,7 +267,7 @@ not posted. In final-answer posting a bare marker after a finished sentence
 is silence. In the envelope arm a marker after a sentence ("On it.
 [SILENT]") is posted as written, and counts as both. The rest is posted as
 written: another thinking tag such as `<think>` (the model's native
-reasoning is the harness's to strip, Zoe's decision, and the eval has no
+reasoning is the harness's to strip, as decided, and the eval has no
 harness), a field name, or the turn's tag (whether the library refuses a
 post that quotes it is still open, D6).
 
@@ -290,7 +287,7 @@ which never ran, is graded `not judged`. Each pause record's
 from a look again carries `occasion: "pause"`.
 
 A pause moment with an `outcome` is the turn an approved action starts when
-it settles after the pause (Zoe, #90 decision 2 on #94). The scene's own
+it settles after the pause (#90, decision 2 on #94). The scene's own
 events say the agent asked for approval; a scripted proposal stands in for
 the authorization coordinator, shows it awaiting approval in the agent's
 memory, and settles as the moment says. The agent then gets its outcome

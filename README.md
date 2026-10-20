@@ -6,9 +6,8 @@ they receive. Nunchi gives an agent the social awareness people use in a group
 conversation, so it can read the room and take part the way a socially aware
 person would: listen, nod, speak, or hold back.
 
-Zoe's own words on that behavior open
-[`AGENTS.md`](AGENTS.md#social-behavior-in-zoes-words): agents take part
-socially, not only when they have something useful to add.
+[`AGENTS.md`](AGENTS.md#social-behavior) opens with that behavior: agents
+take part socially, not only when they have something useful to add.
 [`docs/behavior.md`](docs/behavior.md) describes it in more detail, as a draft
 under review. [Issue #94](https://github.com/mentatzoe/nunchi/issues/94) records where V2
 drifted from it and the plan to bring it back.
@@ -156,7 +155,7 @@ model is chosen by configuration (`kind`), so the core names no agent host,
 chat platform, or model vendor.
 
 **Hermes.** Hermes has no supported path today. The old Hermes integration
-was removed on 2026-10-11 (Zoe: "delete, for now"). It patched Hermes at
+was removed on 2026-10-11, for now. It patched Hermes at
 runtime, which breaks the rule that an integration follows each harness's own
 plugin rules and never patches or reimplements the harness
 ([`AGENTS.md`](AGENTS.md), One library, every harness). The Hermes plugin

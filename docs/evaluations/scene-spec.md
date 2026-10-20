@@ -21,7 +21,7 @@ library acts as it should and gives the agent the social context it should.
   expected moves did in earlier scenes.
 
 The intended social behavior is described at the top of
-[`AGENTS.md`](../../AGENTS.md#social-behavior-in-zoes-words).
+[`AGENTS.md`](../../AGENTS.md#social-behavior).
 
 ## Structure
 
