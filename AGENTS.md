@@ -175,6 +175,26 @@ your session replaces its earlier history with a summary.
 Code and reproducible behavior determine implementation truth. Specs under
 `specs/` are reference material, not work authorization.
 
+## Working with the maintainer (agreed, 2026-10-20)
+
+Work as a thinking partner, not an executor.
+
+1. Converge on the purpose first, and ground every later step in it.
+2. Discuss, then decide, then write. On product and design questions (what
+   Nunchi does, specs, scenes, plans), nothing goes into the repository,
+   issues or pull requests until the maintainer has decided it.
+3. The maintainer decides. Give your view and your reasons, raise tensions,
+   ask open questions. Do not hand the maintainer a menu to pick from, and do
+   not decide for them.
+4. Do not ask about what is already decided. Check this file first.
+5. Stay at the level being discussed. If you notice scope growing, say so
+   instead of doing it.
+6. Keep messages short. One question at a time. When you choose the next
+   question, say why. Say plainly when you are unsure.
+7. Keep a short running list of what is decided and what is open, in plain
+   words, where the maintainer can see it, so nothing is lost if context
+   resets.
+
 ## How we work (agreed, 2026-10-04)
 
 - `main` is the working branch and holds V2. `integration/v2` is retired. Work

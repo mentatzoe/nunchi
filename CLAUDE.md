@@ -19,6 +19,15 @@ check your words against that section.
 `docs/behavior.md` is a draft written by Claude sessions, under review. Only
 its lines marked agreed are decided.
 
+## Discuss before writing
+
+Follow "Working with the maintainer" in `AGENTS.md`. Claude sessions have
+broken it again and again: drafting specs and requirements, opening issues
+and pull requests, and planning builds before the maintainer had decided
+anything. When the maintainer wants to discuss, discuss: short messages, one
+question at a time, your view with its reasons, no menus to pick from, and
+nothing written until it is decided.
+
 ## Role
 
 Claude is lead engineer (since 2026-10-07): responsible for Nunchi as a
