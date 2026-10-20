@@ -2,7 +2,8 @@
 
 **Status:** agreed, 2026-10-19. It replaces the earlier scene format. The
 existing scenes ([#136](https://github.com/mentatzoe/nunchi/issues/136)) have
-not yet been reviewed against it.
+not yet been reviewed against it. Description clarification agreed,
+2026-10-20.
 
 ## Purpose
 
@@ -27,7 +28,11 @@ The intended social behavior is described at the top of
 
 A scene has four parts.
 
-1. **Description:** a short account of the scene.
+1. **Description:** a short account of the social situation and its conflict
+   or tension, in the dramatic sense. It establishes what the scene explores
+   and guides the choice of participants, history and other contents. The
+   tension need not be an argument, and the description does not prescribe
+   a response or resolution.
 2. **Static components**, the same on every run:
    - supporting participants;
    - transcript / history;
