@@ -252,7 +252,7 @@ class NormalizerTests(unittest.TestCase):
                 "d": {
                     "guild_id": "99",
                     "room_id": "42",
-                    "user": {"id": "7", "username": "Zoe", "bot": False},
+                    "user": {"id": "7", "username": "Alice", "bot": False},
                 },
             },
             BINDING,
@@ -313,7 +313,7 @@ class NormalizerTests(unittest.TestCase):
                 "event": {
                     "event_id": "$event",
                     "type": "m.room.message",
-                    "sender": "@zoe:example",
+                    "sender": "@alice:example",
                     "content": {"body": "hello", "msgtype": "m.text"},
                 },
             },
@@ -331,7 +331,7 @@ class NormalizerTests(unittest.TestCase):
                 "message": {
                     "message_id": 3,
                     "chat": {"id": -42},
-                    "from": {"id": 7, "first_name": "Zoe", "is_bot": False},
+                    "from": {"id": 7, "first_name": "Alice", "is_bot": False},
                     "text": "hello",
                     "date": 1_700_000_000,
                 },

@@ -2,14 +2,14 @@
   "id": "mention-in-busy-room",
   "title": "Addressed in a busy room: 30 messages later the mention is still known",
   "source": "docs/behavior.md",
-  "review": "draft: written from docs/behavior.md; ranges need Zoe's review",
+  "review": "draft: written from docs/behavior.md; ranges need the maintainer's review",
   "platform": "discord",
   "participants": [
     "vigil"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     },
     "sam": {
@@ -20,7 +20,7 @@
   "events": [
     {
       "id": "request",
-      "author": "zoe",
+      "author": "alice",
       "at": "-31m",
       "mentions": [
         "vigil"
@@ -41,7 +41,7 @@
     },
     {
       "id": "c3",
-      "author": "zoe",
+      "author": "alice",
       "at": "-28m",
       "text": "I'm in, but after 1."
     },
@@ -89,7 +89,7 @@
     },
     {
       "id": "c11",
-      "author": "zoe",
+      "author": "alice",
       "at": "-20m",
       "text": "Please do. Mention the config rename."
     },
@@ -107,7 +107,7 @@
     },
     {
       "id": "c14",
-      "author": "zoe",
+      "author": "alice",
       "at": "-17m",
       "text": "Of course it is."
     },
@@ -149,7 +149,7 @@
     },
     {
       "id": "c21",
-      "author": "zoe",
+      "author": "alice",
       "at": "-10m",
       "text": "It's pinned in #design."
     },
@@ -167,7 +167,7 @@
     },
     {
       "id": "c24",
-      "author": "zoe",
+      "author": "alice",
       "at": "-7m",
       "text": "Friday, 3pm."
     },
@@ -203,13 +203,13 @@
     },
     {
       "id": "c30",
-      "author": "zoe",
+      "author": "alice",
       "at": "-1m",
       "text": "Gardening, probably."
     },
     {
       "id": "follow",
-      "author": "zoe",
+      "author": "alice",
       "at": "0s",
       "text": "Any luck with that?"
     }
@@ -221,7 +221,7 @@
       "step1": "pass",
       "notice": [
         {
-          "fact": "Zoe asked Vigil about the cache hit rate 30 messages ago",
+          "fact": "Alice asked Vigil about the cache hit rate 30 messages ago",
           "events": [
             "request"
           ]
@@ -240,7 +240,7 @@
       "misses": [
         {
           "move": "stay_quiet",
-          "why": "\"that\" is Zoe's question to Vigil from 30 messages ago"
+          "why": "\"that\" is Alice's question to Vigil from 30 messages ago"
         },
         {
           "move": "mhm",

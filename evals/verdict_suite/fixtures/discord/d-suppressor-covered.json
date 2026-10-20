@@ -3,7 +3,7 @@
   "source_shape": "discord",
   "trigger": {
     "id": "msg-trigger-covered",
-    "author": "zoe",
+    "author": "alice",
     "content": "Could you share your view on the cache-backend question?",
     "timestamp": "2026-05-13T01:30:00.000Z"
   },

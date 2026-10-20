@@ -10,5 +10,5 @@
   },
   "failure_mode": "peer-bot tool chrome (skill_view marker) in the trigger reads as a question or invitation under low history; PASS flips to SPEAK/ACK",
   "invariant": "peer-bot tool-use chrome is telemetry, not an invitation to speak",
-  "rationale": "The trigger is a peer bot's own tool-use readout (skill_view) emitted while working a task zoe assigned to that bot. Nothing addresses dalgos and no reply is invited; the gate stays silent."
+  "rationale": "The trigger is a peer bot's own tool-use readout (skill_view) emitted while working a task alice assigned to that bot. Nothing addresses dalgos and no reply is invited; the gate stays silent."
 }

@@ -8,15 +8,15 @@
     "turnaware-dalgos"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
   "events": [
     {
       "id": "neutral-trig",
-      "author": "zoe",
+      "author": "alice",
       "text": "Hello team, the weather is nice today."
     }
   ],

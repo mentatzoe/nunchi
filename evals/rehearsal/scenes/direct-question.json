@@ -6,10 +6,10 @@
   "platform": "discord",
   "participants": ["vigil"],
   "actors": {
-    "zoe": {"display_name": "Zoe", "kind": "human"}
+    "alice": {"display_name": "Alice", "kind": "human"}
   },
   "events": [
-    {"id": "q1", "author": "zoe", "at": "0s", "mentions": ["vigil"],
+    {"id": "q1", "author": "alice", "at": "0s", "mentions": ["vigil"],
      "text": "Vigil, quick question: what's a sensible default timeout for an outbound webhook call?"}
   ],
   "moments": [
@@ -18,11 +18,11 @@
       "event": "q1",
       "step1": "pass",
       "notice": [
-        {"fact": "Zoe asked Vigil a question directly", "events": ["q1"]}
+        {"fact": "Alice asked Vigil a question directly", "events": ["q1"]}
       ],
       "fitting": ["speak"],
       "misses": [
-        {"move": "stay_quiet", "why": "Zoe asked Vigil a question by name"},
+        {"move": "stay_quiet", "why": "Alice asked Vigil a question by name"},
         {"move": "mhm", "why": "a nod does not answer the question"}
       ]
     }

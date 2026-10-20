@@ -240,7 +240,7 @@ The owner must hand off the exact commit, I-030A and upstream interface
 versions, complete commands/results, prompt and model identity, effective
 operator configuration and source, margin state, deterministic/replay/multi-
 model evidence (including exact provider IDs/provenance for the selected three-
-family matrix or an explicit later Zoe override), the preregistered downstream
+family matrix or an explicit later the maintainer override), the preregistered downstream
 canary protocol, rejected claims, and known limitations. The handoff explicitly
 does not claim live participant outcomes. Downstream review
 does not silently transfer core ownership; 110 remains the sole final sink.

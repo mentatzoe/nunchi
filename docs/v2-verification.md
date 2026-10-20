@@ -6,7 +6,7 @@ reproduced.
 
 ## Current state (2026-10-04)
 
-**Update, 2026-10-11:** Zoe removed the old Hermes integration ("delete, for
+**Update, 2026-10-11:** the maintainer removed the old Hermes integration ("delete, for
 now"). Its `Hermes host contract` workflow (the contract, normal-attention and
 startup lanes), `scripts/verify_stock_hermes.py`, the Hermes profile lifecycle
 and the `nunchi-hermes-*` commands named in this record are gone from the tree,

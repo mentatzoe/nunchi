@@ -143,7 +143,7 @@ overrun red cases rather than leaving those rules unimplemented.
 
 The source owner must return the slice declarations to `ACTIVE` while
 preserving all three candidate/handoff attempts and rejection records. Per
-Zoe's direction for this attempt, do not restart bound-workflow scaffolding
+the maintainer's direction for this attempt, do not restart bound-workflow scaffolding
 merely to perform the correction; follow the current owner-lane instruction.
 
 The next correction must:

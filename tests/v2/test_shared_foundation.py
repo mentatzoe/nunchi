@@ -58,7 +58,7 @@ from tests.v2.contract.schema_helpers import (
 
 def message(
     event_id: str,
-    author_id: str = "human:zoe",
+    author_id: str = "human:alice",
     text: str = "Could you look at this?",
     **extra,
 ):
@@ -179,7 +179,7 @@ class ObservationTests(unittest.TestCase):
         pipeline.handle_delivery(
             delivery_id="d-prompt",
             event=message("e-prompt"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         self.assertEqual(
             participant_attention_prompt(pipeline.attention.profile),
@@ -198,9 +198,9 @@ class ObservationTests(unittest.TestCase):
 
         collision = pipeline.handle_delivery(
             delivery_id="d-human",
-            event=message("e-human", "human:zoe", "Vigil is also my display name"),
+            event=message("e-human", "human:alice", "Vigil is also my display name"),
             actors={
-                "human:zoe": {"display_name": "Vigil", "kind": "human"},
+                "human:alice": {"display_name": "Vigil", "kind": "human"},
             },
         )
         self.assertTrue(collision.observation.wake_eligible)
@@ -217,12 +217,12 @@ class ObservationTests(unittest.TestCase):
                 "id": "e-membership",
                 "type": "membership",
                 "scope": {"kind": "room", "id": "42"},
-                "subject_actor_id": "human:zoe",
+                "subject_actor_id": "human:alice",
                 "caused_by_actor_id": "discord:bot:9",
                 "change": "join",
             },
             actors={
-                "human:zoe": {"display_name": "Zoe", "kind": "human"},
+                "human:alice": {"display_name": "Alice", "kind": "human"},
                 "discord:bot:9": {"display_name": "Vigil", "kind": "bot"},
             },
         )
@@ -235,20 +235,20 @@ class ObservationTests(unittest.TestCase):
         first = pipeline.handle_delivery(
             delivery_id="d1",
             event=message("e1"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         self.assertEqual(1, len(first.opportunities))
         for kwargs in (
             {
                 "delivery_id": "d1",
                 "event": message("e1"),
-                "actors": {"human:zoe": {"kind": "human"}},
+                "actors": {"human:alice": {"kind": "human"}},
             },
             {"delivery_id": "d2", "event": None, "actors": None},
             {
                 "delivery_id": "d3",
                 "event": message("e3"),
-                "actors": {"human:zoe": {"kind": "human"}},
+                "actors": {"human:alice": {"kind": "human"}},
                 "authorized_route": False,
             },
         ):
@@ -270,7 +270,7 @@ class ObservationTests(unittest.TestCase):
             pipeline.observation.observe(
                 delivery_id=f"d{index}",
                 event=message(f"e{index}", text=f"event {index}"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
         request = pipeline.observation.build_snapshot("e4")
         self.assertEqual(["e2", "e3", "e4"], [item["id"] for item in request["events"]])
@@ -304,7 +304,7 @@ class ObservationTests(unittest.TestCase):
             first.observation.observe(
                 delivery_id="d1",
                 event=message("e1"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
             second, model, _, _ = foundation(persistence_path=store)
             self.assertEqual(["e1"], [event["id"] for event in second.observation.retained_events()])
@@ -313,7 +313,7 @@ class ObservationTests(unittest.TestCase):
             second.handle_delivery(
                 delivery_id="d2",
                 event=message("e2"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
             self.assertEqual(["e1", "e2"], [
                 event["id"] for event in model.calls[0][1]["events"]
@@ -334,7 +334,7 @@ class ObservationTests(unittest.TestCase):
                     "e-newer",
                     timestamp=newer_timestamp,
                 ),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
             first.observation.observe(
                 delivery_id="d-older",
@@ -342,7 +342,7 @@ class ObservationTests(unittest.TestCase):
                     "e-older",
                     timestamp=older_timestamp,
                 ),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
             self.assertEqual(
                 ["e-older", "e-newer"],
@@ -378,7 +378,7 @@ class ObservationTests(unittest.TestCase):
             first.observation.observe(
                 delivery_id="d-invalid-time",
                 event=message("e-invalid-time", timestamp="not-a-timestamp"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
 
             retained = first.observation.retained_events()[0]
@@ -403,7 +403,7 @@ class ObservationTests(unittest.TestCase):
                 "e-aware",
                 timestamp=reference.isoformat().replace("+00:00", "Z"),
             ),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         pipeline.observation.observe(
             delivery_id="d-naive",
@@ -413,7 +413,7 @@ class ObservationTests(unittest.TestCase):
                 .replace(tzinfo=None)
                 .isoformat(),
             ),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
 
         retained = pipeline.observation.retained_events()
@@ -427,7 +427,7 @@ class ObservationTests(unittest.TestCase):
 
     def test_older_direct_mention_survives_newer_chatter(self):
         pipeline, model, _, _ = foundation()
-        actors = {"human:zoe": {"display_name": "Zoe", "kind": "human"}}
+        actors = {"human:alice": {"display_name": "Alice", "kind": "human"}}
         for index in range(1, 30):
             pipeline.observation.observe(
                 delivery_id=f"d{index}",
@@ -460,7 +460,7 @@ class ObservationTests(unittest.TestCase):
             event=message("e-own", "discord:bot:9", "my earlier answer"),
             actors={"discord:bot:9": {"display_name": "Vigil", "kind": "bot"}},
         )
-        actors = {"human:zoe": {"display_name": "Zoe", "kind": "human"}}
+        actors = {"human:alice": {"display_name": "Alice", "kind": "human"}}
         pipeline.observation.observe(
             delivery_id="d-reply",
             event=message("e-reply", text="why that way?", reply_to_event_id="e-own"),
@@ -481,7 +481,7 @@ class ObservationTests(unittest.TestCase):
 
     def test_older_mention_keeps_the_participants_answer(self):
         pipeline, _, _, _ = foundation()
-        actors = {"human:zoe": {"display_name": "Zoe", "kind": "human"}}
+        actors = {"human:alice": {"display_name": "Alice", "kind": "human"}}
         pipeline.observation.observe(
             delivery_id="d-ask",
             event=message("e-ask", text="Vigil, can you check X?",
@@ -509,12 +509,12 @@ class ObservationTests(unittest.TestCase):
         )
 
     def test_direct_exchange_never_displaces_recent_context(self):
-        # Zoe mentions Vigil in every message while Castor answers between
+        # Alice mentions Vigil in every message while Castor answers between
         # them: the newest window is already the conversation, so nothing
         # older may push Castor's answers out.
         pipeline, _, _, _ = foundation()
         actors = {
-            "human:zoe": {"display_name": "Zoe", "kind": "human"},
+            "human:alice": {"display_name": "Alice", "kind": "human"},
             "discord:bot:7": {"display_name": "Castor", "kind": "bot"},
         }
         events = []
@@ -536,7 +536,7 @@ class ObservationTests(unittest.TestCase):
     def test_interior_gap_stays_fetchable(self):
         limits = ObservationLimits(snapshot_events=4)
         pipeline, _, _, _ = foundation(limits=limits)
-        actors = {"human:zoe": {"kind": "human"}}
+        actors = {"human:alice": {"kind": "human"}}
         pipeline.observation.observe(
             delivery_id="d-first",
             event=message("e-first", text="first",
@@ -594,7 +594,7 @@ class ObservationTests(unittest.TestCase):
                 pipeline.observation.observe(
                     delivery_id=f"d-{event['id']}",
                     event=event,
-                    actors={"human:zoe": {"kind": "human"}},
+                    actors={"human:alice": {"kind": "human"}},
                 )
             request = pipeline.observation.build_snapshot("e-chat3")
             return request, receipts.all_records()[-1]["body"]["byte_count"]
@@ -621,7 +621,7 @@ class ObservationTests(unittest.TestCase):
             pipeline.observation.observe(
                 delivery_id="d-said",
                 event=message("e-said"),
-                actors={"human:zoe": {"display_name": "Zoe", "kind": "human"}},
+                actors={"human:alice": {"display_name": "Alice", "kind": "human"}},
             )
             # A reaction delivery may know only the reactor's ID.
             pipeline.observation.observe(
@@ -629,34 +629,34 @@ class ObservationTests(unittest.TestCase):
                 event={
                     "id": "e-reacted",
                     "type": "reaction",
-                    "author_id": "human:zoe",
+                    "author_id": "human:alice",
                     "target_event_id": "e-said",
                     "reaction": "✅",
                     "operation": "add",
                 },
-                actors={"human:zoe": {"kind": "unknown"}},
+                actors={"human:alice": {"kind": "unknown"}},
             )
-            known = {"display_name": "Zoe", "kind": "human"}
+            known = {"display_name": "Alice", "kind": "human"}
             self.assertEqual(
                 known,
-                pipeline.observation.build_snapshot("e-reacted")["actors"]["human:zoe"],
+                pipeline.observation.build_snapshot("e-reacted")["actors"]["human:alice"],
             )
 
             restored, _, _, _ = foundation(persistence_path=store)
             self.assertEqual(
                 known,
-                restored.observation.build_snapshot("e-reacted")["actors"]["human:zoe"],
+                restored.observation.build_snapshot("e-reacted")["actors"]["human:alice"],
             )
 
             # A newly known name still replaces the old one.
             restored.observation.observe(
                 delivery_id="d-renamed",
                 event=message("e-renamed"),
-                actors={"human:zoe": {"display_name": "Zoë", "kind": "human"}},
+                actors={"human:alice": {"display_name": "Zoë", "kind": "human"}},
             )
             self.assertEqual(
                 {"display_name": "Zoë", "kind": "human"},
-                restored.observation.build_snapshot("e-renamed")["actors"]["human:zoe"],
+                restored.observation.build_snapshot("e-renamed")["actors"]["human:alice"],
             )
 
 
@@ -684,7 +684,7 @@ class AttentionAndHostTests(unittest.TestCase):
             outcome = pipeline.handle_delivery(
                 delivery_id="d-reconstruct",
                 event=message("e-reconstruct"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
 
         opportunity = outcome.opportunities[0]
@@ -708,7 +708,7 @@ class AttentionAndHostTests(unittest.TestCase):
             outcome = pipeline.handle_delivery(
                 delivery_id="d-unrecoverable",
                 event=message("e-unrecoverable"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
 
         opportunity = outcome.opportunities[0]
@@ -736,7 +736,7 @@ class AttentionAndHostTests(unittest.TestCase):
                 pipeline.handle_delivery(
                     delivery_id="d-persistence",
                     event=message("e-persistence"),
-                    actors={"human:zoe": {"kind": "human"}},
+                    actors={"human:alice": {"kind": "human"}},
                 )
 
         self.assertEqual(1, build_snapshot.call_count)
@@ -752,7 +752,7 @@ class AttentionAndHostTests(unittest.TestCase):
             pipeline.observation.observe(
                 delivery_id=f"d-{event_id}",
                 event=message(event_id),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
         request_b = pipeline.observation.build_snapshot("e-b")
         decision_b = pipeline.attention.judge(request_b)
@@ -783,7 +783,7 @@ class AttentionAndHostTests(unittest.TestCase):
         outcome = pipeline.handle_delivery(
             delivery_id="d1",
             event=message("e1"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         self.assertEqual(0, len(model.calls))
         self.assertEqual("PREATTENTION_BYPASS", wakes[0]["attention"]["source"])
@@ -815,7 +815,7 @@ class AttentionAndHostTests(unittest.TestCase):
                 outcome = pipeline.handle_delivery(
                     delivery_id="d1",
                     event=message("e1"),
-                    actors={"human:zoe": {"kind": "human"}},
+                    actors={"human:alice": {"kind": "human"}},
                 )
                 self.assertEqual("DEFER", wakes[0]["attention"]["source"])
                 request_id = outcome.opportunities[0].request_id
@@ -830,7 +830,7 @@ class AttentionAndHostTests(unittest.TestCase):
         outcome = pipeline.handle_delivery(
             delivery_id="d1",
             event=message("e1"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         self.assertEqual("SUPPRESS", outcome.opportunities[0].effective_disposition)
         self.assertEqual(0, pipeline.host.invocation_count)
@@ -854,7 +854,7 @@ class AttentionAndHostTests(unittest.TestCase):
         outcome = pipeline.handle_delivery(
             delivery_id="d1",
             event=message("e1"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         self.assertEqual(0, len(model.calls))
         self.assertEqual("error", outcome.opportunities[0].decision_status)
@@ -877,7 +877,7 @@ class AttentionAndHostTests(unittest.TestCase):
         outcome = pipeline.handle_delivery(
             delivery_id="d1",
             event=message("e1"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         serialized = json.dumps(
             receipts.records(outcome.opportunities[0].request_id)
@@ -899,7 +899,7 @@ class AttentionAndHostTests(unittest.TestCase):
         second_outcome = second.handle_delivery(
             delivery_id="d2",
             event=message("e2"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         second_stream = second_receipts.records(
             second_outcome.opportunities[0].request_id
@@ -912,7 +912,7 @@ class AttentionAndHostTests(unittest.TestCase):
         outcome = pipeline.handle_delivery(
             delivery_id="d1",
             event=message("e1"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         stream = receipts.records(outcome.opportunities[0].request_id)
         self.assertEqual(["observation", "attention", "participant-host"], [
@@ -932,7 +932,7 @@ class AttentionAndHostTests(unittest.TestCase):
         outcome = pipeline.handle_delivery(
             delivery_id="d1",
             event=message("e1"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
 
         stream = receipts.records(outcome.opportunities[0].request_id)
@@ -967,7 +967,7 @@ class AttentionAndHostTests(unittest.TestCase):
                 pipeline.handle_delivery(
                     delivery_id="d1",
                     event=message("e1"),
-                    actors={"human:zoe": {"kind": "human"}},
+                    actors={"human:alice": {"kind": "human"}},
                 )
 
         self.assertEqual([], transport.calls)
@@ -988,7 +988,7 @@ class AttentionAndHostTests(unittest.TestCase):
             result["outcome"] = pipeline.handle_delivery(
                 delivery_id="d1",
                 event=message("e1"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
 
         thread = threading.Thread(target=run)
@@ -1032,7 +1032,7 @@ class AttentionAndHostTests(unittest.TestCase):
             result["outcome"] = pipeline.handle_delivery(
                 delivery_id="d1",
                 event=message("e1"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
 
         thread = threading.Thread(target=run)
@@ -1070,7 +1070,7 @@ class AttentionAndHostTests(unittest.TestCase):
         outcome = pipeline.handle_delivery(
             delivery_id="d1",
             event=message("e1"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         release.set()
         self.assertTrue(entered.is_set())
@@ -1118,7 +1118,7 @@ class AttentionAndHostTests(unittest.TestCase):
                 outcome = pipeline.handle_delivery(
                     delivery_id="d1",
                     event=message("e1"),
-                    actors={"human:zoe": {"kind": "human"}},
+                    actors={"human:alice": {"kind": "human"}},
                 )
                 result = outcome.opportunities[0].transport
                 self.assertIsNotNone(result)
@@ -1160,7 +1160,7 @@ class AttentionAndHostTests(unittest.TestCase):
         outcome = pipeline.handle_delivery(
             delivery_id="d1",
             event=message("e1"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
 
         self.assertEqual([], transport.calls)
@@ -1226,7 +1226,7 @@ class AttentionAndHostTests(unittest.TestCase):
                 outcome = pipeline.handle_delivery(
                     delivery_id="d1",
                     event=message("e1"),
-                    actors={"human:zoe": {"kind": "human"}},
+                    actors={"human:alice": {"kind": "human"}},
                 )
                 result = outcome.opportunities[0].transport
                 self.assertIsNotNone(result)
@@ -1264,14 +1264,14 @@ class AttentionAndHostTests(unittest.TestCase):
         lane.submit(
             delivery_id="d0",
             event=message("e0"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         self.assertTrue(entered.wait(1))
         for index in range(1, 8):
             outcome = lane.submit(
                 delivery_id=f"d{index}",
                 event=message(f"e{index}"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
             self.assertTrue(outcome.coalesced)
         release.set()
@@ -1296,7 +1296,7 @@ class AttentionAndHostTests(unittest.TestCase):
             target=lambda: pipeline.handle_delivery(
                 delivery_id="d0",
                 event=message("e0"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
         )
         thread.start()
@@ -1305,7 +1305,7 @@ class AttentionAndHostTests(unittest.TestCase):
             outcome = pipeline.handle_delivery(
                 delivery_id=f"d{index}",
                 event=message(f"e{index}", text=f"intervening {index}"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
             self.assertTrue(outcome.coalesced)
         self.assertEqual("e20", pipeline.scheduler.pending_anchor)
@@ -1351,14 +1351,14 @@ class AuthorizationTests(unittest.TestCase):
         self.pipeline.observation.observe(
             delivery_id="d1",
             event=message("e1"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         self.wake = self.pipeline.observation.build_snapshot("e1")
         self.wake.pop("schema_version")
         self.wake.pop("continuation", None)
         self.wake["attention"] = {"source": "WAKE"}
         self.rule = CapabilityRule(
-            requester_actor_id="human:zoe",
+            requester_actor_id="human:alice",
             capability="workspace.file.write",
             platform="discord",
             room_id="42",
@@ -1373,7 +1373,7 @@ class AuthorizationTests(unittest.TestCase):
                 "policy",
                 "r1",
                 (self.rule,),
-                ("operator:zoe",),
+                ("operator:alice",),
             )
         )
         self.journal = AuthorizationJournal(Path(self.temp.name) / "authorization.jsonl")
@@ -1393,7 +1393,7 @@ class AuthorizationTests(unittest.TestCase):
 
     def test_pipeline_cancel_discards_pending_approval(self):
         approval_rule = CapabilityRule(
-            requester_actor_id="human:zoe",
+            requester_actor_id="human:alice",
             capability="workspace.file.write",
             platform="discord",
             room_id="42",
@@ -1409,7 +1409,7 @@ class AuthorizationTests(unittest.TestCase):
                     "policy",
                     "approval",
                     (approval_rule,),
-                    ("operator:zoe",),
+                    ("operator:alice",),
                 )
             )
         )
@@ -1424,7 +1424,7 @@ class AuthorizationTests(unittest.TestCase):
         outcome = self.pipeline.handle_delivery(
             delivery_id="d2",
             event=message("e2"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         self.assertEqual("unavailable", outcome.opportunities[0].transport.delivery)
         challenge = coordinator.pending_for_operator()[0]["challenge"][
@@ -1433,7 +1433,7 @@ class AuthorizationTests(unittest.TestCase):
         self.pipeline.cancel()
         result = coordinator.complete_authenticated_approval(
             approval_challenge_id=challenge,
-            authenticated_approver_id="operator:zoe",
+            authenticated_approver_id="operator:alice",
         )
         self.assertEqual("failed", result.delivery)
         self.assertEqual([], self.native_calls)
@@ -1461,7 +1461,7 @@ class AuthorizationTests(unittest.TestCase):
                     "policy",
                     "delayed-approval",
                     (approval_rule,),
-                    ("operator:zoe",),
+                    ("operator:alice",),
                 )
 
         coordinator = self.coordinator(policy=BlockingApprovalPolicy())
@@ -1488,7 +1488,7 @@ class AuthorizationTests(unittest.TestCase):
         outcome = self.pipeline.handle_delivery(
             delivery_id="d2",
             event=message("e2"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
 
         self.assertIn(
@@ -1556,9 +1556,9 @@ class AuthorizationTests(unittest.TestCase):
         self.assertEqual([], validate_privileged_action_authorization_flow(flow))
 
     def test_policy_revocation_between_initial_check_and_commit_makes_zero_calls(self):
-        allowed = PolicySnapshot("policy", "r1", (self.rule,), ("operator:zoe",))
+        allowed = PolicySnapshot("policy", "r1", (self.rule,), ("operator:alice",))
         revoked_rule = CapabilityRule(**{**vars(self.rule), "revoked": True})
-        revoked = PolicySnapshot("policy", "r1", (revoked_rule,), ("operator:zoe",))
+        revoked = PolicySnapshot("policy", "r1", (revoked_rule,), ("operator:alice",))
 
         class ChangingPolicy:
             def __init__(self):
@@ -1597,7 +1597,7 @@ class AuthorizationTests(unittest.TestCase):
                 "policy",
                 "expiring",
                 (expiring_rule,),
-                ("operator:zoe",),
+                ("operator:alice",),
             )
         )
         journal = DelayedEffectCommitJournal(
@@ -1638,13 +1638,13 @@ class AuthorizationTests(unittest.TestCase):
             self.assertEqual(2, len(kinds))
 
     def test_revocation_during_effect_commit_makes_zero_calls(self):
-        allowed = PolicySnapshot("policy", "r1", (self.rule,), ("operator:zoe",))
+        allowed = PolicySnapshot("policy", "r1", (self.rule,), ("operator:alice",))
         revoked_rule = CapabilityRule(**{**vars(self.rule), "revoked": True})
         revoked = PolicySnapshot(
             "policy",
             "r1",
             (revoked_rule,),
-            ("operator:zoe",),
+            ("operator:alice",),
         )
         policy = StaticPolicySource(allowed)
 
@@ -1685,7 +1685,7 @@ class AuthorizationTests(unittest.TestCase):
             "impact": "high",
         })
         policy = StaticPolicySource(
-            PolicySnapshot("policy", "r1", (high_rule,), ("operator:zoe",))
+            PolicySnapshot("policy", "r1", (high_rule,), ("operator:alice",))
         )
         coordinator = self.coordinator(policy=policy)
         result = coordinator.execute_proposal(
@@ -1711,7 +1711,7 @@ class AuthorizationTests(unittest.TestCase):
             "impact": "high",
         })
         policy = StaticPolicySource(
-            PolicySnapshot("policy", "r1", (high_rule,), ("operator:zoe",))
+            PolicySnapshot("policy", "r1", (high_rule,), ("operator:alice",))
         )
         coordinator = self.coordinator(policy=policy)
         coordinator.execute_proposal(
@@ -1722,7 +1722,7 @@ class AuthorizationTests(unittest.TestCase):
         challenge_id = coordinator.pending_for_operator()[0]["challenge"]["approval_challenge_id"]
         approved = coordinator.complete_authenticated_approval(
             approval_challenge_id=challenge_id,
-            authenticated_approver_id="operator:zoe",
+            authenticated_approver_id="operator:alice",
         )
         self.assertEqual("sent", approved.delivery)
         self.assertEqual(self.proposal()["operation"], self.native_calls[0][0])
@@ -1752,7 +1752,7 @@ class AuthorizationTests(unittest.TestCase):
                 "policy",
                 "approval-revocation",
                 (approval_rule,),
-                ("operator:zoe",),
+                ("operator:alice",),
             )
         )
 
@@ -1765,7 +1765,7 @@ class AuthorizationTests(unittest.TestCase):
                             "policy",
                             "approval-revocation",
                             (revoked_rule,),
-                            ("operator:zoe",),
+                            ("operator:alice",),
                         )
                     )
                 return result
@@ -1794,7 +1794,7 @@ class AuthorizationTests(unittest.TestCase):
         ]
         result = coordinator.complete_authenticated_approval(
             approval_challenge_id=challenge_id,
-            authenticated_approver_id="operator:zoe",
+            authenticated_approver_id="operator:alice",
         )
 
         self.assertEqual("failed", result.delivery)
@@ -1807,7 +1807,7 @@ class AuthorizationTests(unittest.TestCase):
             "impact": "high",
         })
         policy = StaticPolicySource(
-            PolicySnapshot("policy", "r1", (high_rule,), ("operator:zoe",))
+            PolicySnapshot("policy", "r1", (high_rule,), ("operator:alice",))
         )
         coordinator = self.coordinator(policy=policy)
         coordinator.execute_proposal(
@@ -1819,7 +1819,7 @@ class AuthorizationTests(unittest.TestCase):
         coordinator.restart()
         result = coordinator.complete_authenticated_approval(
             approval_challenge_id=challenge_id,
-            authenticated_approver_id="operator:zoe",
+            authenticated_approver_id="operator:alice",
         )
         self.assertEqual("failed", result.delivery)
         self.assertEqual([], self.native_calls)
@@ -1848,7 +1848,7 @@ class AuthorizationTests(unittest.TestCase):
         self.assertEqual("e1", pending[0]["origin_observation"]["id"])
         retried = coordinator.complete_authenticated_approval(
             approval_challenge_id=pending[0]["challenge"]["approval_challenge_id"],
-            authenticated_approver_id="operator:zoe",
+            authenticated_approver_id="operator:alice",
         )
         self.assertEqual("unknown", retried.delivery)
         self.assertEqual(2, len(self.native_calls))
@@ -1865,7 +1865,7 @@ class AuthorizationTests(unittest.TestCase):
             **{**vars(self.rule), "target_idempotency": True}
         )
         policy = StaticPolicySource(
-            PolicySnapshot("policy", "idempotent", (idempotent_rule,), ("operator:zoe",))
+            PolicySnapshot("policy", "idempotent", (idempotent_rule,), ("operator:alice",))
         )
         results = [
             TransportResult("unknown", "lost"),
@@ -1933,7 +1933,7 @@ class AuthorizationTests(unittest.TestCase):
                 "policy",
                 "retry-revocation",
                 (idempotent_rule,),
-                ("operator:zoe",),
+                ("operator:alice",),
             )
         )
 
@@ -1946,7 +1946,7 @@ class AuthorizationTests(unittest.TestCase):
                             "policy",
                             "retry-revocation",
                             (revoked_rule,),
-                            ("operator:zoe",),
+                            ("operator:alice",),
                         )
                     )
                 return result
@@ -2038,7 +2038,7 @@ class MhmTests(unittest.TestCase):
         outcome = pipeline.handle_delivery(
             delivery_id="d-mhm",
             event=message("e-mhm"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
 
         self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
@@ -2068,7 +2068,7 @@ class MhmTests(unittest.TestCase):
         outcome = pipeline.handle_delivery(
             delivery_id="d-other-emoji",
             event=message("e-other-emoji"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
 
         # The participant may react, but only with what the platform attests.
@@ -2086,7 +2086,7 @@ class MhmTests(unittest.TestCase):
         outcome = pipeline.handle_delivery(
             delivery_id="d-no-reactions",
             event=message("e-no-reactions"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
 
         self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
@@ -2143,7 +2143,7 @@ class MhmTests(unittest.TestCase):
         outcome = pipeline.handle_delivery(
             delivery_id="d-discord-permission-denied",
             event=message("e-discord-permission-denied"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
 
         self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
@@ -2206,7 +2206,7 @@ class MhmTests(unittest.TestCase):
         outcome = pipeline.handle_delivery(
             delivery_id="d-matrix-permission-denied",
             event=message("e-matrix-permission-denied"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
 
         self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)

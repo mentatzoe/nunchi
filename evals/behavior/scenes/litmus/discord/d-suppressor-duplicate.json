@@ -8,8 +8,8 @@
     "dalgos"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
@@ -22,7 +22,7 @@
     },
     {
       "id": "msg-trigger-dup",
-      "author": "zoe",
+      "author": "alice",
       "at": "0s",
       "text": "Anyone want to weigh in on the cache thing?"
     }

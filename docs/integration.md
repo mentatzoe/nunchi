@@ -15,7 +15,7 @@ Every integration builds the library's side through one `Room`
 the participant's pinned profile and delegated model, the scheduler, and the
 turn host. The Hermes plugin builds a `Room` too, and is parked (2026-10-10).
 The older Hermes integration wired these itself and was removed on 2026-10-11
-(Zoe). An integration then takes one of two paths for the participant turn.
+(decided). An integration then takes one of two paths for the participant turn.
 
 ## Nunchi-owned participant
 

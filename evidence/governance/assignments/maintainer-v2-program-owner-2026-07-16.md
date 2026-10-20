@@ -1,8 +1,8 @@
 # Owner-lane assignment — v2-program-owner
 
-**Assignee**: Zoe
+**Assignee**: the maintainer
 **Lane**: v2-program-owner
-**Assigned by**: Zoe
+**Assigned by**: the maintainer
 **Assigned on**: 2026-07-16
 **Authority reference**: aleph-vault projects/shared/nunchi/decisions.md — 2026-07-16 V2 owner-lane assignment decision, commit a09c0f334ee389c6d01984db026b8455b6eef284
 

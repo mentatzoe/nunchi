@@ -298,7 +298,7 @@ class DiscordChecksTest(unittest.TestCase):
         self.assertTrue(checks.discord_writes_reconciled(lost, []).ok)
 
     def test_addressing_compares_what_was_sent_with_what_the_agent_received(self):
-        agent, zoe = "discord:actor:5", "discord:actor:9"
+        agent, alice = "discord:actor:5", "discord:actor:9"
         writes = [{"kind": "message", "message_id": "100"}, {"kind": "message", "message_id": "300"}, {"kind": "reaction", "message_id": "250"}]
         moments = [
             {"name": "direct-question", "expect": "post", "graded_event": "discord:message:200", "deliveries": [
@@ -309,7 +309,7 @@ class DiscordChecksTest(unittest.TestCase):
             {"name": "reply", "expect": "reply", "graded_event": "discord:message:250", "deliveries": [
                 {"event_id": "discord:message:250", "message_id": "250", "mentioned_actor_ids": [agent], "reply_to": "100",
                  "reply_resolves": True,
-                 "received": {"trigger": "discord:message:250", "mentioned_actor_ids": [agent, zoe], "reply_to_event_id": "discord:message:100",
+                 "received": {"trigger": "discord:message:250", "mentioned_actor_ids": [agent, alice], "reply_to_event_id": "discord:message:100",
                               "own_moves": [{"kind": "message"}]}}]},
             {"name": "reaction", "expect": "reaction", "graded_event": "discord:message:400", "deliveries": [
                 {"event_id": "discord:message:400", "message_id": "400", "mentioned_actor_ids": [agent], "reply_to": None,
@@ -338,7 +338,7 @@ class DiscordChecksTest(unittest.TestCase):
         failed = check(lost_received(0, mentioned_actor_ids=[]), agent=agent, writes=writes)
         self.assertFalse(failed.ok)
         self.assertIn(f"sent pinging {agent}, but Nunchi saw mentioned_actor_ids=[]", failed.detail)
-        self.assertFalse(check(lost_received(3, mentioned_actor_ids=[zoe]), agent=agent, writes=writes).ok)
+        self.assertFalse(check(lost_received(3, mentioned_actor_ids=[alice]), agent=agent, writes=writes).ok)
         failed = check(lost_received(2, reply_to_event_id=None), agent=agent, writes=writes)
         self.assertIn("Nunchi saw reply_to_event_id=None", failed.detail)
         # The reply's own ping is compared too: a harness that drops the mentions of a reply (and keeps its target) fails.
@@ -417,9 +417,9 @@ class WorldTest(unittest.TestCase):
     def test_one_channel_for_the_column_its_bot_and_the_scenes_people_and_scripted_bots(self):
         spec, members = _world()
         self.assertEqual({"codex": {}}, spec["channels"])
-        self.assertEqual(["zoe"], spec["people"])
+        self.assertEqual(["alice"], spec["people"])
         self.assertEqual({"CI": {"harness": False}, "Vigil": {}}, spec["bots"])
-        self.assertEqual({"vigil": "Vigil", "zoe": "zoe", "ci": "CI"}, members)
+        self.assertEqual({"vigil": "Vigil", "alice": "alice", "ci": "CI"}, members)
 
     def test_the_moments_go_in_order_with_the_reconnect_before_the_reaction(self):
         names = [spec.name for spec in discord_room.MOMENTS]
@@ -581,7 +581,7 @@ class WireTest(_StandIn, unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_the_agents_writes_and_calls_come_from_the_wire_and_reconcile(self):
-        asked = self.fd.post("zoe", "codex", "a question")["id"]
+        asked = self.fd.post("alice", "codex", "a question")["id"]
         sent, ok = await asyncio.to_thread(self.tool, "send_message", content="an answer")
         self.assertTrue(ok, sent)
         _, ok = await asyncio.to_thread(self.tool, "reply_message", message_id=asked, content="a reply")
@@ -606,7 +606,7 @@ class WireTest(_StandIn, unittest.IsolatedAsyncioTestCase):
         calls = discord_room.wire_calls(records, "Vigil")
         self.assertEqual(set(discord_room.TRANSPORT_CALLS), set(calls))
         # A person's post is the director's, never the agent's write.
-        self.assertEqual([], discord_room.wire_writes(records, "zoe"))
+        self.assertEqual([], discord_room.wire_writes(records, "alice"))
 
     async def test_a_reconnect_resumes_and_replays_what_was_posted_meanwhile(self):
         events: list[dict] = []
@@ -625,7 +625,7 @@ class WireTest(_StandIn, unittest.IsolatedAsyncioTestCase):
             await asyncio.to_thread(self.fd.wait_for, lambda r: r.get("t") == "READY", 10)
             since = len(self.fd.wire.records)
             await asyncio.to_thread(self.fd.gateway, "Vigil", "reconnect")
-            posted = await asyncio.to_thread(self.fd.post, "zoe", "codex", "posted while the bot reconnects")
+            posted = await asyncio.to_thread(self.fd.post, "alice", "codex", "posted while the bot reconnects")
             for _ in range(100):
                 if any((event.get("event") or {}).get("id") == f"discord:message:{posted['id']}" for event in events):
                     break

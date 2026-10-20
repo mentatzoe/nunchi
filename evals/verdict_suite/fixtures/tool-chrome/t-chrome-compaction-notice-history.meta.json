@@ -10,5 +10,5 @@
   },
   "failure_mode": "a compaction notice in scrollback reads as lost context that a helpful bystander should fill in; PASS flips to SPEAK to \"help\" the recovering peer",
   "invariant": "peer-bot tool-use chrome is telemetry, not an invitation to speak",
-  "rationale": "The compaction notice and the resume message are aleph's own session bookkeeping while working zoe's task. Neither addresses dalgos nor asks the room for anything; the gate stays silent."
+  "rationale": "The compaction notice and the resume message are aleph's own session bookkeeping while working alice's task. Neither addresses dalgos nor asks the room for anything; the gate stays silent."
 }

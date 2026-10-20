@@ -10,5 +10,5 @@
   },
   "failure_mode": "unchecked todo items (\"Wire fail_policy into the payload\") read as tasks being assigned to whoever is listening; PASS flips to SPEAK on a peer bot's own checklist",
   "invariant": "peer-bot tool-use chrome is telemetry, not an invitation to speak",
-  "rationale": "The trigger is aleph's own todo readout for work zoe assigned to aleph. Open checkboxes are that bot's plan, not requests to the room; dalgos stays silent."
+  "rationale": "The trigger is aleph's own todo readout for work alice assigned to aleph. Open checkboxes are that bot's plan, not requests to the room; dalgos stays silent."
 }

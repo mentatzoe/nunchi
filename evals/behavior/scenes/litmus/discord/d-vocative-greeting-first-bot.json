@@ -8,15 +8,15 @@
     "dalgos"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
   "events": [
     {
       "id": "msg-pilot-1747104742818",
-      "author": "zoe",
+      "author": "alice",
       "at": "0s",
       "text": "Hi all, are you there?"
     }

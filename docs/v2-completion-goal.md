@@ -2,9 +2,9 @@
 
 **Revision:** 2
 
-**Completion authority:** Zoe
+**Completion authority:** the maintainer
 
-> **Decision, Zoe, 2026-10-04.** This supersedes how V2 reaches `main` and how
+> **Decision, 2026-10-04.** This supersedes how V2 reaches `main` and how
 > day-to-day work is reviewed. It does not change what complete means.
 >
 > - `main` holds V2 before completion. Work merges into `main` as it lands,
@@ -16,7 +16,7 @@
 >   Cross-family independent review is not required for day-to-day delivery.
 > - The final completion decision and the release proof are unchanged: the
 >   end conditions, the proof standard, and the independent review of the
->   frozen release candidate still apply, and Zoe alone accepts the result.
+>   frozen release candidate still apply, and the maintainer alone accepts the result.
 
 ## Goal
 
@@ -36,9 +36,9 @@ runtimes, documentation, and reproducible evidence all describe the same exact
 candidate.
 
 The binding decision chain is the **Read first** order in repository-root
-`AGENTS.md`, including the Zoe-selected Nunchi decisions and technical design
+`AGENTS.md`, including the maintainer-selected Nunchi decisions and technical design
 recorded by Aleph Vault PR 67 (`bdd1ebb`), the contract clarification in PR 68
-(`c834e8c`), and the repository-owned selected design and contract. Zoe may
+(`c834e8c`), and the repository-owned selected design and contract. The maintainer may
 durably supersede a
 selected decision only through an explicit product decision that names the old
 decision, its replacement, and every affected requirement and surface, and
@@ -62,21 +62,21 @@ clean install or supported upgrade:
 | CLI, packaging, and operator paths | Installation, supported V1 upgrade, configuration, diagnostics, restart, and rollback work from committed documentation. |
 | Shared transport and Discord | Native facts, identity, authority, ordering, and delivery closure are preserved through the common transport and Discord path. |
 | Codex | The installed Codex integration implements the complete V2 lifecycle. |
-| Hermes | The installed Hermes integration implements the complete V2 lifecycle. (The Hermes plugin is parked since 2026-10-10 and the old integration was removed on 2026-10-11, Zoe, "delete, for now"; whether this row stays a release requirement is Zoe's decision.) |
+| Hermes | The installed Hermes integration implements the complete V2 lifecycle. (The Hermes plugin is parked since 2026-10-10 and the old integration was removed on 2026-10-11, the maintainer, "delete, for now"; whether this row stays a release requirement is the maintainer's decision.) |
 | Claude Code | The installed Claude Code integration implements the complete V2 lifecycle. |
 | Reference adapters | Generic channel, Matrix, Telegram, and standalone Discord implement the applicable V2 contract and represent unavailable platform facts honestly. |
 
-A surface may be removed only through Zoe's explicit product-scope decision
+A surface may be removed only through the maintainer's explicit product-scope decision
 showing how every affected requirement and user capability is resolved.
 Difficulty, missing evidence, an unfinished implementation, or a narrower
 support label is not an exclusion. A surface advertised as live-supported must
 pass real native live evidence; a deliberately reference-only tier requires
-Zoe's approval, must be labelled, and cannot support a live-parity claim. Each
+the maintainer's approval, must be labelled, and cannot support a live-parity claim. Each
 surface's required capabilities, native facts, and acceptance scenes are
 frozen before inherited work is admitted or reused and before any delivery
 resumes under this revision. Historical attempts remain non-candidates until
 they pass that frozen matrix. A claimed platform absence requires native-
-platform evidence or Zoe's product-scope decision.
+platform evidence or the maintainer's product-scope decision.
 
 ## Accountability
 
@@ -147,7 +147,7 @@ Nunchi V2 is complete only when all of the following are true:
    wrong one.** Before candidate freeze, every mutating, external,
    secret-bearing, account, and configuration effect and required capability
    is inventoried. Each is guarded or, if not required, explicitly disabled;
-   disabling a required capability needs the same Zoe product-scope decision
+   disabling a required capability needs the same the maintainer product-scope decision
    as removing a surface. The release-proof profile freezes impact
    classifications, with ambiguity treated as high impact. Ordinary room
    content may be conversational input but is never proof of authority.
@@ -252,7 +252,7 @@ Nunchi V2 is complete only when all of the following are true:
     candidate—keep candidate bytes read-only while using separate environments
     to verify the manifests and execute the complete review matrix. Any blocker
     creates an exact successor, a fresh held-back challenge set, and a complete
-    new review. Zoe alone accepts or rejects the final repository commit, input
+    new review. The maintainer alone accepts or rejects the final repository commit, input
     manifest, and closure manifest through a durable decision.
 
     Atomic cutover means one `main` product tree, version, and artifact manifest
@@ -268,7 +268,7 @@ Nunchi V2 is complete only when all of the following are true:
     `main` commit and current-state documentation is validated against
     installed behavior before V2 is complete. A post-merge
     blocker forbids any verified-current claim and requires an immediate revert
-    or a newly frozen, fully reviewed, Zoe-accepted successor. Release and
+    or a newly frozen, fully reviewed, maintainer-accepted successor. Release and
     promotion remain separate decisions.
 
 ## Proof standard
@@ -290,13 +290,13 @@ Before final evidence begins, a committed release-proof profile freezes:
   social-quality thresholds;
 - the complete deterministic test and evaluation identifiers, expected
   coverage, and skip/exception counts present at final profile freeze, with the
-  adoption-time inventory as a non-regression floor and a Zoe-approved V2
+  adoption-time inventory as a non-regression floor and a maintainer-approved V2
   replacement mapping for any retired V1 coverage;
 - a threat model covering assets, trust boundaries, attacker capabilities,
   credentials, supply chain and installation, transport and identity,
   cancellation and races, capacity, and output escape paths, with explicit
   disposition of every risk, no unresolved Critical or High risk, and every
-  residual risk included in Zoe's profile decision;
+  residual risk included in the maintainer's profile decision;
 - operating and overload limits, recovery deadlines, upgrade/rollback state
   outcomes, severity rules, and blocking criteria; and
 - the input- and closure-manifest boundaries and an exact review matrix naming
@@ -304,12 +304,12 @@ Before final evidence begins, a committed release-proof profile freezes:
   hard-zero invariant, `S01`–`S18` scene, and proof claim to independent review
   and reproduction.
 
-Independent non-author reviewers and Zoe durably accept the initial profile
+Independent non-author reviewers and the maintainer durably accept the initial profile
 before any held-back or final candidate evidence runs. Thresholds and loads
 must be justified against the selected product decisions, baselines, and
 false-suppression risk and must reject near-degenerate behavior, not only exact
 always-one-outcome implementations. The profile may grow stricter. Weakening
-it or shrinking scope after results requires Zoe's explicit supersession and a
+it or shrinking scope after results requires the maintainer's explicit supersession and a
 fresh candidate evidence run.
 
 Evidence counts only under all of these rules:

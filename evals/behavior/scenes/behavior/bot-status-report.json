@@ -2,15 +2,15 @@
   "id": "bot-status-report",
   "title": "A status report from a bot is suppressed",
   "source": "docs/behavior.md",
-  "review": "draft: written from docs/behavior.md; ranges need Zoe's review",
+  "review": "draft: written from docs/behavior.md; ranges need the maintainer's review",
   "platform": "discord",
   "participants": ["vigil"],
   "actors": {
-    "zoe": {"display_name": "Zoe", "kind": "human"},
+    "alice": {"display_name": "Alice", "kind": "human"},
     "ci": {"display_name": "CI", "kind": "bot"}
   },
   "events": [
-    {"id": "c1", "author": "zoe", "at": "-30m",
+    {"id": "c1", "author": "alice", "at": "-30m",
      "text": "Merging the cache PR now."},
     {"id": "b1", "author": "ci", "at": "0s",
      "text": "Build #482 passed on main (3m12s). 1,204 tests, 0 failures."}

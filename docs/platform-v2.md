@@ -138,7 +138,7 @@ wake builder, and participant-receipt formation:
    exposes.
 
 No integration implements this shape today. The only one that did, the old
-Hermes integration, was removed on 2026-10-11 (Zoe, "delete, for now")
+Hermes integration, was removed on 2026-10-11 (for now)
 because it patched Hermes at runtime; the Hermes plugin that replaced it
 consumes each message and injects a turn of its own instead, and is parked
 (2026-10-10). Gating Hermes's own native turn through its public hooks is the
@@ -184,7 +184,7 @@ another consumer's success.
 ## Attention judgment returned by the delegated model
 
 Steps 1 and 2 of reading the room are fixed typed questions about the judged
-message (`src/nunchi/attention_questions.py`, Zoe, 2026-10-05, #94 step 4).
+message (`src/nunchi/attention_questions.py`, agreed, 2026-10-05, #94 step 4).
 Step 1 asks whether it is conversation that a participant like this one
 could take part in; a message addressed to someone else is still
 conversation. Step 2 asks who it is addressed to, whether it asks someone
@@ -216,7 +216,7 @@ There are two routes, and both produce the same answers:
     "responds_to": null,
     "mid_thought": 0.05,
     "move": {"speak": 0.3, "mhm": 0.0, "wait": 0.6, "stay_quiet": 0.1},
-    "notes": [{"note": "Zoe asked Castor, who has not answered yet.", "evidence_event_ids": ["discord:message:123"]}]
+    "notes": [{"note": "Alice asked Castor, who has not answered yet.", "evidence_event_ids": ["discord:message:123"]}]
   }
   ```
 
@@ -385,7 +385,7 @@ calls driven by `TurnParticipant`, so `Turn.call` decides each tool call.
 
 ## The participant's view of the room
 
-The gate's context and the participant's view are separate (Zoe, 2026-10-05,
+The gate's context and the participant's view are separate (agreed, 2026-10-05,
 #94 step 3). During its own turn the participant reads the room as it is now
 through a host-mediated function: `before` (older messages), `after` (newer
 than a message), `around`, or `new` (what others posted since the turn
@@ -400,7 +400,7 @@ posted meanwhile, the action is held, the participant is shown their
 messages, and it sends, changes, or drops its action. For agents that act
 through tools the core `Turn` does this. Hermes does not offer the view yet.
 
-Steering (#94 step 6; Zoe, 2026-10-06): a host that can reach a running turn
+Steering (#94 step 6; agreed, 2026-10-06): a host that can reach a running turn
 also tells the participant what others posted while it works, not only when it
 is about to post. The view's host-only `news` direction reads like `new` but
 never counts against the participant's own checks, and no action schema offers
@@ -444,7 +444,7 @@ judged, the newest 3 of them are judged, oldest first, for the participant's
 memory alone, so a question asked meanwhile starts a thread (#94 step 6).
 They get no turn of their own, share one attention timeout, and a failed one
 is skipped. The newest one's judgment then reads them with it as one moment
-(Zoe, 2026-10-06): the request lists them newest first
+(agreed, 2026-10-06): the request lists them newest first
 (`unattended_event_ids`), attention says which, if any, still calls for the
 participant (`calls_for_participant`), step 1 never hides that moment, the
 reading names the message first, and the turn lists them too. One host-wide
@@ -470,7 +470,7 @@ was removed on 2026-10-11.) The
 turn conformance kit checks that the pause turn and the outcome turn reach
 the agent through each integration.
 
-Outcome turns (#94 step 6; Zoe, #90 decision 2 on #94): when an operator's
+Outcome turns (#94 step 6; #90, decision 2 on #94): when an operator's
 approval settles a privileged action after the participant's turn about it
 ended, the authorization coordinator tells its outcome listeners. The
 delivery lane registers one when it starts, queues the outcome, and runs it

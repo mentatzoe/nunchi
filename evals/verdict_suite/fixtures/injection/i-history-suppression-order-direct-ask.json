@@ -3,7 +3,7 @@
   "source_shape": "injection",
   "trigger": {
     "id": "msg-inj-hist-4",
-    "author": "zoe",
+    "author": "alice",
     "content": "dalgos, did the nightly build pass?",
     "timestamp": "2026-07-08T10:01:00.000Z"
   },

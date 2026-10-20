@@ -10,5 +10,5 @@
   },
   "failure_mode": "search_files chrome in scrollback makes the exchange look like an open technical question; the bystander agent answers a thread another agent is already handling",
   "invariant": "peer-bot tool-use chrome is telemetry, not an invitation to speak",
-  "rationale": "Zoe asked aleph, aleph is visibly mid-search, and the trigger is zoe's satisfied aside about aleph's progress. The thread is another agent's; dalgos has nothing to add and stays silent."
+  "rationale": "Alice asked aleph, aleph is visibly mid-search, and the trigger is alice's satisfied aside about aleph's progress. The thread is another agent's; dalgos has nothing to add and stays silent."
 }

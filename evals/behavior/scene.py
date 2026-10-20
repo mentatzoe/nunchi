@@ -9,16 +9,16 @@ A scene is JSON:
       "review": "draft",
       "platform": "discord",
       "participants": ["vigil"],
-      "actors": {"zoe": {"display_name": "Zoe", "kind": "human"}},
+      "actors": {"alice": {"display_name": "Alice", "kind": "human"}},
       "events": [
-        {"id": "m1", "author": "zoe", "at": "-90s", "text": "...",
+        {"id": "m1", "author": "alice", "at": "-90s", "text": "...",
          "mentions": ["vigil"], "reply_to": "m0"},
         {"id": "r1", "type": "reaction", "author": "vigil", "at": "-60s",
          "target": "m1", "reaction": "👂"}
       ],
       "moments": [
         {"event": "m2", "step1": "pass",
-         "notice": [{"fact": "Zoe is mid-story", "events": ["m1", "m2"]}],
+         "notice": [{"fact": "Alice is mid-story", "events": ["m1", "m2"]}],
          "fitting": ["mhm", "stay_quiet"],
          "misses": [{"move": "speak", "why": "takes the floor mid-story"}]}
       ]

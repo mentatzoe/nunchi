@@ -66,7 +66,7 @@ adapters, and harnesses on their installed runtimes; runs the complete staged
 room ladder; indexes S01-S16 evidence; and updates product/release truth without
 performing promotion. The slice implementation task graph stops after preparing
 the exact candidate and documentation/handoff inputs; later workflow gates
-establish `CONVERGED` and `HANDOFF_READY`. Zoe's acceptance and the atomic
+establish `CONVERGED` and `HANDOFF_READY`. The maintainer's acceptance and the atomic
 merge/post-merge verification are the separately governed umbrella program
 tail; package release and promotion remain separate.
 
@@ -177,9 +177,9 @@ or product artifact under `specs/` is planned.
 | S01-S16 scene/surface evidence manifest | assigned `v2-integrator` | `evidence/v2/parity/manifest.json` |
 | V2 release-readiness boundary | assigned `v2-integrator` | `docs/releases/v2-readiness.md` |
 | Append-only slice candidate attempts, after convergence | assigned `v2-integrator` | `evidence/v2/parity/slice-candidate.md` |
-| Append-only handoff/rejection attempts, after docs freshness | assigned `v2-integrator`; Zoe remains the rejection decision owner | `evidence/v2/parity/slice-handoff.md` |
-| Exact slice acceptance | assigned `v2-integrator`, copying Zoe's decision with `Recorded by: v2-integrator` | `evidence/v2/parity/slice-acceptance.md` |
-| Program cutover acceptance | assigned `v2-program-owner`, copying accepted Zoe decision with `Recorded by: v2-program-owner` | `evidence/v2/parity/cutover-acceptance.md` |
+| Append-only handoff/rejection attempts, after docs freshness | assigned `v2-integrator`; the maintainer remains the rejection decision owner | `evidence/v2/parity/slice-handoff.md` |
+| Exact slice acceptance | assigned `v2-integrator`, copying the maintainer's decision with `Recorded by: v2-integrator` | `evidence/v2/parity/slice-acceptance.md` |
+| Program cutover acceptance | assigned `v2-program-owner`, copying accepted the maintainer decision with `Recorded by: v2-program-owner` | `evidence/v2/parity/cutover-acceptance.md` |
 | Merged-main verification | assigned `v2-integrator`; verified by `v2-program-owner` | `evidence/v2/parity/post-merge-verification.md` |
 
 These are integration/evidence artifacts, not product interfaces. This final
@@ -201,7 +201,7 @@ security hashes changed. Only after atomic assembly and assurance pass may
 per-surface probes and S01-S16 evidence be adjudicated. After every gate passes,
 the assigned integrator appends the slice candidate and handoff attempts and
 stops slice implementation at `HANDOFF_READY`. The assigned integrator copies
-Zoe's explicit decision for that exact packet into immutable slice acceptance;
+the maintainer's explicit decision for that exact packet into immutable slice acceptance;
 on acceptance, the assigned program owner copies it only into program cutover
 acceptance. Rejection instead appends an attributable `REJECTED`
 decision to the handoff stream and returns the slice to `ACTIVE`; because the
@@ -221,7 +221,7 @@ validates exact main, finalizes current-state documentation, and establishes
 mixed state remains confined there, is marked non-releaseable, and never merges
 to main.
 
-**Handoff to**: Umbrella program and Zoe for final candidate, explicit repository
+**Handoff to**: Umbrella program and the maintainer for final candidate, explicit repository
 cutover acceptance, and a separate release go/no-go; no downstream implementation
 owner.
 
@@ -229,7 +229,7 @@ owner.
 runner/comparison, staged-room evidence index, and final docs/release
 reconciliation. The originating owner resolves semantic changes to its
 interface or component. `v2-security-owner` owns security risk disposition;
-only Zoe accepts residual risk.
+only the maintainer accepts residual risk.
 
 ## Acceptance Scenes and Evidence
 
@@ -364,13 +364,13 @@ in the docs/evidence-only follow-up before `CUTOVER_VERIFIED`.
 Each dependency owner MUST hand off exact commit, verification commands/results,
 canonical interface versions, ordinary evidence, installed-runtime provenance,
 and limitations. `v2-integrator` MUST return semantic defects to that owner and
-record the resolution. The final slice handoff to Zoe and the umbrella program includes
+record the resolution. The final slice handoff to the maintainer and the umbrella program includes
 the integrated candidate manifest, parity evidence index, release-readiness
 boundary, exact candidate commit/package identities, all
 commands/results, security readiness, failures/limitations, and an explicit
 statement that promotion remains unaddressed. The assigned `v2-integrator`
 appends candidate and handoff attempts to `slice-candidate.md` and
-`slice-handoff.md` and stops at `HANDOFF_READY`. Zoe owns the external acceptance
+`slice-handoff.md` and stops at `HANDOFF_READY`. The maintainer owns the external acceptance
 decision; the assigned `v2-integrator` durably copies it into immutable
 `slice-acceptance.md` or the append-only rejection stream, while the assigned
 `v2-program-owner` copies an acceptance only into `cutover-acceptance.md`; rejection returns

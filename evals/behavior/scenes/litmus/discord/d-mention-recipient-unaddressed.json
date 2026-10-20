@@ -8,15 +8,15 @@
     "dalgos"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
   "events": [
     {
       "id": "msg-pilot-1779463950000",
-      "author": "zoe",
+      "author": "alice",
       "at": "0s",
       "text": "Hey <@1494822530643398827>, could you post a short recap of the pineapple debate to the channel when you get a sec?",
       "mentions": [

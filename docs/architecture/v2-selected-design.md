@@ -175,7 +175,7 @@ Uncertainty widens attention through `WAKE` or `DEFER`. Trusted preattention
 bypass is a host policy branch and never fabricates a classifier result.
 
 The selected design made `ACK` a core outcome: one reaction Nunchi added for
-the participant without running it. Since #94 step 7 (Zoe, 2026-10-05:
+the participant without running it. Since #94 step 7 (agreed, 2026-10-05:
 every visible move is the participant's own) that outcome is gone. A
 judgment that leans to a "mhm" is `DEFER`; the participant takes the turn and
 reacts itself, within the platform's attested reaction capability.

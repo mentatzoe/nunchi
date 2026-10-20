@@ -29,7 +29,7 @@ NAMES = {
 # probes): the agent meant each for the room, and every posting style posts it
 # as written. The core reads no tag in a tool or one-reply post, and in a
 # final answer only the <thinking> the turn teaches, which these do not hold:
-# native reasoning in other tags is the harness's job (Zoe).
+# native reasoning in other tags is the harness's job (decided).
 REAL_FINAL_ANSWERS = (
     "DeepSeek R1 wraps its reasoning in `<think>...</think>` before the answer.",
     "Hermes strips `<think>...</think>` blocks before posting.",
@@ -47,7 +47,7 @@ REAL_FINAL_ANSWERS = (
     "Does Hermes still show the <nunchi_wake marker? It should be hidden.\n\nAlso, 5 > 3.",
     "Quick update: the plugin still prefixes <nunchi_wake ids to the turn text.\n"
     "Next steps:\n- fix the parser\n- ship -> staging",
-    "I grep for <nunchi_wake in the logs.\n\n> Zoe: thanks!\nAgreed.",
+    "I grep for <nunchi_wake in the logs.\n\n> Alice: thanks!\nAgreed.",
 )
 REAL_POSTS = (
     *REAL_FINAL_ANSWERS,
@@ -811,8 +811,8 @@ class OneReplyTurnTests(unittest.TestCase):
         self.assertEqual("On it.", action["text"])
         self.assertNotIn("why", action)
         given = self.protocol()
-        done, action = given.consume(self.reply(given, {**say, "why": "Zoe asked me directly."}), expand=None)
-        self.assertEqual(("On it.", "Zoe asked me directly."), (action["text"], action["why"]))
+        done, action = given.consume(self.reply(given, {**say, "why": "Alice asked me directly."}), expand=None)
+        self.assertEqual(("On it.", "Alice asked me directly."), (action["text"], action["why"]))
 
     def test_a_reply_of_only_a_wake_marker_is_refused_once_then_is_silence(self):
         protocol = self.protocol()
@@ -855,7 +855,7 @@ class FinalAnswerTurnTests(unittest.TestCase):
             "[SILENT]",
             "  [SILENT]\n\nNothing to add here.",
             "[silent]",
-            "Zoe asked Castor, who has not answered.\nCastor should take it.\n\n[SILENT]",
+            "Alice asked Castor, who has not answered.\nCastor should take it.\n\n[SILENT]",
             "",
             None,
         ):
@@ -866,9 +866,9 @@ class FinalAnswerTurnTests(unittest.TestCase):
 
     def test_thinking_is_never_posted_and_becomes_the_reason(self):
         turn = self.turn()
-        decision = turn.decide("<thinking>Zoe asked me directly; I have not checked yet.</thinking>\nNot yet, checking now.")
+        decision = turn.decide("<thinking>Alice asked me directly; I have not checked yet.</thinking>\nNot yet, checking now.")
         self.assertEqual(("deliver", "Not yet, checking now."), (decision.kind, decision.text))
-        self.assertEqual("Zoe asked me directly; I have not checked yet.", turn.action["why"])
+        self.assertEqual("Alice asked me directly; I have not checked yet.", turn.action["why"])
         self.assertEqual("Not yet, checking now.", turn.action["text"])
         quiet = self.turn()
         self.assertEqual("silent", quiet.decide("<thinking>Castor was asked; let him answer.</thinking>\n[SILENT]").kind)
@@ -892,7 +892,7 @@ class FinalAnswerTurnTests(unittest.TestCase):
         self.assertIsNone(marker_only.action)
 
     def test_native_reasoning_in_another_tag_is_the_harnesss_and_is_posted_as_written(self):
-        # Zoe: native reasoning is the harness's job; the core reads only the taught tag.
+        # Alice: native reasoning is the harness's job; the core reads only the taught tag.
         for answer in ("<think>Castor has it.</think>", "<reasoning>plan</reasoning>\nOn it.", *QUOTES_ITS_CLOSE):
             with self.subTest(answer=answer):
                 turn = self.turn()
@@ -938,8 +938,8 @@ class FinalAnswerTurnTests(unittest.TestCase):
             ("比如下午再说吧。[SILENT]", "比如下午再说吧。"),
             ("To stay quiet, reply with this, for example. [SILENT]", "To stay quiet, reply with this, for example."),
             # The marker at the start or on a line of its own, as before.
-            ("Zoe asked Castor, who has not answered.\nCastor should take it.\n\n[SILENT]",
-             "Zoe asked Castor, who has not answered. Castor should take it."),
+            ("Alice asked Castor, who has not answered.\nCastor should take it.\n\n[SILENT]",
+             "Alice asked Castor, who has not answered. Castor should take it."),
             ("**[SILENT]** Castor has this one.", "Castor has this one."),
             # Markdown emphasis may close around the sentence's end.
             ("**Done.** [SILENT]", "**Done.**"),
@@ -1881,7 +1881,7 @@ class RealPostsTests(unittest.TestCase):
 
     def tool_and_one_reply_posts(self):
         # Real posts, and posts that lead with native reasoning: the harness's
-        # to strip (Zoe), so the core posts them as written.
+        # to strip (decided), so the core posts them as written.
         return (*REAL_POSTS, *QUOTES_ITS_CLOSE, *(text for text, _, _ in _thinking_with_code()),
                 "<thinking>Should I answer?</thinking>")
 
@@ -1935,7 +1935,7 @@ class PrivateTextTests(unittest.TestCase):
     def test_tool_and_one_reply_posting_read_no_tag(self):
         for text in (
             "<think>Plan.</think>On it.",
-            "<thinking>\n  Zoe asked me.\n</thinking>\n\nOn it.",
+            "<thinking>\n  Alice asked me.\n</thinking>\n\nOn it.",
             "<thinking>Only this.</thinking>",
             "On it. <thinking>I could say",
             "<THINKING>x</THINKING> On it.",
@@ -1948,7 +1948,7 @@ class PrivateTextTests(unittest.TestCase):
         # Main's rule, unchanged: <thinking>(.*?)(?:</thinking>|\Z), any case, code or not.
         taught = re.compile(r"<thinking>(.*?)(?:</thinking>|\Z)", re.S | re.I)
         for text, expected in (
-            ("<thinking>\n  Zoe asked me.\n</thinking>\n\nOn it.", ("On it.", "Zoe asked me.")),
+            ("<thinking>\n  Alice asked me.\n</thinking>\n\nOn it.", ("On it.", "Alice asked me.")),
             ("On it. <thinking>I could say", ("On it.", "I could say")),
             ("On it. <thinking>a</thinking> Done.", ("On it.  Done.", "a")),
             ("<THINKING>x</THINKING> On it.", ("On it.", "x")),
@@ -2035,7 +2035,7 @@ class PrivateTextTests(unittest.TestCase):
             "Does Hermes still show the <nunchi_wake marker? It should be hidden.\n\nAlso, 5 > 3.",
             "Quick update: the plugin still prefixes <nunchi_wake ids to the turn text.\n"
             "Next steps:\n- fix the parser\n- ship -> staging",
-            "I grep for <nunchi_wake in the logs.\n\n> Zoe: thanks!\nAgreed.",
+            "I grep for <nunchi_wake in the logs.\n\n> Alice: thanks!\nAgreed.",
             "The <nunchi_wakeup> tag is someone else's.",
         ):
             with self.subTest(text=text):

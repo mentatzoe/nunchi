@@ -23,7 +23,7 @@ commit-consistent.
 
 ### R4 — the five public interfaces do not encode the selected V2 contract (CRITICAL)
 
-The Zoe-selected Aleph Vault technical design at `c834e8c` defines the clean
+The maintainer-selected Aleph Vault technical design at `c834e8c` defines the clean
 V2 request, continuation, participant-wake, decision, and staged-receipt
 contracts. The proposed `@1` schemas replace required facts and capabilities
 with materially narrower local shapes:

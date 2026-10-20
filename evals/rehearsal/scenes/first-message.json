@@ -6,10 +6,10 @@
   "platform": "discord",
   "participants": ["vigil"],
   "actors": {
-    "zoe": {"display_name": "Zoe", "kind": "human"}
+    "alice": {"display_name": "Alice", "kind": "human"}
   },
   "events": [
-    {"id": "m1", "author": "zoe", "at": "-45m", "text": "Morning, all."}
+    {"id": "m1", "author": "alice", "at": "-45m", "text": "Morning, all."}
   ],
   "moments": [
     {
@@ -17,7 +17,7 @@
       "event": "m1",
       "step1": "either",
       "notice": [
-        {"fact": "Zoe greets the room, nobody in particular", "events": ["m1"]}
+        {"fact": "Alice greets the room, nobody in particular", "events": ["m1"]}
       ],
       "fitting": ["stay_quiet", "mhm"],
       "misses": []

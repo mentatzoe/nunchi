@@ -2,17 +2,17 @@
   "id": "did-you-see",
   "title": "After the agent nodded, someone asks \"did you see what I said?\"",
   "source": "docs/behavior.md",
-  "review": "draft: written from docs/behavior.md; ranges need Zoe's review",
+  "review": "draft: written from docs/behavior.md; ranges need the maintainer's review",
   "platform": "discord",
   "participants": ["vigil"],
   "actors": {
-    "zoe": {"display_name": "Zoe", "kind": "human"}
+    "alice": {"display_name": "Alice", "kind": "human"}
   },
   "events": [
-    {"id": "z1", "author": "zoe", "at": "-12m", "mentions": ["vigil"],
+    {"id": "z1", "author": "alice", "at": "-12m", "mentions": ["vigil"],
      "text": "Vigil, I think we should drop the per-room secrets file and read the key from the OS keychain instead. Fewer files to leak, and rotation gets easier."},
     {"id": "r1", "type": "reaction", "author": "vigil", "at": "-11m", "target": "z1", "reaction": "👂"},
-    {"id": "z2", "author": "zoe", "at": "0s", "mentions": ["vigil"],
+    {"id": "z2", "author": "alice", "at": "0s", "mentions": ["vigil"],
      "text": "Vigil, did you see what I said?"}
   ],
   "moments": [
@@ -21,12 +21,12 @@
       "event": "z2",
       "step1": "pass",
       "notice": [
-        {"fact": "Vigil only nodded at Zoe's proposal and never replied", "events": ["z1", "r1"]},
-        {"fact": "Zoe is asking Vigil directly for a response", "events": ["z2"]}
+        {"fact": "Vigil only nodded at Alice's proposal and never replied", "events": ["z1", "r1"]},
+        {"fact": "Alice is asking Vigil directly for a response", "events": ["z2"]}
       ],
       "fitting": ["speak"],
       "misses": [
-        {"move": "stay_quiet", "why": "Zoe asked Vigil directly after getting only a nod"},
+        {"move": "stay_quiet", "why": "Alice asked Vigil directly after getting only a nod"},
         {"move": "mhm", "why": "another nod ignores the question"}
       ]
     }

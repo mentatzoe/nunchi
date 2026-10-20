@@ -1,8 +1,8 @@
 """Messages that arrive mid-turn are read with the newest, as one moment.
 
-Zoe, 2026-10-06 (#94 step 6): a person catching up reads the newest message
+Agreed, 2026-10-06 (#94 step 6): a person catching up reads the newest message
 and glances back at what they missed. Run 45 showed why: Sam asked Vigil a
-question while Vigil was answering Zoe, Zoe then said "Thanks!", and only her
+question while Vigil was answering Alice, Alice then said "Thanks!", and only her
 thanks was judged as a moment, so Vigil mostly left Sam unanswered. Now the
 judgment of the newest message lists the messages it replaced, newest first,
 and answers one more question: which of them still calls for the participant.
@@ -32,7 +32,7 @@ from nunchi.v2_contracts import (
 from tests.v2.test_operator_protocol import PROFILE as TURN_PROFILE, opportunity
 from tests.v2.test_shared_foundation import FixtureModel, foundation, message
 
-ACTORS = {"human:zoe": {"kind": "human"}, "human:sam": {"kind": "human"}}
+ACTORS = {"human:alice": {"kind": "human"}, "human:sam": {"kind": "human"}}
 
 
 class PointingModel(FixtureModel):
@@ -78,7 +78,7 @@ class UnattendedMomentTests(unittest.TestCase):
             return decision
 
         pipeline.attention.judge = capture
-        self.during = [("s1", "human:sam", "Vigil, is staging up?"), ("z2", "human:zoe", "Thanks!")]
+        self.during = [("s1", "human:sam", "Vigil, is staging up?"), ("z2", "human:alice", "Thanks!")]
         pipeline.handle_delivery(
             delivery_id="d-z1", event=message("z1", text="Vigil, can you check the build?"), actors=ACTORS
         )
@@ -120,10 +120,10 @@ class UnattendedMomentTests(unittest.TestCase):
         self.assertNotIn("unattended_event_ids", first.instructions)
 
     def test_a_post_that_names_the_unattended_ask_it_answers_links_that_thread_not_the_thanks(self):
-        # The turn is about Zoe's thanks; the agent answers Sam, whose question arrived while it was busy, and
+        # The turn is about Alice's thanks; the agent answers Sam, whose question arrived while it was busy, and
         # names it as the message its words answer (the send tool asks for that). Without the named origin the
         # post would be filed under the newest message and Sam's thread would read unanswered.
-        wakes, during = [], [("s1", "human:sam", "Vigil, is staging up?"), ("z2", "human:zoe", "Thanks!")]
+        wakes, during = [], [("s1", "human:sam", "Vigil, is staging up?"), ("z2", "human:alice", "Thanks!")]
         answers = {"z2": {"kind": "message", "origin_event_id": "s1", "text": "Staging is up."}}
         pipeline, _, _, _ = foundation(model=FixtureModel("DEFER"))
 
@@ -160,7 +160,7 @@ class UnattendedMomentTests(unittest.TestCase):
         model = FixtureModel("DEFER")
         pipeline, _, _, _ = foundation(model=model)
         pipeline.host.participant = self.participant(pipeline)
-        self.during = [("z2", "human:zoe", "Also the nightly?")]
+        self.during = [("z2", "human:alice", "Also the nightly?")]
         pipeline.handle_delivery(delivery_id="d-z1", event=message("z1"), actors=ACTORS)
         self.assertNotIn("unattended_event_ids", model.calls[-1][1])
 
@@ -218,10 +218,10 @@ class UnattendedAnswerTests(unittest.TestCase):
             "trigger_event_id": "z2",
             "self": {"actor_id": "bot:9", "participant_id": "vigil"},
             "actors": {"human:sam": {"display_name": "Sam"}},
-            "events": [{"id": "s1", "author_id": "human:sam"}, {"id": "z2", "author_id": "human:zoe"}],
+            "events": [{"id": "s1", "author_id": "human:sam"}, {"id": "z2", "author_id": "human:alice"}],
         }
         answers = dict(answers_leaning("DEFER"), **{UNATTENDED_POINTER: "s1"})
-        for notes in (None, [{"note": "Zoe thanks Vigil.", "evidence_event_ids": ["z2"]}]):
+        for notes in (None, [{"note": "Alice thanks Vigil.", "evidence_event_ids": ["z2"]}]):
             with self.subTest(model_notes=bool(notes)):
                 reading = reading_from_answers(answers, projection, notes=notes)
                 self.assertEqual("Sam's message s1 arrived while you were busy with your previous turn, and it still calls for you.", reading[0]["note"])

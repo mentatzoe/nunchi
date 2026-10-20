@@ -3,7 +3,7 @@
 The V1 corpus (`evals/verdict_suite/fixtures/`) holds real and constructed
 conversations, each with one expected V1 verdict. This writes one draft scene
 per conversation under `scenes/litmus/<category>/`. The scene files are the
-source from then on: Zoe reviews and edits their ranges, so the converter
+source from then on: the maintainer reviews and edits their ranges, so the converter
 never overwrites an existing scene unless asked with `--force`.
 
 Conversion rules, all drafts:
@@ -37,7 +37,7 @@ FIXTURES = Path(__file__).resolve().parents[1] / "verdict_suite" / "fixtures"
 OUT = SCENES / "litmus"
 SKIP = {"contract"}
 MOVE = {"PASS": "stay_quiet", "ACK": "mhm", "ASK": "speak", "SPEAK": "speak"}
-HUMANS = {"zoe", "tpm", "mira", "mallory"}
+HUMANS = {"alice", "tpm", "mira", "mallory"}
 _MENTION = re.compile(r"<@!?(\d+)>")
 _PLATFORM = {"discord-channel": "discord", "issue-thread": "issue-thread"}
 

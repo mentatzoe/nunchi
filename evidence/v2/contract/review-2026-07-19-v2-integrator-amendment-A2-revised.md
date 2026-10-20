@@ -25,7 +25,7 @@
 
 ## Decision basis
 
-The complete revised A2 candidate matches the Zoe-selected technical design at
+The complete revised A2 candidate matches the maintainer-selected technical design at
 `c834e8c` without broadening or narrowing it. The selected design says an
 active transition margin is finite within `[0,1]`. I-010B `@2` now encodes that
 inclusive domain identically in the Draft 2020-12 schema and stdlib mirror,

@@ -85,13 +85,13 @@ class MemoryCases(unittest.TestCase):
     def test_a_message_may_point_at_the_message_it_answered(self):
         # @16: the host knows which message prompted each post, so a promise is remembered beside the ask.
         answering = dict(self.MOVES[0], about_event_id="q1")
-        shown = dict(answering, about_author_id="human:zoe", about_text="Watch the nightly and tell me.")
+        shown = dict(answering, about_author_id="human:alice", about_text="Watch the nightly and tell me.")
         harness_posted = {k: v for k, v in shown.items() if k != "event_id"}
-        for good in ([answering], [shown], [harness_posted], [dict(shown, why="Zoe asked me.")]):
+        for good in ([answering], [shown], [harness_posted], [dict(shown, why="Alice asked me.")]):
             with self.subTest(good=good):
                 assert_schema_verdict(self, "participant-wake", self.wake(good), "valid")
         for bad in (
-            [dict(answering, about_author_id="human:zoe")],
+            [dict(answering, about_author_id="human:alice")],
             [dict(answering, about_text="Watch the nightly.")],
             [dict(answering, about_event_id="")],
             [{k: v for k, v in shown.items() if k != "about_event_id"}],
@@ -157,14 +157,14 @@ class MoveAboutCases(unittest.TestCase):
 
     def test_the_about_pair_comes_together(self):
         move = {"kind": "silence", "about_event_id": "e1", "at": "2026-10-06T09:00:00.000Z",
-                "about_author_id": "human:zoe", "about_text": "Vigil, tell me when the nightly finishes?"}
+                "about_author_id": "human:alice", "about_text": "Vigil, tell me when the nightly finishes?"}
         wake = dict(make_wake("DEFER"), memory={"own_moves": [move]})
         assert_schema_verdict(self, "participant-wake", wake, "valid")
         for missing in ("about_author_id", "about_text"):
             with self.subTest(missing=missing):
                 alone = {key: value for key, value in move.items() if key != missing}
                 assert_schema_verdict(self, "participant-wake", dict(make_wake("DEFER"), memory={"own_moves": [alone]}), "invalid")
-        message = {"kind": "message", "event_id": "v1", "text": "hi", "about_author_id": "human:zoe", "about_text": "x"}
+        message = {"kind": "message", "event_id": "v1", "text": "hi", "about_author_id": "human:alice", "about_text": "x"}
         assert_schema_verdict(self, "participant-wake", dict(make_wake("DEFER"), memory={"own_moves": [message]}), "invalid")
 
 
@@ -174,7 +174,7 @@ class ThreadCases(unittest.TestCase):
     THREADS = [
         {
             "event_id": "q1",
-            "author_id": "human:zoe",
+            "author_id": "human:alice",
             "text": "Does the backoff cap at 30 seconds?",
             "addressed_to": "room",
             "at": "2026-10-06T08:00:00.000Z",
@@ -184,9 +184,9 @@ class ThreadCases(unittest.TestCase):
             "event_id": "v1",
             "author_id": "bot:vigil",
             "text": "Docs too?",
-            "responses": [{"event_id": "z1", "author_id": "human:zoe", "text": "Yes please."}],
+            "responses": [{"event_id": "z1", "author_id": "human:alice", "text": "Yes please."}],
         },
-        {"event_id": "q2", "author_id": "human:zoe", "text": "Lunch?", "addressed_to": "participant", "responses": []},
+        {"event_id": "q2", "author_id": "human:alice", "text": "Lunch?", "addressed_to": "participant", "responses": []},
     ]
 
     def wake(self, threads, **memory):
@@ -323,7 +323,7 @@ class WakeBudgetCases(unittest.TestCase):
 
 
 class WakeGapCases(unittest.TestCase):
-    """@15 (Zoe, 2026-10-10): the wake carries the gaps its view reaches that the participant has not been told about."""
+    """@15 (agreed, 2026-10-10): the wake carries the gaps its view reaches that the participant has not been told about."""
 
     def wake(self, gaps):
         doc = make_wake("WAKE")

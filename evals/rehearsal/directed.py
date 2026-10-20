@@ -24,7 +24,7 @@ Two rules bind the director:
   says why (`REASONS`; `docs/rehearsal.md` has the table).
 - **Scenes are drafts** (`evals/behavior/README.md`). Every result says
   "draft expectations": it compares the agent with a draft, and is not a
-  finding about the model until Zoe reviews the scene.
+  finding about the model until the maintainer reviews the scene.
 
 Timing: events older than `HISTORY_SECONDS` before the first graded message
 are history, posted backdated (`post(at=)`), oldest first, so the room's

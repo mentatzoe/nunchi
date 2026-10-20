@@ -96,7 +96,7 @@ def _scene(events: list[dict], moments: list[dict], **fields) -> object:
         "review": "draft: test",
         "platform": "discord",
         "participants": ["vigil"],
-        "actors": {"zoe": {"display_name": "Zoe", "kind": "human"}, "sam": {"display_name": "Sam", "kind": "human"}},
+        "actors": {"alice": {"display_name": "Alice", "kind": "human"}, "sam": {"display_name": "Sam", "kind": "human"}},
         "events": events,
         "moments": moments,
         **fields,
@@ -113,11 +113,11 @@ def _moment(event: str, fitting: list[str], misses: list[str] = (), step1: str =
 def _directed_scene():
     return _scene(
         [
-            {"id": "h1", "author": "zoe", "at": "-3h", "text": "Morning all."},
-            {"id": "h2", "author": "sam", "at": "-2h", "text": "Morning Zoe."},
-            {"id": "g1", "author": "zoe", "at": "-30s", "mentions": ["castor"], "text": "Castor, how does the backoff work?"},
+            {"id": "h1", "author": "alice", "at": "-3h", "text": "Morning all."},
+            {"id": "h2", "author": "sam", "at": "-2h", "text": "Morning Alice."},
+            {"id": "g1", "author": "alice", "at": "-30s", "mentions": ["castor"], "text": "Castor, how does the backoff work?"},
             {"id": "g2", "author": "sam", "at": "-20s", "reply_to": "g1", "text": "I wondered that too."},
-            {"id": "g3", "author": "zoe", "at": "0s", "mentions": ["vigil"], "text": "Vigil, did you see that?"},
+            {"id": "g3", "author": "alice", "at": "0s", "mentions": ["vigil"], "text": "Vigil, did you see that?"},
         ],
         [_moment("g1", ["wait", "stay_quiet"]), _moment("g3", ["speak"], ["stay_quiet", "mhm"])],
     )
@@ -152,10 +152,10 @@ class PlanTest(unittest.TestCase):
         # What a scene says Vigil said earlier is a line the agent says itself: the director never posts as the agent.
         scene = _scene(
             [
-                {"id": "z1", "author": "zoe", "at": "-2h", "mentions": ["vigil"], "text": "Vigil, can you check the build?"},
+                {"id": "z1", "author": "alice", "at": "-2h", "mentions": ["vigil"], "text": "Vigil, can you check the build?"},
                 {"id": "v1", "author": "vigil", "at": "-2h", "reply_to": "z1", "text": "I will."},
                 {"id": "r1", "type": "reaction", "author": "vigil", "at": "-1h", "target": "z1", "reaction": "x"},
-                {"id": "q1", "author": "zoe", "at": "0s", "mentions": ["vigil"], "text": "Vigil, how does it work?"},
+                {"id": "q1", "author": "alice", "at": "0s", "mentions": ["vigil"], "text": "Vigil, how does it work?"},
             ],
             [_moment("q1", ["speak"])],
         )
@@ -176,8 +176,8 @@ class PlanTest(unittest.TestCase):
             self.assertEqual(("agent-event",), item.reasons)
             self.assertIn(expect, item.unplayable)
 
-        z1 = {"id": "z1", "author": "zoe", "at": "-2m", "mentions": ["vigil"], "text": "Vigil, a question?"}
-        q = {"id": "q1", "author": "zoe", "at": "0s", "text": "Vigil, anything else?"}
+        z1 = {"id": "z1", "author": "alice", "at": "-2m", "mentions": ["vigil"], "text": "Vigil, a question?"}
+        q = {"id": "q1", "author": "alice", "at": "0s", "text": "Vigil, anything else?"}
         # A line on a message a moment grades: the graded moment is the agent's own move there.
         refused([z1, {"id": "v1", "author": "vigil", "at": "-1m", "reply_to": "z1", "text": "Yes."}, q], [_moment("z1", ["speak"])], "which a moment grades")
         # A line on the agent's own line.
@@ -216,15 +216,15 @@ class PlanTest(unittest.TestCase):
     def test_other_reasons_a_scene_cannot_be_played(self):
         reaction = _scene(
             [
-                {"id": "m1", "author": "zoe", "at": "-5s", "text": "Look at this."},
+                {"id": "m1", "author": "alice", "at": "-5s", "text": "Look at this."},
                 {"id": "r1", "type": "reaction", "author": "sam", "at": "-2s", "target": "m1", "reaction": "x"},
-                {"id": "m2", "author": "zoe", "at": "0s", "text": "Vigil?"},
+                {"id": "m2", "author": "alice", "at": "0s", "text": "Vigil?"},
             ],
             [_moment("m2", ["speak"])],
         )
         self.assertEqual(("reaction-event",), directed.plan(reaction).reasons)
         other = _scene(
-            [{"id": "m1", "author": "zoe", "at": "0s", "text": "Castor?"}], [_moment("m1", ["speak"])], participants=["castor"]
+            [{"id": "m1", "author": "alice", "at": "0s", "text": "Castor?"}], [_moment("m1", ["speak"])], participants=["castor"]
         )
         self.assertEqual(("other-participant",), directed.plan(other).reasons)
 
@@ -1129,8 +1129,8 @@ class DirectorTest(_StandIn, unittest.TestCase):
     def test_a_scene_with_no_history_posts_every_message_live_and_moves_no_clock(self):
         scene = parse_scene(
             {**{"id": "short", "title": "t", "source": "s", "review": "draft", "platform": "discord", "participants": ["vigil"],
-                "actors": {"zoe": {"display_name": "Zoe", "kind": "human"}}},
-             "events": [{"id": "a", "author": "zoe", "at": "-40s", "text": "one"}, {"id": "b", "author": "zoe", "at": "0s", "text": "two"}],
+                "actors": {"alice": {"display_name": "Alice", "kind": "human"}}},
+             "events": [{"id": "a", "author": "alice", "at": "-40s", "text": "one"}, {"id": "b", "author": "alice", "at": "0s", "text": "two"}],
              "moments": [_moment("b", ["speak"])]}
         )
         leg, fd, played = self.play(scene)
@@ -1277,9 +1277,9 @@ class CommandTest(unittest.TestCase):
         self.assertIs(item.script, leg.script)
         self.assertIs(discord_room.SCRIPT, discord_room.ReferenceLeg.script, "without a scene it is the moments' script")
         spec, members = discord_room.world_spec("reference", [item.plan.scene], agent="Vigil")
-        self.assertEqual(["zoe", "sam"], spec["people"])
+        self.assertEqual(["alice", "sam"], spec["people"])
         self.assertEqual({"CI": {"harness": False}, "Vigil": {}}, spec["bots"])
-        self.assertEqual({"vigil": "Vigil", "zoe": "zoe", "sam": "sam", "ci": "CI"}, members)
+        self.assertEqual({"vigil": "Vigil", "alice": "alice", "sam": "sam", "ci": "CI"}, members)
 
     def test_hermes_and_the_moments_are_as_they_were(self):
         self.assertEqual(
@@ -1300,7 +1300,7 @@ class SummaryTest(unittest.TestCase):
     def test_the_summary_shows_the_grade_matrix_with_the_columns_grades_and_says_the_expectations_are_drafts(self):
         text = record.summary_markdown(self.document())
         self.assertIn("## Grade matrix (draft expectations)", text)
-        self.assertIn("awaiting Zoe's review", text)
+        self.assertIn("awaiting the maintainer's review", text)
         self.assertIn("| story-across-messages | mid-story, second message | mhm, stay_quiet, wait (pass) | `m` fits/ok |", text)
         # The fourth message fits a silence, but the script nods there: the matrix says it was off script.
         self.assertIn("| story-across-messages | mid-story, fourth message | mhm, stay_quiet, wait (pass) | `q` fits/ok off script |", text)

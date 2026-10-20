@@ -8,15 +8,15 @@
     "turnaware-dalgos"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
   "events": [
     {
       "id": "ack-trig",
-      "author": "zoe",
+      "author": "alice",
       "text": "@All members please acknowledge that you saw the route change."
     }
   ],

@@ -1,6 +1,6 @@
 """The agent reports an approved action's outcome itself (#94 step 6).
 
-Zoe, #90 decision 2 on #94: when an approved action completes after the
+#90, decision 2 on #94: when an approved action completes after the
 agent's turn has ended, the agent is the one who says so in the room;
 Nunchi doesn't. So when an approval settles, the agent gets a turn about
 the message it proposed the action for, with ``occasion: "outcome"`` and
@@ -20,14 +20,14 @@ from nunchi.v2_contracts import validate_attention_decision, validate_participan
 from tests.v2.test_proposal_outcomes import ProposalFixture, proposal
 from tests.v2.test_shared_foundation import message
 
-ZOE = {"human:zoe": {"kind": "human"}}
+ALICE = {"human:alice": {"kind": "human"}}
 
 
 class OutcomeTurnTests(ProposalFixture, unittest.TestCase):
     def approve(self, coordinator):
         challenge = coordinator.pending_for_operator()[0]["challenge"]["approval_challenge_id"]
         return coordinator.complete_authenticated_approval(
-            approval_challenge_id=challenge, authenticated_approver_id="operator:zoe"
+            approval_challenge_id=challenge, authenticated_approver_id="operator:alice"
         )
 
     def proposed(self, **coordinator_options):
@@ -148,10 +148,10 @@ class OutcomeTurnTests(ProposalFixture, unittest.TestCase):
     def test_an_outcome_about_a_message_that_left_the_window_uses_the_newest(self):
         coordinator, _ = self.proposed()
         self.approve(coordinator)
-        self.pipeline.observation.observe(delivery_id="d-e9", event=message("e9", text="Later."), actors=ZOE)
+        self.pipeline.observation.observe(delivery_id="d-e9", event=message("e9", text="Later."), actors=ALICE)
         # The agent's own message is newer, but a turn is about someone else's.
         self.pipeline.observation.observe(
-            delivery_id="d-v9", event=message("v9", author_id="discord:bot:9", text="Noted."), actors=ZOE
+            delivery_id="d-v9", event=message("v9", author_id="discord:bot:9", text="Noted."), actors=ALICE
         )
         self.pipeline._outcomes[0]["about_event_id"] = "gone"
         self.pipeline.report_outcomes()
@@ -198,11 +198,11 @@ class LaneOutcomeTests(ProposalFixture, unittest.TestCase):
         self.pipeline.host.participant = participant
         # The lane listens to the coordinator the host has when it starts.
         lane = AsyncDeliveryLane(self.pipeline)
-        lane.submit(delivery_id="d-e1", event=message("e1", text="Vigil, update the README."), actors=ZOE)
+        lane.submit(delivery_id="d-e1", event=message("e1", text="Vigil, update the README."), actors=ALICE)
         self.assertTrue(lane.drain(2))
         challenge = coordinator.pending_for_operator()[0]["challenge"]["approval_challenge_id"]
         coordinator.complete_authenticated_approval(
-            approval_challenge_id=challenge, authenticated_approver_id="operator:zoe"
+            approval_challenge_id=challenge, authenticated_approver_id="operator:alice"
         )
         self.assertTrue(told.wait(2))
         self.assertTrue(lane.drain(2))

@@ -22,7 +22,7 @@ context items.
   "source_shape": "discord",                     // "multica" | "discord"; extension over public schema
   "trigger": {
     "id": "msg-pilot-1747104742818",
-    "author": "zoe",
+    "author": "alice",
     "content": "Hi all, are you there?",
     "timestamp": "2026-05-13T00:32:22.818Z"      // optional, present for discord-shape
   },

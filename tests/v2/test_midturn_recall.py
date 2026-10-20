@@ -14,7 +14,7 @@ import unittest
 from nunchi.pipeline import MIDTURN_RECALL_LIMIT
 from tests.v2.test_shared_foundation import FixtureModel, foundation, message
 
-ACTORS = {"human:zoe": {"kind": "human"}, "human:sam": {"kind": "human"}}
+ACTORS = {"human:alice": {"kind": "human"}, "human:sam": {"kind": "human"}}
 
 
 class MidturnRecallTests(unittest.TestCase):
@@ -42,7 +42,7 @@ class MidturnRecallTests(unittest.TestCase):
         )
 
     def test_a_question_asked_mid_turn_is_remembered_before_the_newest_is_judged(self):
-        self.during = [("s1", "human:sam", "Vigil, is staging up?"), ("z2", "human:zoe", "Thanks!")]
+        self.during = [("s1", "human:sam", "Vigil, is staging up?"), ("z2", "human:alice", "Thanks!")]
         self.start()
         self.assertEqual(["z1", "s1", "z2"], self.judged())
         # Only the newest gets a turn; s1 was judged for the memory alone.
@@ -52,7 +52,7 @@ class MidturnRecallTests(unittest.TestCase):
         self.assertIn("s1", [thread["event_id"] for thread in self.wakes[-1]["memory"]["threads"]])
 
     def test_the_newest_is_judged_once_and_a_lone_message_is_not_recalled(self):
-        self.during = [("z2", "human:zoe", "Also the nightly?")]
+        self.during = [("z2", "human:alice", "Also the nightly?")]
         self.start()
         self.assertEqual(["z1", "z2"], self.judged())
 
@@ -64,7 +64,7 @@ class MidturnRecallTests(unittest.TestCase):
         self.assertEqual(["z1", *recalled, f"s{count - 1}"], self.judged())
 
     def test_a_message_that_cannot_be_judged_does_not_stop_the_newest(self):
-        self.during = [("s1", "human:sam", "Vigil, is staging up?"), ("z2", "human:zoe", "Thanks!")]
+        self.during = [("s1", "human:sam", "Vigil, is staging up?"), ("z2", "human:alice", "Thanks!")]
         recall = self.pipeline.recall
 
         def failing(event_id, **kwargs):

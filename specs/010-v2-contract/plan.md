@@ -153,7 +153,7 @@ evidence and task-graph wording only; no new gate exposure is introduced.
 
 ### Consumes
 
-- Zoe-selected V2 technical design at Aleph Vault merge `c834e8c`; no upstream
+- maintainer-selected V2 technical design at Aleph Vault merge `c834e8c`; no upstream
   slice interface.
 
 ### Produces

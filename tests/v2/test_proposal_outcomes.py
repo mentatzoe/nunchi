@@ -1,6 +1,6 @@
 """What becomes of a proposal reaches the agent, and the agent can withdraw it.
 
-Zoe, 2026-10-04 (#90 on #94): an approval for a privileged action outlives
+Agreed, 2026-10-04 (#90 on #94): an approval for a privileged action outlives
 the agent's turn, so the conversation memory gains two things tested here.
 The outcome reaches the agent: approved and done, denied, expired, or
 cancelled goes into its memory and its next turn, so nothing happens in its
@@ -28,7 +28,7 @@ from nunchi.participant_model import participant_tool_action
 from nunchi.v2_contracts import validate_participant_wake
 from tests.v2.test_shared_foundation import foundation, message
 
-ZOE = {"human:zoe": {"kind": "human"}}
+ALICE = {"human:alice": {"kind": "human"}}
 
 
 def proposal(origin="e1"):
@@ -42,7 +42,7 @@ def proposal(origin="e1"):
 
 
 class ProposalFixture:
-    """A room with Zoe and Vigil, and a coordinator for Vigil's proposals."""
+    """A room with Alice and Vigil, and a coordinator for Vigil's proposals."""
 
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
@@ -60,7 +60,7 @@ class ProposalFixture:
 
     def coordinator(self, *, approval=True, ttl=300, result=None):
         rule = CapabilityRule(
-            requester_actor_id="human:zoe",
+            requester_actor_id="human:alice",
             capability="workspace.file.write",
             platform="discord",
             room_id="42",
@@ -77,7 +77,7 @@ class ProposalFixture:
 
         coordinator = AuthorizationCoordinator(
             observation=self.pipeline.observation,
-            policy_source=StaticPolicySource(PolicySnapshot("policy", "r1", (rule,), ("operator:zoe",))),
+            policy_source=StaticPolicySource(PolicySnapshot("policy", "r1", (rule,), ("operator:alice",))),
             journal=self.journal,
             executors={"workspace.file.write": execute},
             approval_ttl_seconds=ttl,
@@ -86,7 +86,7 @@ class ProposalFixture:
         return coordinator
 
     def deliver(self, event_id, text="Vigil, please update the README."):
-        return self.pipeline.handle_delivery(delivery_id=f"d-{event_id}", event=message(event_id, text=text), actors=ZOE)
+        return self.pipeline.handle_delivery(delivery_id=f"d-{event_id}", event=message(event_id, text=text), actors=ALICE)
 
     def proposals_in(self, wake):
         return [move for move in wake.get("memory", {}).get("own_moves", ()) if move["kind"] == "proposal"]
@@ -116,13 +116,13 @@ class ProposalOutcomeTests(ProposalFixture, unittest.TestCase):
                 "capability": "workspace.file.write",
                 "status": "awaiting_approval",
                 "at": record["at"],
-                "about_author_id": "human:zoe",
+                "about_author_id": "human:alice",
                 "about_text": "Vigil, please update the README.",
             },
             waiting,
         )
         approved = coordinator.complete_authenticated_approval(
-            approval_challenge_id=challenge, authenticated_approver_id="operator:zoe"
+            approval_challenge_id=challenge, authenticated_approver_id="operator:alice"
         )
         self.assertEqual("sent", approved.delivery)
         self.deliver("e3", "Thanks!")
@@ -140,7 +140,7 @@ class ProposalOutcomeTests(ProposalFixture, unittest.TestCase):
         with mock.patch("nunchi.authorization._now", return_value=_after(challenge["expires_at"])):
             self.assertEqual("expired", coordinator.proposals()[0]["status"])
             result = coordinator.complete_authenticated_approval(
-                approval_challenge_id=challenge["approval_challenge_id"], authenticated_approver_id="operator:zoe"
+                approval_challenge_id=challenge["approval_challenge_id"], authenticated_approver_id="operator:alice"
             )
         self.assertEqual("failed", result.delivery)
         self.assertEqual("expired", coordinator.proposals()[0]["status"])
@@ -151,14 +151,14 @@ class ProposalOutcomeTests(ProposalFixture, unittest.TestCase):
         coordinator = self.coordinator()
         record = self.propose(coordinator)
         challenge = coordinator.pending_for_operator()[0]["challenge"]["approval_challenge_id"]
-        self.replies.append({"kind": "withdraw", "origin_event_id": "e2", "proposal_id": record["proposal_id"], "why": "Zoe changed her mind."})
+        self.replies.append({"kind": "withdraw", "origin_event_id": "e2", "proposal_id": record["proposal_id"], "why": "Alice changed her mind."})
         outcome = self.deliver("e2", "Never mind, I'll do it myself.")
         self.assertEqual("sent", outcome.opportunities[0].transport.delivery)
         self.assertEqual("withdrawn", coordinator.proposals()[0]["status"])
         self.assertEqual((), coordinator.pending_for_operator())
         # An operator can no longer approve it, and nothing runs.
         late = coordinator.complete_authenticated_approval(
-            approval_challenge_id=challenge, authenticated_approver_id="operator:zoe"
+            approval_challenge_id=challenge, authenticated_approver_id="operator:alice"
         )
         self.assertEqual("failed", late.delivery)
         self.assertEqual([], self.native_calls)
@@ -181,7 +181,7 @@ class ProposalOutcomeTests(ProposalFixture, unittest.TestCase):
 
     def test_a_denied_proposal_says_so(self):
         coordinator = self.coordinator()
-        coordinator.policy_source = StaticPolicySource(PolicySnapshot("policy", "r2", (), ("operator:zoe",)))
+        coordinator.policy_source = StaticPolicySource(PolicySnapshot("policy", "r2", (), ("operator:alice",)))
         self.replies.append(lambda wake: proposal(wake["trigger_event_id"]))
         outcome = self.deliver("e1")
         self.assertEqual("failed", outcome.opportunities[0].transport.delivery)

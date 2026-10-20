@@ -78,8 +78,7 @@ out of the shared core.
   is a "mhm" is `DEFER`: the participant takes the turn, and any "mhm" is its
   own reaction.
 
-Nunchi never reacts on the participant's behalf (#94 step 7; Zoe,
-2026-10-05). The `ACK` disposition, its reaction policy, its durable
+Nunchi never reacts on the participant's behalf (#94 step 7; agreed, 2026-10-05). The `ACK` disposition, its reaction policy, its durable
 reservation journal, and the reaction probe it ran before attention are gone.
 The participant's own reaction still needs the adapter's attested reaction
 capability: without it the turn offers no reaction, and a reaction the

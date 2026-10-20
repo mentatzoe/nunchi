@@ -213,7 +213,7 @@ class CodexRoomRunnerTest(unittest.TestCase):
             runner.connection.handle(_notification("discord:message:4", continuity_gap=True))
 
     def test_a_gap_the_transport_declares_is_a_point_the_agents_reading_reaches_until_it_is_told(self):
-        """The shared connection declares it to the core, which is where it is told (Zoe, 2026-10-10)."""
+        """The shared connection declares it to the core, which is where it is told (agreed, 2026-10-10)."""
         runner = self._runner()
         runner.connection.handle(_notification("discord:message:1", text="before the loss"))
         runner.connection.handle(_notification("discord:message:2", continuity_gap=True, event=None, actors={}))

@@ -8,8 +8,8 @@
     "vigil"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
@@ -22,7 +22,7 @@
     },
     {
       "id": "msg-addr-3",
-      "author": "zoe",
+      "author": "alice",
       "at": "0s",
       "text": "Codex, what's the status on the config migration?"
     }

@@ -55,7 +55,7 @@ class PendingMessageSurvivesDeadlineTests(unittest.TestCase):
             target=lambda: pipeline.handle_delivery(
                 delivery_id="d0",
                 event=fx.message("e0"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
         )
         first.start()
@@ -63,7 +63,7 @@ class PendingMessageSurvivesDeadlineTests(unittest.TestCase):
         pipeline.handle_delivery(
             delivery_id="d1",
             event=fx.message("e1", text="urgent: are you there?"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         first.join(5)
         self.assertFalse(first.is_alive())
@@ -112,7 +112,7 @@ class FiniteDeadlineTests(unittest.TestCase):
         pipeline.observation.observe(
             delivery_id="d1",
             event=fx.message("e1"),
-            actors={"human:zoe": {"kind": "human"}},
+            actors={"human:alice": {"kind": "human"}},
         )
         token = pipeline.scheduler.offer("e1")
         request = pipeline.observation.build_snapshot("e1")
@@ -168,7 +168,7 @@ class CoordinatorCancelTests(unittest.TestCase):
                 "policy",
                 "approval",
                 (replace(case.rule, direct_allow=False, impact="high"),),
-                ("operator:zoe",),
+                ("operator:alice",),
             )
         )
         scheduler = case.pipeline.scheduler

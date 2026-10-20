@@ -22,7 +22,7 @@ from tests.v2.test_shared_foundation import foundation, message
 
 SELF = "discord:bot:9"
 NOW = datetime(2026, 10, 6, 9, 0, tzinfo=timezone.utc)
-ZOE = {"human:zoe": {"kind": "human"}}
+ALICE = {"human:alice": {"kind": "human"}}
 
 
 def at(seconds_ago):
@@ -94,12 +94,12 @@ class SnapshotTests(unittest.TestCase):
         pipeline, _, _, _ = foundation(participant=lambda **turn: wakes.append(turn["wake"]) or None)
         clock = [NOW]
         pipeline.observation.clock = lambda: clock[0]
-        pipeline.observation.observe(delivery_id="d-z1", event=message("z1", timestamp=at(7200)), actors=ZOE)
+        pipeline.observation.observe(delivery_id="d-z1", event=message("z1", timestamp=at(7200)), actors=ALICE)
         request = pipeline.observation.build_snapshot("z1")
         self.assertEqual(7200, request["pace"]["judged_seconds_ago"])
         validate_attention_request(request)
         clock[0] = NOW + timedelta(seconds=30)
-        pipeline.handle_delivery(delivery_id="d-z2", event=message("z2", timestamp=at(0)), actors=ZOE)
+        pipeline.handle_delivery(delivery_id="d-z2", event=message("z2", timestamp=at(0)), actors=ALICE)
         pace = wakes[0]["pace"]
         self.assertEqual("2026-10-06T09:00:30.000Z", pace["now"])
         self.assertEqual((30, 7200), (pace["judged_seconds_ago"], pace["quiet_before_seconds"]))
@@ -111,8 +111,8 @@ class PromptAndReadingTests(unittest.TestCase):
         return {
             "self": {"participant_id": "vigil", "actor_id": SELF, "names": ["Vigil"]},
             "room": {"platform": "discord", "id": "42", "kind": "group"},
-            "actors": {"human:zoe": {"display_name": "Zoe", "kind": "human"}},
-            "events": [{"id": "z1", "type": "message", "author_id": "human:zoe", "text": "So..."}],
+            "actors": {"human:alice": {"display_name": "Alice", "kind": "human"}},
+            "events": [{"id": "z1", "type": "message", "author_id": "human:alice", "text": "So..."}],
             "trigger_event_id": "z1",
             "coverage": {},
             "pace": pace,
@@ -135,7 +135,7 @@ class PromptAndReadingTests(unittest.TestCase):
         }
         notes = [item["note"] for item in fact_notes(answers_leaning("WAKE"), self.projection(pace))]
         self.assertIn("The room was quiet for 7 hours before this message.", notes)
-        self.assertIn("Zoe has sent 3 messages in a row over 40 seconds.", notes)
+        self.assertIn("Alice has sent 3 messages in a row over 40 seconds.", notes)
         slow = dict(pace, quiet_before_seconds=600, author_run_seconds=900)
         notes = [item["note"] for item in fact_notes(answers_leaning("WAKE"), self.projection(slow))]
         self.assertFalse([note for note in notes if "quiet for" in note or "in a row" in note])
@@ -152,7 +152,7 @@ class PromptAndReadingTests(unittest.TestCase):
         self.assertNotIn("occasion", attention_state(self.projection(pace), "x"))
         # Nor does a look again that something was said after.
         later = dict(projection, events=projection["events"] + [
-            {"id": "c1", "type": "message", "author_id": "human:zoe", "text": "Found it."}
+            {"id": "c1", "type": "message", "author_id": "human:alice", "text": "Found it."}
         ])
         notes = [item["note"] for item in fact_notes(answers_leaning("WAKE"), later)]
         self.assertFalse([note for note in notes if note.startswith("Nothing new")])

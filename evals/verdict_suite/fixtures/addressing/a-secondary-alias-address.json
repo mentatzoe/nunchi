@@ -3,7 +3,7 @@
   "source_shape": "addressing",
   "trigger": {
     "id": "msg-addr-3",
-    "author": "zoe",
+    "author": "alice",
     "content": "Codex, what's the status on the config migration?",
     "timestamp": "2026-07-08T22:18:00.000Z"
   },

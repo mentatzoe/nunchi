@@ -74,7 +74,7 @@ See [`v2-shared-foundation.md`](v2-shared-foundation.md) for the schema,
 service, compatibility, and authority boundaries.
 
 Hermes has no supported install path from this package. The old Hermes
-integration was removed on 2026-10-11 (Zoe, "delete, for now"): it patched
+integration was removed on 2026-10-11 (for now): it patched
 Hermes at runtime, which breaks the rule that an integration follows each
 harness's own plugin rules and never patches or reimplements the harness. The
 wheel no longer registers a `hermes_agent.plugins` entry point or ships the

@@ -2,19 +2,19 @@
   "id": "quiet-for-hours",
   "title": "A room quiet for hours, then a new message",
   "source": "docs/behavior.md",
-  "review": "draft: written from docs/behavior.md; ranges need Zoe's review",
+  "review": "draft: written from docs/behavior.md; ranges need the maintainer's review",
   "platform": "discord",
   "participants": ["vigil"],
   "actors": {
-    "zoe": {"display_name": "Zoe", "kind": "human"},
+    "alice": {"display_name": "Alice", "kind": "human"},
     "sam": {"display_name": "Sam", "kind": "human"}
   },
   "events": [
-    {"id": "n1", "author": "zoe", "at": "-7h", "mentions": ["vigil"],
+    {"id": "n1", "author": "alice", "at": "-7h", "mentions": ["vigil"],
      "text": "Vigil, can you check the nightly build when it finishes and tell us in the morning?"},
     {"id": "n2", "author": "vigil", "at": "-7h", "reply_to": "n1",
      "text": "Will do."},
-    {"id": "n3", "author": "zoe", "at": "-7h",
+    {"id": "n3", "author": "alice", "at": "-7h",
      "text": "Thanks. Night all."},
     {"id": "m1", "author": "sam", "at": "0s",
      "text": "Morning! Is the nightly build green?"}

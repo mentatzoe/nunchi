@@ -157,7 +157,7 @@ CHK095 PASS via T025+T026 — the invariant is requirement text (plan §Post-Rej
 worktree — not via a bound `run speckit` invocation. Three consecutive bound
 runs for this rework failed on workflow-machinery defects unrelated to this
 gate's substance (a governance lexical-token violation in the Phase 8 append,
-then twice a nested-integration write-permission fault); Zoe directed this
+then twice a nested-integration write-permission fault); the maintainer directed this
 session to complete the rework directly in the worktree and hand off the
 result rather than continue restarting the bound-run machinery. The checklist
 step of the second retried run appended CHK112–CHK121 against T035–T045's own

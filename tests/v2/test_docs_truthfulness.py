@@ -98,7 +98,7 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
     def test_completion_goal_records_the_main_and_review_decision(self) -> None:
         normalized = _normalized(COMPLETION_GOAL)
         required = (
-            "Decision, Zoe, 2026-10-04",
+            "Decision, 2026-10-04",
             "`main` holds V2 before completion",
             "now govern the release tag (`v*`), not the merge to `main`",
             "The final completion decision and the release proof are unchanged",
@@ -125,7 +125,7 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
             "not by itself a blocker",
             "continue other unblocked product work",
             "Do not narrow supported behavior",
-            "Ask Zoe only when a choice materially changes product behavior",
+            "Ask the maintainer only when a choice materially changes product behavior",
             "`main` is the working branch and holds V2",
             "Scale review to the size and risk of the change",
             "Only the exact participant's delegated model may make a social suppression judgment",

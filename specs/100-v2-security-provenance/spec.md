@@ -208,7 +208,7 @@ three-family attention matrix and every exact installed participant/runtime
 configuration. Execute at least five independent repetitions per stochastic
 model/scene/configuration cell, retain every attempt, trace every threat to a
 mitigation and evidence record, and verify that every unmitigated risk has
-explicit Zoe acceptance or blocks the handoff.
+explicit the maintainer acceptance or blocks the handoff.
 
 **Acceptance Scenarios**:
 
@@ -218,7 +218,7 @@ explicit Zoe acceptance or blocks the handoff.
    without granting room content operator authority and results are recorded
    without cherry-picking.
 2. **Given** a threat lacks a built and tested mitigation, **When** readiness is
-   reviewed, **Then** the handoff is blocked unless Zoe explicitly accepts a
+   reviewed, **Then** the handoff is blocked unless the maintainer explicitly accepts a
    precise residual-risk statement.
 3. **Given** all threats have evidence-backed dispositions, **When** the owner
    prepares the handoff, **Then** the bundle identifies exact commands, commits,
@@ -285,12 +285,12 @@ explicit Zoe acceptance or blocks the handoff.
   matrix MUST contain Gemini 3.1 Flash Lite, GPT-5.5, and Qwen3 families from
   slice `030`, and each stochastic model/scene/configuration cell MUST run at
   least five independent repetitions with every attempt retained. A different
-  matrix or repetition floor requires Zoe's explicit pre-registered approval
+  matrix or repetition floor requires the maintainer's explicit pre-registered approval
   before execution. Evidence MUST record exact provider/model IDs and timestamps
   and MUST NOT reduce stochastic behavior to an unreproducible single accuracy
   number.
 - **FR-012**: Every threat MUST end in an evidence-backed mitigation or a
-  precise residual-risk statement explicitly accepted by Zoe; otherwise the
+  precise residual-risk statement explicitly accepted by the maintainer; otherwise the
   slice MUST block handoff to `110`.
 - **FR-013**: The slice MUST consume and validate every handoff from `010`
   through `090` before security integration begins.
@@ -369,7 +369,7 @@ explicit Zoe acceptance or blocks the handoff.
 - **SC-005**: Every surface has a committed provenance record and live V2 probe
   identifying the intended installed runtime before slice `110` accepts it.
 - **SC-006**: Every enumerated threat has one traceable disposition: tested
-  mitigation or explicit Zoe-accepted residual risk; the count of unexplained
+  mitigation or explicit maintainer-accepted residual risk; the count of unexplained
   threats is zero.
 - **SC-007**: The selected adversarial matrix completes with all failures and
   run-to-run variation reported across at least five retained attempts for every
@@ -393,13 +393,13 @@ explicit Zoe acceptance or blocks the handoff.
 - The attention-model families are the slice-`030` selected Gemini 3.1 Flash
   Lite, GPT-5.5, and Qwen3 families. Exact provider/model IDs are pinned in each
   run record. Every stochastic model/scene/configuration cell runs at least five
-  independent repetitions with all attempts retained unless Zoe explicitly
+  independent repetitions with all attempts retained unless the maintainer explicitly
   approves a different pre-registered matrix before execution.
 - The assurance worktree starts from the exact accepted slice-`010` contract/
   integration baseline commit. Slices `020`-`090` remain immutable handoff refs
   and installed artifacts in the audit manifest; slice `100` does not merge or
   rewrite them.
-- Zoe alone may explicitly accept any residual risk that remains after
+- The maintainer alone may explicitly accept any residual risk that remains after
   evidence-backed mitigation review.
 
 ## Documentation Freshness

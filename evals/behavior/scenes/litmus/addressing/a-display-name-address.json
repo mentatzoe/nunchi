@@ -8,15 +8,15 @@
     "vigil"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
   "events": [
     {
       "id": "msg-addr-2",
-      "author": "zoe",
+      "author": "alice",
       "at": "0s",
       "text": "Vigil, can you take a look at the deploy logs from tonight's run?"
     }

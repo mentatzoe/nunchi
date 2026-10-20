@@ -12,8 +12,8 @@
       "display_name": "Peer",
       "kind": "bot"
     },
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
@@ -25,7 +25,7 @@
     },
     {
       "id": "mixed-ack-trig",
-      "author": "zoe",
+      "author": "alice",
       "text": "@All members please acknowledge that you saw the cutover notice."
     }
   ],

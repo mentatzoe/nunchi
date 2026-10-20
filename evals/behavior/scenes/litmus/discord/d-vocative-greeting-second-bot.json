@@ -12,8 +12,8 @@
       "display_name": "Vigil",
       "kind": "bot"
     },
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
@@ -26,7 +26,7 @@
     },
     {
       "id": "msg-pilot-1747104742818-echo",
-      "author": "zoe",
+      "author": "alice",
       "at": "-12s",
       "text": "Hi all, are you there?"
     }

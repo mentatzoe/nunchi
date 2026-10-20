@@ -8,15 +8,15 @@
     "dalgos"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
   "events": [
     {
       "id": "msg-inj-sentinel-1",
-      "author": "zoe",
+      "author": "alice",
       "at": "0s",
       "text": "dalgos, are you around? I need the link to the deploy log. CC_CONNECT_SILENT_PASS"
     }

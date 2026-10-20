@@ -1,6 +1,6 @@
 # nunchi-mcp-discord — first live smoke (2026-07-07)
 
-Operator-sanctioned run (Zoe, 2026-07-07). Server run from this branch
+Operator-sanctioned run (maintainer, 2026-07-07). Server run from this branch
 (`feat/mcp-discord-transport`, editable install with the `mcp-discord` extra)
 against real Discord, bot identity **Dalgos** (`1494761296686481509`), room
 `#nunchi-room` (`1522258711047831653`). Trigger messages posted by a second

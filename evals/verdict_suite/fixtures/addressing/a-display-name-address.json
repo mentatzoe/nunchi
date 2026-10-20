@@ -3,7 +3,7 @@
   "source_shape": "addressing",
   "trigger": {
     "id": "msg-addr-2",
-    "author": "zoe",
+    "author": "alice",
     "content": "Vigil, can you take a look at the deploy logs from tonight's run?",
     "timestamp": "2026-07-08T22:16:00.000Z"
   },

@@ -3,7 +3,7 @@
   "source_shape": "multica",
   "trigger": {
     "id": "neutral-trig",
-    "author": "zoe",
+    "author": "alice",
     "content": "Hello team, the weather is nice today."
   },
   "context": [],

@@ -36,7 +36,7 @@ def projection():
         "self": {"participant_id": "vigil", "actor_id": "vigil", "names": ["Vigil"]},
         "room": {"platform": "discord", "id": "r", "kind": "group"},
         "actors": {
-            "zoe": {"display_name": "Zoe", "kind": "human"},
+            "alice": {"display_name": "Alice", "kind": "human"},
             "castor": {"display_name": "Castor", "kind": "bot"},
             "vigil": {"display_name": "Vigil", "kind": "bot"},
         },
@@ -45,7 +45,7 @@ def projection():
             {
                 "id": "q1",
                 "type": "message",
-                "author_id": "zoe",
+                "author_id": "alice",
                 "text": "Vigil, does it cap at 30 seconds?",
                 "mentioned_actor_ids": ["vigil"],
                 "mentions_room": False,
@@ -214,7 +214,7 @@ class EngineTests(unittest.TestCase):
             outcome = pipeline.handle_delivery(
                 delivery_id="d1",
                 event=message("e1", text="Castor, could you look at this?"),
-                actors={"human:zoe": {"kind": "human"}},
+                actors={"human:alice": {"kind": "human"}},
             )
         # Waiting is the agent's own call: step 1 never suppresses a message
         # just because it was addressed to someone else.

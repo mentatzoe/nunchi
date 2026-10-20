@@ -42,11 +42,11 @@ the documentation current. Each integration documents itself under
   today's contract, check it against Social behavior at the top of
   `AGENTS.md` first. The rule for recommending is in `AGENTS.md`, Working
   style.
-- Before asking Zoe, check what is already decided: lines marked agreed or
+- Before asking the maintainer, check what is already decided: lines marked agreed or
   decided, with a date, in `AGENTS.md` and `docs/behavior.md`. Anything else
   in those files is an agent's writing, not a decision.
 - Write decisions in plain words, marked agreed with the date. Do not quote
-  Zoe or attribute lines to Zoe in this repository.
+  the maintainer or attribute lines to the maintainer in this repository.
 - When briefing subagents, give them the goal of the task, not only the
   mechanism, and point them to `AGENTS.md` instead of restating it.
 - Say plainly when a review is a self-review.
@@ -54,8 +54,8 @@ the documentation current. Each integration documents itself under
 
 ## Exec summary
 
-Claude keeps a living exec summary of Nunchi for Zoe in claude.ai: status,
-what is decided, what is pending, and findings. Zoe gives a session its link,
+Claude keeps a living exec summary of Nunchi for the maintainer in claude.ai: status,
+what is decided, what is pending, and findings. The maintainer gives a session its link,
 so a session started from `main` can keep it current. Never write the link
 into this repository, its issues or its pull requests: all are public. Keep
 the summary current at each milestone of your work. When something is decided

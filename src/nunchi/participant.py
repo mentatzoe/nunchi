@@ -524,8 +524,7 @@ class RoomView:
     it has shown, and every event it has shown may be an action's origin or
     target. ``guard`` raises when the turn is cancelled or out of time.
 
-    ``news`` is the host's own direction, for steering (#94 step 6; Zoe,
-    2026-10-06): what others posted since the participant last looked, like
+    ``news`` is the host's own direction, for steering (#94 step 6; agreed, 2026-10-06): what others posted since the participant last looked, like
     ``new``, but it never counts against the participant's checks. A host
     that can reach a running turn delivers it there; models cannot ask for
     it, since every action schema names only the four model directions.
@@ -981,7 +980,7 @@ class ParticipantTurnHost:
         # From here the turn is current: `is_current` is false once it was
         # cancelled, superseded or out of time. The agent took it when it
         # answered with silence or with an action the host accepts, and then
-        # what its reading showed it of gaps is no longer news (Zoe,
+        # what its reading showed it of gaps is no longer news (the maintainer,
         # 2026-10-10). An answer the host refuses, and a turn that failed or
         # was cancelled, leave them to be told again: when unsure, tell.
         def tell_gaps() -> None:

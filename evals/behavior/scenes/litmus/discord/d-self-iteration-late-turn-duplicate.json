@@ -8,8 +8,8 @@
     "dalgos"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
@@ -22,7 +22,7 @@
     },
     {
       "id": "msg-pilot-1778634937867-echo",
-      "author": "zoe",
+      "author": "alice",
       "at": "-304s",
       "text": "Can y'all please re-read the story you've produced and tell me if you're satisfied with the output? If you're not, how would you improve it? Iterate until you're all happy with it."
     }

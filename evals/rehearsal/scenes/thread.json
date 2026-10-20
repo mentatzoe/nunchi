@@ -6,10 +6,10 @@
   "platform": "discord",
   "participants": ["vigil"],
   "actors": {
-    "zoe": {"display_name": "Zoe", "kind": "human"}
+    "alice": {"display_name": "Alice", "kind": "human"}
   },
   "events": [
-    {"id": "t1", "author": "zoe", "at": "0s", "text": "Opening this thread to collect the retry details as we go."}
+    {"id": "t1", "author": "alice", "at": "0s", "text": "Opening this thread to collect the retry details as we go."}
   ],
   "moments": [
     {
@@ -17,7 +17,7 @@
       "event": "t1",
       "step1": "either",
       "notice": [
-        {"fact": "Zoe opened a thread under the room for the retry details", "events": ["t1"]}
+        {"fact": "Alice opened a thread under the room for the retry details", "events": ["t1"]}
       ],
       "fitting": ["stay_quiet", "mhm"],
       "misses": [

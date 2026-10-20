@@ -6,7 +6,7 @@
 
 **Authorized slices**: `010`, `020`, `030`, `040`, `050`, `060`, `070`, `080`, `090`, `100`, `110`
 
-**Authorized by**: Zoe
+**Authorized by**: the maintainer
 
 **Authorized on**: 2026-07-16
 
@@ -17,7 +17,7 @@ V2 lifecycle across every independently owned slice, per the selected
 technical design and the 001 program contract.
 
 **Authority reference**: aleph-vault projects/shared/nunchi/decisions.md —
-2026-07-16 V2 implementation grant (Zoe), commit
+2026-07-16 V2 implementation grant (decided), commit
 554fc4f636a0eed18168eebd49d87b688df97a06
 
 **Recorded by**: v2-program-owner

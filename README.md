@@ -108,7 +108,7 @@ flowchart TB
         e3["Refinement, later:<br/>other agent families,<br/>real agents"]:::later
         e1 --> e2 --> e3
     end
-    p1["1. Zoe reviews the scenes' ranges"]:::next
+    p1["1. The maintainer reviews the scenes' ranges"]:::next
     p1 -.-> measure
     measure -. "judges each step<br/>before and after" .-> build
 ```

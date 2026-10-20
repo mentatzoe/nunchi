@@ -15,7 +15,7 @@ from nunchi.attention_questions import attention_state
 from nunchi.v2_contracts import _memory, validate_attention_request
 from tests.v2.test_shared_foundation import FixtureModel, foundation, message
 
-ZOE = {"human:zoe": {"kind": "human"}}
+ALICE = {"human:alice": {"kind": "human"}}
 SELF = "discord:bot:9"
 
 
@@ -24,7 +24,7 @@ class AttentionMemoryTests(unittest.TestCase):
         self.pipeline, self.model, _, _ = foundation(model=FixtureModel("DEFER"))
 
     def deliver(self, event_id, **kwargs):
-        return self.pipeline.handle_delivery(delivery_id=f"d-{event_id}", event=message(event_id, **kwargs), actors=ZOE)
+        return self.pipeline.handle_delivery(delivery_id=f"d-{event_id}", event=message(event_id, **kwargs), actors=ALICE)
 
     def test_the_judgment_carries_what_the_participant_said_it_would_do(self):
         self.deliver("z1", text="Vigil, tell me when the nightly finishes?")
@@ -34,7 +34,7 @@ class AttentionMemoryTests(unittest.TestCase):
         self.pipeline.observation.observe(
             delivery_id="d-v1",
             event=message("v1", author_id=SELF, text="I'll tell you when it finishes.", reply_to_event_id="z1"),
-            actors=ZOE,
+            actors=ALICE,
         )
         self.pipeline.handle_delivery(
             delivery_id="d-c1",
@@ -52,9 +52,9 @@ class AttentionMemoryTests(unittest.TestCase):
     def test_the_request_validates_and_a_typed_model_does_not_get_the_memory_yet(self):
         self.deliver("z1", text="Vigil, tell me when the nightly finishes?")
         self.pipeline.observation.observe(
-            delivery_id="d-v1", event=message("v1", author_id=SELF, text="Will do.", reply_to_event_id="z1"), actors=ZOE
+            delivery_id="d-v1", event=message("v1", author_id=SELF, text="Will do.", reply_to_event_id="z1"), actors=ALICE
         )
-        self.pipeline.observation.observe(delivery_id="d-c1", event=message("c1", text="passed"), actors=ZOE)
+        self.pipeline.observation.observe(delivery_id="d-c1", event=message("c1", text="passed"), actors=ALICE)
         request = self.pipeline.observation.build_snapshot("c1", memory=self.pipeline.host.memory_facts("c1"))
         validate_attention_request(request)
         self.assertIn("memory", request)
@@ -64,9 +64,9 @@ class AttentionMemoryTests(unittest.TestCase):
     def test_a_recalled_message_is_judged_with_the_memory_too(self):
         self.deliver("z1", text="Vigil, tell me when the nightly finishes?")
         self.pipeline.observation.observe(
-            delivery_id="d-v1", event=message("v1", author_id=SELF, text="Will do.", reply_to_event_id="z1"), actors=ZOE
+            delivery_id="d-v1", event=message("v1", author_id=SELF, text="Will do.", reply_to_event_id="z1"), actors=ALICE
         )
-        self.pipeline.observation.observe(delivery_id="d-c1", event=message("c1", text="passed"), actors=ZOE)
+        self.pipeline.observation.observe(delivery_id="d-c1", event=message("c1", text="passed"), actors=ALICE)
         self.pipeline.recall("c1")
         _, projection = self.model.calls[-1]
         self.assertIn("own_moves", projection["memory"])
@@ -74,11 +74,11 @@ class AttentionMemoryTests(unittest.TestCase):
     def test_the_turn_and_the_judgment_see_the_same_memory(self):
         wakes = []
         pipeline, model, _, _ = foundation(model=FixtureModel("WAKE"), participant=lambda **turn: wakes.append(turn["wake"]))
-        pipeline.handle_delivery(delivery_id="d-z1", event=message("z1", text="Vigil, can you check?"), actors=ZOE)
+        pipeline.handle_delivery(delivery_id="d-z1", event=message("z1", text="Vigil, can you check?"), actors=ALICE)
         pipeline.observation.observe(
-            delivery_id="d-v1", event=message("v1", author_id=SELF, text="Checking.", reply_to_event_id="z1"), actors=ZOE
+            delivery_id="d-v1", event=message("v1", author_id=SELF, text="Checking.", reply_to_event_id="z1"), actors=ALICE
         )
-        pipeline.handle_delivery(delivery_id="d-z2", event=message("z2", text="Any luck?"), actors=ZOE)
+        pipeline.handle_delivery(delivery_id="d-z2", event=message("z2", text="Any luck?"), actors=ALICE)
         _, projection = model.calls[-1]
         self.assertEqual(wakes[-1]["memory"], projection["memory"])
 
@@ -92,12 +92,12 @@ class PromiseOriginTests(unittest.TestCase):
             model=FixtureModel("WAKE"), participant=lambda **turn: next(replies, None)
         )
         pipeline.handle_delivery(
-            delivery_id="d-z1", event=message("z1", text="Vigil, watch the nightly and tell me."), actors=ZOE
+            delivery_id="d-z1", event=message("z1", text="Vigil, watch the nightly and tell me."), actors=ALICE
         )
         self.assertEqual(1, len(transport.calls))
         # The room shows the post back as any message: no reply link, so nothing in it says what it answered.
         pipeline.observation.observe(
-            delivery_id="d-v1", event=message("v1", author_id=SELF, text="I'll tell you when it finishes."), actors=ZOE
+            delivery_id="d-v1", event=message("v1", author_id=SELF, text="I'll tell you when it finishes."), actors=ALICE
         )
         pipeline.handle_delivery(
             delivery_id="d-c1",
@@ -107,7 +107,7 @@ class PromiseOriginTests(unittest.TestCase):
         _, projection = model.calls[-1]
         (move,) = projection["memory"]["own_moves"]
         self.assertEqual(
-            ("v1", "z1", "human:zoe", "Vigil, watch the nightly and tell me."),
+            ("v1", "z1", "human:alice", "Vigil, watch the nightly and tell me."),
             tuple(move[key] for key in ("event_id", "about_event_id", "about_author_id", "about_text")),
         )
         (thread,) = projection["memory"]["threads"]
@@ -129,16 +129,16 @@ class RememberedTargetTests(unittest.TestCase):
             if wake["trigger_event_id"] != "c1":
                 return None
             replies.append(wake)
-            return {"kind": "reply", "origin_event_id": "c1", "target_event_id": "z1", "text": "Zoe, it passed."}
+            return {"kind": "reply", "origin_event_id": "c1", "target_event_id": "z1", "text": "Alice, it passed."}
 
         pipeline, _, transport, _ = foundation(
             model=FixtureModel("WAKE"), participant=participant, limits=ObservationLimits(snapshot_events=4)
         )
         observe = pipeline.observation.observe
-        observe(delivery_id="d-z1", event=message("z1", text="Tell me when the nightly finishes?"), actors=ZOE)
-        observe(delivery_id="d-v1", event=message("v1", author_id=SELF, text="I will.", reply_to_event_id="z1"), actors=ZOE)
+        observe(delivery_id="d-z1", event=message("z1", text="Tell me when the nightly finishes?"), actors=ALICE)
+        observe(delivery_id="d-v1", event=message("v1", author_id=SELF, text="I will.", reply_to_event_id="z1"), actors=ALICE)
         for index in range(6):
-            observe(delivery_id=f"d-t{index}", event=message(f"t{index}", text=f"Other talk {index}."), actors=ZOE)
+            observe(delivery_id=f"d-t{index}", event=message(f"t{index}", text=f"Other talk {index}."), actors=ALICE)
         pipeline.handle_delivery(
             delivery_id="d-c1",
             event=message("c1", author_id="bot:ci", text="nightly passed"),

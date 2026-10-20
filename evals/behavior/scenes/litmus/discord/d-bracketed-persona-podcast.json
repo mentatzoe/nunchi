@@ -8,15 +8,15 @@
     "dalgos"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
   "events": [
     {
       "id": "msg-pilot-1747262745624",
-      "author": "zoe",
+      "author": "alice",
       "at": "0s",
       "text": "[Let's play a game! Imagine you're a famous Software Engineer from the past 15-20 years. It's 2026. You're at a Podcast called 'I accidentally the whole']\nHello hello team!!! I'm Mike McMic, your host, and this is 'I accidentally the whole!' You're live on air, and in today's stream we have three very successful guests! Could you please introduce yourselves for our audience, and tell us what's one thing you accidentally broke at scale?"
     }

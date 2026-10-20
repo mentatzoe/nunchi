@@ -557,7 +557,7 @@ class PlainParticipantHostTests(unittest.TestCase):
         transport = RecordingTransport(capability=MhmTests.capability())
         participant = CapturingParticipant({**MhmTests.own_mhm("e-word", reaction=reaction), "operation": operation})
         pipeline, _, _, receipts = foundation(model=FixtureModel("mhm"), participant=participant, transport=transport)
-        outcome = pipeline.handle_delivery(delivery_id="d-word", event=message("e-word"), actors={"human:zoe": {"kind": "human"}})
+        outcome = pipeline.handle_delivery(delivery_id="d-word", event=message("e-word"), actors={"human:alice": {"kind": "human"}})
         return outcome.opportunities[0], transport
 
     def test_a_word_is_refused_before_anything_is_dispatched(self):

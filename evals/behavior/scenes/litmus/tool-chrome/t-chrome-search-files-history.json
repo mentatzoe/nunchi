@@ -2,14 +2,14 @@
   "id": "litmus-t-chrome-search-files-history",
   "title": "Peer-bot search_files chrome in history, bystander comment as trigger — not an invitation",
   "source": "evals/verdict_suite/fixtures/tool-chrome/t-chrome-search-files-history.json",
-  "review": "draft: converted from the V1 litmus corpus; V1 expected PASS. V1 rationale: Zoe asked aleph, aleph is visibly mid-search, and the trigger is zoe's satisfied aside about aleph's progress. The thread is another agent's; dalgos has nothing to add and stays silent.",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected PASS. V1 rationale: Alice asked aleph, aleph is visibly mid-search, and the trigger is alice's satisfied aside about aleph's progress. The thread is another agent's; dalgos has nothing to add and stays silent.",
   "platform": "discord",
   "participants": [
     "dalgos"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     },
     "aleph": {
@@ -20,7 +20,7 @@
   "events": [
     {
       "id": "msg-chrome-search-1",
-      "author": "zoe",
+      "author": "alice",
       "at": "-120s",
       "text": "aleph, where does fail_policy get set?"
     },
@@ -32,7 +32,7 @@
     },
     {
       "id": "msg-chrome-search-3",
-      "author": "zoe",
+      "author": "alice",
       "at": "0s",
       "text": "nice, aleph's search already found the offending files."
     }

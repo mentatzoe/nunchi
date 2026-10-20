@@ -65,7 +65,7 @@ class AuthorizationCommitClosureTests(unittest.TestCase):
         self.assertEqual([], self.native_calls)
 
     def test_policy_reload_failure_after_commit_closes_the_commit(self) -> None:
-        snapshot = PolicySnapshot("policy", "r1", (self.rule,), ("operator:zoe",))
+        snapshot = PolicySnapshot("policy", "r1", (self.rule,), ("operator:alice",))
         journal = self.journal
 
         class FlakyPolicy(StaticPolicySource):

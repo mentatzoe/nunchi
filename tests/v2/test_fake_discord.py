@@ -43,7 +43,7 @@ from evals.rehearsal.fake_discord.control import FakeDiscord
 from evals.rehearsal.fake_discord.world import INTENTS, PERMISSIONS, DiscordError, World, id_ms, iso
 
 WORLD = {
-    "people": ["zoe", "kim"],
+    "people": ["alice", "kim"],
     "bots": {  # every bot is a harness's unless the world says otherwise
         "vigil": {},
         "boss": {"roles": ["admin"]},
@@ -158,13 +158,13 @@ class TransportTest(StandIn, unittest.IsolatedAsyncioTestCase):
 
     async def test_a_message_reply_and_reaction_go_through_the_transport_as_on_discord(self):
         await self.connect()
-        zoe = self.member("zoe")
-        asked = self.fd.post("zoe", "room", f"<@{self.vigil}> what's a sensible webhook timeout?")
+        alice = self.member("alice")
+        asked = self.fd.post("alice", "room", f"<@{self.vigil}> what's a sensible webhook timeout?")
         await self.until(lambda: len(self.events) == 1)
         first = self.events[0]
-        self.assertEqual(first["event"]["author_id"], f"discord:actor:{zoe}")
+        self.assertEqual(first["event"]["author_id"], f"discord:actor:{alice}")
         self.assertEqual(first["event"]["mentioned_actor_ids"], [f"discord:actor:{self.vigil}"])
-        self.assertEqual(first["actors"][f"discord:actor:{zoe}"], {"display_name": "Zoe", "kind": "human"})
+        self.assertEqual(first["actors"][f"discord:actor:{alice}"], {"display_name": "Alice", "kind": "human"})
         self.assertEqual(first["event"]["timestamp"], asked["timestamp"])
 
         payload, ok = await asyncio.to_thread(self.tool, "send_message", content="Ten seconds.")
@@ -188,14 +188,14 @@ class TransportTest(StandIn, unittest.IsolatedAsyncioTestCase):
 
         payload, ok = await asyncio.to_thread(self.tool, "add_reaction", message_id=asked["id"], reaction="mhm")
         self.assertFalse(ok)
-        self.assertIn("Unknown Emoji", payload["error"])  # a nod sent as a word is refused, as in Zoe's room
+        self.assertIn("Unknown Emoji", payload["error"])  # a nod sent as a word is refused, as in Alice's room
         self.assertTrue(self.fd.verdict()["clean"], self.fd.verdict()["unknown"])
 
     async def test_a_resume_replays_what_the_transport_missed_without_a_gap(self):
         protocol = await self.connect()
         session = protocol.session_id
         self.fd.gateway("vigil", "drop")
-        self.fd.post("zoe", "room", "while you were away")
+        self.fd.post("alice", "room", "while you were away")
         await self.until(lambda: "while you were away" in self.texts())
         self.assertEqual(protocol.session_id, session)
         self.assertEqual(len(self.gaps), 1, "only the fresh process's own gap")
@@ -272,10 +272,10 @@ class SocialFactsTest(StandIn, unittest.TestCase):
 
     def test_who_a_message_addresses(self):
         world = self.fd.world
-        vigil, kim, zoe = self.member("vigil"), self.member("kim"), self.member("zoe")
+        vigil, kim, alice = self.member("vigil"), self.member("kim"), self.member("alice")
         agents, admin = world.role("agents").id, world.role("admin").id
         everything = f"<@{vigil}> <@&{agents}> @everyone"
-        self.fd.create_thread("zoe", "announce", "announce-thread")
+        self.fd.create_thread("alice", "announce", "announce-thread")
         mention_everyone = PERMISSIONS["MENTION_EVERYONE"]
         self.assertFalse(world.permissions(kim, self.channel("announce")) & mention_everyone, "no SEND_MESSAGES, no MENTION_EVERYONE")
         self.assertTrue(world.permissions(kim, self.channel("announce-thread")) & mention_everyone, "a thread asks SEND_MESSAGES_IN_THREADS")
@@ -284,21 +284,21 @@ class SocialFactsTest(StandIn, unittest.TestCase):
             return [world.members[u].name for u in record["mentions"]], [world.roles[r].name for r in record["mention_roles"]], record["mention_everyone"]
 
         people = [
-            ("a person with MENTION_EVERYONE", "zoe", "room", everything, (["vigil"], ["agents"], True)),
+            ("a person with MENTION_EVERYONE", "alice", "room", everything, (["vigil"], ["agents"], True)),
             ("a person without it, by an overwrite", "kim", "quiet", everything, (["vigil"], [], False)),
-            ("@here is everyone too", "zoe", "room", "@here look", ([], [], True)),
+            ("@here is everyone too", "alice", "room", "@here look", ([], [], True)),
             ("a thread under a channel she may not post in", "kim", "announce-thread", "@here look", ([], [], True)),
-            ("the older mention form", "zoe", "room", f"<@!{kim}> hi", (["kim"], [], False)),
-            ("an id nobody has", "zoe", "room", "<@123456789012345678> hi", ([], [], False)),
+            ("the older mention form", "alice", "room", f"<@!{kim}> hi", (["kim"], [], False)),
+            ("an id nobody has", "alice", "room", "<@123456789012345678> hi", ([], [], False)),
         ]
         for why, author, channel, content, expected in people:
             posted = self.fd.post(author, channel, content)
             self.assertEqual(addressed(world.messages[posted["id"]]), expected, why)
         bots = [
-            ("a bot has no MENTION_EVERYONE", "vigil", None, f"<@{zoe}> @here", (["zoe"], [], False)),
-            ("allowed_mentions parses nothing", "vigil", {"parse": []}, f"<@{zoe}>", ([], [], False)),
-            ("allowed_mentions names one user", "vigil", {"parse": [], "users": [zoe]}, f"<@{zoe}> <@{kim}>", (["zoe"], [], False)),
-            ("allowed_mentions names one role", "boss", {"parse": [], "roles": [agents]}, f"<@{zoe}> <@&{agents}> <@&{admin}> @everyone",
+            ("a bot has no MENTION_EVERYONE", "vigil", None, f"<@{alice}> @here", (["alice"], [], False)),
+            ("allowed_mentions parses nothing", "vigil", {"parse": []}, f"<@{alice}>", ([], [], False)),
+            ("allowed_mentions names one user", "vigil", {"parse": [], "users": [alice]}, f"<@{alice}> <@{kim}>", (["alice"], [], False)),
+            ("allowed_mentions names one role", "boss", {"parse": [], "roles": [agents]}, f"<@{alice}> <@&{agents}> <@&{admin}> @everyone",
              ([], ["agents"], False)),
         ]
         for why, bot, allowed, content, expected in bots:
@@ -310,13 +310,13 @@ class SocialFactsTest(StandIn, unittest.TestCase):
 
     def test_what_a_message_replies_to(self):
         world, room = self.fd.world, self.channel("room")
-        target = self.fd.post("zoe", "room", "is the deploy done?")
+        target = self.fd.post("alice", "room", "is the deploy done?")
         status, _, reply = self.post("room", {"content": "yes", "message_reference": {"message_id": target["id"]}})
         self.assertEqual(status, 200)
         self.assertEqual(reply["type"], 19)
         self.assertEqual(reply["message_reference"], {"type": 0, "message_id": target["id"], "channel_id": room, "guild_id": world.guild_id})
         self.assertEqual(reply["referenced_message"]["id"], target["id"])
-        self.assertEqual([m["username"] for m in reply["mentions"]], ["zoe"], "the world's reply_ping")
+        self.assertEqual([m["username"] for m in reply["mentions"]], ["alice"], "the world's reply_ping")
         status, _, quiet = self.post("room", {"content": "yes", "message_reference": {"message_id": target["id"]},
                                               "allowed_mentions": {"parse": ["users"], "replied_user": False}})
         self.assertEqual(quiet["mentions"], [])
@@ -326,7 +326,7 @@ class SocialFactsTest(StandIn, unittest.TestCase):
 
         refused = [
             ("a target nobody posted", {"message_id": "1"}),
-            ("a target in another channel", {"message_id": self.fd.post("zoe", "other", "elsewhere")["id"]}),
+            ("a target in another channel", {"message_id": self.fd.post("alice", "other", "elsewhere")["id"]}),
         ]
         for why, reference in refused:
             status, _, error = self.post("room", {"content": "yes", "message_reference": reference})
@@ -341,9 +341,9 @@ class SocialFactsTest(StandIn, unittest.TestCase):
 
     def test_who_wrote_it(self):
         world = self.fd.world
-        person = payloads.message(world, world.messages[self.fd.post("zoe", "room", "hi")["id"]], gateway=True)
+        person = payloads.message(world, world.messages[self.fd.post("alice", "room", "hi")["id"]], gateway=True)
         self.assertNotIn("bot", person["author"])
-        self.assertEqual(person["author"]["global_name"], "Zoe")
+        self.assertEqual(person["author"]["global_name"], "Alice")
         self.assertEqual(person["member"]["roles"], [world.role("room").id])
         scripted = payloads.message(world, world.messages[self.fd.post("ci", "room", "deploy finished")["id"]])
         self.assertIs(scripted["author"]["bot"], True)
@@ -359,9 +359,9 @@ class SocialFactsTest(StandIn, unittest.TestCase):
         self.assertNotEqual(self.post("room", twice)[2]["id"], self.post("room", twice)[2]["id"])
 
     def test_who_may_post_see_and_react(self):
-        targets = {name: self.fd.post("zoe", name, "react here")["id"] for name in WORLD["channels"]}
-        self.fd.create_thread("zoe", "people-only", "people-thread")
-        self.fd.create_thread("zoe", "read-only", "read-only-thread")
+        targets = {name: self.fd.post("alice", name, "react here")["id"] for name in WORLD["channels"]}
+        self.fd.create_thread("alice", "people-only", "people-thread")
+        self.fd.create_thread("alice", "read-only", "read-only-thread")
         rows = [
             ("vigil", "post", "room", 200, None),
             ("vigil", "post", "read-only", 403, 50013),
@@ -379,11 +379,11 @@ class SocialFactsTest(StandIn, unittest.TestCase):
             ("shy", "react", "split", 204, None),  # one role's allow beats another's deny
             ("kim", "post", "people-only", 200, None),
             ("kim", "post", "agents-only", 403, 50001),
-            ("zoe", "post", "agents-only", 200, None),  # the owner passes every overwrite
+            ("alice", "post", "agents-only", 200, None),  # the owner passes every overwrite
         ]
         for who, action, channel, status, code in rows:
             with self.subTest(who=who, action=action, channel=channel):
-                if who in ("zoe", "kim"):
+                if who in ("alice", "kim"):
                     try:
                         self.fd.post(who, channel, "hello")
                         got = (200, None, None)
@@ -406,7 +406,7 @@ class SocialFactsTest(StandIn, unittest.TestCase):
         self.assertEqual(self.api("GET", "/guilds/1/roles")[2]["code"], 10004)
 
     def test_the_limits_on_the_agents_own_moves(self):
-        target = self.fd.post("zoe", "room", "react here")["id"]
+        target = self.fd.post("alice", "room", "react here")["id"]
         rows = [
             ({"content": "a" * 2000}, 200, None),
             ({"content": "a" * 2001}, 400, 50035),
@@ -421,7 +421,7 @@ class SocialFactsTest(StandIn, unittest.TestCase):
                       ("1", 400), ("👍🏽", 204), ("1️⃣", 204), ("🏳️‍🌈", 204), ("🇺🇸", 204), ("‼️", 204), ("ℹ️", 204), ("◽", 204)]
         for emoji, status in emoji_rows:
             self.assertEqual(self.react("room", target, emoji)[0], status, emoji)
-        crowded = self.fd.post("zoe", "room", "so many")["id"]
+        crowded = self.fd.post("alice", "room", "so many")["id"]
         for i in range(20):
             self.assertEqual(self.react("room", crowded, chr(0x1F600 + i), bot="boss")[0], 204)
         self.assertEqual(self.react("room", crowded, "🚀")[2]["code"], 30010)
@@ -439,7 +439,7 @@ class SocialFactsTest(StandIn, unittest.TestCase):
 
     def test_every_response_carries_discords_headers(self):
         rate_limit = {"x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset", "x-ratelimit-reset-after", "x-ratelimit-bucket"}
-        target = self.fd.post("zoe", "room", "x")["id"]
+        target = self.fd.post("alice", "room", "x")["id"]
         for why, (_, headers, _) in [
             ("a read", self.api("GET", "/users/@me")),
             ("a refusal", self.post("read-only", {"content": "x"})),
@@ -582,7 +582,7 @@ class HermesRoutesTest(StandIn, unittest.TestCase):
         self.assertEqual(len(self.fd.verdict()["unknown"]), 5)
 
     def test_history_is_newest_first_before_an_id_and_limited(self):
-        ids = [self.fd.post("zoe", "room", f"message {number}")["id"] for number in range(51)]
+        ids = [self.fd.post("alice", "room", f"message {number}")["id"] for number in range(51)]
         status, headers, found = self.history(f"?limit=3&before={ids[4]}")
         self.assertEqual((status, headers["content-type"], [m["id"] for m in found]), (200, "application/json", [ids[3], ids[2], ids[1]]))
         self.assertEqual([m["id"] for m in self.history()[2]], ids[:0:-1], "fifty of the fifty-one by default, newest first")
@@ -591,13 +591,13 @@ class HermesRoutesTest(StandIn, unittest.TestCase):
         for message in found:
             self.assertEqual(shapes.missing(payloads.SHAPES["message"], message), [])
             self.assertFalse({"guild_id", "member"} & set(message), "as a REST read is documented")
-        thread = self.fd.create_thread("zoe", "room", "side")
+        thread = self.fd.create_thread("alice", "room", "side")
         inside = self.fd.post("kim", "side", "in the thread")["id"]
         self.assertEqual([m["id"] for m in self.history(channel=thread["id"])[2]], [inside], "a thread has its own messages")
         self.assertEqual(self.history(f"?before={inside}", channel=thread["id"])[2], [])
 
     def test_history_asks_only_for_what_hermes_asked(self):
-        self.fd.post("zoe", "room", "one")
+        self.fd.post("alice", "room", "one")
         for query in ("?limit=0", "?limit=101", "?limit=many", "?before=soon"):
             with self.subTest(query=query):
                 status, _, error = self.history(query)
@@ -605,22 +605,22 @@ class HermesRoutesTest(StandIn, unittest.TestCase):
         self.assertEqual(self.history("?after=1")[0], 599, "after and around have no caller yet")
         self.assertEqual([u["what"] for u in self.fd.verdict()["unknown"]], ["request"])
         quiet = self.channel("no-history")
-        self.fd.post("zoe", "no-history", "unseen")
+        self.fd.post("alice", "no-history", "unseen")
         self.assertEqual(self.history(channel=quiet)[::2], (200, []), "without READ_MESSAGE_HISTORY no message is returned")
         hidden = self.channel("people-only")
-        self.fd.post("zoe", "people-only", "unseen")
+        self.fd.post("alice", "people-only", "unseen")
         status, _, error = self.history(channel=hidden)
         self.assertEqual((status, error["code"]), (403, 50001))
         self.assertEqual(self.history(channel="1")[0], 404)
 
     def test_one_message_needs_read_message_history_and_belongs_to_its_channel(self):
-        posted = self.fd.post("zoe", "room", "hello")["id"]
+        posted = self.fd.post("alice", "room", "hello")["id"]
         status, _, message = self.api("GET", f"/channels/{self.room}/messages/{posted}")
         self.assertEqual((status, message["content"], message["id"]), (200, "hello", posted))
         self.assertEqual(message, self.history()[2][0])
         self.assertEqual(self.api("GET", f"/channels/{self.channel('other')}/messages/{posted}")[::2], (404, {"message": "Unknown Message", "code": 10008}))
         self.assertEqual(self.api("GET", f"/channels/{self.room}/messages/1")[0], 404, "a message Hermes made up, like its injected turn's")
-        self.fd.post("zoe", "no-history", "unseen")
+        self.fd.post("alice", "no-history", "unseen")
         unseen = next(iter(self.fd.world.messages))  # any message: the permission is checked first
         status, _, error = self.api("GET", f"/channels/{self.channel('no-history')}/messages/{unseen}")
         self.assertEqual((status, error["code"]), (403, 50013))
@@ -629,7 +629,7 @@ class HermesRoutesTest(StandIn, unittest.TestCase):
     def test_a_message_read_over_rest_carries_its_reactions_with_who_made_them(self):
         from urllib.parse import quote
 
-        posted = self.fd.post("zoe", "room", "react to me")["id"]
+        posted = self.fd.post("alice", "room", "react to me")["id"]
         thumbs = quote("👍", safe="")
         for bot in ("vigil", "boss"):
             self.assertEqual(self.api("PUT", f"/channels/{self.room}/messages/{posted}/reactions/{thumbs}/@me", bot=bot)[0], 204)
@@ -641,7 +641,7 @@ class HermesRoutesTest(StandIn, unittest.TestCase):
         self.assertEqual(seen["shy"], {"👍": (2, False), "👀": (1, False)})
         reaction = self.api("GET", f"/channels/{self.room}/messages/{posted}")[2]["reactions"][0]
         self.assertEqual(shapes.missing("message.Reaction", reaction), [])
-        plain = self.fd.post("zoe", "room", "no reactions")["id"]
+        plain = self.fd.post("alice", "room", "no reactions")["id"]
         self.assertNotIn("reactions", self.api("GET", f"/channels/{self.room}/messages/{plain}")[2])
 
 
@@ -662,7 +662,7 @@ class ClockTest(StandIn, unittest.TestCase):
         times, ids = [], []
 
         def post(**options) -> None:
-            posted = fd.post("zoe", "room", "x", **options)
+            posted = fd.post("alice", "room", "x", **options)
             ids.append(int(posted["id"]))
             times.append(round(seconds(posted)))
 
@@ -684,21 +684,21 @@ class ClockTest(StandIn, unittest.TestCase):
         self.assertEqual(fd.state()["channels"]["room"]["lag"], 0.0)
         raised = fd.verdict()["raised"]
         self.assertEqual([(r["channel"], r["requested"]) for r in raised], [("room", iso(int((start - 100) * 1000)))])
-        self.assertEqual(round(seconds(fd.post("zoe", "other", "x", at=ago(-300)))), -300, "each channel keeps its own clock")
+        self.assertEqual(round(seconds(fd.post("alice", "other", "x", at=ago(-300)))), -300, "each channel keeps its own clock")
         self.assertEqual(fd.advance("other", 10_000), iso(int(now[0] * 1000)), "and it never passes the wall")
 
     def test_a_thread_keeps_its_parents_clock(self):
         start = datetime(2026, 10, 9, 12, 0, tzinfo=timezone.utc).timestamp()
         fd = self.start(World(WORLD, clock=lambda: start))
-        first = fd.post("zoe", "room", "a scene that began a minute ago", at=datetime.fromtimestamp(start - 60, timezone.utc))
+        first = fd.post("alice", "room", "a scene that began a minute ago", at=datetime.fromtimestamp(start - 60, timezone.utc))
         fd.create_thread("kim", "room", "side", from_message=first["id"])
         self.assertEqual(fd.post("kim", "side", "a reply in the thread")["timestamp"], iso(int((start - 60) * 1000)), "the room's time")
         status, _, mine = self.api("POST", f"/channels/{self.channel('room')}/messages", {"content": "the agent's answer"})
-        later = fd.post("zoe", "side", "a follow-up in the thread, after the answer")
+        later = fd.post("alice", "side", "a follow-up in the thread, after the answer")
         self.assertGreater(int(later["id"]), int(mine["id"]))
         self.assertEqual(later["timestamp"], iso(int(start * 1000)))
         self.assertEqual(fd.state()["channels"]["side"]["lag"], 0.0)
-        early = fd.post("zoe", "side", "a time before the agent's answer", at=datetime.fromtimestamp(start - 30, timezone.utc))
+        early = fd.post("alice", "side", "a time before the agent's answer", at=datetime.fromtimestamp(start - 30, timezone.utc))
         self.assertGreater(int(early["id"]), int(later["id"]), "the room's floor holds in its thread")
         self.assertEqual([(r["channel"], r["requested"]) for r in fd.verdict()["raised"]], [("side", iso(int((start - 30) * 1000)))])
 
@@ -773,18 +773,18 @@ class GatewayTest(StandIn, unittest.IsolatedAsyncioTestCase):
         watcher = await self.open()
         await self.identify(watcher, "boss", INTENTS["GUILDS"] | INTENTS["GUILD_MESSAGES"])
         self.assertEqual((await self.receive(watcher))["t"], "GUILD_CREATE")
-        self.assertEqual(self.fd.post("zoe", "people-only", "just us")["dispatched_to"], ["boss"])
+        self.assertEqual(self.fd.post("alice", "people-only", "just us")["dispatched_to"], ["boss"])
         self.assertEqual((await self.receive(watcher))["d"]["content"], "just us")
-        self.assertEqual(self.fd.post("zoe", "room", "everyone")["dispatched_to"], ["vigil", "boss"])
+        self.assertEqual(self.fd.post("alice", "room", "everyone")["dispatched_to"], ["vigil", "boss"])
         self.assertEqual((await self.receive(transport))["d"]["content"], "everyone")
         self.assertEqual((await self.receive(watcher))["d"]["content"], "everyone")
-        thread = self.fd.create_thread("zoe", "room", "side")
-        self.fd.post("zoe", "side", "in the thread")
+        thread = self.fd.create_thread("alice", "room", "side")
+        self.fd.post("alice", "side", "in the thread")
         created, message = await self.receive(watcher), await self.receive(watcher)
         self.assertEqual((created["t"], created["d"]["newly_created"], created["d"]["parent_id"]), ("THREAD_CREATE", True, self.channel("room")))
         self.assertEqual((message["t"], message["d"]["channel_id"]), ("MESSAGE_CREATE", thread["id"]))
         self.assertEqual((await self.receive(transport))["d"]["channel_id"], thread["id"])
-        self.assertEqual(self.fd.create_thread("zoe", "people-only", "hidden")["dispatched_to"], ["boss"])
+        self.assertEqual(self.fd.create_thread("alice", "people-only", "hidden")["dispatched_to"], ["boss"])
         self.assertEqual(self.fd.post("kim", "hidden", "between us")["dispatched_to"], ["boss"], "a thread takes its parent's")
         self.assertTrue(self.fd.verdict()["clean"], self.fd.verdict()["unknown"])
 
@@ -891,10 +891,10 @@ class ShapePinTest(unittest.TestCase):
 
     def test_every_payload_the_stand_in_builds_carries_the_keys_discord_py_requires(self):
         world = World(WORLD)
-        zoe, vigil, room = world.member("zoe"), world.member("vigil"), world.channel("room")
-        asked, _ = world.create_message(zoe.id, room.id, f"<@{vigil.id}> is the deploy done?")
+        alice, vigil, room = world.member("alice"), world.member("vigil"), world.channel("room")
+        asked, _ = world.create_message(alice.id, room.id, f"<@{vigil.id}> is the deploy done?")
         reply, _ = world.create_message(vigil.id, room.id, "yes", reference={"message_id": asked["id"]}, nonce="1", wall=True)
-        thread = world.create_thread(zoe.id, room.id, "side")
+        thread = world.create_thread(alice.id, room.id, "side")
         command, _ = world.upsert_command(vigil.id, {"name": "status", "description": "Show the session", "type": 1})
         built = {
             "READY": payloads.ready(world, vigil, "session", "ws://127.0.0.1:1"),
@@ -910,7 +910,7 @@ class ShapePinTest(unittest.TestCase):
             "message": payloads.message(world, reply),
             "text": payloads.channel(world, room),
             "thread": payloads.channel(world, thread),
-            "member": payloads.member(zoe),
+            "member": payloads.member(alice),
             "role": payloads.role(world.role("agents")),
         }
         self.assertEqual(set(built), set(payloads.SHAPES))
@@ -921,9 +921,9 @@ class ShapePinTest(unittest.TestCase):
 
     def test_guild_create_lists_only_the_threads_a_bot_can_see(self):
         world = World(WORLD)
-        zoe = world.member("zoe")
-        world.create_thread(zoe.id, world.channel("room").id, "side")
-        world.create_thread(zoe.id, world.channel("people-only").id, "hidden")
+        alice = world.member("alice")
+        world.create_thread(alice.id, world.channel("room").id, "side")
+        world.create_thread(alice.id, world.channel("people-only").id, "hidden")
         threads = {bot: [t["name"] for t in payloads.guild_create(world, world.member(bot), INTENTS["GUILDS"])["threads"]]
                    for bot in ("vigil", "boss")}
         self.assertEqual(threads, {"vigil": ["side"], "boss": ["side", "hidden"]})

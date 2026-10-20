@@ -1,6 +1,6 @@
 """A Discord stand-in that answers as discord.com and gateway.discord.gg (step 9f, PR 3a).
 
-Rehearsals run each harness's real Discord client against it before Zoe's
+Rehearsals run each harness's real Discord client against it before Alice's
 room: the same processes, unmodified, with only the hostnames, the tokens
 and the ids changed. It behaves like Discord wherever the room's social
 facts come from (the time of each message, who it addresses, what it

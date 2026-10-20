@@ -14,7 +14,7 @@
 
 ## Decision basis
 
-Direct comparison with the Zoe-selected design at `c834e8c` confirms that A1
+Direct comparison with the maintainer-selected design at `c834e8c` confirms that A1
 identifies the right contract gap and chooses the right interface boundary:
 
 - classifier-outcome attention receipts need the effective policy's trusted

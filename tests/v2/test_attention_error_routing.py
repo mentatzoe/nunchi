@@ -25,7 +25,7 @@ def _deliver(pipeline, event_id="e1"):
     return pipeline.handle_delivery(
         delivery_id=f"d-{event_id}",
         event=message(event_id, text="@Vigil can you check this?"),
-        actors={"human:zoe": {"kind": "human"}},
+        actors={"human:alice": {"kind": "human"}},
     )
 
 

@@ -246,7 +246,7 @@ with their own immutable I-010E attention-stage records.
   downstream canary targets MUST be defined before social-quality or margin-
   retirement claims. The
   multi-model matrix MUST include the incumbent Gemini 3.1 Flash Lite family,
-  frontier GPT-5.5 family, and open-weight Qwen3 family unless Zoe explicitly
+  frontier GPT-5.5 family, and open-weight Qwen3 family unless the maintainer explicitly
   overrides the set; each run MUST record the exact provider model ID, provider,
   endpoint class, date, prompt/config identity, and any override provenance.
 - **FR-015**: The owner MUST hand off the exact commit, I-030A version,
@@ -326,7 +326,7 @@ with their own immutable I-010E attention-stage records.
   DEFER evaluation can run live without narrowing safety.
 - The selected three-family matrix is Gemini 3.1 Flash Lite, GPT-5.5, and
   Qwen3. Provider catalogs can change, so run records—not this plan—pin exact
-  provider IDs; any later family substitution requires an explicit Zoe decision
+  provider IDs; any later family substitution requires an explicit the maintainer decision
   recorded with the evidence.
 - Slice 020 may develop in parallel and is not required to test I-030A because
   core tests can construct contract-valid I-010A fixtures directly.

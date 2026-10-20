@@ -12,8 +12,8 @@
       "display_name": "Vigil",
       "kind": "bot"
     },
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     }
   },
@@ -26,7 +26,7 @@
     },
     {
       "id": "msg-trigger-covered",
-      "author": "zoe",
+      "author": "alice",
       "at": "0s",
       "text": "Could you share your view on the cache-backend question?"
     }

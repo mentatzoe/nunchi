@@ -8,8 +8,8 @@
     "vigil"
   ],
   "actors": {
-    "zoe": {
-      "display_name": "Zoe",
+    "alice": {
+      "display_name": "Alice",
       "kind": "human"
     },
     "user-999888777000111222": {
@@ -26,7 +26,7 @@
     },
     {
       "id": "msg-addr-6",
-      "author": "zoe",
+      "author": "alice",
       "at": "0s",
       "text": "<@999888777000111222> can you review the retry PR? Vigil already flagged the failing test earlier.",
       "mentions": [
