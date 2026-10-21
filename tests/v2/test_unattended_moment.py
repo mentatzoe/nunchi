@@ -224,7 +224,7 @@ class UnattendedAnswerTests(unittest.TestCase):
         for notes in (None, [{"note": "Alice thanks Vigil.", "evidence_event_ids": ["z2"]}]):
             with self.subTest(model_notes=bool(notes)):
                 reading = reading_from_answers(answers, projection, notes=notes)
-                self.assertEqual("Sam's message s1 arrived while you were busy with your previous turn, and it still calls for you.", reading[0]["note"])
+                self.assertEqual("Sam's message s1 arrived while you were busy with your previous turn, and still matters to how you might take part.", reading[0]["note"])
                 self.assertTrue(reading[-1]["note"].startswith("Kinds of response"))
 
 
