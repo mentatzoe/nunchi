@@ -152,12 +152,15 @@ def attention_questions(name: str, *, unattended: bool = False) -> dict[str, dic
                 "does not require a question, a request, new information or a practical "
                 "contribution. People also joke, share reactions and experiences, agree "
                 "or disagree. An absent request or an answer already given is not, by "
-                "itself, a reason to stay quiet. A completed thought can open the floor "
-                "rather than end the exchange. Read the room and this participant's "
-                "place in it; speaking and silence are both possible."
+                "itself, a reason to stay quiet. Judge timing as well as participation: "
+                "a quick burst of messages from one person can still be one speaking "
+                "turn. While they are developing their thought, a backchannel or "
+                "waiting leaves them the floor; a speaking turn can interrupt them. "
+                "Read the pace, who has the floor, and whether the exchange is "
+                "opening up or winding down. Speaking and silence can both fit."
             ),
             "options": {
-                "speak": "Say something to the room: a reaction, a joke, an opinion, a story, a question, an answer, or anything else.",
+                "speak": "Take the floor with a conversational contribution: a joke, an opinion, a story, a question, an answer, or anything else.",
                 "mhm": "A quick acknowledgement, like a nod or 'mhm', that shows it is following without taking the floor.",
                 "wait": "Hold off for now: let the addressee answer first, or let the speaker finish.",
                 "stay_quiet": f"Let this moment pass with no message and no reaction from {name}.",
