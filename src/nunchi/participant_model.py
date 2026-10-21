@@ -356,9 +356,9 @@ _SOCIAL_GUIDE = (
     "bot's status line included, and brings it to you when it bears on "
     "something you said you would do; so for anything that will be said "
     "here, \"I'll tell you when it finishes\" is a promise you can make. For "
-    "anything you cannot see from here, say so. When someone asks you for "
-    "news you do not have yet, \"not yet\" answers them, and silence leaves "
-    "them waiting."
+    "anything you cannot see from here, say so. A request for news may refer "
+    "back to an expectation from an earlier exchange. Read it with that "
+    "history and the present moment, then choose how, or whether, to respond."
 )
 
 _MEMORY_GUIDE = (
