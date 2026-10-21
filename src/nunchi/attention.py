@@ -342,7 +342,7 @@ _UNATTENDED_PROMPT = (
     "newest first. Judge this moment as a whole, the way a person catching up "
     "reads the newest message and glances back at what they missed: the move "
     "fits the whole moment, and " + UNATTENDED_POINTER + " names the one of "
-    "them, if any, that still calls for {called}."
+    "them, if any, that still matters to how {called} might take part."
 )
 
 

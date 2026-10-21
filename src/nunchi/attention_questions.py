@@ -63,7 +63,7 @@ def attention_questions(name: str, *, unattended: bool = False) -> dict[str, dic
     id of one supplied message, or none). ``step`` says which step of
     reading the room it belongs to. With ``unattended``, the judgment also
     covers messages that arrived while the participant was busy, and one more
-    question asks which of them still calls for it (#94 step 6).
+    question asks which of them still matters to its participation (#94 step 6).
     """
 
     questions = {
@@ -173,11 +173,13 @@ def attention_questions(name: str, *, unattended: bool = False) -> dict[str, dic
             "kind": EVENT,
             "ask": (
                 f"Which of the messages that arrived while {name} was busy with its "
-                f"previous turn still calls for {name}: asked of it or of the room, and "
-                "not yet answered?"
+                f"previous turn, if any, still matters to {name}'s participation in "
+                "the present exchange? It can be a social remark or a request, "
+                "whether or not someone has answered it. Naming "
+                f"one does not oblige {name} to reply."
             ),
             "none": "null if none does",
-            "no_message": f"None of them still calls for {name}.",
+            "no_message": f"None of them still matters to {name}'s participation in this exchange.",
         }
     return questions
 
@@ -421,7 +423,8 @@ def classifier_disposition(answers: Mapping[str, Any]) -> str:
     turn (``docs/behavior.md``; #94 step 6). Otherwise the participant gets
     a turn: speaking wakes it, and a mhm, waiting or staying quiet defer to
     it with the reading. A message that arrived while the
-    participant was busy and still calls for it is never hidden either.
+    participant was busy and still matters to its participation is never
+    hidden either.
     """
 
     move = top_move(answers)
@@ -649,7 +652,7 @@ def reading_from_answers(
             {
                 "note": (
                     f"{author}'s message {waiting} arrived while you were busy with your "
-                    "previous turn, and it still calls for you."
+                    "previous turn, and still matters to how you might take part."
                 ),
                 "evidence_event_ids": [waiting],
             },

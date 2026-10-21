@@ -327,8 +327,10 @@ A tagged host-facing union on `status`:
   (runtime-adapter-only); the core drops a pointer that does not, or that
   names the judged message, on its own. Since @8 (#94 step 6), a request
   with `unattended_event_ids` adds the optional `calls_for_participant`
-  pointer: which of those messages still calls for the participant, asked of
-  it or of the room and not yet answered. It must name one of the request's
+  pointer: which of those messages still matters to the participant's
+  participation in the present exchange. It may name a social remark as well
+  as a request, whether or not it was answered; naming one does not oblige a
+  reply. It must name one of the request's
   unattended messages (runtime-adapter-only); the core drops it otherwise.
   Step 1 never suppresses a judgment that names one, and the reading names
   it first, on both routes. The V1-era
