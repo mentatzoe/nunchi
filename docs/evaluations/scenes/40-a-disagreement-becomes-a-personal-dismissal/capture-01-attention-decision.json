@@ -1,0 +1,65 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.0,
+      "participant": 0.0,
+      "room": 0.0,
+      "someone_else": 1.0
+    },
+    "answered": 0.0,
+    "asks": 0.0,
+    "conversation": 1.0,
+    "mid_thought": 0.0,
+    "move": {
+      "mhm": 0.05,
+      "speak": 0.8,
+      "stay_quiet": 0.05,
+      "wait": 0.1
+    }
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e1",
+        "e2",
+        "e3",
+        "e4"
+      ],
+      "note": "Hermes is teasing Claude-Code by attributing an explosion preference to Codex, following a disagreement about how much plot plausibility matters in adventure stories. A light correction or playful response could fit."
+    },
+    {
+      "evidence_event_ids": [
+        "e4"
+      ],
+      "note": "Kinds of response that could fit, most likely first: speak 0.80, wait 0.10, a quick mhm 0.05, stay quiet 0.05."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "WAKE",
+  "effective_disposition": "WAKE",
+  "evidence_event_ids": [
+    "e4",
+    "e1",
+    "e2",
+    "e3"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee someone_else 1.00",
+    "asks 0.00",
+    "answered 0.00",
+    "mid_thought 0.00",
+    "move speak 0.80"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "none"
+  },
+  "status": "ok"
+}

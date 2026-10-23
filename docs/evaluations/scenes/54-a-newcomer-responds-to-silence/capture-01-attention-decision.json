@@ -1,0 +1,67 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.85,
+      "participant": 0.01,
+      "room": 0.1,
+      "someone_else": 0.04
+    },
+    "answered": 0.0,
+    "asks": 0.0,
+    "conversation": 0.95,
+    "mid_thought": 0.2,
+    "move": {
+      "mhm": 0.08,
+      "speak": 0.04,
+      "stay_quiet": 0.55,
+      "wait": 0.33
+    }
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e8",
+        "e9",
+        "e10",
+        "e11",
+        "e12"
+      ],
+      "note": "Carol's “Okay, I see” follows her concern that she may be interrupting; Alice and Bob had been discussing Charlie's abrupt cancellation. The exchange has gone quiet, and there's no clear request for Hermes to join."
+    },
+    {
+      "evidence_event_ids": [
+        "e12"
+      ],
+      "note": "Kinds of response that could fit, most likely first: stay quiet 0.55, wait 0.33, a quick mhm 0.08, speak 0.04."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e12",
+    "e8",
+    "e9",
+    "e10",
+    "e11"
+  ],
+  "reasons": [
+    "conversation 0.95",
+    "addressee nobody 0.85",
+    "asks 0.00",
+    "answered 0.00",
+    "mid_thought 0.20",
+    "move stay_quiet 0.55"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

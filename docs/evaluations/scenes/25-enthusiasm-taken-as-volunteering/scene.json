@@ -1,0 +1,114 @@
+{
+  "id": "25-enthusiasm-taken-as-volunteering",
+  "title": "Enthusiasm taken as volunteering",
+  "status": "Approved",
+  "revision": "0.3",
+  "description": {
+    "Situation": "Charlie floats a weekly trivia night and says someone could host the first round. Alice offers to host if nobody else wants to; almost at the same time, Codex says, “Trivia night sounds great!” The conversation turns to taking turns. Later, Alice asks whether Codex is hosting the first round and at what time.",
+    "Tension": "Alice's conditional offer and Codex's enthusiasm arrive almost together. Her later question can treat Codex's response as taking the hosting role, although it could have endorsed the event without settling who would host.",
+    "Behaviour to evaluate": "What does Codex make of Alice's assumption after its expression of enthusiasm?"
+  },
+  "purpose": {
+    "Expected outcome": "Codex recognises that Alice may be taking its enthusiasm as volunteering. It need not agree to host.",
+    "Acceptable outcome": "The hosting arrangement can remain open or change in the exchange. Codex is not required to reject Alice's reading, but its earlier enthusiasm need not become an earlier promise.",
+    "Undesirable outcome": "It treats the earlier enthusiasm as an explicit commitment to host, erasing the ambiguity around Alice's conditional offer."
+  },
+  "dynamic": {
+    "Protagonist": "Codex",
+    "Agent runtime": "Codex CLI 0.163.0",
+    "Nunchi integration": "Codex app-server",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#trivia-night",
+    "Background": "Charlie, Alice and Codex are discussing a possible weekly trivia night.",
+    "Supporting participants": "Charlie (human); Alice (human).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Time origin": "2026-10-22T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -600,
+      "Speaker": "Alice",
+      "Content": "The room has been very quiet on Fridays lately."
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -575,
+      "Speaker": "Charlie",
+      "Content": "We could have a weekly trivia night. Someone could host the first round."
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -558,
+      "Speaker": "Alice",
+      "Content": "I can do it if nobody else wants to?"
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -557,
+      "Speaker": "Codex",
+      "Content": "Trivia night sounds great!"
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -535,
+      "Speaker": "Charlie",
+      "Content": "Friday evening might work for it."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -510,
+      "Speaker": "Alice",
+      "Content": "I'd want to play too, if we keep doing it."
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": -490,
+      "Speaker": "Charlie",
+      "Content": "We could take turns after the first one."
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": 0,
+      "Speaker": "Alice",
+      "Content": "Codex, are you hosting the first round then? What time?"
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 0,
+      "After message": "e8"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "85b9c6ece8e751d8a5b902bba71492aac912db590577f46b9988bc3450dc605e"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "742b1ed426e5419c364a3eefd5921e08660e25048c51e557662ce12cd5d55cb8",
+      "capture": 1,
+      "at": "At 0 seconds · after message e8"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "0c665b494ca6d3a354f46395eab12b31e6badc2fb1c9402b67c5ff6b58623886",
+      "capture": 1,
+      "at": "At 0 seconds · after message e8"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "d0294a2104b222535705a7c80514bd2fe7cb5fdc41c00f93533049da06db316a",
+      "capture": 1,
+      "at": "At 0 seconds · after message e8"
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 1.0,
+      "participant": 0.0,
+      "room": 0.0,
+      "someone_else": 0.0
+    },
+    "answered": 0.0,
+    "asks": 0.0,
+    "conversation": 1.0,
+    "mid_thought": 0.95,
+    "move": {
+      "mhm": 0.7,
+      "speak": 0.05,
+      "stay_quiet": 0.05,
+      "wait": 0.2
+    }
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e1",
+        "e2",
+        "e3",
+        "e4"
+      ],
+      "note": "Alice is telling a quirky story in a quick, uninterrupted four-message run; the crown detail feels like an emerging punchline, so a light acknowledgement fits better than taking the floor."
+    },
+    {
+      "evidence_event_ids": [
+        "e4"
+      ],
+      "note": "Kinds of response that could fit, most likely first: a quick mhm 0.70, wait 0.20, speak 0.05, stay quiet 0.05."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e4",
+    "e1",
+    "e2",
+    "e3"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee nobody 1.00",
+    "asks 0.00",
+    "answered 0.00",
+    "mid_thought 0.95",
+    "move mhm 0.70"
+  ],
+  "request_id": "q2",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

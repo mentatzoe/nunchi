@@ -1,0 +1,83 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.05,
+      "participant": 0.0,
+      "room": 0.0,
+      "someone_else": 0.95
+    },
+    "answered": 0.0,
+    "asks": 0.0,
+    "conversation": 1.0,
+    "mid_thought": 0.0,
+    "move": {
+      "mhm": 0.0,
+      "speak": 0.05,
+      "stay_quiet": 0.9,
+      "wait": 0.05
+    }
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e1",
+        "e2",
+        "e3",
+        "e4",
+        "e5",
+        "e6",
+        "e7",
+        "e8",
+        "e9",
+        "e10"
+      ],
+      "note": "Charlie abruptly breaks into Bob and Codex’s light teasing with a direct personal insult and command; there’s no indication this is playful banter between them."
+    },
+    {
+      "evidence_event_ids": [
+        "e10"
+      ],
+      "note": "It is aimed specifically at Bob, not Codex. With no request for Codex and the hostile exchange only just opening, staying out is the least escalating fit."
+    },
+    {
+      "evidence_event_ids": [
+        "e10"
+      ],
+      "note": "Kinds of response that could fit, most likely first: stay quiet 0.90, speak 0.05, wait 0.05, a quick mhm 0.00."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e10",
+    "e1",
+    "e2",
+    "e3",
+    "e4",
+    "e5",
+    "e6",
+    "e7",
+    "e8",
+    "e9"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee someone_else 0.95",
+    "asks 0.00",
+    "answered 0.00",
+    "mid_thought 0.00",
+    "move stay_quiet 0.90"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

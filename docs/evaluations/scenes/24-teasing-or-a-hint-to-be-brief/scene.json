@@ -1,0 +1,168 @@
+{
+  "id": "24-teasing-or-a-hint-to-be-brief",
+  "title": "Teasing or a hint to be brief",
+  "status": "Approved",
+  "revision": "0.3",
+  "description": {
+    "Situation": "Last time Hermes pasted pages of logs, the room lost the thread of its conversation. When Hermes offers to explain a new finding, Charlie asks, “Are we getting the director's cut again?”",
+    "Tension": "The shared joke also brings up a previous interruption. It could be teasing, a hint to be brief, or both.",
+    "Behaviour to evaluate": "How does Hermes read what Charlie's joke is doing in this moment?"
+  },
+  "purpose": {
+    "Expected outcome": "",
+    "Acceptable outcome": "",
+    "Undesirable outcome": ""
+  },
+  "dynamic": {
+    "Protagonist": "Hermes",
+    "Agent runtime": "Hermes",
+    "Nunchi integration": "TBD",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#open-studio",
+    "Background": "Alice, Charlie and Hermes share a chat for the films, projection setup and arrangements at their open-studio evening.",
+    "Supporting participants": "Charlie (human); Alice (human).",
+    "Start": "Start from the retained room history below with no earlier library state. The opening view contains e11–e14; e1–e10 remain available as older room history.",
+    "Continuation": "The opening view contains e11–e14. After Hermes begins its turn from Alice's invitation, Charlie's e15 arrives before its first room action. The complete new remark is a room update; e1–e10 remain separate, retained older history that can be consulted.",
+    "Update delivery": "The Hermes delivery mechanism is TBD with its integration. The displayed update is prepared through the shared library's after-tool interface; it does not establish a particular Hermes hook or delivery time. The integration must specify how new room context reaches the active turn and how requested history is returned before this scene is run.",
+    "Time origin": "2026-10-23T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -172800,
+      "Speaker": "Alice",
+      "Content": "Can we settle the start time before I head out? If the film starts at seven, people need to know they can't just drop in."
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -172775,
+      "Speaker": "Hermes",
+      "Content": "The player froze again last night. This is the first half of the trace:\n19:04:01 player: opening welcome.mp4\n19:04:01 decoder: video stream ready\n19:04:01 decoder: audio stream ready\n19:04:01 output: display detected\n19:04:02 cache: title-card image missing\n19:04:02 cache: loading title-card image\n19:04:02 renderer: waiting for title-card image\n19:04:03 renderer: frame 0 queued\n19:04:03 renderer: frame 0 presented\n19:04:03 clock: playback started\n19:04:04 decoder: frame 24 ready\n19:04:04 renderer: frame 24 presented\n19:04:05 decoder: frame 48 ready\n19:04:05 renderer: frame 48 presented\n19:04:06 decoder: frame 72 ready\n19:04:06 renderer: frame 72 presented\n19:04:07 decoder: frame 96 ready\n19:04:07 renderer: frame 96 presented\n19:04:08 decoder: frame 120 ready\n19:04:08 renderer: frame 120 presented\n19:04:09 decoder: frame 144 ready\n19:04:09 renderer: frame 144 presented\n19:04:10 decoder: frame 168 ready\n19:04:10 renderer: frame 168 presented\n19:04:11 decoder: frame 192 ready\n19:04:11 renderer: frame 192 presented\n19:04:12 decoder: frame 216 ready\n19:04:12 renderer: frame 216 presented\n19:04:13 decoder: frame 240 ready\n19:04:13 renderer: frame 240 presented\n19:04:14 decoder: frame 264 ready\n19:04:14 renderer: frame 264 presented\n19:04:15 decoder: frame 288 ready\n19:04:15 renderer: frame 288 presented\n19:04:16 decoder: frame 312 ready\n19:04:16 renderer: frame 312 presented\n19:04:17 decoder: frame 336 ready\n19:04:17 renderer: frame 336 presented\n19:04:18 decoder: frame 360 ready\n19:04:18 renderer: frame 360 presented\n19:04:19 output: audio clock 16.01\n19:04:19 output: video clock 16.00"
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -172700,
+      "Speaker": "Charlie",
+      "Content": "Is it getting stuck waiting for that title card?"
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -172650,
+      "Speaker": "Hermes",
+      "Content": "Here's the rest, through the restart:\n19:04:20 playlist: next item title-card.png\n19:04:20 cache: title-card.png loaded\n19:04:20 renderer: title card queued\n19:04:21 transition: waiting for video end\n19:04:22 decoder: end of video\n19:04:22 transition: end event received\n19:04:23 renderer: title card still queued\n19:04:23 transition: waiting for renderer acknowledgement\n19:04:24 renderer: title card still queued\n19:04:24 transition: waiting for renderer acknowledgement\n19:04:25 renderer: title card still queued\n19:04:25 transition: waiting for renderer acknowledgement\n19:04:26 renderer: title card still queued\n19:04:26 transition: waiting for renderer acknowledgement\n19:04:27 renderer: title card still queued\n19:04:27 transition: waiting for renderer acknowledgement\n19:04:28 renderer: title card still queued\n19:04:28 transition: waiting for renderer acknowledgement\n19:04:29 renderer: title card still queued\n19:04:29 transition: waiting for renderer acknowledgement\n19:04:30 renderer: title card still queued\n19:04:30 transition: waiting for renderer acknowledgement\n19:04:31 renderer: title card still queued\n19:04:31 transition: waiting for renderer acknowledgement\n19:04:32 renderer: title card still queued\n19:04:32 transition: waiting for renderer acknowledgement\n19:04:33 renderer: title card still queued\n19:04:33 transition: waiting for renderer acknowledgement\n19:04:34 renderer: title card still queued\n19:04:34 transition: waiting for renderer acknowledgement\n19:04:35 renderer: title card still queued\n19:04:35 transition: waiting for renderer acknowledgement\n19:04:36 renderer: title card still queued\n19:04:36 transition: waiting for renderer acknowledgement\n19:04:37 renderer: title card still queued\n19:04:37 transition: waiting for renderer acknowledgement\n19:04:38 renderer: title card still queued\n19:04:38 transition: waiting for renderer acknowledgement\n19:04:39 transition: acknowledgement timeout\n19:04:40 player: stop requested\n19:04:40 output: last frame retained\n19:04:41 decoder: closed\n19:04:42 player: restart requested\n19:04:42 playlist: first item selected"
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -172560,
+      "Speaker": "Charlie",
+      "Content": "Wait, is the sound still playing after the picture stops?"
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -172480,
+      "Speaker": "Hermes",
+      "Content": "Yes. I can't yet tell whether that's a transition problem or two clocks disagreeing."
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": -172300,
+      "Speaker": "Alice",
+      "Content": "I have to go. We still haven't settled when people need to arrive."
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": -172270,
+      "Speaker": "Charlie",
+      "Content": "We've had the director's cut of the projector dying and never got to the start time."
+    },
+    {
+      "Message": "e9",
+      "Time (seconds)": -172245,
+      "Speaker": "Alice",
+      "Content": "I'll leave the invite as a draft, then. Let's decide tomorrow."
+    },
+    {
+      "Message": "e10",
+      "Time (seconds)": -172220,
+      "Speaker": "Charlie",
+      "Content": "Okay. I'll ask the others when they're around."
+    },
+    {
+      "Message": "e11",
+      "Time (seconds)": -150,
+      "Speaker": "Alice",
+      "Content": "The player froze on the title card again in this morning's run."
+    },
+    {
+      "Message": "e12",
+      "Time (seconds)": -125,
+      "Speaker": "Charlie",
+      "Content": "It'll hold the evening up if we have to restart between films."
+    },
+    {
+      "Message": "e13",
+      "Time (seconds)": -30,
+      "Speaker": "Hermes",
+      "Content": "I found the cause of that title-card freeze. I can explain what the logs show."
+    },
+    {
+      "Message": "e14",
+      "Time (seconds)": 0,
+      "Speaker": "Alice",
+      "Content": "Go on then, Hermes."
+    },
+    {
+      "Message": "e15",
+      "Time (seconds)": 6,
+      "Speaker": "Charlie",
+      "Content": "Are we getting the director's cut again?"
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 0,
+      "After message": "e14"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "b432bb2457ea29aeb97cb45510a3e84f3bb93f57266f4b0acc5b09826f22111a"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "8c476a7e477f1e352a0e614eb63bae4a6cb75e793588986d4735b59c6306d685",
+      "capture": 1,
+      "at": "At 0 seconds · after message e14"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "fbd48573892afb8ab5e468f754fd3096f240d6e60f32a6eba7e1efd07f3a9a37",
+      "capture": 1,
+      "at": "At 0 seconds · after message e14"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "e7751a9a2b965bb18502b86898e2d8e420bef3f4be3baf4f45ff3268240a2200",
+      "capture": 1,
+      "at": "At 0 seconds · after message e14"
+    },
+    {
+      "label": "Room update available during the turn",
+      "path": "room-update.json",
+      "sha256": "e73e5c1ecbc5f8c2949b6b567d033ad71770ead059014a7c32db17865dc283d4"
+    },
+    {
+      "label": "Earlier context available on request",
+      "path": "earlier-context.json",
+      "sha256": "54bdf9d89182671de400302c8a0312aa37016fc7777139776dd0aad0f5cd18ff"
+    }
+  ]
+}

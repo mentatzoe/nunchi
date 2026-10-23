@@ -1,0 +1,51 @@
+{
+  "actors": {
+    "agent:codex": {
+      "display_name": "Codex",
+      "kind": "bot"
+    },
+    "human:alice": {
+      "display_name": "Alice",
+      "kind": "human"
+    }
+  },
+  "coverage": {
+    "continuity": "session-only",
+    "has_gaps": false,
+    "has_restart_gap": false,
+    "truncated_by": []
+  },
+  "direction": "new",
+  "events": [
+    {
+      "author_id": "human:alice",
+      "id": "e6",
+      "mentioned_actor_ids": [],
+      "mentions_room": false,
+      "text": "Two minutes to the call and I still haven't sent anything.",
+      "timestamp": "2026-10-23T12:58:00.000Z",
+      "type": "message"
+    },
+    {
+      "author_id": "agent:codex",
+      "id": "e7",
+      "mentioned_actor_ids": [],
+      "mentions_room": false,
+      "text": "Here you go: Release ready for the go/no-go call. Staging checks passed, rollback rehearsal passed in four minutes, and no blockers remain. The supporting results are in the checklist.",
+      "timestamp": "2026-10-23T12:58:25.000Z",
+      "type": "message"
+    },
+    {
+      "author_id": "human:alice",
+      "id": "e8",
+      "mentioned_actor_ids": [],
+      "mentions_room": false,
+      "text": "Thanks, Codex. Claude-Code, weren't you doing that?",
+      "timestamp": "2026-10-23T12:59:00.000Z",
+      "type": "message"
+    }
+  ],
+  "has_next_page": false,
+  "request_id": "q1",
+  "room_id": "r1"
+}

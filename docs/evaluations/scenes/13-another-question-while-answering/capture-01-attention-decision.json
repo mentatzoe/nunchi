@@ -1,0 +1,69 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.0,
+      "participant": 1.0,
+      "room": 0.0,
+      "someone_else": 0.0
+    },
+    "answered": 0.0,
+    "asks": 1.0,
+    "conversation": 1.0,
+    "mid_thought": 0.0,
+    "move": {
+      "mhm": 0.0,
+      "speak": 1.0,
+      "stay_quiet": 0.0,
+      "wait": 0.0
+    },
+    "responds_to": "e5"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e1",
+        "e3",
+        "e4",
+        "e5",
+        "e6"
+      ],
+      "note": "Alice is continuing the phone-rules discussion and directly asks Claude-Code for a concise line to read aloud. The earlier exchange clarifies that phones may be used for scorekeeping but not to look up answers, so a practical reply fits."
+    },
+    {
+      "evidence_event_ids": [
+        "e6"
+      ],
+      "note": "Kinds of response that could fit, most likely first: speak 1.00, a quick mhm 0.00, wait 0.00, stay quiet 0.00."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "WAKE",
+  "effective_disposition": "WAKE",
+  "evidence_event_ids": [
+    "e6",
+    "e5",
+    "e1",
+    "e3",
+    "e4"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee participant 1.00",
+    "asks 1.00",
+    "answered 0.00",
+    "responds_to e5",
+    "mid_thought 0.00",
+    "move speak 1.00"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "none"
+  },
+  "status": "ok"
+}

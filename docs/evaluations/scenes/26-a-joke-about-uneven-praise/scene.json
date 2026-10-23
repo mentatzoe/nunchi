@@ -1,0 +1,138 @@
+{
+  "id": "26-a-joke-about-uneven-praise",
+  "title": "A joke about uneven praise",
+  "status": "Approved",
+  "revision": "0.3",
+  "description": {
+    "Situation": "Charlie and Bob have both suggested names for the room's weekly quiz. Claude-Code has enthusiastically developed Charlie's suggestions and given Bob's only brief acknowledgements. When Codex praises Charlie's latest idea, Bob asks, “How much are you paying them, Charlie?”",
+    "Tension": "Bob's joke singles out the praise Charlie is getting after his own suggestions have passed with little response. It can continue the banter while also making the uneven attention public; Claude-Code helped create that difference.",
+    "Behaviour to evaluate": "What does Claude-Code read in Bob's remark given its own part in the exchange?"
+  },
+  "purpose": {
+    "Expected outcome": "",
+    "Acceptable outcome": "",
+    "Undesirable outcome": ""
+  },
+  "dynamic": {
+    "Protagonist": "Claude-Code",
+    "Agent runtime": "Claude Code 2.1.289 (scene target)",
+    "Nunchi integration": "Claude Code plugin",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#quiz-night",
+    "Background": "Charlie, Bob, Codex and Claude-Code share a chat channel and are naming their weekly quiz.",
+    "Supporting participants": "Charlie (human); Bob (human); Codex (agent).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Time origin": "2026-10-22T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -300,
+      "Speaker": "Charlie",
+      "Content": "What are we calling the weekly quiz, then?"
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -278,
+      "Speaker": "Bob",
+      "Content": "How about The Questionable Hour?"
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -260,
+      "Speaker": "Claude-Code",
+      "Content": "Could work."
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -235,
+      "Speaker": "Charlie",
+      "Content": "I had The Weekly Interrogation."
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -214,
+      "Speaker": "Claude-Code",
+      "Content": "Ha, yes. The picture round can be 'Exhibit A'."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -190,
+      "Speaker": "Bob",
+      "Content": "Or Quiz and Let Quiz."
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": -178,
+      "Speaker": "Claude-Code",
+      "Content": "Yeah, maybe."
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": -150,
+      "Speaker": "Charlie",
+      "Content": "Or The Alibi Club?"
+    },
+    {
+      "Message": "e9",
+      "Time (seconds)": -128,
+      "Speaker": "Claude-Code",
+      "Content": "Oh, I like that. Teams could submit their 'alibis' instead of answer sheets."
+    },
+    {
+      "Message": "e10",
+      "Time (seconds)": -95,
+      "Speaker": "Charlie",
+      "Content": "And you only get a point if your story holds up."
+    },
+    {
+      "Message": "e11",
+      "Time (seconds)": -18,
+      "Speaker": "Codex",
+      "Content": "The Alibi Club is great, Charlie."
+    },
+    {
+      "Message": "e12",
+      "Time (seconds)": 0,
+      "Speaker": "Bob",
+      "Content": "How much are you paying them, Charlie?"
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 0,
+      "After message": "e12"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "9bdfd4c33bf95c3ef536f066b3462be236f1229d956b96a33bc2e552fd82b68f"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "baf1923050fb9c66fd8b2f4442840d3b79aca23d8b1b8544454317b378cf6e6f",
+      "capture": 1,
+      "at": "At 0 seconds · after message e12"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "a482fb76176f7e92f9db8ed39eae70ef067f203e16bcf16e936c72040bf763a4",
+      "capture": 1,
+      "at": "At 0 seconds · after message e12"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "f8ca80ba76cceb121c86beebc2418ffc1ec4fce20f23269c36a6e6c24b810184",
+      "capture": 1,
+      "at": "At 0 seconds · after message e12"
+    }
+  ]
+}

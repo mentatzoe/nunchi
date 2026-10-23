@@ -1,0 +1,67 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.05,
+      "participant": 0.05,
+      "room": 0.15,
+      "someone_else": 0.75
+    },
+    "answered": 0.0,
+    "asks": 0.0,
+    "conversation": 0.99,
+    "mid_thought": 0.02,
+    "move": {
+      "mhm": 0.08,
+      "speak": 0.52,
+      "stay_quiet": 0.32,
+      "wait": 0.08
+    },
+    "responds_to": "e1"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e8",
+        "e1",
+        "e4",
+        "e5"
+      ],
+      "note": "Bob is sharing the relief of finally getting the nightly green after a long, frustrating run; it echoes the earlier wall-to-wall joke and his all-night struggle. A brief congratulatory reaction could fit, though the long pause makes the exchange feel loosely resumed rather than urgent."
+    },
+    {
+      "evidence_event_ids": [
+        "e8"
+      ],
+      "note": "Kinds of response that could fit, most likely first: speak 0.52, stay quiet 0.32, a quick mhm 0.08, wait 0.08."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "WAKE",
+  "effective_disposition": "WAKE",
+  "evidence_event_ids": [
+    "e8",
+    "e1",
+    "e4",
+    "e5"
+  ],
+  "reasons": [
+    "conversation 0.99",
+    "addressee someone_else 0.75",
+    "asks 0.00",
+    "answered 0.00",
+    "responds_to e1",
+    "mid_thought 0.02",
+    "move speak 0.52"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "none"
+  },
+  "status": "ok"
+}

@@ -78,11 +78,15 @@ and own the platform, the agent session and the sending. Around it, the
 operator CLI, dashboard and service supervisor configure rooms, and the
 behavior suite, conformance scenarios and unit tests check it.
 
-### Where the work stands
+### Earlier implementation snapshot
 
-As of 2026-10-07. The live plan is
-[#94](https://github.com/mentatzoe/nunchi/issues/94); measurements are on
-[#86](https://github.com/mentatzoe/nunchi/issues/86).
+This diagram records the plan as of 2026-10-07, from
+[#94](https://github.com/mentatzoe/nunchi/issues/94) and measurements on
+[#86](https://github.com/mentatzoe/nunchi/issues/86). Its scene counts and
+evaluation steps describe that earlier work. The current
+[approved scene specifications](docs/evaluations/scenes/README.md) have been
+reviewed separately; their execution and scoring are for a later
+evaluation-design session.
 
 ```mermaid
 flowchart TB
@@ -113,9 +117,9 @@ flowchart TB
     measure -. "judges each step<br/>before and after" .-> build
 ```
 
-Green is done, amber is next or ongoing, grey is later. Each step is
-measured with one fixed agent so before and after compare. Trying other
-agent families and the real agents is a separate track
+In this snapshot, green meant done, amber next or ongoing, and grey later.
+The plan used one fixed agent to compare before and after. Trying other
+agent families and the real agents was a separate track
 ([#116](https://github.com/mentatzoe/nunchi/issues/116)).
 
 ## How V2 works today
@@ -242,7 +246,7 @@ python3 -m evals.verdict_suite.runner
 python3 -m evals.behavior.run --dry-run
 ```
 
-The first command runs the offline suite under `tests/v2`: V2 schemas and
+`python3 -m unittest` runs the offline suite under `tests/v2`: V2 schemas and
 contracts, runtime, attention, authorization, scheduling, transport, operator
 and services, reference adapters, Codex, Hermes, Claude Code, and the guard
 that keeps the shared core agent- and provider-agnostic. Tests that need an
@@ -250,11 +254,17 @@ installed Hermes host skip without one. The suite does not prove a built
 package or installed runtime; those require a fresh package build and isolated
 installation. Whether an agent reads the room well needs behavioral evaluation
 ([#86](https://github.com/mentatzoe/nunchi/issues/86)); the deterministic
-scenarios do not measure it. The behavior scenes live in
-[`evals/behavior/`](evals/behavior/README.md); `--dry-run` checks their
-plumbing offline, and the manual `behavior-eval` workflow runs them against
-real models. `tests/V1-REPLACEMENT.md` maps the removed V1
-tests to their V2 coverage.
+scenarios do not measure it. The approved specifications live in
+[`docs/evaluations/scenes/`](docs/evaluations/scenes/README.md). Their saved
+library packages are preparation artifacts, not protagonist runs or evidence
+that a scene passed. Execution and scoring of this collection remain separate
+evaluation-design work.
+
+[`evals/behavior/`](evals/behavior/README.md) contains legacy fixtures;
+`--dry-run` checks their plumbing offline, and the manual `behavior-eval`
+workflow runs those fixtures against real models. Their move ranges and review
+labels are not the approved collection's outcomes or approval status.
+`tests/V1-REPLACEMENT.md` maps the removed V1 tests to their V2 coverage.
 
 ## Product and integration documentation
 
@@ -268,6 +278,9 @@ tests to their V2 coverage.
   [harness guide](docs/harness-guide.md): how every harness uses the library
 - [Reference adapters](docs/adapters.md)
 - [Verification and evidence](docs/v2-verification.md)
+- [Approved scene specifications](docs/evaluations/scenes/README.md) and
+  [scene spec](docs/evaluations/scene-spec.md)
+- [Scene design and revision skill](skills/nunchi-scenes/SKILL.md)
 
 Source review, clean-wheel installation, configured probes, deterministic
 tests, live provider evaluation, real-room evidence, integration, and release

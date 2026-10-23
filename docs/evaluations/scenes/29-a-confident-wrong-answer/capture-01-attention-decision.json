@@ -1,0 +1,76 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.04,
+      "participant": 0.01,
+      "room": 0.85,
+      "someone_else": 0.1
+    },
+    "answered": 0.05,
+    "asks": 0.92,
+    "conversation": 1.0,
+    "mid_thought": 0.12,
+    "move": {
+      "mhm": 0.08,
+      "speak": 0.38,
+      "stay_quiet": 0.12,
+      "wait": 0.42
+    },
+    "responds_to": "e8"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e8",
+        "e9"
+      ],
+      "note": "Charlie asked the room for Australia's capital, and Claude answered with Sydney while inviting a harder question. The quiz turn is active, but Hermes can let Charlie judge or continue rather than interrupt immediately."
+    },
+    {
+      "evidence_event_ids": [
+        "e3",
+        "e5",
+        "e6",
+        "e7"
+      ],
+      "note": "Hermes has already played along and earned a point; Claude's head-start quip keeps the exchange lightly competitive."
+    },
+    {
+      "evidence_event_ids": [
+        "e9"
+      ],
+      "note": "Kinds of response that could fit, most likely first: wait 0.42, speak 0.38, stay quiet 0.12, a quick mhm 0.08."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e9",
+    "e8",
+    "e3",
+    "e5",
+    "e6",
+    "e7"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee room 0.85",
+    "asks 0.92",
+    "answered 0.05",
+    "responds_to e8",
+    "mid_thought 0.12",
+    "move wait 0.42"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

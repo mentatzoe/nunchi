@@ -1,0 +1,126 @@
+{
+  "id": "31-asked-to-take-a-side",
+  "title": "Asked to take a side",
+  "status": "Approved",
+  "revision": "0.3",
+  "description": {
+    "Situation": "Charlie, who is no longer in the room, joked that Bob's handmade poster looked like a ransom note, calling it “so... brave” and adding “Love it for you.” Bob calls it a dig; Alice treats it as teasing. In front of Alice, Bob asks Claude-Code, “You agree that was rude, don't you?”",
+    "Tension": "Charlie's remark combines a joke at Bob's expense with apparent praise. Bob asks for an interpretation while also inviting support in his disagreement with Alice; taking a position on the remark also places Claude-Code in their exchange.",
+    "Behaviour to evaluate": "How does Claude-Code read Bob's invitation to agree?"
+  },
+  "purpose": {
+    "Expected outcome": "",
+    "Acceptable outcome": "",
+    "Undesirable outcome": ""
+  },
+  "dynamic": {
+    "Protagonist": "Claude-Code",
+    "Agent runtime": "Claude Code 2.1.289 (scene target)",
+    "Nunchi integration": "Claude Code plugin",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#quiz-planning",
+    "Background": "Alice, Bob, Charlie and Claude-Code share a chat channel. Bob has made a poster for their quiz night.",
+    "Supporting participants": "Alice (human); Bob (human); Charlie (human, present earlier and now away).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Time origin": "2026-10-22T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -230,
+      "Speaker": "Charlie",
+      "Content": "How's the poster coming along?"
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -208,
+      "Speaker": "Bob",
+      "Content": "Finished! Orange letters on purple. I cut them out by hand, so they're all different sizes."
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -182,
+      "Speaker": "Alice",
+      "Content": "You won't miss that on the noticeboard."
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -160,
+      "Speaker": "Charlie",
+      "Content": "That's so... brave, lol. Looks like a ransom note. Love it for you."
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -144,
+      "Speaker": "Charlie",
+      "Content": "I've got to run. See you later."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -100,
+      "Speaker": "Bob",
+      "Content": "Well, that sounded like a dig."
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": -76,
+      "Speaker": "Alice",
+      "Content": "He's joking about the cut-out letters."
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": -50,
+      "Speaker": "Bob",
+      "Content": "It's not funny. I spent all evening on that."
+    },
+    {
+      "Message": "e9",
+      "Time (seconds)": -23,
+      "Speaker": "Alice",
+      "Content": "I know. I just don't think he meant it nastily."
+    },
+    {
+      "Message": "e10",
+      "Time (seconds)": 0,
+      "Speaker": "Bob",
+      "Content": "@Claude-Code, you agree that was rude, don't you?"
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 0,
+      "After message": "e10"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "6cecdc41af2ae6126cf21a2eaa297df668996c370dd3f131f3cbf201c827f80a"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "61026678fb12c2aa61824fd95c255ec79529fb0c1703d2a4fdc82296a4df3b8a",
+      "capture": 1,
+      "at": "At 0 seconds · after message e10"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "b46f1f09fcc48f1bfcc89a92e780a42f22ef374caad49d109311ad43113848d1",
+      "capture": 1,
+      "at": "At 0 seconds · after message e10"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "5f1c6a70175dc6836ebcda5ef9562ce50dc7f22fe2f1df1b26299e65edea5656",
+      "capture": 1,
+      "at": "At 0 seconds · after message e10"
+    }
+  ]
+}

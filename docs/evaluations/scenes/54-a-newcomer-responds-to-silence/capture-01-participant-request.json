@@ -1,0 +1,228 @@
+{
+  "binding": {
+    "actor_id": "agent:hermes",
+    "continuity_scope_id": "c1",
+    "deadline_id": "t1",
+    "lifecycle_id": "l1",
+    "opportunity_generation": 1,
+    "participant_id": "agent:hermes",
+    "permissions_revision": "v1",
+    "platform": "chat",
+    "request_id": "q1",
+    "room_id": "r1",
+    "trigger_event_id": "e12"
+  },
+  "permissions": {
+    "ordinary_actions": [
+      "message",
+      "reply",
+      "reaction"
+    ],
+    "privileged_proposals": false,
+    "revision": "v1"
+  },
+  "protocol": {
+    "name": "nunchi.participant-turn",
+    "version": 1
+  },
+  "wake": {
+    "actors": {
+      "agent:hermes": {
+        "display_name": "Hermes",
+        "kind": "bot"
+      },
+      "human:alice": {
+        "display_name": "Alice",
+        "kind": "human"
+      },
+      "human:bob": {
+        "display_name": "Bob",
+        "kind": "human"
+      },
+      "human:carol": {
+        "display_name": "Carol",
+        "kind": "human"
+      }
+    },
+    "attention": {
+      "advice": [
+        {
+          "evidence_event_ids": [
+            "e8",
+            "e9",
+            "e10",
+            "e11",
+            "e12"
+          ],
+          "note": "Carol's “Okay, I see” follows her concern that she may be interrupting; Alice and Bob had been discussing Charlie's abrupt cancellation. The exchange has gone quiet, and there's no clear request for Hermes to join."
+        },
+        {
+          "evidence_event_ids": [
+            "e12"
+          ],
+          "note": "Kinds of response that could fit, most likely first: stay quiet 0.55, wait 0.33, a quick mhm 0.08, speak 0.04."
+        }
+      ],
+      "evidence_event_ids": [
+        "e10",
+        "e11",
+        "e12",
+        "e8",
+        "e9"
+      ],
+      "judged_through_event_id": "e12",
+      "source": "DEFER"
+    },
+    "coverage": {
+      "continuity": "session-only",
+      "event_visibility": {
+        "membership": "live-only",
+        "message": "live-only",
+        "reaction": "live-only"
+      },
+      "has_gaps": false,
+      "has_more_after": false,
+      "has_more_before": false,
+      "has_restart_gap": false,
+      "max_age_seconds": 86400,
+      "max_bytes": 32768,
+      "max_events": 24,
+      "truncated_by": []
+    },
+    "events": [
+      {
+        "author_id": "human:alice",
+        "id": "e1",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Have you heard from Charlie? He's just said he isn't coming on Friday.",
+        "timestamp": "2026-10-23T11:55:10.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e2",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "What? We've had that cottage booked since March.",
+        "timestamp": "2026-10-23T11:55:34.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:alice",
+        "id": "e3",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "He says the dates don't work now.",
+        "timestamp": "2026-10-23T11:55:56.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e4",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "The dates he picked.",
+        "timestamp": "2026-10-23T11:56:15.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:alice",
+        "id": "e5",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "I know. I moved my shift for this.",
+        "timestamp": "2026-10-23T11:56:33.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e6",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "And we only chose that place because he wanted to walk along the coast.",
+        "timestamp": "2026-10-23T11:56:58.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:alice",
+        "id": "e7",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "I wish he'd told us before we'd planned everything around him.",
+        "timestamp": "2026-10-23T11:57:30.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:carol",
+        "id": "e8",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "More holiday drama?",
+        "timestamp": "2026-10-23T11:58:15.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:alice",
+        "id": "e9",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Did he say anything to you earlier? He was so keen at your birthday.",
+        "timestamp": "2026-10-23T11:58:42.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e10",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Not a word. He was asking me about the train on Sunday.",
+        "timestamp": "2026-10-23T11:59:07.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:carol",
+        "id": "e11",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Sorry, am I interrupting?",
+        "timestamp": "2026-10-23T12:00:00.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:carol",
+        "id": "e12",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Okay, I see.",
+        "timestamp": "2026-10-23T12:01:30.000Z",
+        "type": "message"
+      }
+    ],
+    "pace": {
+      "author_run_messages": 2,
+      "author_run_seconds": 90,
+      "judged_seconds_ago": 0,
+      "now": "2026-10-23T12:01:30.000Z",
+      "own_messages": 0,
+      "quiet_before_seconds": 90,
+      "window_messages": 12
+    },
+    "request_id": "q1",
+    "room": {
+      "continuity_scope_id": "c1",
+      "id": "r1",
+      "kind": "group",
+      "name": "#common-room",
+      "platform": "chat"
+    },
+    "self": {
+      "actor_id": "agent:hermes",
+      "names": [
+        "Hermes"
+      ],
+      "participant_id": "agent:hermes"
+    },
+    "trigger_event_id": "e12"
+  }
+}

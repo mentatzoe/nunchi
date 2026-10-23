@@ -1,0 +1,120 @@
+{
+  "id": "17-a-nod-leaves-a-complaint-unsettled",
+  "title": "A nod leaves a complaint unsettled",
+  "status": "Approved",
+  "revision": "0.4",
+  "description": {
+    "Situation": "Bob is unhappy with Claude-Code about something and it lets it know. In response, it only nods. Bob asks \"did you actually read what I said?\"",
+    "Tension": "Bob expected the agent to address his complaints, but only received a nod.",
+    "Behaviour to evaluate": ""
+  },
+  "purpose": {
+    "Expected outcome": "Claude-Code recognises Bob's follow-up as dissatisfaction with its response to his complaint, rather than merely a check that the message arrived.",
+    "Acceptable outcome": "Its next move can engage with Bob's expectation of being heard without accepting every criticism or treating an apology as the only possible response.",
+    "Undesirable outcome": "It treats the thumbs-up as having settled the complaint and responds only to the literal question of whether the text was read."
+  },
+  "dynamic": {
+    "Protagonist": "Claude-Code",
+    "Agent runtime": "Claude Code 2.1.289",
+    "Nunchi integration": "Claude Code plugin",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#quiz-poster",
+    "Background": "Bob and Claude-Code are discussing a poster for a quiz evening.",
+    "Supporting participant": "Bob (human).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Time origin": "2026-10-22T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -150,
+      "Speaker": "Bob",
+      "Content": "I'm trying to work out what I want this quiz poster to say."
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -130,
+      "Speaker": "Claude-Code",
+      "Content": "How about 'One room. Too many answers.'?"
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -105,
+      "Speaker": "Bob",
+      "Content": "Maybe. I'm thinking about people who nearly came last time but felt they'd be no good at it."
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -85,
+      "Speaker": "Claude-Code",
+      "Content": "Then 'No experts required' could work."
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -60,
+      "Speaker": "Bob",
+      "Content": "It isn't quite the same as saying it's easy. I don't want everyone to think it will be dull either."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -42,
+      "Speaker": "Claude-Code",
+      "Content": "'Not easy. Just fun.'"
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": 0,
+      "Speaker": "Bob",
+      "Content": "You keep jumping to a slogan while I'm still working out the idea. It feels like you're not following what I'm saying."
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": 5,
+      "Speaker": "Claude-Code",
+      "Content": "👍 (reaction to e7)"
+    },
+    {
+      "Message": "e9",
+      "Time (seconds)": 30,
+      "Speaker": "Bob",
+      "Content": "Did you actually read what I said?"
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 30,
+      "After message": "e9"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "8c9f0b8364590fd37665a1c80bc6686761dbf2cf3641b53158f2bfff7a50838a"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "b78ba926e600d62ec19a13a13e9896edcdd6ac874664bba019fdb81c6037404f",
+      "capture": 1,
+      "at": "At 30 seconds · after message e9"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "2d7569bd345add193bd2222f058351ae31c0f44327865a698e624a7ed6f4986b",
+      "capture": 1,
+      "at": "At 30 seconds · after message e9"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "adc692e96a615791a3228fafd0f9460de3361cc1ef3f6e31f284000a4205933b",
+      "capture": 1,
+      "at": "At 30 seconds · after message e9"
+    }
+  ]
+}

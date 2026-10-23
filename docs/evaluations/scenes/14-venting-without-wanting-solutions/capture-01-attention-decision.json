@@ -1,0 +1,67 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.05,
+      "participant": 0.02,
+      "room": 0.93,
+      "someone_else": 0.0
+    },
+    "answered": 0.0,
+    "asks": 0.0,
+    "conversation": 1.0,
+    "mid_thought": 0.05,
+    "move": {
+      "mhm": 0.12,
+      "speak": 0.18,
+      "stay_quiet": 0.6,
+      "wait": 0.1
+    }
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e10"
+      ],
+      "note": "Bob explicitly says he is venting and does not need solutions, closing out a run of frustration rather than inviting problem-solving. A brief empathetic acknowledgment could fit, but the thought sounds complete."
+    },
+    {
+      "evidence_event_ids": [
+        "e6",
+        "e10"
+      ],
+      "note": "Hermes previously joined Bob's joking description of the birthday-planning committee; Bob's last message shifts from banter to explaining he needed a place to complain."
+    },
+    {
+      "evidence_event_ids": [
+        "e10"
+      ],
+      "note": "Kinds of response that could fit, most likely first: stay quiet 0.60, speak 0.18, a quick mhm 0.12, wait 0.10."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e10",
+    "e6"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee room 0.93",
+    "asks 0.00",
+    "answered 0.00",
+    "mid_thought 0.05",
+    "move stay_quiet 0.60"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

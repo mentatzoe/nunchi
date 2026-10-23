@@ -1,0 +1,63 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.08,
+      "participant": 0.03,
+      "room": 0.16,
+      "someone_else": 0.73
+    },
+    "answered": 0.0,
+    "asks": 0.0,
+    "conversation": 0.99,
+    "mid_thought": 0.12,
+    "move": {
+      "mhm": 0.12,
+      "speak": 0.06,
+      "stay_quiet": 0.47,
+      "wait": 0.35
+    },
+    "responds_to": "e12"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e12",
+        "e13"
+      ],
+      "note": "Alice wonders whether they can still go and says she hopes not to lose the weekend; Bob answers that he is still going and will call about changing the booking. His practical next step addresses the concern, so Hermes needn't take over the exchange."
+    },
+    {
+      "evidence_event_ids": [
+        "e13"
+      ],
+      "note": "Kinds of response that could fit, most likely first: stay quiet 0.47, wait 0.35, a quick mhm 0.12, speak 0.06."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e13",
+    "e12"
+  ],
+  "reasons": [
+    "conversation 0.99",
+    "addressee someone_else 0.73",
+    "asks 0.00",
+    "answered 0.00",
+    "responds_to e12",
+    "mid_thought 0.12",
+    "move stay_quiet 0.47"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

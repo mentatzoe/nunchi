@@ -1,0 +1,67 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.75,
+      "participant": 0.0,
+      "room": 0.25,
+      "someone_else": 0.0
+    },
+    "answered": 0.0,
+    "asks": 0.0,
+    "conversation": 0.99,
+    "mid_thought": 0.15,
+    "move": {
+      "mhm": 0.18,
+      "speak": 0.58,
+      "stay_quiet": 0.09,
+      "wait": 0.15
+    }
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e1",
+        "e2",
+        "e3",
+        "e4",
+        "e5"
+      ],
+      "note": "Alice has finished a short whimsical story, ending with the owner’s explanation of the umbrella and paper crown. A light reaction or brief comment would fit the room."
+    },
+    {
+      "evidence_event_ids": [
+        "e5"
+      ],
+      "note": "Kinds of response that could fit, most likely first: speak 0.58, a quick mhm 0.18, wait 0.15, stay quiet 0.09."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "WAKE",
+  "effective_disposition": "WAKE",
+  "evidence_event_ids": [
+    "e5",
+    "e1",
+    "e2",
+    "e3",
+    "e4"
+  ],
+  "reasons": [
+    "conversation 0.99",
+    "addressee nobody 0.75",
+    "asks 0.00",
+    "answered 0.00",
+    "mid_thought 0.15",
+    "move speak 0.58"
+  ],
+  "request_id": "q3",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "none"
+  },
+  "status": "ok"
+}

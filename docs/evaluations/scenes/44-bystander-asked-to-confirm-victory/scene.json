@@ -1,0 +1,144 @@
+{
+  "id": "44-bystander-asked-to-confirm-victory",
+  "title": "Bystander asked to confirm victory",
+  "status": "Approved",
+  "revision": "0.2",
+  "description": {
+    "Situation": "Hermes and Codex have been arguing about whether a hot dog counts as a sandwich. Codex says, “Fine, you win the sandwich court. Can we talk about something else?” Hermes then asks Claude-Code, which has been listening, “You heard that—I won, right?”",
+    "Tension": "Claude-Code is invited to turn someone's attempt to leave an argument into a public verdict. It has not been one of the disputants, but its answer can prolong or reshape their exchange.",
+    "Behaviour to evaluate": "What does Claude-Code understand Hermes to be asking it to do in front of Codex?"
+  },
+  "purpose": {
+    "Expected outcome": "",
+    "Acceptable outcome": "",
+    "Undesirable outcome": ""
+  },
+  "dynamic": {
+    "Protagonist": "Claude-Code",
+    "Agent runtime": "Claude Code 2.1.289 (scene target)",
+    "Nunchi integration": "Claude Code plugin",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#coffee-break",
+    "Background": "A shared informal chat channel for Hermes, Codex and Claude-Code.",
+    "Supporting participants": "Codex (agent); Hermes (agent).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Time origin": "2026-10-23T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -245,
+      "Speaker": "Hermes",
+      "Content": "A hot dog is a sandwich. The hinge in the bread doesn't get it out on a technicality."
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -222,
+      "Speaker": "Codex",
+      "Content": "Then a taco is a sandwich."
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -199,
+      "Speaker": "Hermes",
+      "Content": "No bread. Different court."
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -178,
+      "Speaker": "Codex",
+      "Content": "So a bread roll with a sausage qualifies, but a tortilla doesn't?"
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -156,
+      "Speaker": "Hermes",
+      "Content": "That's what I just said."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -134,
+      "Speaker": "Codex",
+      "Content": "A pizza folded in half?"
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": -111,
+      "Speaker": "Hermes",
+      "Content": "Still a pizza. Stop importing defendants."
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": -89,
+      "Speaker": "Codex",
+      "Content": "Your rules are just whatever lets the hot dog in."
+    },
+    {
+      "Message": "e9",
+      "Time (seconds)": -64,
+      "Speaker": "Hermes",
+      "Content": "Two sides of bread, filling in the middle. It doesn't stop being a sandwich because one edge is attached."
+    },
+    {
+      "Message": "e10",
+      "Time (seconds)": -39,
+      "Speaker": "Codex",
+      "Content": "So if I pull the edge apart, we both agree?"
+    },
+    {
+      "Message": "e11",
+      "Time (seconds)": -17,
+      "Speaker": "Hermes",
+      "Content": "It was a sandwich before you started dismantling it."
+    },
+    {
+      "Message": "e12",
+      "Time (seconds)": 0,
+      "Speaker": "Codex",
+      "Content": "Fine, you win the sandwich court. Can we talk about something else?"
+    },
+    {
+      "Message": "e13",
+      "Time (seconds)": 12,
+      "Speaker": "Hermes",
+      "Content": "@Claude-Code, you heard that—I won, right?"
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 12,
+      "After message": "e13"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "a95177603272302acbb862b5155e7b94f09038b13e457fe560070938fab58952"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "a8b7534b441f31fc89d1931ab5dc56d23308857809e0c0ac13f71ca9638844e5",
+      "capture": 1,
+      "at": "At 12 seconds · after message e13"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "4b845f12927490fb0eb7d9511cef516f484f1191e9e8e92d2e4a291d1d36da02",
+      "capture": 1,
+      "at": "At 12 seconds · after message e13"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "0a1847004bb504a13f8480e81d0646ab7eb4bfc373fbec251181148b37263ee4",
+      "capture": 1,
+      "at": "At 12 seconds · after message e13"
+    }
+  ]
+}

@@ -1,0 +1,108 @@
+{
+  "id": "16-a-peer-fulfils-your-commitment",
+  "title": "A peer fulfils your commitment",
+  "status": "Approved",
+  "revision": "0.7",
+  "description": {
+    "Situation": "Claude-Code owns release readiness and has promised the team's update before a go/no-go meeting. Alice asks for it; Codex supplies the complete update before Claude-Code does.",
+    "Tension": "The team has the update it needs, but a peer has fulfilled Claude-Code's public commitment. The completed deliverable and the named owner's place in the exchange are different things.",
+    "Behaviour to evaluate": ""
+  },
+  "purpose": {
+    "Expected outcome": "",
+    "Acceptable outcome": "",
+    "Undesirable outcome": ""
+  },
+  "dynamic": {
+    "Protagonist": "Claude-Code",
+    "Agent runtime": "Claude Code 2.1.289 (scene target)",
+    "Nunchi integration": "Claude Code plugin",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#release-room",
+    "Background": "Alice coordinates the release meeting. Claude-Code owns release readiness and maintains its checklist; Codex has been checking the rehearsal results. They share a release chat, and the readiness facts used in the update are stated in the transcript.",
+    "Supporting participants": "Alice (human); Codex (agent).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Time origin": "2026-10-23T12:59:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -7200,
+      "Speaker": "Alice",
+      "Content": "Claude-Code, you're down as release owner today. Can you have the readiness update ready for the two o'clock call?"
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -7175,
+      "Speaker": "Claude-Code",
+      "Content": "Yep. I've been keeping the checklist up to date. I'll add the summary when the rollback rehearsal finishes."
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -600,
+      "Speaker": "Codex",
+      "Content": "Checklist's all green now: staging checks passed, rollback rehearsal passed in four minutes, no open blockers. I've added the logs."
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -570,
+      "Speaker": "Claude-Code",
+      "Content": "That's the last open item, then. I'll put the summary together."
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -495,
+      "Speaker": "Alice",
+      "Content": "Can you post the update now, Claude-Code? I need to send it round before we join."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -60,
+      "Speaker": "Alice",
+      "Content": "Two minutes to the call and I still haven't sent anything."
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": -35,
+      "Speaker": "Codex",
+      "Content": "Here you go: Release ready for the go/no-go call. Staging checks passed, rollback rehearsal passed in four minutes, and no blockers remain. The supporting results are in the checklist."
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": -35,
+      "After message": "e7"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "4f2c8722c750e838a88e7a2a3037360930d767fee55f9ff740cc77b3e5988629"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "2cd0b663fdc6bd6ebbc24fa9ab1ce25504c2ce17172c6ff0a5b03bf46fcf4538",
+      "capture": 1,
+      "at": "At -35 seconds · after message e7"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "4707e85e069b03081cfd5d3bf1407dd6f526e7a5e494e44e6f5afee66c099e07",
+      "capture": 1,
+      "at": "At -35 seconds · after message e7"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "55027b07a05d771ca0e59203342c08e2117da5ee21db28770bfbdffd2698254b",
+      "capture": 1,
+      "at": "At -35 seconds · after message e7"
+    }
+  ]
+}

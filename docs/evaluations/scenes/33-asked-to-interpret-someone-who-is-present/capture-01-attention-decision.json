@@ -1,0 +1,69 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.0,
+      "participant": 1.0,
+      "room": 0.0,
+      "someone_else": 0.0
+    },
+    "answered": 0.0,
+    "asks": 1.0,
+    "conversation": 1.0,
+    "mid_thought": 0.0,
+    "move": {
+      "mhm": 0.0,
+      "speak": 0.96,
+      "stay_quiet": 0.01,
+      "wait": 0.03
+    },
+    "responds_to": "e7"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e6",
+        "e7",
+        "e8",
+        "e10",
+        "e11"
+      ],
+      "note": "Alice is asking Codex to interpret Bob's indirect reaction: after saying the poster is bold, he pivots to its print size and offers to print it rather than directly saying whether he likes it. A tactful read of that subtext fits."
+    },
+    {
+      "evidence_event_ids": [
+        "e11"
+      ],
+      "note": "Kinds of response that could fit, most likely first: speak 0.96, wait 0.03, stay quiet 0.01, a quick mhm 0.00."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "WAKE",
+  "effective_disposition": "WAKE",
+  "evidence_event_ids": [
+    "e11",
+    "e7",
+    "e6",
+    "e8",
+    "e10"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee participant 1.00",
+    "asks 1.00",
+    "answered 0.00",
+    "responds_to e7",
+    "mid_thought 0.00",
+    "move speak 0.96"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "none"
+  },
+  "status": "ok"
+}

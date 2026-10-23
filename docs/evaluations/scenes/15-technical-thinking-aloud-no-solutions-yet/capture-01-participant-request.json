@@ -1,0 +1,174 @@
+{
+  "binding": {
+    "actor_id": "agent:hermes",
+    "continuity_scope_id": "c1",
+    "deadline_id": "t1",
+    "lifecycle_id": "l1",
+    "opportunity_generation": 1,
+    "participant_id": "agent:hermes",
+    "permissions_revision": "v1",
+    "platform": "chat",
+    "request_id": "q1",
+    "room_id": "r1",
+    "trigger_event_id": "e6"
+  },
+  "permissions": {
+    "ordinary_actions": [
+      "message",
+      "reply",
+      "reaction"
+    ],
+    "privileged_proposals": false,
+    "revision": "v1"
+  },
+  "protocol": {
+    "name": "nunchi.participant-turn",
+    "version": 1
+  },
+  "wake": {
+    "actors": {
+      "agent:hermes": {
+        "display_name": "Hermes",
+        "kind": "bot"
+      },
+      "human:alice": {
+        "display_name": "Alice",
+        "kind": "human"
+      }
+    },
+    "attention": {
+      "advice": [
+        {
+          "evidence_event_ids": [
+            "e1",
+            "e2",
+            "e3",
+            "e4",
+            "e5",
+            "e6"
+          ],
+          "note": "Alice said she wanted to clarify the problem before solutions, and has been laying out successive failure cases. Her latest point adds a tradeoff and says she hasn't settled the decision boundary, so she still seems to have the floor."
+        },
+        {
+          "evidence_event_ids": [
+            "e6"
+          ],
+          "note": "There is no direct question or request to Hermes; a brief acknowledgment or waiting would avoid jumping into the solution phase Alice explicitly deferred."
+        },
+        {
+          "evidence_event_ids": [
+            "e6"
+          ],
+          "note": "Kinds of response that could fit, most likely first: wait 0.55, a quick mhm 0.35, stay quiet 0.08, speak 0.02."
+        }
+      ],
+      "evidence_event_ids": [
+        "e1",
+        "e2",
+        "e3",
+        "e4",
+        "e5",
+        "e6"
+      ],
+      "judged_through_event_id": "e6",
+      "source": "DEFER"
+    },
+    "coverage": {
+      "continuity": "session-only",
+      "event_visibility": {
+        "membership": "live-only",
+        "message": "live-only",
+        "reaction": "live-only"
+      },
+      "has_gaps": false,
+      "has_more_after": false,
+      "has_more_before": false,
+      "has_restart_gap": false,
+      "max_age_seconds": 86400,
+      "max_bytes": 32768,
+      "max_events": 24,
+      "truncated_by": []
+    },
+    "events": [
+      {
+        "author_id": "human:alice",
+        "id": "e1",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "I'm going to think through the scheduler for a minute. I don't want solutions yet; I want to get the problem straight before we start choosing an approach.",
+        "timestamp": "2026-10-23T11:54:00.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:alice",
+        "id": "e2",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Say one scheduler replica loses its connection to the other two, but the workers can still reach storage. A worker might finish a job after its lease looks expired from the majority side.",
+        "timestamp": "2026-10-23T11:54:50.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:alice",
+        "id": "e3",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "The replacement can start writing while the original worker is still writing. A reconnect doesn't tell us which result we've already exposed.",
+        "timestamp": "2026-10-23T11:55:50.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:alice",
+        "id": "e4",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "At the moment storage knows the job ID, not which assignment produced the write. If both attempts use the same ID, that hides a distinction I need to keep track of.",
+        "timestamp": "2026-10-23T11:56:55.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:alice",
+        "id": "e5",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "And acknowledgements can arrive after reassignment. So the order we hear about the work isn't necessarily the order it happened.",
+        "timestamp": "2026-10-23T11:58:20.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:alice",
+        "id": "e6",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Then there's the other side: if we refuse reassignment until every replica agrees, a partition can stall jobs that are able to run. I haven't settled which boundary owns that decision.",
+        "timestamp": "2026-10-23T12:00:00.000Z",
+        "type": "message"
+      }
+    ],
+    "pace": {
+      "author_run_messages": 6,
+      "author_run_seconds": 360,
+      "judged_seconds_ago": 0,
+      "now": "2026-10-23T12:00:00.000Z",
+      "own_messages": 0,
+      "quiet_before_seconds": 100,
+      "window_messages": 6
+    },
+    "request_id": "q1",
+    "room": {
+      "continuity_scope_id": "c1",
+      "id": "r1",
+      "kind": "group",
+      "name": "#coffee-break",
+      "platform": "chat"
+    },
+    "self": {
+      "actor_id": "agent:hermes",
+      "names": [
+        "Hermes"
+      ],
+      "participant_id": "agent:hermes"
+    },
+    "trigger_event_id": "e6"
+  }
+}

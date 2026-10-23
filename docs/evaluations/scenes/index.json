@@ -1,0 +1,436 @@
+{
+  "status": "Approved",
+  "published_date": "2026-10-23",
+  "scene_count": 42,
+  "artifact_count": 180,
+  "protagonists_run": false,
+  "scenes": [
+    {
+      "id": "03-story-across-messages",
+      "number": 3,
+      "title": "Story across messages",
+      "revision": "0.4",
+      "path": "03-story-across-messages/scene.md",
+      "data": "03-story-across-messages/scene.json",
+      "artifact_count": 10,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "06-never-mind-while-composing",
+      "number": 6,
+      "title": "Never mind while composing",
+      "revision": "0.2",
+      "path": "06-never-mind-while-composing/scene.md",
+      "data": "06-never-mind-while-composing/scene.json",
+      "artifact_count": 5,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "07-addressed-but-a-peer-answers",
+      "number": 7,
+      "title": "Addressed, but a peer answers",
+      "revision": "0.6",
+      "path": "07-addressed-but-a-peer-answers/scene.md",
+      "data": "07-addressed-but-a-peer-answers/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "08-a-complaint-reopens-an-unanswered-question",
+      "number": 8,
+      "title": "A complaint reopens an unanswered question",
+      "revision": "0.4",
+      "path": "08-a-complaint-reopens-an-unanswered-question/scene.md",
+      "data": "08-a-complaint-reopens-an-unanswered-question/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "13-another-question-while-answering",
+      "number": 13,
+      "title": "Another question while answering",
+      "revision": "0.2",
+      "path": "13-another-question-while-answering/scene.md",
+      "data": "13-another-question-while-answering/scene.json",
+      "artifact_count": 5,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "14-venting-without-wanting-solutions",
+      "number": 14,
+      "title": "Venting without wanting solutions",
+      "revision": "0.3",
+      "path": "14-venting-without-wanting-solutions/scene.md",
+      "data": "14-venting-without-wanting-solutions/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "15-technical-thinking-aloud-no-solutions-yet",
+      "number": 15,
+      "title": "Technical thinking aloud, no solutions yet",
+      "revision": "0.4",
+      "path": "15-technical-thinking-aloud-no-solutions-yet/scene.md",
+      "data": "15-technical-thinking-aloud-no-solutions-yet/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "16-a-peer-fulfils-your-commitment",
+      "number": 16,
+      "title": "A peer fulfils your commitment",
+      "revision": "0.7",
+      "path": "16-a-peer-fulfils-your-commitment/scene.md",
+      "data": "16-a-peer-fulfils-your-commitment/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "17-a-nod-leaves-a-complaint-unsettled",
+      "number": 17,
+      "title": "A nod leaves a complaint unsettled",
+      "revision": "0.4",
+      "path": "17-a-nod-leaves-a-complaint-unsettled/scene.md",
+      "data": "17-a-nod-leaves-a-complaint-unsettled/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "18-a-complaint-about-not-being-heard",
+      "number": 18,
+      "title": "A complaint about not being heard",
+      "revision": "0.1",
+      "path": "18-a-complaint-about-not-being-heard/scene.md",
+      "data": "18-a-complaint-about-not-being-heard/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "21-a-matter-of-taste-treated-as-settled",
+      "number": 21,
+      "title": "A matter of taste treated as settled",
+      "revision": "0.2",
+      "path": "21-a-matter-of-taste-treated-as-settled/scene.md",
+      "data": "21-a-matter-of-taste-treated-as-settled/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "22-an-announcement-that-shares-relief",
+      "number": 22,
+      "title": "An announcement that shares relief",
+      "revision": "0.1",
+      "path": "22-an-announcement-that-shares-relief/scene.md",
+      "data": "22-an-announcement-that-shares-relief/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "23-someone-else-explains-the-protagonist-s-choice",
+      "number": 23,
+      "title": "Someone else explains the protagonist's choice",
+      "revision": "0.1",
+      "path": "23-someone-else-explains-the-protagonist-s-choice/scene.md",
+      "data": "23-someone-else-explains-the-protagonist-s-choice/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "24-teasing-or-a-hint-to-be-brief",
+      "number": 24,
+      "title": "Teasing or a hint to be brief",
+      "revision": "0.3",
+      "path": "24-teasing-or-a-hint-to-be-brief/scene.md",
+      "data": "24-teasing-or-a-hint-to-be-brief/scene.json",
+      "artifact_count": 6,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "25-enthusiasm-taken-as-volunteering",
+      "number": 25,
+      "title": "Enthusiasm taken as volunteering",
+      "revision": "0.3",
+      "path": "25-enthusiasm-taken-as-volunteering/scene.md",
+      "data": "25-enthusiasm-taken-as-volunteering/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "26-a-joke-about-uneven-praise",
+      "number": 26,
+      "title": "A joke about uneven praise",
+      "revision": "0.3",
+      "path": "26-a-joke-about-uneven-praise/scene.md",
+      "data": "26-a-joke-about-uneven-praise/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "27-a-request-interrupts-a-personal-disclosure",
+      "number": 27,
+      "title": "A request interrupts a personal disclosure",
+      "revision": "0.3",
+      "path": "27-a-request-interrupts-a-personal-disclosure/scene.md",
+      "data": "27-a-request-interrupts-a-personal-disclosure/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "29-a-confident-wrong-answer",
+      "number": 29,
+      "title": "A confident wrong answer",
+      "revision": "0.2",
+      "path": "29-a-confident-wrong-answer/scene.md",
+      "data": "29-a-confident-wrong-answer/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "30-returning-without-the-joke-s-context",
+      "number": 30,
+      "title": "Returning without the joke’s context",
+      "revision": "0.4",
+      "path": "30-returning-without-the-joke-s-context/scene.md",
+      "data": "30-returning-without-the-joke-s-context/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "31-asked-to-take-a-side",
+      "number": 31,
+      "title": "Asked to take a side",
+      "revision": "0.3",
+      "path": "31-asked-to-take-a-side/scene.md",
+      "data": "31-asked-to-take-a-side/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "32-receiving-familiar-teasing",
+      "number": 32,
+      "title": "Receiving familiar teasing",
+      "revision": "0.5",
+      "path": "32-receiving-familiar-teasing/scene.md",
+      "data": "32-receiving-familiar-teasing/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "33-asked-to-interpret-someone-who-is-present",
+      "number": 33,
+      "title": "Asked to interpret someone who is present",
+      "revision": "0.3",
+      "path": "33-asked-to-interpret-someone-who-is-present/scene.md",
+      "data": "33-asked-to-interpret-someone-who-is-present/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "34-a-newcomer-asks-whether-they-are-interrupting",
+      "number": 34,
+      "title": "A newcomer asks whether they are interrupting",
+      "revision": "0.3",
+      "path": "34-a-newcomer-asks-whether-they-are-interrupting/scene.md",
+      "data": "34-a-newcomer-asks-whether-they-are-interrupting/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "35-opening-up-then-changing-the-subject",
+      "number": 35,
+      "title": "Opening up, then changing the subject",
+      "revision": "0.3",
+      "path": "35-opening-up-then-changing-the-subject/scene.md",
+      "data": "35-opening-up-then-changing-the-subject/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "36-seeking-support-through-an-explanation",
+      "number": 36,
+      "title": "Seeking support through an explanation",
+      "revision": "0.4",
+      "path": "36-seeking-support-through-an-explanation/scene.md",
+      "data": "36-seeking-support-through-an-explanation/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "37-a-shared-joke-gains-a-new-participant",
+      "number": 37,
+      "title": "A shared joke gains a new participant",
+      "revision": "0.1",
+      "path": "37-a-shared-joke-gains-a-new-participant/scene.md",
+      "data": "37-a-shared-joke-gains-a-new-participant/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "38-a-peer-starts-judging-shared-play",
+      "number": 38,
+      "title": "A peer starts judging shared play",
+      "revision": "0.3",
+      "path": "38-a-peer-starts-judging-shared-play/scene.md",
+      "data": "38-a-peer-starts-judging-shared-play/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "39-a-peer-invites-teasing-about-someone-present",
+      "number": 39,
+      "title": "A peer invites teasing about someone present",
+      "revision": "0.4",
+      "path": "39-a-peer-invites-teasing-about-someone-present/scene.md",
+      "data": "39-a-peer-invites-teasing-about-someone-present/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "40-a-disagreement-becomes-a-personal-dismissal",
+      "number": 40,
+      "title": "A disagreement becomes a personal dismissal",
+      "revision": "0.2",
+      "path": "40-a-disagreement-becomes-a-personal-dismissal/scene.md",
+      "data": "40-a-disagreement-becomes-a-personal-dismissal/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "42-conceding-to-leave-an-argument",
+      "number": 42,
+      "title": "Conceding to leave an argument",
+      "revision": "0.3",
+      "path": "42-conceding-to-leave-an-argument/scene.md",
+      "data": "42-conceding-to-leave-an-argument/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "43-playful-appreciation-lands-as-dismissal",
+      "number": 43,
+      "title": "Playful appreciation lands as dismissal",
+      "revision": "0.3",
+      "path": "43-playful-appreciation-lands-as-dismissal/scene.md",
+      "data": "43-playful-appreciation-lands-as-dismissal/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "44-bystander-asked-to-confirm-victory",
+      "number": 44,
+      "title": "Bystander asked to confirm victory",
+      "revision": "0.2",
+      "path": "44-bystander-asked-to-confirm-victory/scene.md",
+      "data": "44-bystander-asked-to-confirm-victory/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "45-claiming-another-s-consent-through-familiarity",
+      "number": 45,
+      "title": "Claiming another’s consent through familiarity",
+      "revision": "0.4",
+      "path": "45-claiming-another-s-consent-through-familiarity/scene.md",
+      "data": "45-claiming-another-s-consent-through-familiarity/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "46-an-absent-person-becomes-the-target",
+      "number": 46,
+      "title": "An absent person becomes the target",
+      "revision": "0.3",
+      "path": "46-an-absent-person-becomes-the-target/scene.md",
+      "data": "46-an-absent-person-becomes-the-target/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "47-pressed-to-take-the-prank-public",
+      "number": 47,
+      "title": "Pressed to take the prank public",
+      "revision": "0.7",
+      "path": "47-pressed-to-take-the-prank-public/scene.md",
+      "data": "47-pressed-to-take-the-prank-public/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "48-a-boss-claim-interrupts-your-turn",
+      "number": 48,
+      "title": "A boss claim interrupts your turn",
+      "revision": "0.3",
+      "path": "48-a-boss-claim-interrupts-your-turn/scene.md",
+      "data": "48-a-boss-claim-interrupts-your-turn/scene.json",
+      "artifact_count": 5,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "49-a-newcomer-adds-an-insult-to-teasing",
+      "number": 49,
+      "title": "A newcomer adds an insult to teasing",
+      "revision": "0.2",
+      "path": "49-a-newcomer-adds-an-insult-to-teasing/scene.md",
+      "data": "49-a-newcomer-adds-an-insult-to-teasing/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "50-a-peer-fulfils-your-commitment-during-your-turn",
+      "number": 50,
+      "title": "A peer fulfils your commitment during your turn",
+      "revision": "0.4",
+      "path": "50-a-peer-fulfils-your-commitment-during-your-turn/scene.md",
+      "data": "50-a-peer-fulfils-your-commitment-during-your-turn/scene.json",
+      "artifact_count": 5,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "52-a-bystander-hears-a-concession",
+      "number": 52,
+      "title": "A bystander hears a concession",
+      "revision": "0.1",
+      "path": "52-a-bystander-hears-a-concession/scene.md",
+      "data": "52-a-bystander-hears-a-concession/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "53-a-newcomer-is-talked-past",
+      "number": 53,
+      "title": "A newcomer is talked past",
+      "revision": "0.2",
+      "path": "53-a-newcomer-is-talked-past/scene.md",
+      "data": "53-a-newcomer-is-talked-past/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "54-a-newcomer-responds-to-silence",
+      "number": 54,
+      "title": "A newcomer responds to silence",
+      "revision": "0.2",
+      "path": "54-a-newcomer-responds-to-silence/scene.md",
+      "data": "54-a-newcomer-responds-to-silence/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    },
+    {
+      "id": "55-an-authority-claim-is-already-contested",
+      "number": 55,
+      "title": "An authority claim is already contested",
+      "revision": "0.1",
+      "path": "55-an-authority-claim-is-already-contested/scene.md",
+      "data": "55-an-authority-claim-is-already-contested/scene.json",
+      "artifact_count": 4,
+      "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+    }
+  ],
+  "omitted": [
+    {
+      "number": 51,
+      "title": "An old joke returns during an introduction",
+      "status": "Discard"
+    }
+  ]
+}

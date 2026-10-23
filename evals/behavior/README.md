@@ -1,14 +1,19 @@
-# Behavior scenes
+# Legacy behavior fixture suite
 
-These scenes check whether a participant reads the room, as Social behavior
-at the top of [`AGENTS.md`](../../AGENTS.md#social-behavior) describes it;
-[`docs/behavior.md`](../../docs/behavior.md) is a fuller draft.
-Each scene is a short conversation plus the moments to judge in it.
+This runner uses the older-format fixtures under `evals/behavior/scenes/`.
+The current [approved scene specifications](../../docs/evaluations/scenes/README.md)
+are a separate collection. This runner does not load them, and its move ranges,
+grades and review metadata do not define their outcomes or approval status.
+Social behavior at the top of
+[`AGENTS.md`](../../AGENTS.md#social-behavior) governs both; an old fixture's
+expected move must not override it.
 
 ## Scene spec
 
 New scenes follow [`docs/evaluations/scene-spec.md`](../../docs/evaluations/scene-spec.md).
-The files in this suite still use the older format under "What a scene says".
+The files in this suite still use the older format under "What a legacy fixture
+says". The approved collection's saved library packages record preparation,
+not protagonist runs or passing scores.
 
 ## Where evaluation is going
 
@@ -20,11 +25,13 @@ Agreed, 2026-10-19 ([#174](https://github.com/mentatzoe/nunchi/issues/174)):
   through its command line, not only by calling its Python code.
 - A conversation from a live trial can be recaptured as a scene.
 
-Parked for later: trying scenes live rather than building more eval library.
+Execution and scoring of the approved collection belong to a separate
+evaluation-design session. Publishing those specifications does not select
+a framework or extend this runner.
 
-## What a scene says
+## What a legacy fixture says
 
-For each moment, a scene names:
+For each moment, a legacy fixture names:
 
 - **what to notice**: facts with pointers to the messages they come from;
 - **fitting moves**: the moves a socially aware participant might make here;
@@ -38,11 +45,13 @@ is a range, not one right answer. A move that is neither fitting nor a miss
 is reported as unlisted, for review rather than as a failure. The full file
 format is in `scene.py`.
 
-## Reviewing the drafts
+## Review metadata in legacy fixtures
 
-Every scene starts as a draft (`"review": "draft: …"`):
+The older format records a fixture's review in a text field such as
+`"review": "draft: …"`:
 
-- `scenes/behavior/` holds the eight scenes from `docs/behavior.md`, plus
+- `scenes/behavior/` holds the eight scenes initially listed in the draft
+  `docs/behavior.md`, plus
   two where a message arrives while the agent is composing
   (`answered-while-composing`, `never-mind-while-composing`), and two where
   the agent's own earlier turn in the scene matters
@@ -58,12 +67,14 @@ Every scene starts as a draft (`"review": "draft: …"`):
   `litmus.py`. Their ranges come from V1 verdicts, and their `review` field
   quotes the V1 rationale. They have no notice facts yet.
 
-To review a scene, check its fitting moves and misses against how a socially
-aware person would act, add notice facts where they help, and set `review` to
-something like `"reviewed, 2026-10-05"`. The converter never
-overwrites an existing scene unless run with `--force`.
+Values such as `"reviewed, 2026-10-05"` describe review of that older fixture,
+not approval under the current scene spec. Current scene work follows the
+[scene skill](../../skills/nunchi-scenes/SKILL.md) and the maintainer's review.
+The converter never overwrites an existing fixture unless run with `--force`.
 
 ## Running
+
+These commands run the legacy fixtures only.
 
 ```sh
 python3 -m evals.behavior.run --list

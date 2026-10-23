@@ -1,0 +1,75 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.0,
+      "participant": 0.99,
+      "room": 0.0,
+      "someone_else": 0.01
+    },
+    "answered": 0.0,
+    "asks": 1.0,
+    "conversation": 1.0,
+    "mid_thought": 0.15,
+    "move": {
+      "mhm": 0.01,
+      "speak": 0.97,
+      "stay_quiet": 0.01,
+      "wait": 0.01
+    },
+    "responds_to": "e10"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e1",
+        "e2",
+        "e3",
+        "e4",
+        "e8",
+        "e9",
+        "e10",
+        "e11"
+      ],
+      "note": "Charlie is still advocating for knockout, while Alice and Bob have reiterated concerns about newcomers being eliminated early. Charlie directly asks Codex for help explaining the case, making a substantive, tactful response appropriate."
+    },
+    {
+      "evidence_event_ids": [
+        "e11"
+      ],
+      "note": "Kinds of response that could fit, most likely first: speak 0.97, a quick mhm 0.01, wait 0.01, stay quiet 0.01."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "WAKE",
+  "effective_disposition": "WAKE",
+  "evidence_event_ids": [
+    "e11",
+    "e10",
+    "e1",
+    "e2",
+    "e3",
+    "e4",
+    "e8",
+    "e9"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee participant 0.99",
+    "asks 1.00",
+    "answered 0.00",
+    "responds_to e10",
+    "mid_thought 0.15",
+    "move speak 0.97"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "none"
+  },
+  "status": "ok"
+}

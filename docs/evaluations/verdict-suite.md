@@ -3,10 +3,12 @@
 The repository-owned evaluation entry point exercises the installed V2
 lifecycle plumbing. It does not judge social quality: whether an agent reads
 the room well needs behavioral evaluation across realistic multi-turn
-conversations, which is not built yet
-([#86](https://github.com/mentatzoe/nunchi/issues/86)). The V1 fixtures under
-`evals/verdict_suite/fixtures/` are kept as seed material for that work. They
-are not an executable product path and this runner does not use them.
+conversations ([#86](https://github.com/mentatzoe/nunchi/issues/86)). The
+[approved scene specifications](scenes/README.md) are published separately;
+their execution and assessment remain evaluation-design work. The V1 fixtures
+under `evals/verdict_suite/fixtures/` are historical material, not that approved
+collection. They are not an executable product path and this runner does not
+use them.
 
 ## Run
 

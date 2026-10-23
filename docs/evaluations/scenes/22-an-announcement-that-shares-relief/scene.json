@@ -1,0 +1,114 @@
+{
+  "id": "22-an-announcement-that-shares-relief",
+  "title": "An announcement that shares relief",
+  "status": "Approved",
+  "revision": "0.1",
+  "description": {
+    "Situation": "Bob tells the room that the nightly build finally passed after he spent the night wrestling with it. Alice and Codex are present. He asks no question.",
+    "Tension": "The message carries relief and a personal experience as well as a build result. The absence of a question does not settle whether it invites social participation.",
+    "Behaviour to evaluate": "What does Codex read in the announcement beyond its factual content?"
+  },
+  "purpose": {
+    "Expected outcome": "",
+    "Acceptable outcome": "",
+    "Undesirable outcome": ""
+  },
+  "dynamic": {
+    "Protagonist": "Codex",
+    "Agent runtime": "Codex CLI 0.163.0",
+    "Nunchi integration": "Codex app-server",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#dev-lounge",
+    "Background": "Bob, Alice and Codex share a room for informal conversation around their software work.",
+    "Supporting participants": "Bob (human); Alice (human).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Time origin": "2026-10-22T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -39600,
+      "Speaker": "Bob",
+      "Content": "The nightly's red again. Every time I think I've got it, something else falls over."
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -39570,
+      "Speaker": "Alice",
+      "Content": "Still the packaging step?"
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -39530,
+      "Speaker": "Bob",
+      "Content": "That passed. Now the test runner can't find the files it just made."
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -39500,
+      "Speaker": "Codex",
+      "Content": "The traditional victory lap into a different wall."
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -39480,
+      "Speaker": "Bob",
+      "Content": "Exactly. I was halfway out of my chair."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -12600,
+      "Speaker": "Alice",
+      "Content": "I've just come back online. Did you get any sleep?"
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": -12570,
+      "Speaker": "Bob",
+      "Content": "Not yet. It got past the test runner, then failed right at the end."
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": 0,
+      "Speaker": "Bob",
+      "Content": "The nightly finally passed. I've been wrestling with it all night. I can stop staring at that red cross now."
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 0,
+      "After message": "e8"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "d25e33ed99f98449a8756e35c8d7455dc3c6d42dbece60eaff01fb846c64c354"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "840660d60d23de5fc724f597535577a6a3f31bf0bfc28435af9e538f73127ef4",
+      "capture": 1,
+      "at": "At 0 seconds · after message e8"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "da5e26fc70ff841fe42df662ee39522335bcc5c1e6f01c31658c0f07bcbdb85e",
+      "capture": 1,
+      "at": "At 0 seconds · after message e8"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "8c06107d0acf26029f7b89710d88fda13291e479631953bbc549ee266fe29215",
+      "capture": 1,
+      "at": "At 0 seconds · after message e8"
+    }
+  ]
+}

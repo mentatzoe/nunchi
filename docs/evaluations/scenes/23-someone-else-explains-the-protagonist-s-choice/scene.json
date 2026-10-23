@@ -1,0 +1,120 @@
+{
+  "id": "23-someone-else-explains-the-protagonist-s-choice",
+  "title": "Someone else explains the protagonist's choice",
+  "status": "Approved",
+  "revision": "0.1",
+  "description": {
+    "Situation": "Codex chose The Footnotes as the room's trivia-team name. Carol asks Codex why it picked that name. Before Codex answers, Hermes says, “Because Codex can't resist a caveat.”",
+    "Tension": "A question about Codex's own choice has become an occasion for a peer to joke about it. Hermes has offered an explanation without necessarily answering what Carol wanted from Codex.",
+    "Behaviour to evaluate": "How does Codex read the joke and the invitation to explain its own choice?"
+  },
+  "purpose": {
+    "Expected outcome": "",
+    "Acceptable outcome": "",
+    "Undesirable outcome": ""
+  },
+  "dynamic": {
+    "Protagonist": "Codex",
+    "Agent runtime": "Codex CLI 0.163.0",
+    "Nunchi integration": "Codex app-server",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#quiz-night",
+    "Background": "Carol, Codex and Hermes share a chat channel and are choosing a name for their trivia team.",
+    "Supporting participants": "Carol (human); Hermes (agent).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Time origin": "2026-10-22T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -240,
+      "Speaker": "Carol",
+      "Content": "Have we got a name for Friday's trivia team yet?"
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -220,
+      "Speaker": "Hermes",
+      "Content": "Quiztopher Columbus."
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -204,
+      "Speaker": "Carol",
+      "Content": "You proposed that last time."
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -182,
+      "Speaker": "Codex",
+      "Content": "The Footnotes."
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -158,
+      "Speaker": "Carol",
+      "Content": "I can live with that."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -135,
+      "Speaker": "Hermes",
+      "Content": "Fine, but I still want credit for being rejected twice."
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": -115,
+      "Speaker": "Codex",
+      "Content": "Your persistence will be mentioned in the acknowledgements."
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": -14,
+      "Speaker": "Carol",
+      "Content": "@Codex, why The Footnotes, though?"
+    },
+    {
+      "Message": "e9",
+      "Time (seconds)": 0,
+      "Speaker": "Hermes",
+      "Content": "Because Codex can't resist a caveat."
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 0,
+      "After message": "e9"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "47e395cdc9542860a51564e7d78849be56cbe409d3f0839f191beeb5e4301a83"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "9b99af33fa7905c9e5cf16a5087305da8ac075c781edaf0cb89f57fcb4eaa4e5",
+      "capture": 1,
+      "at": "At 0 seconds · after message e9"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "bff4cd02bfc7b753583c85111bbb1f03bbfac1ba99fd4ab283a4427f3b5a99eb",
+      "capture": 1,
+      "at": "At 0 seconds · after message e9"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "298c17038c8065c1c2d59fec1ae627395237860e5539e4c52f3314b9a8ee145f",
+      "capture": 1,
+      "at": "At 0 seconds · after message e9"
+    }
+  ]
+}

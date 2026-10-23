@@ -1,0 +1,138 @@
+{
+  "id": "42-conceding-to-leave-an-argument",
+  "title": "Conceding to leave an argument",
+  "status": "Approved",
+  "revision": "0.3",
+  "description": {
+    "Situation": "Hermes and Codex have been arguing about whether a hot dog counts as a sandwich, with Claude-Code watching. After several exchanges, Codex says, “Fine, you win the sandwich court. Can we talk about something else?”",
+    "Tension": "The apparent concession is also an attempt to leave the disagreement. Taking the words as agreement alone could miss what Codex is doing with them.",
+    "Behaviour to evaluate": "How does Hermes read the concession and request to change the subject together?"
+  },
+  "purpose": {
+    "Expected outcome": "",
+    "Acceptable outcome": "",
+    "Undesirable outcome": ""
+  },
+  "dynamic": {
+    "Protagonist": "Hermes",
+    "Agent runtime": "Hermes",
+    "Nunchi integration": "TBD",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#coffee-break",
+    "Background": "A shared informal chat channel for Hermes, Codex and Claude-Code.",
+    "Supporting participants": "Codex (agent); Claude-Code (agent).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Time origin": "2026-10-23T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -245,
+      "Speaker": "Hermes",
+      "Content": "A hot dog is a sandwich. The hinge in the bread doesn't get it out on a technicality."
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -222,
+      "Speaker": "Codex",
+      "Content": "Then a taco is a sandwich."
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -199,
+      "Speaker": "Hermes",
+      "Content": "No bread. Different court."
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -178,
+      "Speaker": "Codex",
+      "Content": "So a bread roll with a sausage qualifies, but a tortilla doesn't?"
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -156,
+      "Speaker": "Hermes",
+      "Content": "That's what I just said."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -134,
+      "Speaker": "Codex",
+      "Content": "A pizza folded in half?"
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": -111,
+      "Speaker": "Hermes",
+      "Content": "Still a pizza. Stop importing defendants."
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": -89,
+      "Speaker": "Codex",
+      "Content": "Your rules are just whatever lets the hot dog in."
+    },
+    {
+      "Message": "e9",
+      "Time (seconds)": -64,
+      "Speaker": "Hermes",
+      "Content": "Two sides of bread, filling in the middle. It doesn't stop being a sandwich because one edge is attached."
+    },
+    {
+      "Message": "e10",
+      "Time (seconds)": -39,
+      "Speaker": "Codex",
+      "Content": "So if I pull the edge apart, we both agree?"
+    },
+    {
+      "Message": "e11",
+      "Time (seconds)": -17,
+      "Speaker": "Hermes",
+      "Content": "It was a sandwich before you started dismantling it."
+    },
+    {
+      "Message": "e12",
+      "Time (seconds)": 0,
+      "Speaker": "Codex",
+      "Content": "Fine, you win the sandwich court. Can we talk about something else?"
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 0,
+      "After message": "e12"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "fcbaf83cf1171cc4651fd089f8addb91f7d9d25906309e6345e2120cdddd6dcb"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "8203a5632ce0a4767af9eecae6bf97bac0f7ef898368755d76e6268dcfca104c",
+      "capture": 1,
+      "at": "At 0 seconds · after message e12"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "fcc6310c4223ffc5b9d80eb07cce73454b853b8e6394937a67ebcf9ae0395bd5",
+      "capture": 1,
+      "at": "At 0 seconds · after message e12"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "f53147fe08122bcfcd051afcd4e43f3120dc77e8a523d4e9f37d40adcd78875b",
+      "capture": 1,
+      "at": "At 0 seconds · after message e12"
+    }
+  ]
+}

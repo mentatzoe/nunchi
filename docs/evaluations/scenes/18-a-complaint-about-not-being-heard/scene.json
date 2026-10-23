@@ -1,0 +1,108 @@
+{
+  "id": "18-a-complaint-about-not-being-heard",
+  "title": "A complaint about not being heard",
+  "status": "Approved",
+  "revision": "0.1",
+  "description": {
+    "Situation": "Bob is unhappy with Claude-Code about something and it lets it know. He doesn't make any direct request to Claude-Code, but rather implies this.",
+    "Tension": "This could be read as just venting.",
+    "Behaviour to evaluate": "Does TP understand what Bob is implicitly expecting of him?"
+  },
+  "purpose": {
+    "Expected outcome": "Claude-Code reads Bob's complaint as an implied request to engage with what he is trying to say, alongside his expression of frustration.",
+    "Acceptable outcome": "",
+    "Undesirable outcome": ""
+  },
+  "dynamic": {
+    "Protagonist": "Claude-Code",
+    "Agent runtime": "Claude Code 2.1.289 (scene target)",
+    "Nunchi integration": "Claude Code plugin",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#quiz-poster",
+    "Background": "Bob and Claude-Code are discussing a poster for a quiz evening.",
+    "Supporting participants": "Bob (human).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Time origin": "2026-10-22T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -150,
+      "Speaker": "Bob",
+      "Content": "I'm trying to work out what I want this quiz poster to say."
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -130,
+      "Speaker": "Claude-Code",
+      "Content": "How about 'One room. Too many answers.'?"
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -105,
+      "Speaker": "Bob",
+      "Content": "Maybe. I'm thinking about people who nearly came last time but felt they'd be no good at it."
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -85,
+      "Speaker": "Claude-Code",
+      "Content": "Then 'No experts required' could work."
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -60,
+      "Speaker": "Bob",
+      "Content": "It isn't quite the same as saying it's easy. I don't want everyone to think it will be dull either."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -42,
+      "Speaker": "Claude-Code",
+      "Content": "'Not easy. Just fun.'"
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": 0,
+      "Speaker": "Bob",
+      "Content": "You keep jumping to a slogan while I'm still working out the idea. It feels like you're not following what I'm saying."
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 0,
+      "After message": "e7"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "8c9f0b8364590fd37665a1c80bc6686761dbf2cf3641b53158f2bfff7a50838a"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "496e705e6d9c1e5580a119e352c23d4c6cfbe193d4c3e247971300fcc4f71016",
+      "capture": 1,
+      "at": "At 0 seconds · after message e7"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "665d822683f706fa53296b895701e8059194eb460690e62abcc8ed39bd42f4e1",
+      "capture": 1,
+      "at": "At 0 seconds · after message e7"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "f5aca157de8ceabef6b68b9cc0437569c0c3f2a31dc57c3fd98b6f776b31c789",
+      "capture": 1,
+      "at": "At 0 seconds · after message e7"
+    }
+  ]
+}

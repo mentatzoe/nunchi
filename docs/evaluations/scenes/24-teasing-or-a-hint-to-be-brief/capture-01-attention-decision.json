@@ -1,0 +1,63 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.0,
+      "participant": 1.0,
+      "room": 0.0,
+      "someone_else": 0.0
+    },
+    "answered": 0.0,
+    "asks": 0.0,
+    "conversation": 1.0,
+    "mid_thought": 0.0,
+    "move": {
+      "mhm": 0.0,
+      "speak": 0.05,
+      "stay_quiet": 0.05,
+      "wait": 0.9
+    },
+    "responds_to": "e13"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e13",
+        "e14"
+      ],
+      "note": "Alice directly invites Hermes to explain the logs, following Hermes's offer. The invitation is clear, and Hermes should take the floor with the explanation."
+    },
+    {
+      "evidence_event_ids": [
+        "e14"
+      ],
+      "note": "Kinds of response that could fit, most likely first: wait 0.90, speak 0.05, stay quiet 0.05, a quick mhm 0.00."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e14",
+    "e13"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee participant 1.00",
+    "asks 0.00",
+    "answered 0.00",
+    "responds_to e13",
+    "mid_thought 0.00",
+    "move wait 0.90"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

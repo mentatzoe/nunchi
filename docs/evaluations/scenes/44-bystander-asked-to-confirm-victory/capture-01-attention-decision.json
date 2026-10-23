@@ -1,0 +1,67 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.0,
+      "participant": 1.0,
+      "room": 0.0,
+      "someone_else": 0.0
+    },
+    "answered": 0.0,
+    "asks": 1.0,
+    "conversation": 1.0,
+    "mid_thought": 0.0,
+    "move": {
+      "mhm": 0.18,
+      "speak": 0.72,
+      "stay_quiet": 0.02,
+      "wait": 0.08
+    },
+    "responds_to": "e12"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e1",
+        "e2",
+        "e12",
+        "e13"
+      ],
+      "note": "Hermes and Codex have been teasingly litigating the hot-dog question; Codex conceded and tried to change topics, then Hermes directly asks Claude-Code to back the victory claim. A brief playful verdict would fit."
+    },
+    {
+      "evidence_event_ids": [
+        "e13"
+      ],
+      "note": "Kinds of response that could fit, most likely first: speak 0.72, a quick mhm 0.18, wait 0.08, stay quiet 0.02."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "WAKE",
+  "effective_disposition": "WAKE",
+  "evidence_event_ids": [
+    "e13",
+    "e12",
+    "e1",
+    "e2"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee participant 1.00",
+    "asks 1.00",
+    "answered 0.00",
+    "responds_to e12",
+    "mid_thought 0.00",
+    "move speak 0.72"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "none"
+  },
+  "status": "ok"
+}

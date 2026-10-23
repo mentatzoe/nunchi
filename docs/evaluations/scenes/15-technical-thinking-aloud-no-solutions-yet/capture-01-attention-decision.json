@@ -1,0 +1,77 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.05,
+      "participant": 0.0,
+      "room": 0.1,
+      "someone_else": 0.85
+    },
+    "answered": 0.0,
+    "asks": 0.05,
+    "conversation": 0.99,
+    "mid_thought": 0.95,
+    "move": {
+      "mhm": 0.35,
+      "speak": 0.02,
+      "stay_quiet": 0.08,
+      "wait": 0.55
+    },
+    "responds_to": "e5"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e1",
+        "e2",
+        "e3",
+        "e4",
+        "e5",
+        "e6"
+      ],
+      "note": "Alice said she wanted to clarify the problem before solutions, and has been laying out successive failure cases. Her latest point adds a tradeoff and says she hasn't settled the decision boundary, so she still seems to have the floor."
+    },
+    {
+      "evidence_event_ids": [
+        "e6"
+      ],
+      "note": "There is no direct question or request to Hermes; a brief acknowledgment or waiting would avoid jumping into the solution phase Alice explicitly deferred."
+    },
+    {
+      "evidence_event_ids": [
+        "e6"
+      ],
+      "note": "Kinds of response that could fit, most likely first: wait 0.55, a quick mhm 0.35, stay quiet 0.08, speak 0.02."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e6",
+    "e5",
+    "e1",
+    "e2",
+    "e3",
+    "e4"
+  ],
+  "reasons": [
+    "conversation 0.99",
+    "addressee someone_else 0.85",
+    "asks 0.05",
+    "answered 0.00",
+    "responds_to e5",
+    "mid_thought 0.95",
+    "move wait 0.55"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

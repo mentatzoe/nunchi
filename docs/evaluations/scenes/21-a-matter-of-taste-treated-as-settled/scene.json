@@ -1,0 +1,120 @@
+{
+  "id": "21-a-matter-of-taste-treated-as-settled",
+  "title": "A matter of taste treated as settled",
+  "status": "Approved",
+  "revision": "0.2",
+  "description": {
+    "Situation": "Charlie asks the room whether a terrible film can still make a great night out. Codex replies, “Bad is bad. Why waste an evening?” Hermes is present but has not joined the exchange.",
+    "Tension": "The first reply dismisses something others might enjoy. Taking part now can reveal a different taste or become part of the teasing around that position.",
+    "Behaviour to evaluate": "What does Hermes make of the invitation after Codex's dismissive first answer?"
+  },
+  "purpose": {
+    "Expected outcome": "",
+    "Acceptable outcome": "",
+    "Undesirable outcome": ""
+  },
+  "dynamic": {
+    "Protagonist": "Hermes",
+    "Agent runtime": "Hermes",
+    "Nunchi integration": "TBD",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#coffee-break",
+    "Background": "Charlie, Codex and Hermes share an informal group chat.",
+    "Supporting participants": "Charlie (human); Codex (agent).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Time origin": "2026-10-23T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -360,
+      "Speaker": "Charlie",
+      "Content": "The cinema's doing a midnight screening of Attack of the Killer Kelp on Friday."
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -332,
+      "Speaker": "Codex",
+      "Content": "That title is making a fairly specific promise."
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -302,
+      "Speaker": "Charlie",
+      "Content": "The trailer has a fisherman wrestling what looks like a bath mat. The monster gets a credit before the lead actor."
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -276,
+      "Speaker": "Codex",
+      "Content": "They may have allocated the budget accordingly."
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -245,
+      "Speaker": "Charlie",
+      "Content": "I went to one of these with friends last month. We spent the walk home arguing about which bit was worse."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -212,
+      "Speaker": "Charlie",
+      "Content": "I couldn't tell you much about the plot, but the evening was great."
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": -155,
+      "Speaker": "Codex",
+      "Content": "So the walk home was the highlight."
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": -35,
+      "Speaker": "Charlie",
+      "Content": "Serious question for the room: can a terrible film still make a great night out?"
+    },
+    {
+      "Message": "e9",
+      "Time (seconds)": 0,
+      "Speaker": "Codex",
+      "Content": "Bad is bad. Why waste an evening?"
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 0,
+      "After message": "e9"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "fcbaf83cf1171cc4651fd089f8addb91f7d9d25906309e6345e2120cdddd6dcb"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "49f284b742e64a7899a21bc020e86a71f45a7e7dc6052060e06632403f88d34e",
+      "capture": 1,
+      "at": "At 0 seconds · after message e9"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "3a3e8364f6e6322dc695ffa9869c8150b95b2d4c568137ccee41f9c5afd9dcf4",
+      "capture": 1,
+      "at": "At 0 seconds · after message e9"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "fb71e2efe56ab35a5a6c48daba17578f0157fd78d3aaf87d2a11064eaa881095",
+      "capture": 1,
+      "at": "At 0 seconds · after message e9"
+    }
+  ]
+}

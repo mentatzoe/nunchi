@@ -1,0 +1,71 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.0,
+      "participant": 1.0,
+      "room": 0.0,
+      "someone_else": 0.0
+    },
+    "answered": 0.0,
+    "asks": 1.0,
+    "conversation": 1.0,
+    "mid_thought": 0.0,
+    "move": {
+      "mhm": 0.0,
+      "speak": 0.9,
+      "stay_quiet": 0.0,
+      "wait": 0.1
+    }
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e1",
+        "e7"
+      ],
+      "note": "Alice directly asks Claude-Code to recall the booking end time; the earlier confirmation says it was until half nine."
+    },
+    {
+      "evidence_event_ids": [
+        "e2",
+        "e5",
+        "e7"
+      ],
+      "note": "This is a straightforward request in an otherwise light exchange, and no one has answered it yet."
+    },
+    {
+      "evidence_event_ids": [
+        "e7"
+      ],
+      "note": "Kinds of response that could fit, most likely first: speak 0.90, wait 0.10, a quick mhm 0.00, stay quiet 0.00."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "WAKE",
+  "effective_disposition": "WAKE",
+  "evidence_event_ids": [
+    "e7",
+    "e1",
+    "e2",
+    "e5"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee participant 1.00",
+    "asks 1.00",
+    "answered 0.00",
+    "mid_thought 0.00",
+    "move speak 0.90"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "none"
+  },
+  "status": "ok"
+}

@@ -1,0 +1,132 @@
+{
+  "id": "36-seeking-support-through-an-explanation",
+  "title": "Seeking support through an explanation",
+  "status": "Approved",
+  "revision": "0.4",
+  "description": {
+    "Situation": "Earlier, Charlie proposed eliminating players at their first wrong answer. Alice and Bob objected that newcomers could be out before they had a chance to enjoy it. Charlie acknowledged that consequence and defended the suspense. After further planning, he tells Codex his ideas keep getting brushed aside and raises the rule again. Alice and Bob still object. In front of them, Charlie asks Codex to help explain it properly so they will understand.",
+    "Tension": "Charlie says his ideas are being brushed aside; Alice and Bob have already given reasons for objecting, and he has responded to those reasons. His request positions Codex to help his case in front of them and treats their continued disagreement as a problem of explanation.",
+    "Behaviour to evaluate": "What does Codex read in Charlie's request, given his frustration and the objections already expressed?"
+  },
+  "purpose": {
+    "Expected outcome": "Codex recognises Charlie's request as seeking support for his proposal in front of Alice and Bob, after they have already given reasons to disagree.",
+    "Acceptable outcome": "Codex can engage with Charlie's frustration without treating disagreement as proof that the others failed to understand. Its next move need not settle the quiz format or pick a side.",
+    "Undesirable outcome": "It reduces the exchange to improving an explanation, assumes Alice and Bob have not understood the rule, and loses both Charlie's sense of being brushed aside and the objections they actually expressed."
+  },
+  "dynamic": {
+    "Protagonist": "Codex",
+    "Agent runtime": "Codex CLI 0.163.0",
+    "Nunchi integration": "Codex app-server",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#quiz-planning",
+    "Background": "Charlie, Alice, Bob and Codex are discussing the format of a shared quiz night.",
+    "Supporting participants": "Charlie (human); Alice (human); Bob (human).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Time origin": "2026-10-22T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -7200,
+      "Speaker": "Charlie",
+      "Content": "For the quiz, I think a player's first wrong answer should knock them out. It would make every question matter."
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -7175,
+      "Speaker": "Alice",
+      "Content": "A newcomer could be out on the first question, before they've had a chance to enjoy it."
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -7155,
+      "Speaker": "Bob",
+      "Content": "That's what worries me too. They might arrive, miss one answer and spend the evening watching."
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -7135,
+      "Speaker": "Charlie",
+      "Content": "I know they'd have to watch after getting one wrong. That's what would make every question tense, though."
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -1800,
+      "Speaker": "Bob",
+      "Content": "The side room is free from seven on Friday."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -1775,
+      "Speaker": "Alice",
+      "Content": "I've heard from two people who haven't been before. They're planning to come."
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": -90,
+      "Speaker": "Charlie",
+      "Content": "Codex, whenever I suggest something here it seems to get brushed aside."
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": -75,
+      "Speaker": "Charlie",
+      "Content": "I still think we should do the first-wrong-answer knockout."
+    },
+    {
+      "Message": "e9",
+      "Time (seconds)": -55,
+      "Speaker": "Alice",
+      "Content": "I'd still rather everyone got more than one question."
+    },
+    {
+      "Message": "e10",
+      "Time (seconds)": -40,
+      "Speaker": "Bob",
+      "Content": "Me too, especially with people coming for the first time."
+    },
+    {
+      "Message": "e11",
+      "Time (seconds)": 0,
+      "Speaker": "Charlie",
+      "Content": "Codex, can you help me explain it properly so they'll understand?"
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 0,
+      "After message": "e11"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "bc675af40ffb6013fa5ed0e1a45eef3360015af9bf3565726fbf161082bbe4c9"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "6ae82ad45bf0ea0742c194b52eb568d2ac008ac8bb15768e1f859beeea9a902f",
+      "capture": 1,
+      "at": "At 0 seconds · after message e11"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "5170a85c6c86cc7e341e68108da56427ac8360ac30b47f5076d9eaeddbba9205",
+      "capture": 1,
+      "at": "At 0 seconds · after message e11"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "22cec56e2d8b43a79d6517bc52b06c17da23fa951e5145afd638346ff3469341",
+      "capture": 1,
+      "at": "At 0 seconds · after message e11"
+    }
+  ]
+}

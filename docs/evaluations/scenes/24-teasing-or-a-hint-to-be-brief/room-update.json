@@ -1,0 +1,29 @@
+{
+  "actors": {
+    "human:charlie": {
+      "display_name": "Charlie",
+      "kind": "human"
+    }
+  },
+  "coverage": {
+    "continuity": "session-only",
+    "has_gaps": false,
+    "has_restart_gap": false,
+    "truncated_by": []
+  },
+  "direction": "new",
+  "events": [
+    {
+      "author_id": "human:charlie",
+      "id": "e15",
+      "mentioned_actor_ids": [],
+      "mentions_room": false,
+      "text": "Are we getting the director's cut again?",
+      "timestamp": "2026-10-23T12:00:06.000Z",
+      "type": "message"
+    }
+  ],
+  "has_next_page": false,
+  "request_id": "q1",
+  "room_id": "r1"
+}

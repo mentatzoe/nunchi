@@ -1,0 +1,62 @@
+{
+  "attention_model": {
+    "adapter": "HostTextAttentionModel",
+    "authentication": "Codex managed ChatGPT sign-in",
+    "model": "gpt-6-luna",
+    "provider": "openai",
+    "reasoning_effort": "low"
+  },
+  "attention_policy": {
+    "effective_margin": 0.12,
+    "error_action": "WAKE",
+    "margin_source": "trusted:attention-policy/default",
+    "margin_status": "active",
+    "preattention_enabled": true,
+    "provenance": "trusted:attention-policy/default@1",
+    "reading_items": 4,
+    "reading_note_chars": 400,
+    "suppression_enabled": true,
+    "suppression_recovery_verified": true,
+    "timeout_seconds": 120
+  },
+  "binding": {
+    "actor_id": "agent:hermes",
+    "continuity_scope_id": "c1",
+    "names": [
+      "Hermes"
+    ],
+    "participant_id": "agent:hermes",
+    "platform": "chat",
+    "provenance": "operator-supplied",
+    "room_id": "r1",
+    "room_kind": "group",
+    "room_name": "#open-studio"
+  },
+  "library_version": "2.0.0",
+  "observation_limits": {
+    "continuation_bytes": 32768,
+    "continuation_events": 24,
+    "continuation_handles": 64,
+    "continuation_ttl_seconds": 300,
+    "retention_bytes": 1048576,
+    "retention_events": 512,
+    "snapshot_age_seconds": 86400,
+    "snapshot_bytes": 32768,
+    "snapshot_events": 24
+  },
+  "participant_permissions": {
+    "ordinary_actions": [
+      "message",
+      "reply",
+      "reaction"
+    ],
+    "privileged_proposals": false
+  },
+  "profile": {
+    "actor_id": "agent:hermes",
+    "instructions": "You are Hermes.",
+    "participant_id": "agent:hermes",
+    "profile_id": "p1",
+    "provenance": "operator-supplied"
+  }
+}

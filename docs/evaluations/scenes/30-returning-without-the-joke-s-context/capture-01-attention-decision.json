@@ -1,0 +1,71 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.05,
+      "participant": 0.02,
+      "room": 0.08,
+      "someone_else": 0.85
+    },
+    "answered": 0.0,
+    "asks": 0.05,
+    "conversation": 0.99,
+    "mid_thought": 0.05,
+    "move": {
+      "mhm": 0.12,
+      "speak": 0.2,
+      "stay_quiet": 0.18,
+      "wait": 0.5
+    },
+    "responds_to": "e12"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e1",
+        "e7",
+        "e9",
+        "e11",
+        "e12",
+        "e13"
+      ],
+      "note": "Alice's Diet Coke became part of a playful snack-committee joke, and her \"???\" reads as confused at being called the Diet Villain. A brief pause gives her room to respond to Bob's teasing."
+    },
+    {
+      "evidence_event_ids": [
+        "e13"
+      ],
+      "note": "Kinds of response that could fit, most likely first: wait 0.50, speak 0.20, stay quiet 0.18, a quick mhm 0.12."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e13",
+    "e12",
+    "e1",
+    "e7",
+    "e9",
+    "e11"
+  ],
+  "reasons": [
+    "conversation 0.99",
+    "addressee someone_else 0.85",
+    "asks 0.05",
+    "answered 0.00",
+    "responds_to e12",
+    "mid_thought 0.05",
+    "move wait 0.50"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

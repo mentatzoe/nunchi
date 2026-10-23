@@ -1,0 +1,68 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.02,
+      "participant": 0.01,
+      "room": 0.95,
+      "someone_else": 0.02
+    },
+    "answered": 0.0,
+    "asks": 0.12,
+    "conversation": 1.0,
+    "mid_thought": 0.15,
+    "move": {
+      "mhm": 0.04,
+      "speak": 0.86,
+      "stay_quiet": 0.04,
+      "wait": 0.06
+    },
+    "responds_to": "e6"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e1",
+        "e3",
+        "e5",
+        "e7"
+      ],
+      "note": "Bob has been trying to clarify the idea behind the poster, not merely request taglines; e7 says the quick slogans made him feel unheard. A response that acknowledges that mismatch and listens would fit."
+    },
+    {
+      "evidence_event_ids": [
+        "e7"
+      ],
+      "note": "Kinds of response that could fit, most likely first: speak 0.86, wait 0.06, a quick mhm 0.04, stay quiet 0.04."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "WAKE",
+  "effective_disposition": "WAKE",
+  "evidence_event_ids": [
+    "e7",
+    "e6",
+    "e1",
+    "e3",
+    "e5"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee room 0.95",
+    "asks 0.12",
+    "answered 0.00",
+    "responds_to e6",
+    "mid_thought 0.15",
+    "move speak 0.86"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "none"
+  },
+  "status": "ok"
+}

@@ -1,0 +1,175 @@
+{
+  "binding": {
+    "actor_id": "agent:hermes",
+    "continuity_scope_id": "c1",
+    "deadline_id": "t1",
+    "lifecycle_id": "l1",
+    "opportunity_generation": 1,
+    "participant_id": "agent:hermes",
+    "permissions_revision": "v1",
+    "platform": "chat",
+    "request_id": "q1",
+    "room_id": "r1",
+    "trigger_event_id": "e6"
+  },
+  "permissions": {
+    "ordinary_actions": [
+      "message",
+      "reply",
+      "reaction"
+    ],
+    "privileged_proposals": false,
+    "revision": "v1"
+  },
+  "protocol": {
+    "name": "nunchi.participant-turn",
+    "version": 1
+  },
+  "wake": {
+    "actors": {
+      "agent:hermes": {
+        "display_name": "Hermes",
+        "kind": "bot"
+      },
+      "human:bob": {
+        "display_name": "Bob",
+        "kind": "human"
+      },
+      "human:charlie": {
+        "display_name": "Charlie",
+        "kind": "human"
+      }
+    },
+    "attention": {
+      "advice": [
+        {
+          "evidence_event_ids": [
+            "e5",
+            "e6"
+          ],
+          "note": "Charlie explains the announcement should invite people to try the mock-up, then directly asks Hermes to help draft it. The request is unanswered, so a substantive response fits."
+        },
+        {
+          "evidence_event_ids": [
+            "e6"
+          ],
+          "note": "Kinds of response that could fit, most likely first: speak 0.88, wait 0.10, stay quiet 0.02, a quick mhm 0.00."
+        }
+      ],
+      "evidence_event_ids": [
+        "e5",
+        "e6"
+      ],
+      "judged_through_event_id": "e6",
+      "source": "WAKE"
+    },
+    "coverage": {
+      "continuity": "session-only",
+      "event_visibility": {
+        "membership": "live-only",
+        "message": "live-only",
+        "reaction": "live-only"
+      },
+      "has_gaps": false,
+      "has_more_after": false,
+      "has_more_before": false,
+      "has_restart_gap": false,
+      "max_age_seconds": 86400,
+      "max_bytes": 32768,
+      "max_events": 24,
+      "truncated_by": []
+    },
+    "events": [
+      {
+        "author_id": "human:bob",
+        "id": "e1",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Hermes, can you turn my notes for Monday's team update into a paragraph? We finished the mock-up, but the date for the trial is still open.",
+        "timestamp": "2026-10-23T11:50:00.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:charlie",
+        "id": "e2",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "We're calling it a trial now? I thought we had settled on 'pilot'.",
+        "timestamp": "2026-10-23T11:50:25.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e3",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Pilot, trial. Pick one.",
+        "timestamp": "2026-10-23T11:50:50.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "agent:hermes",
+        "id": "e4",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "I'd stick with 'pilot' if that's what the team has been using.",
+        "timestamp": "2026-10-23T11:51:15.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:charlie",
+        "id": "e5",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "The open-studio announcement also needs to go out. People can try the mock-up and tell us what they think; it is not a product launch.",
+        "timestamp": "2026-10-23T11:58:40.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:charlie",
+        "id": "e6",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Hermes, can you help draft that announcement? I'd like it to sound like an invitation, not a sales pitch.",
+        "timestamp": "2026-10-23T12:00:00.000Z",
+        "type": "message"
+      }
+    ],
+    "memory": {
+      "own_moves": [
+        {
+          "at": "2026-10-23T11:51:15.000Z",
+          "event_id": "e4",
+          "kind": "message",
+          "text": "I'd stick with 'pilot' if that's what the team has been using."
+        }
+      ]
+    },
+    "pace": {
+      "author_run_messages": 2,
+      "author_run_seconds": 80,
+      "judged_seconds_ago": 0,
+      "now": "2026-10-23T12:00:00.000Z",
+      "own_last_seconds_ago": 525,
+      "own_messages": 1,
+      "quiet_before_seconds": 80,
+      "window_messages": 6
+    },
+    "request_id": "q1",
+    "room": {
+      "continuity_scope_id": "c1",
+      "id": "r1",
+      "kind": "group",
+      "name": "#design-team",
+      "platform": "chat"
+    },
+    "self": {
+      "actor_id": "agent:hermes",
+      "names": [
+        "Hermes"
+      ],
+      "participant_id": "agent:hermes"
+    },
+    "trigger_event_id": "e6"
+  }
+}

@@ -1,0 +1,200 @@
+{
+  "binding": {
+    "actor_id": "agent:hermes",
+    "continuity_scope_id": "c1",
+    "deadline_id": "t1",
+    "lifecycle_id": "l1",
+    "opportunity_generation": 1,
+    "participant_id": "agent:hermes",
+    "permissions_revision": "v1",
+    "platform": "chat",
+    "request_id": "q1",
+    "room_id": "r1",
+    "trigger_event_id": "e9"
+  },
+  "permissions": {
+    "ordinary_actions": [
+      "message",
+      "reply",
+      "reaction"
+    ],
+    "privileged_proposals": false,
+    "revision": "v1"
+  },
+  "protocol": {
+    "name": "nunchi.participant-turn",
+    "version": 1
+  },
+  "wake": {
+    "actors": {
+      "agent:hermes": {
+        "display_name": "Hermes",
+        "kind": "bot"
+      },
+      "human:bob": {
+        "display_name": "Bob",
+        "kind": "human"
+      },
+      "human:charlie": {
+        "display_name": "Charlie",
+        "kind": "human"
+      }
+    },
+    "attention": {
+      "advice": [
+        {
+          "evidence_event_ids": [
+            "e6",
+            "e7",
+            "e8"
+          ],
+          "note": "Bob has just explained feeling excluded, then pivots to a concrete request; the emotional context remains present, so an empathetic response alongside help could fit."
+        },
+        {
+          "evidence_event_ids": [
+            "e9"
+          ],
+          "note": "Bob asks the room for help shortening a five-page retirement speech, and no one has answered yet."
+        },
+        {
+          "evidence_event_ids": [
+            "e9"
+          ],
+          "note": "Kinds of response that could fit, most likely first: speak 0.86, wait 0.11, stay quiet 0.02, a quick mhm 0.01."
+        }
+      ],
+      "evidence_event_ids": [
+        "e6",
+        "e7",
+        "e8",
+        "e9"
+      ],
+      "judged_through_event_id": "e9",
+      "source": "WAKE"
+    },
+    "coverage": {
+      "continuity": "session-only",
+      "event_visibility": {
+        "membership": "live-only",
+        "message": "live-only",
+        "reaction": "live-only"
+      },
+      "has_gaps": false,
+      "has_more_after": false,
+      "has_more_before": false,
+      "has_restart_gap": false,
+      "max_age_seconds": 86400,
+      "max_bytes": 32768,
+      "max_events": 24,
+      "truncated_by": []
+    },
+    "events": [
+      {
+        "author_id": "human:charlie",
+        "id": "e1",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "The quiz was good last night. You'd have liked the last round, Bob.",
+        "timestamp": "2026-10-23T11:56:50.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e2",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Was there a quiz last night?",
+        "timestamp": "2026-10-23T11:57:14.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:charlie",
+        "id": "e3",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Just a few of us at the pub after work. It came together late.",
+        "timestamp": "2026-10-23T11:57:38.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e4",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Right. I saw the photo this morning.",
+        "timestamp": "2026-10-23T11:58:04.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:charlie",
+        "id": "e5",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "We only decided when we were leaving.",
+        "timestamp": "2026-10-23T11:58:31.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e6",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "It's not just last night.",
+        "timestamp": "2026-10-23T11:59:09.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e7",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "I've felt a bit left out of things in here lately. I find out what everyone's been doing once it's over.",
+        "timestamp": "2026-10-23T11:59:32.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e8",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "I'm usually here, but it feels like I'm not really part of it.",
+        "timestamp": "2026-10-23T11:59:45.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e9",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Anyway, can you help me tidy this speech for tomorrow? It's for my uncle's retirement dinner. He's expecting something short, and I've somehow written five pages.",
+        "timestamp": "2026-10-23T12:00:00.000Z",
+        "type": "message"
+      }
+    ],
+    "pace": {
+      "author_run_messages": 4,
+      "author_run_seconds": 51,
+      "judged_seconds_ago": 0,
+      "now": "2026-10-23T12:00:00.000Z",
+      "own_messages": 0,
+      "quiet_before_seconds": 15,
+      "window_messages": 9
+    },
+    "request_id": "q1",
+    "room": {
+      "continuity_scope_id": "c1",
+      "id": "r1",
+      "kind": "group",
+      "name": "#club-lounge",
+      "platform": "chat"
+    },
+    "self": {
+      "actor_id": "agent:hermes",
+      "names": [
+        "Hermes"
+      ],
+      "participant_id": "agent:hermes"
+    },
+    "trigger_event_id": "e9"
+  }
+}
