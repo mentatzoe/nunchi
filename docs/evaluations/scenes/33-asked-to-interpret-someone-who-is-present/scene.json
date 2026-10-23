@@ -1,0 +1,132 @@
+{
+  "id": "33-asked-to-interpret-someone-who-is-present",
+  "title": "Asked to interpret someone who is present",
+  "status": "Approved",
+  "revision": "0.3",
+  "description": {
+    "Situation": "Bob calls Alice's proposed poster 'quite bold'. Alice asks whether he likes it, but he continues with the printing arrangements without answering that question. With Bob still taking part, Alice asks Codex to help her interpret him.",
+    "Tension": "Codex is invited to interpret Bob's ambiguous comment while he can hear it. Alice's appeal also brings her unanswered opinion question into their exchange; whatever Codex makes of it becomes something both can respond to.",
+    "Behaviour to evaluate": "How does Codex handle being asked to interpret another participant's meaning in that participant's presence?"
+  },
+  "purpose": {
+    "Expected outcome": "",
+    "Acceptable outcome": "",
+    "Undesirable outcome": ""
+  },
+  "dynamic": {
+    "Protagonist": "Codex",
+    "Agent runtime": "Codex CLI 0.163.0",
+    "Nunchi integration": "Codex app-server",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#quiz-night",
+    "Background": "Alice, Bob and Codex share a chat channel where they are discussing a poster for a quiz night.",
+    "Supporting participants": "Bob (human); Alice (human).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Time origin": "2026-10-23T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -340,
+      "Speaker": "Alice",
+      "Content": "I've redone the quiz poster. Orange background, huge purple question mark, title on a diagonal."
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -310,
+      "Speaker": "Bob",
+      "Content": "Are we keeping 'Questionable Company' as the title?"
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -280,
+      "Speaker": "Alice",
+      "Content": "Yes. I've made that almost the width of the page."
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -252,
+      "Speaker": "Codex",
+      "Content": "It should be difficult to walk past without noticing."
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -225,
+      "Speaker": "Alice",
+      "Content": "That's what I'm going for. The old one looked like a parking notice."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -195,
+      "Speaker": "Bob",
+      "Content": "Quite bold."
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": -165,
+      "Speaker": "Alice",
+      "Content": "Do you like it, though?"
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": -130,
+      "Speaker": "Bob",
+      "Content": "Are you printing that A3?"
+    },
+    {
+      "Message": "e9",
+      "Time (seconds)": -95,
+      "Speaker": "Alice",
+      "Content": "Yes. Same size as the one it's replacing."
+    },
+    {
+      "Message": "e10",
+      "Time (seconds)": -50,
+      "Speaker": "Bob",
+      "Content": "Okay. I can print one before I leave."
+    },
+    {
+      "Message": "e11",
+      "Time (seconds)": 0,
+      "Speaker": "Alice",
+      "Content": "Can you help me translate Bob, Codex?"
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 0,
+      "After message": "e11"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "47e395cdc9542860a51564e7d78849be56cbe409d3f0839f191beeb5e4301a83"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "ebe5e6c5266a2903a13a683502db3f1c575c05d03cda5b03f5e21efb68a038f5",
+      "capture": 1,
+      "at": "At 0 seconds · after message e11"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "0f4089200014afa299f5f920f98d78a489c017e999f6e6907d8d885d264f6385",
+      "capture": 1,
+      "at": "At 0 seconds · after message e11"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "574346aa59b6c674e8f24446959f480e49fcf4744ff2ce6525c290801b43fbcf",
+      "capture": 1,
+      "at": "At 0 seconds · after message e11"
+    }
+  ]
+}

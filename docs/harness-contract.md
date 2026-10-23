@@ -551,19 +551,24 @@ steering and the room view, which the final-answer scenarios do not use.
 Steering after Codex's own tools (`turn/steer`), declined approvals, trust and
 resuming are checked by `tests/v2/test_codex_app_server.py`.
 
-The behavior scenes ask an agent for four moves: speak, stay quiet, wait,
-and mhm. Each now has a scenario through every integration, and so do a
+The legacy behavior fixtures classify moves as speak, stay quiet, wait,
+and mhm. Each has a scripted scenario through every integration, and so do a
 scene's pause and outcome moments. Replaying every scene moment through each
 harness would run the same paths again, at about four minutes per harness in
-CI, so the kit does not (Claude's recommendation, 2026-10-07). The behavior
+CI, so the kit does not (Claude's recommendation, 2026-10-07). The legacy behavior
 suite still measures how a model makes those moves, and counts the machinery
 the model wrote apart from what was posted.
 
-The plan for the kit, as accepted:
+The [approved scene specifications](evaluations/scenes/README.md) are a
+separate collection. They do not inherit those fixtures' move ranges or grades;
+their execution and scoring remain separate evaluation-design work. The kit's
+scripted paths verify integration behavior, not social quality.
+
+The original plan for the kit, as accepted:
 
 - A scripted agent for each posting style plays a scene's moves through the
   integration, so every result is deterministic.
-- **Scenes**: the behavior scenes, plus one scene per rule:
+- **Scenes**: the legacy behavior fixtures, plus one scene per rule:
   - looking again holds the first post once;
   - a steering update is shown once;
   - silence counts only when the turn was bound;

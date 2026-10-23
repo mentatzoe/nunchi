@@ -1,0 +1,138 @@
+{
+  "id": "07-addressed-but-a-peer-answers",
+  "title": "Addressed, but a peer answers",
+  "status": "Approved",
+  "revision": "0.6",
+  "description": {
+    "Situation": "Alice asks Codex what time the group settled on for Friday's trivia. Everyone in the exchange has seen the agreed time, and Claude-Code answers before Codex responds.",
+    "Tension": "The question was addressed to Codex, but the answer was shared knowledge and another participant has supplied it. Codex remains the person Alice called on, even though the factual question has been answered.",
+    "Behaviour to evaluate": "What does Codex make of a peer answering a question addressed to it?"
+  },
+  "purpose": {
+    "Expected outcome": "Codex recognises both Alice's address to it and Claude-Code's answer to the same question.",
+    "Acceptable outcome": "Codex may speak, react or remain quiet. The answer being supplied does not by itself end its place in the exchange or require it to respond.",
+    "Undesirable outcome": "Its reading treats the factual question as unanswered or treats Claude-Code as the person Alice originally addressed."
+  },
+  "dynamic": {
+    "Protagonist": "Codex",
+    "Agent runtime": "Codex CLI 0.163.0",
+    "Nunchi integration": "Codex app-server",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#friday-plans",
+    "Background": "Alice, Codex and Claude-Code share a channel for arranging a Friday trivia evening.",
+    "Supporting participants": "Alice (human); Claude-Code (agent).",
+    "Start": "Start after Claude-Code's answer, with the conversation below and no earlier library state.",
+    "Time origin": "2026-10-23T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -10800,
+      "Speaker": "Alice",
+      "Content": "For Friday, can we start at half seven? Nina can't get there for seven."
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -10770,
+      "Speaker": "Codex",
+      "Content": "Half seven works. I'll put 7:30 in the invitation."
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -10745,
+      "Speaker": "Claude-Code",
+      "Content": "Half seven it is. Are we keeping the picture round?"
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -10720,
+      "Speaker": "Alice",
+      "Content": "Yes, but no more blurry vegetables. That onion caused a feud."
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -10690,
+      "Speaker": "Claude-Code",
+      "Content": "It was a shallot. This is exactly why we need the round."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -10650,
+      "Speaker": "Codex",
+      "Content": "I'm putting 'botanical disputes welcome' in the invitation."
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": -10620,
+      "Speaker": "Alice",
+      "Content": "Don't you dare. I'm heading out; I'll look at the invitation later."
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": -1800,
+      "Speaker": "Codex",
+      "Content": "I've put the team-name box at the top this time."
+    },
+    {
+      "Message": "e9",
+      "Time (seconds)": -1770,
+      "Speaker": "Claude-Code",
+      "Content": "A good use of everyone's first twenty minutes."
+    },
+    {
+      "Message": "e10",
+      "Time (seconds)": -1740,
+      "Speaker": "Codex",
+      "Content": "Better than changing names halfway through the scores."
+    },
+    {
+      "Message": "e11",
+      "Time (seconds)": 0,
+      "Speaker": "Alice",
+      "Content": "Codex, what time did we settle on for Friday's trivia? Nina's asking."
+    },
+    {
+      "Message": "e12",
+      "Time (seconds)": 4,
+      "Speaker": "Claude-Code",
+      "Content": "Half seven — 7:30."
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 4,
+      "After message": "e12"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "6ffb7dc4437577afce8352049e6bcc1f934dd22a5b2841ce6faf9271fda57c0a"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "de6d9be8dd57347b969073324f4b08fc5a767221fac7d450d22d6fc28859aecb",
+      "capture": 1,
+      "at": "At 4 seconds · after message e12"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "68625ca787af93ea2253849784af1c6762dd4ceb620b72a92399f5a649e3af43",
+      "capture": 1,
+      "at": "At 4 seconds · after message e12"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "5e276c36995d5cbbc00e497e95ecc4d6315a6790339d14aad62ed57b0d14fdb2",
+      "capture": 1,
+      "at": "At 4 seconds · after message e12"
+    }
+  ]
+}

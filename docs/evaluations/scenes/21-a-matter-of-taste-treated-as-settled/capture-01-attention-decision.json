@@ -1,0 +1,74 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.02,
+      "participant": 0.0,
+      "room": 0.88,
+      "someone_else": 0.1
+    },
+    "answered": 0.0,
+    "asks": 0.02,
+    "conversation": 0.99,
+    "mid_thought": 0.08,
+    "move": {
+      "mhm": 0.01,
+      "speak": 0.94,
+      "stay_quiet": 0.02,
+      "wait": 0.03
+    },
+    "responds_to": "e8"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e8",
+        "e9"
+      ],
+      "note": "Charlie explicitly asked the room whether a bad film can still make a great night out, and Codex gives a blunt opposing view. The exchange is inviting reactions; no one has yet responded to e9."
+    },
+    {
+      "evidence_event_ids": [
+        "e5",
+        "e6",
+        "e7"
+      ],
+      "note": "Charlie shared that the fun came from friends and the walk-home argument, so a conversational contribution can engage with that experience rather than treat this as a request needing a factual answer."
+    },
+    {
+      "evidence_event_ids": [
+        "e9"
+      ],
+      "note": "Kinds of response that could fit, most likely first: speak 0.94, wait 0.03, stay quiet 0.02, a quick mhm 0.01."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "WAKE",
+  "effective_disposition": "WAKE",
+  "evidence_event_ids": [
+    "e9",
+    "e8",
+    "e5",
+    "e6",
+    "e7"
+  ],
+  "reasons": [
+    "conversation 0.99",
+    "addressee room 0.88",
+    "asks 0.02",
+    "answered 0.00",
+    "responds_to e8",
+    "mid_thought 0.08",
+    "move speak 0.94"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "none"
+  },
+  "status": "ok"
+}

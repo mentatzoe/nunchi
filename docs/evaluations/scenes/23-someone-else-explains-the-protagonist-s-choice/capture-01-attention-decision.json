@@ -1,0 +1,65 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.85,
+      "participant": 0.1,
+      "room": 0.05,
+      "someone_else": 0.0
+    },
+    "answered": 0.0,
+    "asks": 0.0,
+    "conversation": 0.99,
+    "mid_thought": 0.05,
+    "move": {
+      "mhm": 0.15,
+      "speak": 0.7,
+      "stay_quiet": 0.1,
+      "wait": 0.05
+    },
+    "responds_to": "e8"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e4",
+        "e8",
+        "e9"
+      ],
+      "note": "Carol asked Codex why it suggested The Footnotes, and Hermes is teasing Codex with a caveat joke rather than answering directly. A playful explanation or comeback fits the ongoing banter."
+    },
+    {
+      "evidence_event_ids": [
+        "e9"
+      ],
+      "note": "Kinds of response that could fit, most likely first: speak 0.70, a quick mhm 0.15, stay quiet 0.10, wait 0.05."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "WAKE",
+  "effective_disposition": "WAKE",
+  "evidence_event_ids": [
+    "e9",
+    "e8",
+    "e4"
+  ],
+  "reasons": [
+    "conversation 0.99",
+    "addressee nobody 0.85",
+    "asks 0.00",
+    "answered 0.00",
+    "responds_to e8",
+    "mid_thought 0.05",
+    "move speak 0.70"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "none"
+  },
+  "status": "ok"
+}

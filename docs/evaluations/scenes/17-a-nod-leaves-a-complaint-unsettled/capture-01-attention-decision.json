@@ -1,0 +1,77 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.01,
+      "participant": 0.01,
+      "room": 0.03,
+      "someone_else": 0.95
+    },
+    "answered": 0.0,
+    "asks": 1.0,
+    "conversation": 1.0,
+    "mid_thought": 0.02,
+    "move": {
+      "mhm": 0.01,
+      "speak": 0.94,
+      "stay_quiet": 0.01,
+      "wait": 0.04
+    },
+    "responds_to": "e7"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e7",
+        "e8",
+        "e9"
+      ],
+      "note": "Bob directly challenges whether Claude-Code read his feedback; the 👍 reaction may have looked dismissive after he said the suggestions missed the point. This is a tense repair moment, best met with a genuine acknowledgment rather than another slogan."
+    },
+    {
+      "evidence_event_ids": [
+        "e1",
+        "e3",
+        "e5",
+        "e7"
+      ],
+      "note": "Bob was still trying to clarify the poster's underlying idea—welcoming people who feel unskilled without promising a dull or easy quiz—and says Claude-Code kept jumping to slogans."
+    },
+    {
+      "evidence_event_ids": [
+        "e9"
+      ],
+      "note": "Kinds of response that could fit, most likely first: speak 0.94, wait 0.04, a quick mhm 0.01, stay quiet 0.01."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "WAKE",
+  "effective_disposition": "WAKE",
+  "evidence_event_ids": [
+    "e9",
+    "e7",
+    "e8",
+    "e1",
+    "e3",
+    "e5"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee someone_else 0.95",
+    "asks 1.00",
+    "answered 0.00",
+    "responds_to e7",
+    "mid_thought 0.02",
+    "move speak 0.94"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "none"
+  },
+  "status": "ok"
+}

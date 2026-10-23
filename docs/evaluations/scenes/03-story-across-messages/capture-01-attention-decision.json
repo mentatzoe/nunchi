@@ -1,0 +1,61 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.05,
+      "participant": 0.05,
+      "room": 0.9,
+      "someone_else": 0.0
+    },
+    "answered": 0.0,
+    "asks": 0.0,
+    "conversation": 0.99,
+    "mid_thought": 0.95,
+    "move": {
+      "mhm": 0.2,
+      "speak": 0.15,
+      "stay_quiet": 0.1,
+      "wait": 0.55
+    }
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e1",
+        "e2"
+      ],
+      "note": "Alice is setting up a story about the borrowed umbrella; “until I opened it” signals that the surprising part is still coming, so a brief backchannel or waiting fits."
+    },
+    {
+      "evidence_event_ids": [
+        "e2"
+      ],
+      "note": "Kinds of response that could fit, most likely first: wait 0.55, a quick mhm 0.20, speak 0.15, stay quiet 0.10."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e2",
+    "e1"
+  ],
+  "reasons": [
+    "conversation 0.99",
+    "addressee room 0.90",
+    "asks 0.00",
+    "answered 0.00",
+    "mid_thought 0.95",
+    "move wait 0.55"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

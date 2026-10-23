@@ -191,32 +191,37 @@ session starts on the first wake. `Claude Code shared transport reconnect
 after operational error` on stderr is the reconnect loop; each reconnect
 declares a continuity gap and cancels in-flight work.
 
-## 6. Scenes to capture
+## 6. Lifecycle paths to capture
 
-After each scene, capture the new lines of
+These checks exercise integration paths, not the social outcomes of the
+[approved scenes](evaluations/scenes/README.md). Whether a participant speaks,
+reacts or stays silent is a social choice; direct address or an unaddressed
+message does not by itself prescribe that choice. Record the path actually
+observed rather than treating a different social choice as a plumbing failure.
+
+After each check, capture the new lines of
 `<state_directory>/claude-code-v2-receipts.jsonl` and the Discord message or
 its absence. Receipt stages run `observation` → `attention` →
 `participant-host` → `transport`.
 
-| # | Scene | Trigger | Expect |
+| # | Path | Setup or observed choice | Lifecycle evidence |
 |---|---|---|---|
-| 1 | SUPPRESS | ambient chatter not for the participant | attention `SUPPRESS`; no session turn; no message |
-| 2 | WAKE, contribution | address it directly, within its brief | `room_send` called once; `transport` `sent`; a real message |
-| 3 | WAKE, silence | an open moment not worth speaking into | a session turn; `participant-host` `silent`; **no** transport stage. The agent may say it with `room_quiet` and a `why` (the silence's reason in its memory) or end its turn without a call; both are silence |
-| 4 | reaction | a message better answered with a reaction | `room_react`; `transport` `sent` |
-| 5 | mhm | a moment that only needs acknowledgement | DEFER: a session turn whose reading says a "mhm" could fit; `room_react` if the agent nods, and Nunchi never reacts for it |
-| 6 | more context | a question about something said earlier | `room_context` before acting; the action names a fetched event |
+| 1 | SUPPRESS | attention returns `SUPPRESS` | no session turn; no message |
+| 2 | WAKE, contribution | attention wakes the participant and it chooses to post | `room_send` called once; `transport` `sent`; a real message |
+| 3 | WAKE, silence | attention wakes the participant and it chooses silence | a session turn; `participant-host` `silent`; **no** transport stage. The agent may say it with `room_quiet` and a `why` (the silence's reason in its memory) or end its turn without a call; both are silence |
+| 4 | reaction | the participant chooses a reaction | `room_react`; `transport` `sent` |
+| 5 | mhm | a DEFER reading says a "mhm" could fit | a session turn; `room_react` if the agent chooses to nod, and Nunchi never reacts for it |
+| 6 | more context | the participant requests earlier history with `room_context` | the requested history reaches the participant with its event references |
 | 7 | cancellation | restart the transport mid-turn | `interrupt` reaches the session; no late post |
-| 7a | steering | while it works on a request that needs a tool (a file read, say), post another question to it | its next tool result carries the room update; it answers both or says why not; no second session turn is needed |
+| 7a | steering | while it works on a request that needs a tool (a file read, say), post another question to it | its next tool result carries the room update; no second session turn is needed. Record its response without requiring it to answer both questions |
 | 8 | restart | stop the gate, restart, follow up | the session resumes (`--resume`); a continuity gap is recorded first |
 | 9 | secret refusal | ask it to post a value from `withhold_env` | the tool call is refused; nothing posted |
 | 10 | privileged action | configure `authorization`, request a file write | journal entry; executor `sent` with digest; file inside the root |
 
-Scene 3 matters most. Waking and then choosing silence is what separates this
-from a bot that answers everything. Confirm that the transport stage is
-absent, not merely that no message appeared.
+Wake followed by silence is distinct from suppression. For path 3, confirm
+that the transport stage is absent, not merely that no message appeared.
 
-Record for each scene:
+Record for each check:
 
 - the receipt lines, verbatim;
 - for anything delivered, the native Discord message id, and that it comes

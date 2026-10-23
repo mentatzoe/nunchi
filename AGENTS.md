@@ -327,16 +327,23 @@ python3 -m evals.behavior.run --dry-run
 Deterministic tests are offline and prove deterministic behavior only. Whether
 an agent reads the room well is a behavioral question; it needs behavioral
 evaluation across realistic multi-turn conversations
-([#86](https://github.com/mentatzoe/nunchi/issues/86)). The scenes are in
-`evals/behavior/`; the manual `behavior-eval` workflow runs them against real
-models. Evaluation is moving to an existing framework such as DeepEval, and
-to tests of the installed library and its command line, not only its Python
+([#86](https://github.com/mentatzoe/nunchi/issues/86)). The approved scene
+specifications are in
+[`docs/evaluations/scenes/`](docs/evaluations/scenes/README.md) and follow
+[`docs/evaluations/scene-spec.md`](docs/evaluations/scene-spec.md). Their saved
+library packages record preparation, not protagonist runs or passing scores.
+Execution and scoring of this collection belong to a separate evaluation-design
+session.
+
+`evals/behavior/` and the manual `behavior-eval` workflow still use legacy
+fixtures. Their move ranges and review metadata do not define approval or
+required responses for the published scenes. Evaluation is moving to an
+existing framework such as DeepEval, and to tests of the installed library
+and its command line, not only its Python
 code (agreed, 2026-10-19;
 [#174](https://github.com/mentatzoe/nunchi/issues/174);
 [`evals/behavior/README.md`](evals/behavior/README.md#where-evaluation-is-going)).
-New scenes follow
-[`docs/evaluations/scene-spec.md`](docs/evaluations/scene-spec.md). Live
-provider and platform runs need explicit credentials and must record the
+Live provider and platform runs need explicit credentials and must record the
 installed version, identity, configuration, command, and complete result.
 
 Records of test runs on the maintainer's test server, which carries test talk only, may

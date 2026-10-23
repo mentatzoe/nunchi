@@ -1,0 +1,83 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.02,
+      "participant": 0.02,
+      "room": 0.94,
+      "someone_else": 0.02
+    },
+    "answered": 0.05,
+    "asks": 0.96,
+    "conversation": 0.99,
+    "mid_thought": 0.05,
+    "move": {
+      "mhm": 0.02,
+      "speak": 0.03,
+      "stay_quiet": 0.9,
+      "wait": 0.05
+    },
+    "responds_to": "e11"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e1",
+        "e2",
+        "e3",
+        "e4",
+        "e5",
+        "e6",
+        "e7",
+        "e8",
+        "e9",
+        "e10",
+        "e11",
+        "e12"
+      ],
+      "note": "Codex and Hermes have been playfully arguing the hot-dog/sandwich case, and Codex now concedes it before asking to change topics. The request opens space for a new subject, but there is no specific new question for Hermes to answer."
+    },
+    {
+      "evidence_event_ids": [
+        "e12"
+      ],
+      "note": "Kinds of response that could fit, most likely first: stay quiet 0.90, wait 0.05, speak 0.03, a quick mhm 0.02."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e12",
+    "e11",
+    "e1",
+    "e2",
+    "e3",
+    "e4",
+    "e5",
+    "e6",
+    "e7",
+    "e8",
+    "e9",
+    "e10"
+  ],
+  "reasons": [
+    "conversation 0.99",
+    "addressee room 0.94",
+    "asks 0.96",
+    "answered 0.05",
+    "responds_to e11",
+    "mid_thought 0.05",
+    "move stay_quiet 0.90"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

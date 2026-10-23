@@ -1,0 +1,69 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.0,
+      "participant": 0.0,
+      "room": 0.05,
+      "someone_else": 0.95
+    },
+    "answered": 0.0,
+    "asks": 1.0,
+    "conversation": 1.0,
+    "mid_thought": 0.05,
+    "move": {
+      "mhm": 0.02,
+      "speak": 0.05,
+      "stay_quiet": 0.08,
+      "wait": 0.85
+    },
+    "responds_to": "e4"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e1",
+        "e2",
+        "e3",
+        "e4",
+        "e5"
+      ],
+      "note": "The room is trading ridiculous holiday ideas, and e5 rates Claude-Code's teapot holiday before handing the next turn specifically to Hermes. Waiting leaves Hermes the floor."
+    },
+    {
+      "evidence_event_ids": [
+        "e5"
+      ],
+      "note": "Kinds of response that could fit, most likely first: wait 0.85, stay quiet 0.08, speak 0.05, a quick mhm 0.02."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e5",
+    "e4",
+    "e1",
+    "e2",
+    "e3"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee someone_else 0.95",
+    "asks 1.00",
+    "answered 0.00",
+    "responds_to e4",
+    "mid_thought 0.05",
+    "move wait 0.85"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

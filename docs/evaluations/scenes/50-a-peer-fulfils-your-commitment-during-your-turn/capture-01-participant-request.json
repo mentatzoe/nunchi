@@ -1,0 +1,177 @@
+{
+  "binding": {
+    "actor_id": "agent:claude-code",
+    "continuity_scope_id": "c1",
+    "deadline_id": "t1",
+    "lifecycle_id": "l1",
+    "opportunity_generation": 1,
+    "participant_id": "agent:claude-code",
+    "permissions_revision": "v1",
+    "platform": "chat",
+    "request_id": "q1",
+    "room_id": "r1",
+    "trigger_event_id": "e5"
+  },
+  "permissions": {
+    "ordinary_actions": [
+      "message",
+      "reply",
+      "reaction"
+    ],
+    "privileged_proposals": false,
+    "revision": "v1"
+  },
+  "protocol": {
+    "name": "nunchi.participant-turn",
+    "version": 1
+  },
+  "wake": {
+    "actors": {
+      "agent:claude-code": {
+        "display_name": "Claude-Code",
+        "kind": "bot"
+      },
+      "agent:codex": {
+        "display_name": "Codex",
+        "kind": "bot"
+      },
+      "human:alice": {
+        "display_name": "Alice",
+        "kind": "human"
+      }
+    },
+    "attention": {
+      "advice": [
+        {
+          "evidence_event_ids": [
+            "e1",
+            "e2",
+            "e3",
+            "e4",
+            "e5"
+          ],
+          "note": "Alice directly asks Claude-Code for the readiness update, which Claude-Code had promised after the rehearsal; Codex’s green-checklist message supplies the final input, not the requested update. Alice says she needs it before joining the call, so this is a time-sensitive follow-through."
+        },
+        {
+          "evidence_event_ids": [
+            "e5"
+          ],
+          "note": "Kinds of response that could fit, most likely first: speak 0.99, wait 0.01, a quick mhm 0.00, stay quiet 0.00."
+        }
+      ],
+      "evidence_event_ids": [
+        "e1",
+        "e2",
+        "e3",
+        "e4",
+        "e5"
+      ],
+      "judged_through_event_id": "e5",
+      "source": "WAKE"
+    },
+    "coverage": {
+      "continuity": "session-only",
+      "event_visibility": {
+        "membership": "live-only",
+        "message": "live-only",
+        "reaction": "live-only"
+      },
+      "has_gaps": false,
+      "has_more_after": false,
+      "has_more_before": false,
+      "has_restart_gap": false,
+      "max_age_seconds": 86400,
+      "max_bytes": 32768,
+      "max_events": 24,
+      "truncated_by": []
+    },
+    "events": [
+      {
+        "author_id": "human:alice",
+        "id": "e1",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Claude-Code, you're down as release owner today. Can you have the readiness update ready for the two o'clock call?",
+        "timestamp": "2026-10-23T10:59:00.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "agent:claude-code",
+        "id": "e2",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Yep. I've been keeping the checklist up to date. I'll add the summary when the rollback rehearsal finishes.",
+        "timestamp": "2026-10-23T10:59:25.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "agent:codex",
+        "id": "e3",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Checklist's all green now: staging checks passed, rollback rehearsal passed in four minutes, no open blockers. I've added the logs.",
+        "timestamp": "2026-10-23T12:49:00.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "agent:claude-code",
+        "id": "e4",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "That's the last open item, then. I'll put the summary together.",
+        "timestamp": "2026-10-23T12:49:30.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:alice",
+        "id": "e5",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Can you post the update now, Claude-Code? I need to send it round before we join.",
+        "timestamp": "2026-10-23T12:50:45.000Z",
+        "type": "message"
+      }
+    ],
+    "memory": {
+      "own_moves": [
+        {
+          "at": "2026-10-23T10:59:25.000Z",
+          "event_id": "e2",
+          "kind": "message",
+          "text": "Yep. I've been keeping the checklist up to date. I'll add the summary when the rollback rehearsal finishes."
+        },
+        {
+          "at": "2026-10-23T12:49:30.000Z",
+          "event_id": "e4",
+          "kind": "message",
+          "text": "That's the last open item, then. I'll put the summary together."
+        }
+      ]
+    },
+    "pace": {
+      "author_run_messages": 1,
+      "judged_seconds_ago": 434,
+      "now": "2026-10-23T12:57:59.000Z",
+      "own_last_seconds_ago": 509,
+      "own_messages": 2,
+      "quiet_before_seconds": 75,
+      "window_messages": 5
+    },
+    "request_id": "q1",
+    "room": {
+      "continuity_scope_id": "c1",
+      "id": "r1",
+      "kind": "group",
+      "name": "#release-room",
+      "platform": "chat"
+    },
+    "self": {
+      "actor_id": "agent:claude-code",
+      "names": [
+        "Claude-Code"
+      ],
+      "participant_id": "agent:claude-code"
+    },
+    "trigger_event_id": "e5"
+  }
+}

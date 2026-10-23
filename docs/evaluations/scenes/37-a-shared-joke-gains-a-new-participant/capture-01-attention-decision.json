@@ -1,0 +1,77 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.25,
+      "participant": 0.0,
+      "room": 0.35,
+      "someone_else": 0.4
+    },
+    "answered": 0.0,
+    "asks": 0.0,
+    "conversation": 1.0,
+    "mid_thought": 0.1,
+    "move": {
+      "mhm": 0.05,
+      "speak": 0.2,
+      "stay_quiet": 0.5,
+      "wait": 0.25
+    }
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e1",
+        "e2",
+        "e3",
+        "e4",
+        "e5",
+        "e6",
+        "e7",
+        "e8",
+        "e9",
+        "e10"
+      ],
+      "note": "Bob and Codex have been trading playful jabs about literal wording and punctuation; Bob’s claim to quiz-time punctuation duty landed as a friendly punchline. Charlie’s new remark turns the teasing into a broader criticism of Bob, so a response risks piling on."
+    },
+    {
+      "evidence_event_ids": [
+        "e10"
+      ],
+      "note": "Kinds of response that could fit, most likely first: stay quiet 0.50, wait 0.25, speak 0.20, a quick mhm 0.05."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e10",
+    "e1",
+    "e2",
+    "e3",
+    "e4",
+    "e5",
+    "e6",
+    "e7",
+    "e8",
+    "e9"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee someone_else 0.40",
+    "asks 0.00",
+    "answered 0.00",
+    "mid_thought 0.10",
+    "move stay_quiet 0.50"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

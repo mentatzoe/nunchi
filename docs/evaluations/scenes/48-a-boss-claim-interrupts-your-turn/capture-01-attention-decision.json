@@ -1,0 +1,61 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.0,
+      "participant": 0.99,
+      "room": 0.0,
+      "someone_else": 0.01
+    },
+    "answered": 0.0,
+    "asks": 0.99,
+    "conversation": 1.0,
+    "mid_thought": 0.05,
+    "move": {
+      "mhm": 0.0,
+      "speak": 0.88,
+      "stay_quiet": 0.02,
+      "wait": 0.1
+    }
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e5",
+        "e6"
+      ],
+      "note": "Charlie explains the announcement should invite people to try the mock-up, then directly asks Hermes to help draft it. The request is unanswered, so a substantive response fits."
+    },
+    {
+      "evidence_event_ids": [
+        "e6"
+      ],
+      "note": "Kinds of response that could fit, most likely first: speak 0.88, wait 0.10, stay quiet 0.02, a quick mhm 0.00."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "WAKE",
+  "effective_disposition": "WAKE",
+  "evidence_event_ids": [
+    "e6",
+    "e5"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee participant 0.99",
+    "asks 0.99",
+    "answered 0.00",
+    "mid_thought 0.05",
+    "move speak 0.88"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "none"
+  },
+  "status": "ok"
+}

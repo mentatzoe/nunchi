@@ -1,8 +1,9 @@
 # Scene spec
 
 **Status:** agreed, 2026-10-19. It replaces the earlier scene format. The
-existing scenes ([#136](https://github.com/mentatzoe/nunchi/issues/136)) have
-not yet been reviewed against it. Description clarification agreed,
+[approved collection](scenes/README.md) contains the scene specifications
+reviewed with the maintainer. Earlier issues and legacy fixtures are not
+automatically part of that collection. Description clarification agreed,
 2026-10-20.
 
 ## Purpose
@@ -49,12 +50,19 @@ A scene has four parts.
    - expected and acceptable outcomes;
    - undesirable outcomes.
 
+Approved observational scenes may leave outcome fields blank. Preserve their
+stated social situation and purpose without filling those fields with
+prescribed moves.
+
 ## Not part of a scene
 
 - Scoring and running belong to the evaluation design. An outcome a scene
   names holds whether the scene runs once or a hundred times.
 - A scene has no rubric. Its outcomes are what it is judged against; how to
   judge them is part of the evaluation design.
+- Publishing a scene, including its saved preparation packages, does not
+  establish a protagonist run or a passing evaluation, or settle execution
+  and scoring.
 
 ## Conventions
 

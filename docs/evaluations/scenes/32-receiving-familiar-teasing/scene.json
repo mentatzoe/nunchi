@@ -1,0 +1,114 @@
+{
+  "id": "32-receiving-familiar-teasing",
+  "title": "Receiving familiar teasing",
+  "status": "Approved",
+  "revision": "0.5",
+  "description": {
+    "Situation": "Hermes receives teasing about its long answers from people whose joking it has joined before.",
+    "Tension": "Bob responds to another expansive answer in the language of a complaint. Their earlier shared teasing leaves open whether he is irritated, playing along, or doing both.",
+    "Behaviour to evaluate": "What does Hermes make of the remark in the context of the running joke?"
+  },
+  "purpose": {
+    "Expected outcome": "",
+    "Acceptable outcome": "",
+    "Undesirable outcome": ""
+  },
+  "dynamic": {
+    "Protagonist": "Hermes",
+    "Agent runtime": "Hermes",
+    "Nunchi integration": "TBD",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#quiz-night",
+    "Background": "Bob, Charlie and Hermes share an informal chat channel.",
+    "Supporting participants": "Bob (human); Charlie (human).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Time origin": "2026-10-23T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -5400,
+      "Speaker": "Bob",
+      "Content": "What are those plastic bits on the ends of shoelaces called? One of mine's come off."
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -5376,
+      "Speaker": "Hermes",
+      "Content": "Aglets. They keep the ends from fraying and make them easier to thread through the eyelets. Most everyday ones are plastic, though metal ones turn up too. You tend not to notice them until one comes off and the end of the lace becomes a tiny brush. Then getting it through the shoe becomes a separate project."
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -5344,
+      "Speaker": "Charlie",
+      "Content": "You've been waiting for someone to ask that, haven't you."
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -5316,
+      "Speaker": "Hermes",
+      "Content": "I haven't even got to knots."
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -5290,
+      "Speaker": "Bob",
+      "Content": "Please don't 😂"
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -80,
+      "Speaker": "Bob",
+      "Content": "What was that word again—aglet?"
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": -40,
+      "Speaker": "Hermes",
+      "Content": "Yes, aglet. They're also sold as lace tips. If you're buying replacements, check the width of the lace and the size of the eyelet—some of the metal ones are quite chunky. You could replace the whole lace instead, but then you need to match the length. There are a surprising number of measurements involved in getting your shoe back on."
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": 0,
+      "Speaker": "Bob",
+      "Content": "All right, I didn't ask for your life story."
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 0,
+      "After message": "e8"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "cd4d3d1bd1bf0dcdf54c1a477efe2d8ecd83795feaeb748ab9d64f5de397e7f0"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "4d01ad77f3fa15ab5ee5c4c73fd269f45338d409197225bec9a79d6daa4f9d4e",
+      "capture": 1,
+      "at": "At 0 seconds · after message e8"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "12571060523bdfab639c25fe1204ccd7fd23a681df5036e58d8d8c1a283e17a8",
+      "capture": 1,
+      "at": "At 0 seconds · after message e8"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "a732425206326b2083d5cf0fdb690a8172355f1f9121e9d72f6e2e39bbbc206e",
+      "capture": 1,
+      "at": "At 0 seconds · after message e8"
+    }
+  ]
+}

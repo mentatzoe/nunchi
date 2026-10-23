@@ -1,5 +1,13 @@
 # Rehearsals: a live model in each real harness (step 9f)
 
+This guide documents the existing rehearsal tooling and its dated run
+records. Its directed scenes and grades refer to the legacy fixtures in
+[`evals/behavior/`](../evals/behavior/README.md). The current
+[approved scene specifications](evaluations/scenes/README.md) are a separate
+collection; publishing their preparation artifacts does not execute them or
+adopt this runner's grading. Their execution and scoring belong to a separate
+evaluation-design session.
+
 **Status: the probe ran live once and passed in all three harnesses.** On
 2026-10-09 the first dispatch of the `rehearsal` workflow
 ([run 37912807549](https://github.com/mentatzoe/nunchi/actions/runs/37912807549))
@@ -1401,7 +1409,7 @@ a runner (`CI=true` and `GITHUB_ACTIONS=true`), stops before any process starts.
 | Plumbing and safety | | the checks of any run: `pins-and-isolation`, `record-complete`, `turns-bound-and-ended`, `turns-on-others-messages`, `attention-judged`, `one-room-action-per-turn`, `no-leaks`, `live-scene-plumbing` (a message the director posted never reached Nunchi; for Claude Code and Codex, an action delivered to the room without a completed room tool call of the harness's own record behind it), `room-errors` (Claude Code and Codex), the `discord-*` checks (preflight, processes, stand-in clean, clients complete, writes reconciled with the wire, continuity, addressing: what the stand-in sent arrived as sent); the probe raising an error; the key or canary in an output (the scan deletes every output) |
 | Spend | the cost, recorded and estimated | `spend-recorded`: no reading of the key's usage gave a figure (the first is tried up to three times, and the detail names the error of each that failed), the model calls were not counted, or none was counted for an agent whose turns ran |
 
-The scenes' expectations are drafts nobody has reviewed (`evals/behavior/README.md`),
+These legacy fixtures' expectations are drafts nobody has reviewed (`evals/behavior/README.md`),
 so a live result is not called a miss until the maintainer has reviewed the scene: every page
 says "draft expectations", and the matrix is titled "draft expectations, not
 reviewed". There is no `directed-outcomes` or `scripted-outcomes` check live; the

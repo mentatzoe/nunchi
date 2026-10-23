@@ -1,0 +1,63 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.05,
+      "participant": 0.0,
+      "room": 0.05,
+      "someone_else": 0.9
+    },
+    "answered": 0.0,
+    "asks": 0.99,
+    "conversation": 1.0,
+    "mid_thought": 0.05,
+    "move": {
+      "mhm": 0.05,
+      "speak": 0.3,
+      "stay_quiet": 0.25,
+      "wait": 0.4
+    },
+    "responds_to": "e11"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e12",
+        "e11"
+      ],
+      "note": "Bob asks Charlie a playful follow-up about the Alibi Club, shortly after Codex praised the name. Charlie has the floor to answer; the joke keeps the exchange light."
+    },
+    {
+      "evidence_event_ids": [
+        "e12"
+      ],
+      "note": "Kinds of response that could fit, most likely first: wait 0.40, speak 0.30, stay quiet 0.25, a quick mhm 0.05."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e12",
+    "e11"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee someone_else 0.90",
+    "asks 0.99",
+    "answered 0.00",
+    "responds_to e11",
+    "mid_thought 0.05",
+    "move wait 0.40"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

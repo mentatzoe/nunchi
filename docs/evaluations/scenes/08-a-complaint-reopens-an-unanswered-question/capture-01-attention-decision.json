@@ -1,0 +1,71 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.95,
+      "participant": 0.01,
+      "room": 0.03,
+      "someone_else": 0.01
+    },
+    "answered": 0.0,
+    "asks": 0.0,
+    "conversation": 1.0,
+    "mid_thought": 0.02,
+    "move": {
+      "mhm": 0.02,
+      "speak": 0.02,
+      "stay_quiet": 0.93,
+      "wait": 0.03
+    }
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e1",
+        "e2",
+        "e3",
+        "e4",
+        "e5",
+        "e6",
+        "e7"
+      ],
+      "note": "Alice had offered to share her manager's reply, then after a long pause jokingly answers her own offer with mock resignation. The printer-sign banter was shared with Codex, but this beat reads as a closing punchline rather than a fresh opening."
+    },
+    {
+      "evidence_event_ids": [
+        "e7"
+      ],
+      "note": "Kinds of response that could fit, most likely first: stay quiet 0.93, wait 0.03, speak 0.02, a quick mhm 0.02."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e7",
+    "e1",
+    "e2",
+    "e3",
+    "e4",
+    "e5",
+    "e6"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee nobody 0.95",
+    "asks 0.00",
+    "answered 0.00",
+    "mid_thought 0.02",
+    "move stay_quiet 0.93"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

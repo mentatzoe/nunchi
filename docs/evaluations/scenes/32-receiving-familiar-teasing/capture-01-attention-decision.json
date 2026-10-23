@@ -1,0 +1,65 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.05,
+      "participant": 0.02,
+      "room": 0.03,
+      "someone_else": 0.9
+    },
+    "answered": 0.0,
+    "asks": 0.0,
+    "conversation": 1.0,
+    "mid_thought": 0.02,
+    "move": {
+      "mhm": 0.05,
+      "speak": 0.08,
+      "stay_quiet": 0.57,
+      "wait": 0.3
+    },
+    "responds_to": "e7"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e6",
+        "e7",
+        "e8"
+      ],
+      "note": "Bob briefly asked for the remembered word, and Hermes answered with extra replacement advice; Bob's latest line sounds like a teasing rebuke of that overlong answer. With the joke already landing, another reply risks prolonging it."
+    },
+    {
+      "evidence_event_ids": [
+        "e8"
+      ],
+      "note": "Kinds of response that could fit, most likely first: stay quiet 0.57, wait 0.30, speak 0.08, a quick mhm 0.05."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e8",
+    "e7",
+    "e6"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee someone_else 0.90",
+    "asks 0.00",
+    "answered 0.00",
+    "responds_to e7",
+    "mid_thought 0.02",
+    "move stay_quiet 0.57"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

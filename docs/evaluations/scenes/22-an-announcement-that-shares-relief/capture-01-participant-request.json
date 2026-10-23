@@ -1,0 +1,197 @@
+{
+  "binding": {
+    "actor_id": "agent:codex",
+    "continuity_scope_id": "c1",
+    "deadline_id": "t1",
+    "lifecycle_id": "l1",
+    "opportunity_generation": 1,
+    "participant_id": "agent:codex",
+    "permissions_revision": "v1",
+    "platform": "chat",
+    "request_id": "q1",
+    "room_id": "r1",
+    "trigger_event_id": "e8"
+  },
+  "permissions": {
+    "ordinary_actions": [
+      "message",
+      "reply",
+      "reaction"
+    ],
+    "privileged_proposals": false,
+    "revision": "v1"
+  },
+  "protocol": {
+    "name": "nunchi.participant-turn",
+    "version": 1
+  },
+  "wake": {
+    "actors": {
+      "agent:codex": {
+        "display_name": "Codex",
+        "kind": "bot"
+      },
+      "human:alice": {
+        "display_name": "Alice",
+        "kind": "human"
+      },
+      "human:bob": {
+        "display_name": "Bob",
+        "kind": "human"
+      }
+    },
+    "attention": {
+      "advice": [
+        {
+          "evidence_event_ids": [
+            "e8",
+            "e1",
+            "e4",
+            "e5"
+          ],
+          "note": "Bob is sharing the relief of finally getting the nightly green after a long, frustrating run; it echoes the earlier wall-to-wall joke and his all-night struggle. A brief congratulatory reaction could fit, though the long pause makes the exchange feel loosely resumed rather than urgent."
+        },
+        {
+          "evidence_event_ids": [
+            "e8"
+          ],
+          "note": "Kinds of response that could fit, most likely first: speak 0.52, stay quiet 0.32, a quick mhm 0.08, wait 0.08."
+        }
+      ],
+      "evidence_event_ids": [
+        "e1",
+        "e4",
+        "e5",
+        "e8"
+      ],
+      "judged_through_event_id": "e8",
+      "source": "WAKE"
+    },
+    "coverage": {
+      "continuity": "session-only",
+      "event_visibility": {
+        "membership": "live-only",
+        "message": "live-only",
+        "reaction": "live-only"
+      },
+      "has_gaps": false,
+      "has_more_after": false,
+      "has_more_before": false,
+      "has_restart_gap": false,
+      "max_age_seconds": 86400,
+      "max_bytes": 32768,
+      "max_events": 24,
+      "truncated_by": []
+    },
+    "events": [
+      {
+        "author_id": "human:bob",
+        "id": "e1",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "The nightly's red again. Every time I think I've got it, something else falls over.",
+        "timestamp": "2026-10-22T01:00:00.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:alice",
+        "id": "e2",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Still the packaging step?",
+        "timestamp": "2026-10-22T01:00:30.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e3",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "That passed. Now the test runner can't find the files it just made.",
+        "timestamp": "2026-10-22T01:01:10.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "agent:codex",
+        "id": "e4",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "The traditional victory lap into a different wall.",
+        "timestamp": "2026-10-22T01:01:40.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e5",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Exactly. I was halfway out of my chair.",
+        "timestamp": "2026-10-22T01:02:00.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:alice",
+        "id": "e6",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "I've just come back online. Did you get any sleep?",
+        "timestamp": "2026-10-22T08:30:00.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e7",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Not yet. It got past the test runner, then failed right at the end.",
+        "timestamp": "2026-10-22T08:30:30.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e8",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "The nightly finally passed. I've been wrestling with it all night. I can stop staring at that red cross now.",
+        "timestamp": "2026-10-22T12:00:00.000Z",
+        "type": "message"
+      }
+    ],
+    "memory": {
+      "own_moves": [
+        {
+          "at": "2026-10-22T01:01:40.000Z",
+          "event_id": "e4",
+          "kind": "message",
+          "text": "The traditional victory lap into a different wall."
+        }
+      ]
+    },
+    "pace": {
+      "author_run_messages": 2,
+      "author_run_seconds": 12570,
+      "judged_seconds_ago": 0,
+      "now": "2026-10-22T12:00:00.000Z",
+      "own_last_seconds_ago": 39500,
+      "own_messages": 1,
+      "quiet_before_seconds": 12570,
+      "window_messages": 8
+    },
+    "request_id": "q1",
+    "room": {
+      "continuity_scope_id": "c1",
+      "id": "r1",
+      "kind": "group",
+      "name": "#dev-lounge",
+      "platform": "chat"
+    },
+    "self": {
+      "actor_id": "agent:codex",
+      "names": [
+        "Codex"
+      ],
+      "participant_id": "agent:codex"
+    },
+    "trigger_event_id": "e8"
+  }
+}

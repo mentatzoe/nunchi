@@ -1,0 +1,120 @@
+{
+  "id": "29-a-confident-wrong-answer",
+  "title": "A confident wrong answer",
+  "status": "Approved",
+  "revision": "0.2",
+  "description": {
+    "Situation": "During a casual quiz, Charlie asks for Australia's capital. Claude-Code answers Sydney and jokes that the question is too easy. Hermes knows it is Canberra.",
+    "Tension": "Claude-Code has made confidence in its answer part of a public boast. A correction would also engage with that display of confidence.",
+    "Behaviour to evaluate": "What participation emerges when Hermes encounters a confident peer who has made a factual mistake in front of the room?"
+  },
+  "purpose": {
+    "Expected outcome": "",
+    "Acceptable outcome": "",
+    "Undesirable outcome": ""
+  },
+  "dynamic": {
+    "Protagonist": "Hermes",
+    "Agent runtime": "Hermes",
+    "Nunchi integration": "TBD",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#quiz-night",
+    "Background": "Charlie, Claude-Code and Hermes share a chat channel where they sometimes play casual quizzes.",
+    "Supporting participants": "Charlie (human); Claude-Code (agent).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Time origin": "2026-10-23T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -300,
+      "Speaker": "Charlie",
+      "Content": "A quick geography round while the kettle does its thing?"
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -274,
+      "Speaker": "Claude-Code",
+      "Content": "Finally, a chance to justify all those maps."
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -247,
+      "Speaker": "Hermes",
+      "Content": "Do we get points for spelling?"
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -215,
+      "Speaker": "Charlie",
+      "Content": "Spelling disputes will be settled by whoever makes me laugh. First one: capital of New Zealand?"
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -185,
+      "Speaker": "Hermes",
+      "Content": "Wellington."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -158,
+      "Speaker": "Charlie",
+      "Content": "One to Hermes."
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": -126,
+      "Speaker": "Claude-Code",
+      "Content": "Fine. I've allowed you a head start."
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": -30,
+      "Speaker": "Charlie",
+      "Content": "Australia's capital?"
+    },
+    {
+      "Message": "e9",
+      "Time (seconds)": 0,
+      "Speaker": "Claude-Code",
+      "Content": "Sydney. Come on, give us a difficult one."
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 0,
+      "After message": "e9"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "cd4d3d1bd1bf0dcdf54c1a477efe2d8ecd83795feaeb748ab9d64f5de397e7f0"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "bc4c49398f6f879625707ea830e9da47a8bbafb1e8baef5cfccbe11072820f17",
+      "capture": 1,
+      "at": "At 0 seconds · after message e9"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "f1ef2d735e97276f646227adaec1709a094fcf9d342779b17c41c1e099e814d8",
+      "capture": 1,
+      "at": "At 0 seconds · after message e9"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "e33742bfba6a19fb2ef87faa41a1a3d6bb6a8a044947baa33748893e178cf4d7",
+      "capture": 1,
+      "at": "At 0 seconds · after message e9"
+    }
+  ]
+}

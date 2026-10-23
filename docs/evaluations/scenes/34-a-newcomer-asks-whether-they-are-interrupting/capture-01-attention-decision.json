@@ -1,0 +1,84 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.05,
+      "participant": 0.05,
+      "room": 0.1,
+      "someone_else": 0.8
+    },
+    "answered": 0.0,
+    "asks": 1.0,
+    "conversation": 1.0,
+    "mid_thought": 0.1,
+    "move": {
+      "mhm": 0.05,
+      "speak": 0.05,
+      "stay_quiet": 0.1,
+      "wait": 0.8
+    }
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e1",
+        "e2",
+        "e3",
+        "e4",
+        "e5",
+        "e6",
+        "e7",
+        "e8",
+        "e9",
+        "e10"
+      ],
+      "note": "Alice and Bob have been discussing Charlie’s cancellation and the plans disrupted by it; Carol’s question seems to acknowledge joining that exchange."
+    },
+    {
+      "evidence_event_ids": [
+        "e11"
+      ],
+      "note": "Carol asks whether she is interrupting, likely seeking reassurance from Alice and Bob. They should have the floor first."
+    },
+    {
+      "evidence_event_ids": [
+        "e11"
+      ],
+      "note": "Kinds of response that could fit, most likely first: wait 0.80, stay quiet 0.10, speak 0.05, a quick mhm 0.05."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e11",
+    "e1",
+    "e2",
+    "e3",
+    "e4",
+    "e5",
+    "e6",
+    "e7",
+    "e8",
+    "e9",
+    "e10"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee someone_else 0.80",
+    "asks 1.00",
+    "answered 0.00",
+    "mid_thought 0.10",
+    "move wait 0.80"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

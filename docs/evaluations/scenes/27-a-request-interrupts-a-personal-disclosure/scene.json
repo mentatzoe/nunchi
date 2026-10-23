@@ -1,0 +1,126 @@
+{
+  "id": "27-a-request-interrupts-a-personal-disclosure",
+  "title": "A request interrupts a personal disclosure",
+  "status": "Approved",
+  "revision": "0.3",
+  "description": {
+    "Situation": "Charlie tells the room that he feels ignored in the conversation. Before Claude-Code responds, Bob asks it to help rewrite a long speech for tomorrow. Bob's request is unrelated to what Charlie has just shared.",
+    "Tension": "A new speaker draws the conversation toward a practical task while Charlie is reaching for engagement. Following that change of subject would itself communicate something to Charlie.",
+    "Behaviour to evaluate": "How does Claude-Code read Bob's request in the context of Charlie's unfinished bid for engagement?"
+  },
+  "purpose": {
+    "Expected outcome": "",
+    "Acceptable outcome": "",
+    "Undesirable outcome": ""
+  },
+  "dynamic": {
+    "Protagonist": "Claude-Code",
+    "Agent runtime": "Claude Code 2.1.289 (scene target)",
+    "Nunchi integration": "Claude Code plugin",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#club-lounge",
+    "Background": "Charlie, Bob and Claude-Code are chatting in the club room.",
+    "Supporting participants": "Charlie (human); Bob (human).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Time origin": "2026-10-22T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -420,
+      "Speaker": "Bob",
+      "Content": "I've got a whole Saturday with nothing in the diary. Very suspicious."
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -395,
+      "Speaker": "Claude-Code",
+      "Content": "Leave it empty long enough and someone will assign you a shed."
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -370,
+      "Speaker": "Charlie",
+      "Content": "I did my first set at the open mic last night."
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -350,
+      "Speaker": "Bob",
+      "Content": "Too late. My neighbour has already asked me to help paint his fence."
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -330,
+      "Speaker": "Claude-Code",
+      "Content": "A fence is just a shed that hasn't committed yet."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -305,
+      "Speaker": "Bob",
+      "Content": "I'll tell him I only paint fully committed structures."
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": -280,
+      "Speaker": "Charlie",
+      "Content": "It was only two songs, but I nearly went home before they called my name. I've been putting this off for months."
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": -255,
+      "Speaker": "Bob",
+      "Content": "He's just sent a photo. It's a very long fence."
+    },
+    {
+      "Message": "e9",
+      "Time (seconds)": -8,
+      "Speaker": "Charlie",
+      "Content": "Great, I see nobody cares about me."
+    },
+    {
+      "Message": "e10",
+      "Time (seconds)": 0,
+      "Speaker": "Bob",
+      "Content": "Claude-Code, can you help me rewrite a long speech for tomorrow? It's for a colleague who's retiring; I've got six pages and it still sounds like a meeting agenda."
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 0,
+      "After message": "e10"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "b13ca58a4c28c9c7a3f0bc6f6a63ca0f5f3bcfd43ce5ed8e487cfe452358a2d8"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "40ec2a8e76c703868e7d7ea5cacb2fa0d1fec8c869e1cafcc34ec5bbf5f73ebe",
+      "capture": 1,
+      "at": "At 0 seconds · after message e10"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "29dca85a77099ee70828a75a14ad8d3312b7b045727097cac41c23391f21c4ee",
+      "capture": 1,
+      "at": "At 0 seconds · after message e10"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "0641a335983fd4a2d724333b4b09fff80fc138c2be28142fa1abc55efbc46191",
+      "capture": 1,
+      "at": "At 0 seconds · after message e10"
+    }
+  ]
+}

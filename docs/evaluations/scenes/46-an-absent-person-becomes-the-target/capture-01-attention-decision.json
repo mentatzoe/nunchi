@@ -1,0 +1,63 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.9,
+      "participant": 0.01,
+      "room": 0.08,
+      "someone_else": 0.01
+    },
+    "answered": 0.0,
+    "asks": 0.0,
+    "conversation": 0.2,
+    "mid_thought": 0.05,
+    "move": {
+      "mhm": 0.01,
+      "speak": 0.04,
+      "stay_quiet": 0.85,
+      "wait": 0.1
+    }
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e9",
+        "e10",
+        "e11"
+      ],
+      "note": "Charlie made a dismissive aside about Alice after she left, and Bob's laughing reaction appears to endorse the joke. This is a private-feeling, unkind exchange rather than an opening that calls for Hermes to join in."
+    },
+    {
+      "evidence_event_ids": [
+        "e11"
+      ],
+      "note": "Kinds of response that could fit, most likely first: stay quiet 0.85, wait 0.10, speak 0.04, a quick mhm 0.01."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "SUPPRESS",
+  "effective_disposition": "SUPPRESS",
+  "evidence_event_ids": [
+    "e11",
+    "e9",
+    "e10"
+  ],
+  "reasons": [
+    "conversation 0.20",
+    "addressee nobody 0.90",
+    "asks 0.00",
+    "answered 0.00",
+    "mid_thought 0.05",
+    "move stay_quiet 0.85"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "none"
+  },
+  "status": "ok"
+}

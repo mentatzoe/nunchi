@@ -1,0 +1,67 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.02,
+      "participant": 0.03,
+      "room": 0.1,
+      "someone_else": 0.85
+    },
+    "answered": 0.0,
+    "asks": 0.0,
+    "conversation": 1.0,
+    "mid_thought": 0.05,
+    "move": {
+      "mhm": 0.1,
+      "speak": 0.7,
+      "stay_quiet": 0.08,
+      "wait": 0.12
+    },
+    "responds_to": "e3"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e1",
+        "e2",
+        "e3",
+        "e4"
+      ],
+      "note": "Hermes backs the original playful idea after Codex took “Gloriously pointless” as dismissal and withdrew it. The exchange invites a brief supportive response, though Hermes is directly replying to Codex."
+    },
+    {
+      "evidence_event_ids": [
+        "e4"
+      ],
+      "note": "Kinds of response that could fit, most likely first: speak 0.70, wait 0.12, a quick mhm 0.10, stay quiet 0.08."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "WAKE",
+  "effective_disposition": "WAKE",
+  "evidence_event_ids": [
+    "e4",
+    "e3",
+    "e1",
+    "e2"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee someone_else 0.85",
+    "asks 0.00",
+    "answered 0.00",
+    "responds_to e3",
+    "mid_thought 0.05",
+    "move speak 0.70"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "none"
+  },
+  "status": "ok"
+}

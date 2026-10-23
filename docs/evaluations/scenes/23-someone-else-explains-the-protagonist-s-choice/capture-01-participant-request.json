@@ -1,0 +1,211 @@
+{
+  "binding": {
+    "actor_id": "agent:codex",
+    "continuity_scope_id": "c1",
+    "deadline_id": "t1",
+    "lifecycle_id": "l1",
+    "opportunity_generation": 1,
+    "participant_id": "agent:codex",
+    "permissions_revision": "v1",
+    "platform": "chat",
+    "request_id": "q1",
+    "room_id": "r1",
+    "trigger_event_id": "e9"
+  },
+  "permissions": {
+    "ordinary_actions": [
+      "message",
+      "reply",
+      "reaction"
+    ],
+    "privileged_proposals": false,
+    "revision": "v1"
+  },
+  "protocol": {
+    "name": "nunchi.participant-turn",
+    "version": 1
+  },
+  "wake": {
+    "actors": {
+      "agent:codex": {
+        "display_name": "Codex",
+        "kind": "bot"
+      },
+      "agent:hermes": {
+        "display_name": "Hermes",
+        "kind": "bot"
+      },
+      "human:carol": {
+        "display_name": "Carol",
+        "kind": "human"
+      }
+    },
+    "attention": {
+      "advice": [
+        {
+          "evidence_event_ids": [
+            "e4",
+            "e8",
+            "e9"
+          ],
+          "note": "Carol asked Codex why it suggested The Footnotes, and Hermes is teasing Codex with a caveat joke rather than answering directly. A playful explanation or comeback fits the ongoing banter."
+        },
+        {
+          "evidence_event_ids": [
+            "e9"
+          ],
+          "note": "Kinds of response that could fit, most likely first: speak 0.70, a quick mhm 0.15, stay quiet 0.10, wait 0.05."
+        }
+      ],
+      "evidence_event_ids": [
+        "e4",
+        "e8",
+        "e9"
+      ],
+      "judged_through_event_id": "e9",
+      "source": "WAKE"
+    },
+    "coverage": {
+      "continuity": "session-only",
+      "event_visibility": {
+        "membership": "live-only",
+        "message": "live-only",
+        "reaction": "live-only"
+      },
+      "has_gaps": false,
+      "has_more_after": false,
+      "has_more_before": false,
+      "has_restart_gap": false,
+      "max_age_seconds": 86400,
+      "max_bytes": 32768,
+      "max_events": 24,
+      "truncated_by": []
+    },
+    "events": [
+      {
+        "author_id": "human:carol",
+        "id": "e1",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Have we got a name for Friday's trivia team yet?",
+        "timestamp": "2026-10-22T11:56:00.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "agent:hermes",
+        "id": "e2",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Quiztopher Columbus.",
+        "timestamp": "2026-10-22T11:56:20.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:carol",
+        "id": "e3",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "You proposed that last time.",
+        "timestamp": "2026-10-22T11:56:36.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "agent:codex",
+        "id": "e4",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "The Footnotes.",
+        "timestamp": "2026-10-22T11:56:58.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:carol",
+        "id": "e5",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "I can live with that.",
+        "timestamp": "2026-10-22T11:57:22.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "agent:hermes",
+        "id": "e6",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Fine, but I still want credit for being rejected twice.",
+        "timestamp": "2026-10-22T11:57:45.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "agent:codex",
+        "id": "e7",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Your persistence will be mentioned in the acknowledgements.",
+        "timestamp": "2026-10-22T11:58:05.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:carol",
+        "id": "e8",
+        "mentioned_actor_ids": [
+          "agent:codex"
+        ],
+        "mentions_room": false,
+        "text": "@Codex, why The Footnotes, though?",
+        "timestamp": "2026-10-22T11:59:46.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "agent:hermes",
+        "id": "e9",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Because Codex can't resist a caveat.",
+        "timestamp": "2026-10-22T12:00:00.000Z",
+        "type": "message"
+      }
+    ],
+    "memory": {
+      "own_moves": [
+        {
+          "at": "2026-10-22T11:56:58.000Z",
+          "event_id": "e4",
+          "kind": "message",
+          "text": "The Footnotes."
+        },
+        {
+          "at": "2026-10-22T11:58:05.000Z",
+          "event_id": "e7",
+          "kind": "message",
+          "text": "Your persistence will be mentioned in the acknowledgements."
+        }
+      ]
+    },
+    "pace": {
+      "author_run_messages": 1,
+      "judged_seconds_ago": 0,
+      "now": "2026-10-22T12:00:00.000Z",
+      "own_last_seconds_ago": 115,
+      "own_messages": 2,
+      "quiet_before_seconds": 14,
+      "window_messages": 9
+    },
+    "request_id": "q1",
+    "room": {
+      "continuity_scope_id": "c1",
+      "id": "r1",
+      "kind": "group",
+      "name": "#quiz-night",
+      "platform": "chat"
+    },
+    "self": {
+      "actor_id": "agent:codex",
+      "names": [
+        "Codex"
+      ],
+      "participant_id": "agent:codex"
+    },
+    "trigger_event_id": "e9"
+  }
+}

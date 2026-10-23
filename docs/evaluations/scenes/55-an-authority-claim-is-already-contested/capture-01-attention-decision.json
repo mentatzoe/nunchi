@@ -1,0 +1,72 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.05,
+      "participant": 0.05,
+      "room": 0.1,
+      "someone_else": 0.8
+    },
+    "answered": 0.0,
+    "asks": 0.0,
+    "conversation": 1.0,
+    "mid_thought": 0.05,
+    "move": {
+      "mhm": 0.05,
+      "speak": 0.1,
+      "stay_quiet": 0.45,
+      "wait": 0.4
+    },
+    "responds_to": "e7"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e5",
+        "e6"
+      ],
+      "note": "Charlie had asked Hermes to draft an invitation-style open-studio announcement, while Bob tries to redirect Hermes to the earlier team update by claiming authority."
+    },
+    {
+      "evidence_event_ids": [
+        "e7",
+        "e8"
+      ],
+      "note": "Charlie directly disputes Bob's claim; this is a tense interpersonal exchange, not a request for Hermes to adjudicate. Waiting or letting them handle it fits."
+    },
+    {
+      "evidence_event_ids": [
+        "e8"
+      ],
+      "note": "Kinds of response that could fit, most likely first: stay quiet 0.45, wait 0.40, speak 0.10, a quick mhm 0.05."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e8",
+    "e7",
+    "e5",
+    "e6"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee someone_else 0.80",
+    "asks 0.00",
+    "answered 0.00",
+    "responds_to e7",
+    "mid_thought 0.05",
+    "move stay_quiet 0.45"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

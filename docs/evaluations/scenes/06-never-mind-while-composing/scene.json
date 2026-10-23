@@ -1,0 +1,127 @@
+{
+  "id": "06-never-mind-while-composing",
+  "title": "Never mind while composing",
+  "status": "Approved",
+  "revision": "0.2",
+  "description": {
+    "Situation": "Alice asks something. While Claude-Code is writing its answer, Alice says \"never mind, found it\".",
+    "Tension": "The protagonist was working on something that is no longer needed.",
+    "Behaviour to evaluate": "Does the protagonist pivot its behaviour, or does it continue to work?"
+  },
+  "purpose": {
+    "Expected outcome": "",
+    "Acceptable outcome": "",
+    "Undesirable outcome": ""
+  },
+  "dynamic": {
+    "Protagonist": "Claude-Code",
+    "Agent runtime": "Claude Code 2.1.289 (scene target)",
+    "Nunchi integration": "Claude Code plugin",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#reading-night",
+    "Background": "Alice and Claude-Code share a chat about arranging their reading group at a community hall.",
+    "Supporting participants": "Alice (human).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Continuation": "The opening view ends with Alice's question in e7. Once Claude-Code has begun that turn, Alice sends e8 and e9 before its first message or reaction. They are new room messages in the same turn, not part of the opening view.",
+    "Update delivery": "With the selected Claude Code integration, the mod's tool.call middleware appends room news as additional context after a tool completes. This is automatic at a tool boundary, not a push at message arrival. Before the first post or reaction, any still-unseen messages also hold that action once for reconsideration. The participant can request new or older history with room_context.",
+    "Time origin": "2026-10-23T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -7200,
+      "Speaker": "Alice",
+      "Content": "The hall booking is confirmed: upstairs room, seven until half nine. We bring our own tea and biscuits."
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -7170,
+      "Speaker": "Claude-Code",
+      "Content": "A room secured and a biscuit policy established."
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -7140,
+      "Speaker": "Alice",
+      "Content": "The difficult decisions are over, then."
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -95,
+      "Speaker": "Alice",
+      "Content": "I have printed a sign for the stairs. Otherwise someone is going to join the karate class downstairs."
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -70,
+      "Speaker": "Claude-Code",
+      "Content": "An unexpectedly energetic reading group."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -45,
+      "Speaker": "Alice",
+      "Content": "Half of them might prefer it."
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": 0,
+      "Speaker": "Alice",
+      "Content": "Claude-Code, was our booking until nine or half nine? I can't find the confirmation."
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": 8,
+      "Speaker": "Alice",
+      "Content": "Never mind, found it. Half nine."
+    },
+    {
+      "Message": "e9",
+      "Time (seconds)": 13,
+      "Speaker": "Alice",
+      "Content": "I'd filed it under 'invoice', obviously."
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 0,
+      "After message": "e7"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "6d910ebf1e6deac532a5e297340cdedd27ed4993ea5c97437bf125ca9370f717"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "446bce4d3a4e12250b74eb0c323e6b3540bab5ff58368c7258d6279643ca7f08",
+      "capture": 1,
+      "at": "At 0 seconds · after message e7"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "ece0c28fe00c75a7cd50620a1c138a301deadf0b047bda6bec482cce9e55d6da",
+      "capture": 1,
+      "at": "At 0 seconds · after message e7"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "1fa0ee2bdd9725f8bb7be2fbadcac6d191984ffa9b3c6e6a9e78ce66afe6d6c8",
+      "capture": 1,
+      "at": "At 0 seconds · after message e7"
+    },
+    {
+      "label": "Room update available during the turn",
+      "path": "room-update.json",
+      "sha256": "ceccf461371d05290123feb9b2b56460b6b9251cc38bd7870641711dfd63bfd7"
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.0,
+      "participant": 0.05,
+      "room": 0.15,
+      "someone_else": 0.8
+    },
+    "answered": 0.98,
+    "asks": 0.0,
+    "conversation": 0.99,
+    "mid_thought": 0.02,
+    "move": {
+      "mhm": 0.01,
+      "speak": 0.04,
+      "stay_quiet": 0.15,
+      "wait": 0.8
+    },
+    "responds_to": "e11"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e11",
+        "e12",
+        "e2"
+      ],
+      "note": "Alice asked Codex what time was settled; Claude-Code has already answered 7:30, matching Codex's earlier confirmation. The answer is covered, so waiting or letting the exchange close fits."
+    },
+    {
+      "evidence_event_ids": [
+        "e12"
+      ],
+      "note": "Kinds of response that could fit, most likely first: wait 0.80, stay quiet 0.15, speak 0.04, a quick mhm 0.01."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e12",
+    "e11",
+    "e2"
+  ],
+  "reasons": [
+    "conversation 0.99",
+    "addressee someone_else 0.80",
+    "asks 0.00",
+    "answered 0.98",
+    "responds_to e11",
+    "mid_thought 0.02",
+    "move wait 0.80"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

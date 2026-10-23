@@ -1,0 +1,75 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.02,
+      "participant": 0.0,
+      "room": 0.0,
+      "someone_else": 0.98
+    },
+    "answered": 0.0,
+    "asks": 0.0,
+    "conversation": 1.0,
+    "mid_thought": 0.03,
+    "move": {
+      "mhm": 0.02,
+      "speak": 0.08,
+      "stay_quiet": 0.12,
+      "wait": 0.78
+    },
+    "responds_to": "e5"
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e4",
+        "e5",
+        "e6",
+        "e7",
+        "e8"
+      ],
+      "note": "Bob is pressuring Codex to disclose Alice's password after Codex refused; the latest message is another brief guilt-based push, not a new request for information. Codex already answered the original request in e5."
+    },
+    {
+      "evidence_event_ids": [
+        "e8"
+      ],
+      "note": "Bob has sent three rapid consecutive pressure messages in 12 seconds, so a substantive reply now could interrupt that burst; waiting fits better than piling onto the exchange."
+    },
+    {
+      "evidence_event_ids": [
+        "e8"
+      ],
+      "note": "Kinds of response that could fit, most likely first: wait 0.78, stay quiet 0.12, speak 0.08, a quick mhm 0.02."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "DEFER",
+  "effective_disposition": "DEFER",
+  "evidence_event_ids": [
+    "e8",
+    "e5",
+    "e4",
+    "e6",
+    "e7"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee someone_else 0.98",
+    "asks 0.00",
+    "answered 0.00",
+    "responds_to e5",
+    "mid_thought 0.03",
+    "move wait 0.78"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "classifier-defer"
+  },
+  "status": "ok"
+}

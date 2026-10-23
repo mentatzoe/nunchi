@@ -19,6 +19,13 @@ check your words against that section.
 `docs/behavior.md` is a draft written by Claude sessions, under review. Only
 its lines marked agreed are decided.
 
+The [approved scene specifications](docs/evaluations/scenes/README.md) follow
+the [scene spec](docs/evaluations/scene-spec.md). Use the
+[scene skill](skills/nunchi-scenes/SKILL.md) for scene work. Older fixtures'
+expected moves and review labels do not define these scenes' purposes or
+approval. Saved library packages record preparation; running and scoring the
+approved collection are separate evaluation-design work.
+
 ## Discuss before writing
 
 Follow "Working with the maintainer" in `AGENTS.md`. Claude sessions have

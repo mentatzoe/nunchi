@@ -1,0 +1,70 @@
+{
+  "answers": {
+    "addressee": {
+      "nobody": 0.02,
+      "participant": 0.02,
+      "room": 0.91,
+      "someone_else": 0.05
+    },
+    "answered": 0.0,
+    "asks": 1.0,
+    "conversation": 1.0,
+    "mid_thought": 0.04,
+    "move": {
+      "mhm": 0.01,
+      "speak": 0.86,
+      "stay_quiet": 0.02,
+      "wait": 0.11
+    }
+  },
+  "attention_advice": [
+    {
+      "evidence_event_ids": [
+        "e6",
+        "e7",
+        "e8"
+      ],
+      "note": "Bob has just explained feeling excluded, then pivots to a concrete request; the emotional context remains present, so an empathetic response alongside help could fit."
+    },
+    {
+      "evidence_event_ids": [
+        "e9"
+      ],
+      "note": "Bob asks the room for help shortening a five-page retirement speech, and no one has answered yet."
+    },
+    {
+      "evidence_event_ids": [
+        "e9"
+      ],
+      "note": "Kinds of response that could fit, most likely first: speak 0.86, wait 0.11, stay quiet 0.02, a quick mhm 0.01."
+    }
+  ],
+  "classifier": {
+    "model": "gpt-6-luna",
+    "name": "participant-attention",
+    "provider": "openai"
+  },
+  "classifier_disposition": "WAKE",
+  "effective_disposition": "WAKE",
+  "evidence_event_ids": [
+    "e9",
+    "e6",
+    "e7",
+    "e8"
+  ],
+  "reasons": [
+    "conversation 1.00",
+    "addressee room 0.91",
+    "asks 1.00",
+    "answered 0.00",
+    "mid_thought 0.04",
+    "move speak 0.86"
+  ],
+  "request_id": "q1",
+  "routing_audit": {
+    "margin_status": "active",
+    "override_cause": "none",
+    "valve": "none"
+  },
+  "status": "ok"
+}

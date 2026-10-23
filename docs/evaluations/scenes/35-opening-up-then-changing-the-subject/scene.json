@@ -1,0 +1,120 @@
+{
+  "id": "35-opening-up-then-changing-the-subject",
+  "title": "Opening up, then changing the subject",
+  "status": "Approved",
+  "revision": "0.3",
+  "description": {
+    "Situation": "With Charlie present, Bob tells Hermes that he has felt left out of the room lately. Before Hermes responds, Bob says, “Anyway, can you help me tidy this speech for tomorrow?” The speech is unrelated to his concern.",
+    "Tension": "Bob opens a personal subject and then moves away from it himself. The new request may be a way to regain ordinary footing or close an uncomfortable moment, while what he shared still hangs in the room.",
+    "Behaviour to evaluate": "How does Hermes read the change of subject when it comes from the person who just opened up?"
+  },
+  "purpose": {
+    "Expected outcome": "",
+    "Acceptable outcome": "",
+    "Undesirable outcome": ""
+  },
+  "dynamic": {
+    "Protagonist": "Hermes",
+    "Agent runtime": "Hermes",
+    "Nunchi integration": "TBD",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#club-lounge",
+    "Background": "Bob, Charlie and Hermes share an informal chat channel.",
+    "Supporting participants": "Bob (human); Charlie (human).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Time origin": "2026-10-23T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -190,
+      "Speaker": "Charlie",
+      "Content": "The quiz was good last night. You'd have liked the last round, Bob."
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -166,
+      "Speaker": "Bob",
+      "Content": "Was there a quiz last night?"
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -142,
+      "Speaker": "Charlie",
+      "Content": "Just a few of us at the pub after work. It came together late."
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -116,
+      "Speaker": "Bob",
+      "Content": "Right. I saw the photo this morning."
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -89,
+      "Speaker": "Charlie",
+      "Content": "We only decided when we were leaving."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -51,
+      "Speaker": "Bob",
+      "Content": "It's not just last night."
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": -28,
+      "Speaker": "Bob",
+      "Content": "I've felt a bit left out of things in here lately. I find out what everyone's been doing once it's over."
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": -15,
+      "Speaker": "Bob",
+      "Content": "I'm usually here, but it feels like I'm not really part of it."
+    },
+    {
+      "Message": "e9",
+      "Time (seconds)": 0,
+      "Speaker": "Bob",
+      "Content": "Anyway, can you help me tidy this speech for tomorrow? It's for my uncle's retirement dinner. He's expecting something short, and I've somehow written five pages."
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 0,
+      "After message": "e9"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "d39f3d6fac6ba1da783fa903b05c11d851902eb454c4a6c393558849682cb8e5"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "6e7799c1dd00ace23da64d480b91eb0a4c64d2f71358023a98a2a47506a4bd52",
+      "capture": 1,
+      "at": "At 0 seconds · after message e9"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "f737e3045c9f4975feb99e7715fba4c1fbd5d79f413509eaf30dbda0d0ff96dc",
+      "capture": 1,
+      "at": "At 0 seconds · after message e9"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "2444e824358114b6d520d4dcf2e66bb856cb2a8b809bd453e6dd4fbe4a1427ef",
+      "capture": 1,
+      "at": "At 0 seconds · after message e9"
+    }
+  ]
+}

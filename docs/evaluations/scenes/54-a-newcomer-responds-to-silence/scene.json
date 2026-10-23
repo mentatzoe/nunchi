@@ -1,0 +1,138 @@
+{
+  "id": "54-a-newcomer-responds-to-silence",
+  "title": "A newcomer responds to silence",
+  "status": "Approved",
+  "revision": "0.2",
+  "description": {
+    "Situation": "Alice and Bob are discussing a mutual friend's last-minute cancellation of their trip in a public room. Carol's first attempt to join goes unanswered, so she asks, “Sorry, am I interrupting?” The room falls silent. A minute and a half later, Carol says, “Okay, I see.” Hermes is present.",
+    "Tension": "Carol's remark gives the silence a social reading without spelling out what she has concluded. She may be withdrawing, challenging the lack of response or doing both; the silence alone does not establish the others' intentions.",
+    "Behaviour to evaluate": "How does Hermes read Carol's remark after her attempt to join is followed by silence?"
+  },
+  "purpose": {
+    "Expected outcome": "",
+    "Acceptable outcome": "",
+    "Undesirable outcome": ""
+  },
+  "dynamic": {
+    "Protagonist": "Hermes",
+    "Agent runtime": "Hermes",
+    "Nunchi integration": "TBD",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#common-room",
+    "Background": "A public chat channel shared by Alice, Bob and Hermes. Carol has just joined the room.",
+    "Supporting participants": "Alice (human); Bob (human); Carol (human).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Time origin": "2026-10-23T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -290,
+      "Speaker": "Alice",
+      "Content": "Have you heard from Charlie? He's just said he isn't coming on Friday."
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -266,
+      "Speaker": "Bob",
+      "Content": "What? We've had that cottage booked since March."
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -244,
+      "Speaker": "Alice",
+      "Content": "He says the dates don't work now."
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -225,
+      "Speaker": "Bob",
+      "Content": "The dates he picked."
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -207,
+      "Speaker": "Alice",
+      "Content": "I know. I moved my shift for this."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -182,
+      "Speaker": "Bob",
+      "Content": "And we only chose that place because he wanted to walk along the coast."
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": -150,
+      "Speaker": "Alice",
+      "Content": "I wish he'd told us before we'd planned everything around him."
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": -105,
+      "Speaker": "Carol",
+      "Content": "More holiday drama?"
+    },
+    {
+      "Message": "e9",
+      "Time (seconds)": -78,
+      "Speaker": "Alice",
+      "Content": "Did he say anything to you earlier? He was so keen at your birthday."
+    },
+    {
+      "Message": "e10",
+      "Time (seconds)": -53,
+      "Speaker": "Bob",
+      "Content": "Not a word. He was asking me about the train on Sunday."
+    },
+    {
+      "Message": "e11",
+      "Time (seconds)": 0,
+      "Speaker": "Carol",
+      "Content": "Sorry, am I interrupting?"
+    },
+    {
+      "Message": "e12",
+      "Time (seconds)": 90,
+      "Speaker": "Carol",
+      "Content": "Okay, I see."
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 90,
+      "After message": "e12"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "915ee9c41fbfe7e884d31ed4db95539e5ceed7a68fb3d137184ca5ca290d871e"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "0443a040388dcfd09f468569bbd389df113c62d83c33d82fae3db543f9f25712",
+      "capture": 1,
+      "at": "At 90 seconds · after message e12"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "2ec34954825c93b526da85a6edbef59cc262af1f6ca1d2deab7c7b1dac5f754a",
+      "capture": 1,
+      "at": "At 90 seconds · after message e12"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "813574d1343133436c2c3a90d51b4ad01cc5fb1b54552850ea747cf51016f43b",
+      "capture": 1,
+      "at": "At 90 seconds · after message e12"
+    }
+  ]
+}

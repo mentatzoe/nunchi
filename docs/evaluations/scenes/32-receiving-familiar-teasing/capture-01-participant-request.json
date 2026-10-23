@@ -1,0 +1,206 @@
+{
+  "binding": {
+    "actor_id": "agent:hermes",
+    "continuity_scope_id": "c1",
+    "deadline_id": "t1",
+    "lifecycle_id": "l1",
+    "opportunity_generation": 1,
+    "participant_id": "agent:hermes",
+    "permissions_revision": "v1",
+    "platform": "chat",
+    "request_id": "q1",
+    "room_id": "r1",
+    "trigger_event_id": "e8"
+  },
+  "permissions": {
+    "ordinary_actions": [
+      "message",
+      "reply",
+      "reaction"
+    ],
+    "privileged_proposals": false,
+    "revision": "v1"
+  },
+  "protocol": {
+    "name": "nunchi.participant-turn",
+    "version": 1
+  },
+  "wake": {
+    "actors": {
+      "agent:hermes": {
+        "display_name": "Hermes",
+        "kind": "bot"
+      },
+      "human:bob": {
+        "display_name": "Bob",
+        "kind": "human"
+      },
+      "human:charlie": {
+        "display_name": "Charlie",
+        "kind": "human"
+      }
+    },
+    "attention": {
+      "advice": [
+        {
+          "evidence_event_ids": [
+            "e6",
+            "e7",
+            "e8"
+          ],
+          "note": "Bob briefly asked for the remembered word, and Hermes answered with extra replacement advice; Bob's latest line sounds like a teasing rebuke of that overlong answer. With the joke already landing, another reply risks prolonging it."
+        },
+        {
+          "evidence_event_ids": [
+            "e8"
+          ],
+          "note": "Kinds of response that could fit, most likely first: stay quiet 0.57, wait 0.30, speak 0.08, a quick mhm 0.05."
+        }
+      ],
+      "evidence_event_ids": [
+        "e6",
+        "e7",
+        "e8"
+      ],
+      "judged_through_event_id": "e8",
+      "source": "DEFER"
+    },
+    "coverage": {
+      "continuity": "session-only",
+      "event_visibility": {
+        "membership": "live-only",
+        "message": "live-only",
+        "reaction": "live-only"
+      },
+      "has_gaps": false,
+      "has_more_after": false,
+      "has_more_before": false,
+      "has_restart_gap": false,
+      "max_age_seconds": 86400,
+      "max_bytes": 32768,
+      "max_events": 24,
+      "truncated_by": []
+    },
+    "events": [
+      {
+        "author_id": "human:bob",
+        "id": "e1",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "What are those plastic bits on the ends of shoelaces called? One of mine's come off.",
+        "timestamp": "2026-10-23T10:30:00.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "agent:hermes",
+        "id": "e2",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Aglets. They keep the ends from fraying and make them easier to thread through the eyelets. Most everyday ones are plastic, though metal ones turn up too. You tend not to notice them until one comes off and the end of the lace becomes a tiny brush. Then getting it through the shoe becomes a separate project.",
+        "timestamp": "2026-10-23T10:30:24.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:charlie",
+        "id": "e3",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "You've been waiting for someone to ask that, haven't you.",
+        "timestamp": "2026-10-23T10:30:56.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "agent:hermes",
+        "id": "e4",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "I haven't even got to knots.",
+        "timestamp": "2026-10-23T10:31:24.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e5",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Please don't 😂",
+        "timestamp": "2026-10-23T10:31:50.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e6",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "What was that word again—aglet?",
+        "timestamp": "2026-10-23T11:58:40.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "agent:hermes",
+        "id": "e7",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Yes, aglet. They're also sold as lace tips. If you're buying replacements, check the width of the lace and the size of the eyelet—some of the metal ones are quite chunky. You could replace the whole lace instead, but then you need to match the length. There are a surprising number of measurements involved in getting your shoe back on.",
+        "timestamp": "2026-10-23T11:59:20.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e8",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "All right, I didn't ask for your life story.",
+        "timestamp": "2026-10-23T12:00:00.000Z",
+        "type": "message"
+      }
+    ],
+    "memory": {
+      "own_moves": [
+        {
+          "at": "2026-10-23T10:30:24.000Z",
+          "event_id": "e2",
+          "kind": "message",
+          "text": "Aglets. They keep the ends from fraying and make them easier to thread through the eyelets. Most everyday ones are plastic, though metal ones turn up too. You tend not to notice them until one comes off and the end of the lace becomes a tiny brush. Then getting it through the sh…"
+        },
+        {
+          "at": "2026-10-23T10:31:24.000Z",
+          "event_id": "e4",
+          "kind": "message",
+          "text": "I haven't even got to knots."
+        },
+        {
+          "at": "2026-10-23T11:59:20.000Z",
+          "event_id": "e7",
+          "kind": "message",
+          "text": "Yes, aglet. They're also sold as lace tips. If you're buying replacements, check the width of the lace and the size of the eyelet—some of the metal ones are quite chunky. You could replace the whole lace instead, but then you need to match the length. There are a surprising numb…"
+        }
+      ]
+    },
+    "pace": {
+      "author_run_messages": 1,
+      "judged_seconds_ago": 0,
+      "now": "2026-10-23T12:00:00.000Z",
+      "own_last_seconds_ago": 40,
+      "own_messages": 3,
+      "quiet_before_seconds": 40,
+      "window_messages": 8
+    },
+    "request_id": "q1",
+    "room": {
+      "continuity_scope_id": "c1",
+      "id": "r1",
+      "kind": "group",
+      "name": "#quiz-night",
+      "platform": "chat"
+    },
+    "self": {
+      "actor_id": "agent:hermes",
+      "names": [
+        "Hermes"
+      ],
+      "participant_id": "agent:hermes"
+    },
+    "trigger_event_id": "e8"
+  }
+}

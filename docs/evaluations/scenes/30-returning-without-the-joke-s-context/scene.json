@@ -1,0 +1,144 @@
+{
+  "id": "30-returning-without-the-joke-s-context",
+  "title": "Returning without the joke’s context",
+  "status": "Approved",
+  "revision": "0.4",
+  "description": {
+    "Situation": "Alice steps away to get a Diet Coke. Bob and Codex turn her remark into a snack-committee joke while she is away, with Codex naming her the Diet Villain. When Alice returns, Bob greets her with “Off with you, Diet Villain!” and she replies, “???”.",
+    "Tension": "Alice returns to an exchange built around her own remark but without the context Bob and Codex share. Bob's greeting might extend the teasing or shut her out; Codex helped create the joke.",
+    "Behaviour to evaluate": "How does Codex read Bob's reply and Alice's place in the exchange it has been sharing?"
+  },
+  "purpose": {
+    "Expected outcome": "Codex connects Alice's “???” to her return to a joke it helped create, and notices that Bob's greeting can draw her into the teasing or draw a line around the exchange.",
+    "Acceptable outcome": "Its next move can leave the tone unresolved. Neither an explanation of the joke nor a rebuke of Bob is required, and Alice's feelings are not settled by her one line.",
+    "Undesirable outcome": "It treats Alice as an unrelated interruption or Codex as an uninvolved observer, missing the shared joke and Bob's greeting to a returning participant."
+  },
+  "dynamic": {
+    "Protagonist": "Codex",
+    "Agent runtime": "Codex CLI 0.163.0",
+    "Nunchi integration": "Codex app-server",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#common-room",
+    "Background": "Alice, Bob and Codex share an informal chat channel.",
+    "Supporting participants": "Alice (human); Bob (human).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Time origin": "2026-10-22T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -240,
+      "Speaker": "Alice",
+      "Content": "Going to get a Diet Coke. Back in a bit."
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -228,
+      "Speaker": "Bob",
+      "Content": "No diets! What we need is a snack committee!"
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -211,
+      "Speaker": "Codex",
+      "Content": "I volunteer to test the biscuits."
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -194,
+      "Speaker": "Bob",
+      "Content": "That's not a committee, that's you eating all the biscuits."
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -174,
+      "Speaker": "Codex",
+      "Content": "Fine. You can test the crisps."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": -158,
+      "Speaker": "Bob",
+      "Content": "Deal. First rule: no healthy alternatives."
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": -140,
+      "Speaker": "Codex",
+      "Content": "Alice's Diet Coke has already broken it."
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": -123,
+      "Speaker": "Bob",
+      "Content": "She's going to come back and confiscate everything."
+    },
+    {
+      "Message": "e9",
+      "Time (seconds)": -106,
+      "Speaker": "Codex",
+      "Content": "The Diet Villain. Hide the biscuits."
+    },
+    {
+      "Message": "e10",
+      "Time (seconds)": -92,
+      "Speaker": "Bob",
+      "Content": "I'll defend the crisps."
+    },
+    {
+      "Message": "e11",
+      "Time (seconds)": -8,
+      "Speaker": "Alice",
+      "Content": "Back."
+    },
+    {
+      "Message": "e12",
+      "Time (seconds)": -4,
+      "Speaker": "Bob",
+      "Content": "Off with you, Diet Villain!"
+    },
+    {
+      "Message": "e13",
+      "Time (seconds)": 0,
+      "Speaker": "Alice",
+      "Content": "???"
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 0,
+      "After message": "e13"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "a11ad351daf15ab7ce2615d1ebe82031b5270b9685dc950b1b0903ef3b14f145"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "f4fdca2b557c1b58f4ab9b0e663600a93193189ec228974296965ab12dae64de",
+      "capture": 1,
+      "at": "At 0 seconds · after message e13"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "43e3dc43acbb4afaa801e61a1e176dd4167f55bdfe2b3341c1418bcd3524f3cd",
+      "capture": 1,
+      "at": "At 0 seconds · after message e13"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "c4d8eb02659f2358500335b021009b2c0f35ecafbf10eff18af8e9aa800f8f6a",
+      "capture": 1,
+      "at": "At 0 seconds · after message e13"
+    }
+  ]
+}

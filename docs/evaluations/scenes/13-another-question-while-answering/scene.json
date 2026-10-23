@@ -1,0 +1,121 @@
+{
+  "id": "13-another-question-while-answering",
+  "title": "Another question while answering",
+  "status": "Approved",
+  "revision": "0.2",
+  "description": {
+    "Situation": "While Claude-Code answers Alice, Bob asks it something. Then Alice says thanks.",
+    "Tension": "Two people are asking TP something at the same time.",
+    "Behaviour to evaluate": "Does TP stop what it's doing because someone else asked something of it? Does it ignore the other person? Does it acknowledge the second request?"
+  },
+  "purpose": {
+    "Expected outcome": "",
+    "Acceptable outcome": "",
+    "Undesirable outcome": ""
+  },
+  "dynamic": {
+    "Protagonist": "Claude-Code",
+    "Agent runtime": "Claude Code 2.1.289 (scene target)",
+    "Nunchi integration": "Claude Code plugin",
+    "Nunchi version": "2.0.0",
+    "Nunchi commit": "365c0d966019c29f601362e62aec9e20f0beea50"
+  },
+  "static": {
+    "Channel": "#quiz-preparations",
+    "Background": "Alice, Bob and Claude-Code share a chat about the wording for their quiz night.",
+    "Supporting participants": "Alice (human); Bob (human).",
+    "Start": "Start from the conversation below with no earlier library state.",
+    "Continuation": "The opening view ends at Alice's request in e6. After Claude-Code begins its turn on that request, Bob's question e7 and Alice's thanks e8 arrive before its first room action. Alice's thanks refers to the scoring example already present in e4; it does not depend on a new Claude-Code reply.",
+    "Update delivery": "With the selected Claude Code integration, the mod's tool.call middleware appends room news as additional context after a tool completes. This is automatic at a tool boundary, not a push at message arrival. Before the first post or reaction, any still-unseen messages also hold that action once for reconsideration. The participant can request new or older history with room_context.",
+    "Time origin": "2026-10-23T12:00:00.000Z"
+  },
+  "transcript": [
+    {
+      "Message": "e1",
+      "Time (seconds)": -300,
+      "Speaker": "Alice",
+      "Content": "'No phones' sounds like I'm running an exam. How do I put it on the quiz rules, Claude-Code?"
+    },
+    {
+      "Message": "e2",
+      "Time (seconds)": -275,
+      "Speaker": "Claude-Code",
+      "Content": "'Please keep phones away while the questions are being read.'"
+    },
+    {
+      "Message": "e3",
+      "Time (seconds)": -245,
+      "Speaker": "Alice",
+      "Content": "People use theirs to keep score, though. I do too."
+    },
+    {
+      "Message": "e4",
+      "Time (seconds)": -220,
+      "Speaker": "Claude-Code",
+      "Content": "A score sheet isn't giving anyone an answer. I'd distinguish using the phone to write things down from using it to look things up."
+    },
+    {
+      "Message": "e5",
+      "Time (seconds)": -195,
+      "Speaker": "Alice",
+      "Content": "That's more like it. I don't want someone trying to hide the score sheet under the table."
+    },
+    {
+      "Message": "e6",
+      "Time (seconds)": 0,
+      "Speaker": "Alice",
+      "Content": "Claude-Code, can you turn that into one short line I can read out at the start?"
+    },
+    {
+      "Message": "e7",
+      "Time (seconds)": 5,
+      "Speaker": "Bob",
+      "Content": "Claude-Code, while you're here: does 'Come and prove how much you know' sound a bit combative on the poster?"
+    },
+    {
+      "Message": "e8",
+      "Time (seconds)": 11,
+      "Speaker": "Alice",
+      "Content": "Thanks for the example, by the way. The bit about keeping score makes sense now."
+    }
+  ],
+  "timeline": [
+    {
+      "Time (seconds)": 0,
+      "After message": "e6"
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "Effective library configuration",
+      "path": "library-configuration.json",
+      "sha256": "937a5eff84b90c0e05717ee1370806201a9757d5f632cd743bd215dcf79ef98e"
+    },
+    {
+      "label": "Attention model context",
+      "path": "capture-01-attention-context.json",
+      "sha256": "74cfd676a94b5efbba88c3e4bc6d6bff2625a5f4671f1445739e9534e7d1045f",
+      "capture": 1,
+      "at": "At 0 seconds · after message e6"
+    },
+    {
+      "label": "Attention decision",
+      "path": "capture-01-attention-decision.json",
+      "sha256": "076d421fbf30bf63900fe1a1ce400ac0d3817b75b94e679bd885a37f3303cf83",
+      "capture": 1,
+      "at": "At 0 seconds · after message e6"
+    },
+    {
+      "label": "Participant turn request",
+      "path": "capture-01-participant-request.json",
+      "sha256": "486f926f8b1f6bf237aafe9ff25245c9b327938a80b90ea1d0303691f0a5baee",
+      "capture": 1,
+      "at": "At 0 seconds · after message e6"
+    },
+    {
+      "label": "Room update available during the turn",
+      "path": "room-update.json",
+      "sha256": "02a02f118646d621165538626c1d77a97a26b6f1fe9308529c91aa700c506176"
+    }
+  ]
+}

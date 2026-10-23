@@ -1,0 +1,224 @@
+{
+  "binding": {
+    "actor_id": "agent:codex",
+    "continuity_scope_id": "c1",
+    "deadline_id": "t1",
+    "lifecycle_id": "l1",
+    "opportunity_generation": 1,
+    "participant_id": "agent:codex",
+    "permissions_revision": "v1",
+    "platform": "chat",
+    "request_id": "q1",
+    "room_id": "r1",
+    "trigger_event_id": "e11"
+  },
+  "permissions": {
+    "ordinary_actions": [
+      "message",
+      "reply",
+      "reaction"
+    ],
+    "privileged_proposals": false,
+    "revision": "v1"
+  },
+  "protocol": {
+    "name": "nunchi.participant-turn",
+    "version": 1
+  },
+  "wake": {
+    "actors": {
+      "agent:codex": {
+        "display_name": "Codex",
+        "kind": "bot"
+      },
+      "human:alice": {
+        "display_name": "Alice",
+        "kind": "human"
+      },
+      "human:bob": {
+        "display_name": "Bob",
+        "kind": "human"
+      },
+      "human:charlie": {
+        "display_name": "Charlie",
+        "kind": "human"
+      }
+    },
+    "attention": {
+      "advice": [
+        {
+          "evidence_event_ids": [
+            "e1",
+            "e2",
+            "e3",
+            "e4",
+            "e8",
+            "e9",
+            "e10",
+            "e11"
+          ],
+          "note": "Charlie is still advocating for knockout, while Alice and Bob have reiterated concerns about newcomers being eliminated early. Charlie directly asks Codex for help explaining the case, making a substantive, tactful response appropriate."
+        },
+        {
+          "evidence_event_ids": [
+            "e11"
+          ],
+          "note": "Kinds of response that could fit, most likely first: speak 0.97, a quick mhm 0.01, wait 0.01, stay quiet 0.01."
+        }
+      ],
+      "evidence_event_ids": [
+        "e1",
+        "e10",
+        "e11",
+        "e2",
+        "e3",
+        "e4",
+        "e8",
+        "e9"
+      ],
+      "judged_through_event_id": "e11",
+      "source": "WAKE"
+    },
+    "coverage": {
+      "continuity": "session-only",
+      "event_visibility": {
+        "membership": "live-only",
+        "message": "live-only",
+        "reaction": "live-only"
+      },
+      "has_gaps": false,
+      "has_more_after": false,
+      "has_more_before": false,
+      "has_restart_gap": false,
+      "max_age_seconds": 86400,
+      "max_bytes": 32768,
+      "max_events": 24,
+      "truncated_by": []
+    },
+    "events": [
+      {
+        "author_id": "human:charlie",
+        "id": "e1",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "For the quiz, I think a player's first wrong answer should knock them out. It would make every question matter.",
+        "timestamp": "2026-10-22T10:00:00.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:alice",
+        "id": "e2",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "A newcomer could be out on the first question, before they've had a chance to enjoy it.",
+        "timestamp": "2026-10-22T10:00:25.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e3",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "That's what worries me too. They might arrive, miss one answer and spend the evening watching.",
+        "timestamp": "2026-10-22T10:00:45.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:charlie",
+        "id": "e4",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "I know they'd have to watch after getting one wrong. That's what would make every question tense, though.",
+        "timestamp": "2026-10-22T10:01:05.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e5",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "The side room is free from seven on Friday.",
+        "timestamp": "2026-10-22T11:30:00.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:alice",
+        "id": "e6",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "I've heard from two people who haven't been before. They're planning to come.",
+        "timestamp": "2026-10-22T11:30:25.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:charlie",
+        "id": "e7",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Codex, whenever I suggest something here it seems to get brushed aside.",
+        "timestamp": "2026-10-22T11:58:30.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:charlie",
+        "id": "e8",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "I still think we should do the first-wrong-answer knockout.",
+        "timestamp": "2026-10-22T11:58:45.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:alice",
+        "id": "e9",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "I'd still rather everyone got more than one question.",
+        "timestamp": "2026-10-22T11:59:05.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:bob",
+        "id": "e10",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Me too, especially with people coming for the first time.",
+        "timestamp": "2026-10-22T11:59:20.000Z",
+        "type": "message"
+      },
+      {
+        "author_id": "human:charlie",
+        "id": "e11",
+        "mentioned_actor_ids": [],
+        "mentions_room": false,
+        "text": "Codex, can you help me explain it properly so they'll understand?",
+        "timestamp": "2026-10-22T12:00:00.000Z",
+        "type": "message"
+      }
+    ],
+    "pace": {
+      "author_run_messages": 1,
+      "judged_seconds_ago": 0,
+      "now": "2026-10-22T12:00:00.000Z",
+      "own_messages": 0,
+      "quiet_before_seconds": 40,
+      "window_messages": 11
+    },
+    "request_id": "q1",
+    "room": {
+      "continuity_scope_id": "c1",
+      "id": "r1",
+      "kind": "group",
+      "name": "#quiz-planning",
+      "platform": "chat"
+    },
+    "self": {
+      "actor_id": "agent:codex",
+      "names": [
+        "Codex"
+      ],
+      "participant_id": "agent:codex"
+    },
+    "trigger_event_id": "e11"
+  }
+}

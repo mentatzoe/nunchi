@@ -172,27 +172,22 @@ floor.
 ## How we know it works
 
 - **Behavior is judged by conversations, with real models.**
-  - The litmus corpus in `evals/verdict_suite/fixtures/` has 60 scenes,
-    many taken from real rooms.
-  - New scenes cover rhythm, memory and several agents
-    ([#86](https://github.com/mentatzoe/nunchi/issues/86)).
-- **The suite is `evals/behavior/`.** Each scene lists what a socially
-  aware participant would notice, the moves that fit and the clear misses.
-  A run reports how each model spreads across that range. See
-  `evals/behavior/README.md`.
+  The [approved scene specifications](evaluations/scenes/README.md) describe
+  the social situations and purposes reviewed with the maintainer, under the
+  [scene spec](evaluations/scene-spec.md). Judge a move by whether a person
+  might make it in that room, as [Social behavior](../AGENTS.md#social-behavior)
+  requires. Observational scenes may leave outcome fields blank; that is not
+  an invitation to invent required responses.
+- **Preparation is separate from evaluation.** The collection's saved
+  library packages are not protagonist runs or evidence of passing scenes.
+  Running and scoring the collection belong to a separate evaluation-design
+  session.
+- **Earlier fixtures retain their historical role.** The litmus corpus in
+  `evals/verdict_suite/fixtures/` and the older-format suite in
+  [`evals/behavior/`](../evals/behavior/README.md) document earlier experiments.
+  Their expected moves and review metadata do not define the published
+  scenes' purposes or approval.
 - **Deterministic tests prove plumbing only.**
-- **Scenes the new suite must include:**
-  - a story told across five messages: the agent nods, then replies at the
-    end;
-  - a question someone else already answered;
-  - a question to another agent that this agent can answer: it waits, then
-    joins if nobody answers;
-  - two agents about to answer the same question;
-  - a room quiet for hours, then a new message;
-  - after the agent nodded, someone asks "did you see what I said?";
-  - a status report from a bot, which is suppressed;
-  - the agent addressed in a busy room, where 30 messages later the mention
-    is still known.
 
 ## Fast decisions
 
