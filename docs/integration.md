@@ -1,21 +1,15 @@
 # Nunchi V2 integration
 
-Use [the platform interface](platform-v2.md). Integrations do not implement a
-second gate.
+**Status: current implementation reference, under architecture review.**
+The supplied integrations build a `Room` containing observation, attention,
+scheduling and a turn host. The [harness contract](harness-contract.md),
+[harness guide](harness-guide.md) and [platform reference](platform-v2.md)
+describe that code. Library-owned agents and compulsory sending paths are
+gaps against the [architecture goal](../AGENTS.md#architecture-goal-and-current-gap).
 
-The harness contract in [`harness-contract.md`](harness-contract.md) (#94
-step 9, accepted 2026-10-07) replaces the paths below, so every harness gets
-the same behavior. Until each replacement passes the conformance kit, the
-paths below are what runs.
-
-To build a new integration, follow the [harness guide](harness-guide.md).
-
-Every integration builds the library's side through one `Room`
-(`nunchi.room`): the exact `ParticipantBinding`, observation, attention with
-the participant's pinned profile and delegated model, the scheduler, and the
-turn host. The Hermes plugin builds a `Room` too, and is parked (2026-10-10).
-The older Hermes integration wired these itself and was removed on 2026-10-11
-(decided). An integration then takes one of two paths for the participant turn.
+The two paths below explain existing mechanisms, not choices a new integration
+must adopt. Public harness hooks and channel capabilities need to be assessed
+against the goal before implementation.
 
 ## Nunchi-owned participant
 
@@ -40,25 +34,16 @@ the action `ParticipantTurnHost` commits. See
 
 ## Native host pipeline
 
-Some hosts run their own participant pipeline, as the older Hermes
-integration did (removed on 2026-10-11). They do not use
-`ParticipantTurnHost`, so they miss the behaviors the shared turn carries
-(memory, catching up, looking again, steering, and telling the agent of a
-gap). That gap is a design problem, not the intended shape: see "One library,
-every harness" in [`AGENTS.md`](../AGENTS.md) and step 9 of
-[#94](https://github.com/mentatzoe/nunchi/issues/94), which replaced this path
-with a plugin on Hermes's public hooks. That plugin consumes each message and
-starts the turn itself (consume and inject), and it is parked since
-2026-10-10; gating the harness's own native turn is the open redesign (the
-[harness contract](harness-contract.md#topologies)). Until then, such hosts
-wrap their own turn with the shared owners: observation, attention, the
-scheduler, shared opportunity preparation and wake facts
-(`nunchi.pipeline.prepare_opportunity`), and shared receipts
-(`participant_host_receipt_body`). Nunchi decides before the host starts
-visible work, hands an admitted turn the bounded wake facts, and records the
-lifecycle facts the host exposes. The host keeps its own prompt,
-model, tools, and delivery behind Nunchi's guards. See
-[Host-owned participant pipelines](platform-v2.md#host-owned-participant-pipelines).
+The removed Hermes integration wrapped the native host pipeline; the parked
+plugin instead injects turns through `Room`, bypassing Hermes's native
+thread, session and identity settings. Neither establishes a required shape
+for the new integration. The [recorded hook limitations](harness-contract.md#topologies)
+are evidence to check against the chosen harness version.
+
+The current [host-owned pipeline interface](platform-v2.md#host-owned-participant-pipelines)
+exposes observation, attention, opportunity preparation and receipts. The
+architecture review needs to establish which capabilities can be consumed
+without taking over the agent's lifecycle or communications.
 
 ## Never
 
@@ -69,6 +54,5 @@ Integrations must never:
 - treat events as reply obligations or queue every event as work;
 - expose continuation handles, cursors, binding material, secrets, or approval
   challenges to the participant model;
-- let a participant call native room tools around the host;
 - classify composed output socially at send time;
 - revive pending work or approvals after restart.

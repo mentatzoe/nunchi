@@ -1,9 +1,9 @@
 # V2 stability boundary
 
-No V2 release has been tagged; the last tag is `v0.2.0`. This page names the
-boundary a V2 release would hold stable: the closed V2 contract in
-`docs/contracts/nunchi-v2.md`, the runtime validators in
-`nunchi.v2_contracts`, and the installed commands below.
+No V2 release has been tagged; the last tag is `v0.2.0`. This page records
+the current commands, schemas and compatibility behavior. It does not promise
+that the ownership or interfaces will survive the
+[architecture review](../AGENTS.md#architecture-goal-and-current-gap).
 
 ## Public commands
 
@@ -38,7 +38,7 @@ Removed on 2026-10-11 (for now): `nunchi-hermes-dashboard` and
 to the old Hermes integration, which patched Hermes. The parked Hermes plugin
 ships no command and no entry point.
 
-Installed but not part of the stable boundary:
+Installed, with additional integration limitations:
 
 - `nunchi-claude-code-room-runner` — the Claude Code gate and its mod
   ([#43](https://github.com/mentatzoe/nunchi/issues/43)). Its configuration and

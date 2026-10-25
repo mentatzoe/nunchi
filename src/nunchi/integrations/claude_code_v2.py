@@ -1,8 +1,8 @@
 """Claude Code V2 room presence: a per-room gate and a dedicated session.
 
-The gate is the platform-owned wrapper described by `docs/v2-delivery.md` and
-`docs/platform-v2.md`.  It owns the platform obligations: native identity, the
-dedicated Claude Code session and its Nunchi mod, the session's environment,
+This is the current integration described by `docs/platform-v2.md`; its
+agent and channel ownership is under architecture review. It owns native
+identity, the dedicated Claude Code session and its Nunchi mod, the session's environment,
 cancellation, private persistence, and the inventoried privileged executors.
 It reuses the shared owners for everything else.  Observation, attention,
 scheduling, the participant host, the privileged-action coordinator, and the

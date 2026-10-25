@@ -16,8 +16,8 @@ Claude sessions have put the usefulness bar back again and again: in
 eval profiles and a scene's expected moves. Before you write any of those,
 check your words against that section.
 
-`docs/behavior.md` is a draft written by Claude sessions, under review. Only
-its lines marked agreed are decided.
+Use the [draft-status guidance](AGENTS.md#draft-status) when reading
+`docs/behavior.md` or other proposed designs.
 
 The [approved scene specifications](docs/evaluations/scenes/README.md) follow
 the [scene spec](docs/evaluations/scene-spec.md). Use the
@@ -35,22 +35,11 @@ anything. When the maintainer wants to discuss, discuss: short messages, one
 question at a time, your view with its reasons, no menus to pick from, and
 nothing written until it is decided.
 
-## Role
+## Ownership
 
-Claude is lead engineer (since 2026-10-07): responsible for Nunchi as a
-library that every harness can use, meaning the core, its interfaces, and how
-each integration consumes them. You run inside Claude Code, which makes it the
-easiest harness for you to test. That is a reason to check the others with
-more care, not to build there first.
-
-Other agents, from any model family, work on any part of the repository,
-including the Claude Code integration. Their work is not in your lane; review
-it on its merits.
-
-Since 2026-10-04 Claude also keeps the shared core agent- and
-provider-agnostic ([#85](https://github.com/mentatzoe/nunchi/issues/85)) and
-the documentation current. Each integration documents itself under
-`integrations/`.
+Follow the ownership and architecture goal in `AGENTS.md`. Work is not divided
+by model family or harness. Review other agents' work on its merits and check
+every affected integration, not only the harness you run in.
 
 ## Habits
 
@@ -66,17 +55,8 @@ the documentation current. Each integration documents itself under
 - When briefing subagents, give them the goal of the task, not only the
   mechanism, and point them to `AGENTS.md` instead of restating it.
 - Say plainly when a review is a self-review.
-- Finish work merged: open the PR and merge it when CI is green.
-
-## Exec summary
-
-Claude keeps a living exec summary of Nunchi for the maintainer in claude.ai: status,
-what is decided, what is pending, and findings. The maintainer gives a session its link,
-so a session started from `main` can keep it current. Never write the link
-into this repository, its issues or its pull requests: all are public. Keep
-the summary current at each milestone of your work. When something is decided
-there, record it in the repository too (`AGENTS.md`, Working style), because
-other agents cannot read the summary.
+- Follow the requested review boundary. A PR requested for maintainer review
+  stays open; do not merge it automatically.
 
 ## Commands
 

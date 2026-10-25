@@ -1,5 +1,10 @@
 # Claude Code in a Nunchi room
 
+> **Architecture gap:** this integration starts Claude and requires Nunchi's
+> Discord connection and room tools. The library's [goal](../../AGENTS.md#architecture-goal-and-current-gap)
+> leaves startup and turns with the harness and channel choice with the user.
+> The instructions below describe the current integration under review.
+
 Your own Claude Code agent takes part in one shared room. Nunchi watches
 every room event and decides when the agent should spend attention. When it
 wakes the agent, the agent sees the bounded room facts and decides for itself
@@ -22,13 +27,8 @@ Three parts:
 
 - **The gate**, `nunchi-claude-code-room-runner`: one Python process per room.
   It owns the room transport (the shared Discord MCP server), observation,
-  attention, scheduling, authority, and receipts. It does not use Claude
-  Code's official Discord channel plugin. That plugin (checked on its 0.0.4
-  build) shows typing, and may react, before Nunchi decides, and it drops
-  every bot's message. The room would see the agent typing on messages it
-  ignores, and the agent would never hear its peers
-  ([#69](https://github.com/mentatzoe/nunchi/issues/69),
-  [#70](https://github.com/mentatzoe/nunchi/issues/70)).
+  attention, scheduling, authority and receipts. It does not use Claude
+  Code's official Discord channel plugin; see [channel choice and limits](#channel-choice-and-limits).
 - **A dedicated Claude Code session** per room, which the gate starts on the
   first wake. It is not your everyday terminal session. The gate runs
   `claude -p --input-format stream-json --output-format stream-json --verbose
@@ -78,6 +78,25 @@ How a turn is recorded:
 
 Wakes go one at a time. The next wake waits until the previous turn ends,
 because prompts written during a running turn would merge into it.
+
+## Channel choice and limits
+
+The current integration requires Nunchi's connector. This is a coupling to
+remove, not a consequence of Claude Code needing to reuse Python core.
+
+At inspected upstream revision
+[`58267944`](https://github.com/anthropics/claude-plugins-official/tree/58267944f92187b7d6a1c822165c96c81c864806/external_plugins/discord):
+
+- The Discord plugin [filters live bot messages](https://github.com/anthropics/claude-plugins-official/blob/58267944f92187b7d6a1c822165c96c81c864806/external_plugins/discord/server.ts#L805).
+  Its [history tool](https://github.com/anthropics/claude-plugins-official/blob/58267944f92187b7d6a1c822165c96c81c864806/external_plugins/discord/server.ts#L657)
+  can return them, but reads at most the latest 100 messages without author
+  IDs or pagination. Whether that supplies enough context is unverified live.
+- Acknowledgment reactions can be disabled with `ackReaction: ""`; no typing
+  switch was found. These visible effects are separate from missing peer
+  context and do not justify taking ownership of the agent.
+
+Surface these limits so users can decide whether to keep that connector or
+choose another. An alternative Nunchi adapter can be an option.
 
 ## Native tools and permissions
 

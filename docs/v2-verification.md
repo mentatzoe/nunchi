@@ -1,10 +1,10 @@
 # V2 verification record
 
-This file records attributable checks. A green source suite is not installed or
-live evidence. It is updated only with commands and results that can be
-reproduced.
+This file records attributable checks at the revisions named below, not the
+status of current `main` or a work plan. A green source suite is not installed
+or live evidence. Add only reproducible commands and results.
 
-## Current state (2026-10-04)
+## Recorded state at 41cb79c (2026-10-04)
 
 **Update, 2026-10-11:** the maintainer removed the old Hermes integration ("delete, for
 now"). Its `Hermes host contract` workflow (the contract, normal-attention and
@@ -120,7 +120,7 @@ retained; no V1 social state is converted and package uninstall is not data purg
 
 ### Before 2026-10-04: combined V2 candidate scope
 
-Superseded by Current state above. `integration/v2` is retired.
+Superseded by the dated record above. `integration/v2` is retired.
 
 Included: shared V2 foundation, CLI, packaging, generic/Discord/Matrix/Telegram
 reference adapters, shared Discord MCP transport, Codex, Hermes, and Claude

@@ -1,21 +1,16 @@
 # Harness contract
 
-**Status: accepted, 2026-10-07 ([#94](https://github.com/mentatzoe/nunchi/issues/94),
-steps 9a and 9b). Step 9c built the library's side.** The `Turn` is in the
-core (`nunchi.turn`), with both posting styles, and its local protocol is
-`nunchi.turn_server` (`I-040D`). The Claude Code gate and the one-reply style
-(the behavior eval, Codex) drive it, and the eval measures final-answer
-posting with `--agent-posting final-answer`. Step 9d has started: the turn
-conformance kit runs in CI (see "Conformance kit"), every library-hosted
-integration builds its side through one `Room` (`nunchi.room`), and the
-[harness guide](harness-guide.md) is written. The adapters (9e) come next,
-built from the guide alone. The harness
-facts were checked against upstream source on 2026-10-07: Hermes main
-`a50406d9` and Codex `a513012`. The key Hermes and Codex behaviors were then
-run (see "Runtime checks"). The conformance kit (step 9d) checks the cells
-marked *to verify*. A cell that fails becomes a gap in
-[#135](https://github.com/mentatzoe/nunchi/issues/135), and this contract
-changes with it.
+**Status: current implementation reference, under architecture review.**
+The library-owned turn, required room tools and one-action limit described
+here depart from the [architecture goal](../AGENTS.md#architecture-goal-and-current-gap).
+They describe today's code, not requirements for its replacement. This
+supersedes this document's earlier accepted-target status.
+
+`nunchi.turn` implements the shared `Turn`; `nunchi.turn_server` exposes its
+local protocol (`I-040D`). The [harness guide](harness-guide.md) describes
+existing consumers. Upstream observations below are version-specific: Hermes
+`a50406d9` and Codex `a513012` were inspected on 2026-10-07. Check those limits
+against the chosen pinned harness before relying on them in a new design.
 
 **The Hermes plugin is parked (decided, 2026-10-10).**
 The code and its CI lanes stay, and there is no new Hermes work until it is
@@ -23,29 +18,9 @@ unparked: it consumes each message and injects a turn of its own, so Hermes's
 native settings (threads, sessions, identity) never apply to Nunchi's turns
 ([`integrations/hermes-plugin/README.md`](../integrations/hermes-plugin/README.md#parked-2026-10-10)).
 The Hermes column and the Hermes gaps below describe the plugin as it last ran.
-Codex stays active. An integration follows the harness's own plugin rules and
+An integration follows the harness's own plugin rules and
 never rewrites or reimplements the harness, so a proposal below that would
 rewrite Hermes is marked not allowed.
-
-## Why
-
-Nunchi is a library that any agent harness can use
-([`AGENTS.md`](../AGENTS.md), "One library, every harness"). Today the
-library owns everything up to the agent's turn, but not the turn itself:
-
-- How the agent acts inside its turn is implemented twice: once in the shared
-  one-reply protocol (`ParticipantTurnProtocol`) and once in the Claude Code
-  gate (`GatedParticipant`). The gate's copy has more: steering, turn binding,
-  and the rule that silence counts only for a bound turn.
-- The older Hermes integration skipped the shared turn and patched Hermes
-  internals instead, so it missed memory, catching up, looking again,
-  steering, outcome turns, and the newer attention routes. The maintainer removed it on
-  2026-10-11 ("delete, for now"). The Hermes plugin replaced it, and the
-  plugin is parked (above).
-- The behavior eval measures the shared protocol, not what Claude Code runs.
-
-This contract moves the turn into the library, as one object every harness
-drives, and keeps everything harness-specific in a thin integration.
 
 ## Words
 
@@ -59,9 +34,10 @@ drives, and keeps everything harness-specific in a thin integration.
 | Tool posting | The agent acts in the room by calling room tools. |
 | Final-answer posting | The agent's final answer is what gets posted, as in Hermes, where plugins cannot send. |
 
-## What the library owns
+## What the current library implementation owns
 
-Everything that decides behavior, once, for every harness:
+The current shared runtime owns the following. Agent lifecycle and sending
+ownership are among the gaps being reviewed:
 
 - **Observation**: the room log, actors, history, coverage.
 - **Attention**: steps 1 and 2 on any configured route.
@@ -84,7 +60,7 @@ Everything that decides behavior, once, for every harness:
     or ending the turn without a call; in final-answer posting the harness's
     silence marker.
 
-  The rules: one room action per turn; look again once before the first post
+  Current turn rules: one room action per turn; look again once before the first post
   or reaction; steering updates while the agent works; a turn counts as
   silent only if it was bound to its wake; secret values are never posted;
   privileged actions go through authorization.
@@ -99,7 +75,7 @@ Everything that decides behavior, once, for every harness:
   still current, not cancelled, its action valid), and the record of what
   happened.
 
-## What an integration supplies
+## What current integrations supply
 
 | Capability | Required | What it does | When the harness lacks it |
 |---|---|---|---|
@@ -313,16 +289,15 @@ describes what the plugin did, not a requirement for the next harness-hosted
 integration: how to gate a native turn and still get silence and looking again
 is what the redesign has to answer.
 
-In either shape the library still decides at the commit point. The harness
-then performs delivery, and the receipt says so: the effect is reported as
-the harness delivered it, not confirmed by Nunchi.
+In the current implementation the library decides at the commit point.
+The harness then performs delivery, and the receipt says so: the effect is
+reported as the harness delivered it, not confirmed by Nunchi.
 
-## Expected parity
+## Recorded integration comparison
 
-What each integration should use after step 9e, checked against upstream
-source. The conformance kit checks the *to verify* cells. A gap becomes an issue
-here, with the alternatives considered, before anyone asks a harness's
-maintainers.
+This table records the mechanisms and limits examined for the existing
+integrations. The conformance kit checks the *to verify* cells. It is not an
+acceptance checklist for the replacement architecture.
 
 | Behavior | Claude Code | Codex (app-server) | Hermes (plugin, parked) | One-reply |
 |---|---|---|---|---|
@@ -795,21 +770,6 @@ per-thread MCP server now runs in the kit (Codex CLI 0.160.1): the server sits
 on top of the user's own MCP servers, each call carries its Codex turn id in
 `_meta`, and a user config that disables a server of the same name leaves the
 thread without the room tools, which the integration treats as unbound.
-
-## What this replaces (step 9e)
-
-| Today | After |
-|---|---|
-| Turn rules inside the Claude Code gate | The library's `Turn`; the gate keeps only the session and the mod (done in step 9c) |
-| `ParticipantTurnProtocol` as a separate turn | The one-reply driver of the same `Turn` (done in step 9c) |
-| The old Hermes integration's shims over Hermes internals (removed 2026-10-11) | A plugin on Hermes's public hooks (built from the harness guide: `nunchi.integrations.hermes_plugin`, verified offline; not yet live; parked since 2026-10-10) |
-| Codex with its tools turned off | The app-server with the user's own configuration and room tools (built from the harness guide: `nunchi.integrations.codex_app_server`, verified offline on Codex CLI 0.160.1; its runner `nunchi-codex-app-server-runner` is on the shared room connection, not yet run live) |
-
-Each current integration stays until its replacement passes the conformance
-kit. It is then removed, with migration notes. The old Hermes integration is
-the exception: the maintainer removed it on 2026-10-11, while its replacement is parked,
-so Hermes has no migration path and no supported path until the plugin is
-unparked.
 
 ## Where integrations live
 

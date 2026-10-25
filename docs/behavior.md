@@ -1,12 +1,10 @@
-# How Nunchi behaves
+# Social behavior draft
 
-**Status: Claude's draft, under review.** Claude sessions wrote this
-document, starting on 2026-10-04; it has not been agreed. Only its lines
-marked agreed are decided. Social behavior, at the top of
-[`AGENTS.md`](../AGENTS.md#social-behavior), wins wherever this document
-disagrees. Code, contracts, specs and older designs
-follow this document; where they conflict, the conflict is a gap to close
-([#94](https://github.com/mentatzoe/nunchi/issues/94)).
+**Status: draft, under review.** Follow the [draft-status guidance](../AGENTS.md#draft-status):
+only explicitly agreed statements are decisions, subject to later maintainer
+changes. The [architecture goal](../AGENTS.md#architecture-goal-and-current-gap)
+and [social purpose](../AGENTS.md#social-behavior) take precedence. Unagreed
+recommendations here do not prescribe implementation or authorize work.
 
 ## Purpose
 
@@ -20,12 +18,12 @@ reading of the room, so the agent can take part the way a socially aware
 person would. It translates one-to-one habits into a many-to-many
 conversation, across many turns and many participants.
 
-Social awareness can be learned and described explicitly. This document is
-that description. Every model and prompt in Nunchi should carry it.
+This draft explores how to describe social awareness explicitly. Its proposed
+behaviors and mechanisms remain open for discussion.
 
 ## What a socially aware participant does
 
-This is the yardstick. Every change is judged against it.
+Proposals for discussion, except where explicitly marked agreed:
 
 - **Reads who is talking to whom.** It knows a question to Codex is to
   Codex, and that a remark to the room includes it.
@@ -48,7 +46,7 @@ This is the yardstick. Every change is judged against it.
   answering at once bury the person who asked.
 - **Follows the room's own norms.** A room may set a stricter or looser bar.
 
-## How Nunchi does it
+## Proposed behavior and current mechanisms
 
 ### Step 1: is this conversation, and could someone like me take part?
 
@@ -201,10 +199,11 @@ need to be fast and cheap.
 - Any model provider can serve these steps
   ([#85](https://github.com/mentatzoe/nunchi/issues/85)).
 
-## Older rules this replaces
+## Earlier decisions and implementation changes
 
-The rules of earlier versions give way wherever they block this behavior
-(agreed, 2026-10-04). The rules replaced so far:
+Earlier rules give way where they block agreed social behavior
+(agreed, 2026-10-04). The notes below distinguish explicitly agreed changes
+from implementation history; they do not approve the rest of this draft:
 
 - the "sparse" attention instruction limited to "whether the supplied event is
   worth waking for now";
@@ -232,7 +231,10 @@ The rules of earlier versions give way wherever they block this behavior
   nobody has said" as an example of the reading. They don't fit Social
   behavior at the top of `AGENTS.md` (agreed, 2026-10-19).
 
-## Where the code is today
+## Implementation observations
+
+This table describes code, not approval of the draft or evidence that the
+architecture goal is met. Check dated claims against current source.
 
 | Behavior here | Today (`main`) |
 |---|---|

@@ -1,5 +1,9 @@
 # Run the Claude Code participant live
 
+**Existing integration procedure, not the current work plan.** Architecture
+review is the next step; see the [goal and gap](../AGENTS.md#architecture-goal-and-current-gap).
+The procedure below remains available for an explicitly authorized run.
+
 This is the procedure for the first live run of the Claude Code gate and mod
 in a real Discord room ([#39](https://github.com/mentatzoe/nunchi/issues/39)).
 It assumes a Discord bot token, a logged-in Claude Code, an attention-model

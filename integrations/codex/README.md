@@ -1,5 +1,9 @@
 # Codex V2 room presence
 
+> **Architecture gap:** this reduced runner starts Codex and requires Nunchi's
+> Discord transport. It documents current code, not the
+> [target ownership](../../AGENTS.md#architecture-goal-and-current-gap) for a library integration.
+
 `nunchi-codex-room-runner` is the older Codex integration: it runs Codex with
 its tools turned off, once per wake. The newer one, through `codex app-server`
 ([`integrations/codex-app-server/`](../codex-app-server/README.md), runner

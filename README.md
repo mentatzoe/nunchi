@@ -1,20 +1,34 @@
 # Nunchi V2
 
-Nunchi (눈치) is a social conversational gate for AI agents in multi-turn
-conversations with many participants. Agent harnesses answer every message
-they receive. Nunchi gives an agent the social awareness people use in a group
-conversation, so it can read the room and take part the way a socially aware
-person would: listen, nod, speak, or hold back.
+Nunchi (눈치) is a library that helps an AI agent read the room socially and
+take part in conversations through the channels people already use.
 
-[`AGENTS.md`](AGENTS.md#social-behavior) opens with that behavior: agents
-take part socially, not only when they have something useful to add.
-[`docs/behavior.md`](docs/behavior.md) describes it in more detail, as a draft
-under review. [Issue #94](https://github.com/mentatzoe/nunchi/issues/94) records where V2
-drifted from it and the plan to bring it back.
+> **Architecture gap — under review.** The goal is for agents to use Nunchi's
+> context and attention tools while their harness owns startup and turns, the
+> agent controls its actions, and users choose their channels. Today's Claude
+> Code and Codex integrations instead start agents, require Nunchi's Discord
+> transport and route sending through Nunchi's turn code. Context CRUD and
+> prompt configuration are also incomplete. This is a deviation from the
+> library's goal, not a requirement users should have to accept.
+
+The [architecture goal](AGENTS.md#architecture-goal-and-current-gap) is the
+starting point for the current review. Core is meant to hold context and
+history, make attention and social judgments, and expose configurable APIs
+and tools. Replacement interfaces and implementation are still to be designed.
+
+Agents take part socially, not only when they have something useful to add:
+they may listen, react, joke, disagree, speak or stay silent. See
+[Social behavior](AGENTS.md#social-behavior). The more detailed
+[behavior draft](docs/behavior.md) follows the [draft-status guidance](AGENTS.md#draft-status).
+
+## Current implementation
+
+The diagrams below describe today's code, including the ownership under
+review. They are not the target architecture or proof of live behavior.
 
 ## At a glance
 
-### One message, start to finish
+### Current turn flow
 
 ```mermaid
 %%{init: {"flowchart": {"wrappingWidth": 360}}}%%
@@ -27,7 +41,7 @@ flowchart TD
         s2["Step 2: the reading<br/>Who is it addressed to?<br/>Does it ask for something?<br/>Was it answered, and where?<br/>What does it respond to?<br/>Is the author mid-thought?<br/>Which moves could fit?"]
         s1 -- "yes, or unsure" --> s2
     end
-    s1 -- "no: status report, bot noise,<br/>system event, own echo" --> hidden["Suppressed:<br/>the agent never sees it"]
+    s1 -- "judged not to be conversation" --> hidden["Suppressed:<br/>the agent never sees it"]
     s2 --> turn["The agent's turn: the reading, recent<br/>history, its memory of the room<br/>(its own moves, who asked what),<br/>the live room"]
     turn --> decide{"The agent decides:<br/>speak, mhm, or stay quiet"}
     decide -- "stay quiet" --> silent["Silence, recorded"]
@@ -43,84 +57,20 @@ invisible, a wrong pass costs one turn. Step 2's reading is a
 recommendation; the agent decides, and every visible move, a "mhm"
 included, is its own.
 
-### How the parts fit
+### Available combinations
 
-```mermaid
-flowchart TB
-    subgraph rooms["Rooms"]
-        direction LR
-        discord["Discord"] ~~~ telegram["Telegram"] ~~~ matrix["Matrix"] ~~~ generic["Any platform via JSONL"]
-    end
-    subgraph hosts["Hosts and integrations: they own the platform and start the agent"]
-        direction LR
-        cc["Claude Code<br/>a per-room gate and a mod"] ~~~ hermes["Hermes plugin<br/>(parked)"] ~~~ codex["Codex room runner"] ~~~ ref["Reference adapters"]
-    end
-    subgraph core["Shared core: names no agent host, platform or model vendor"]
-        direction LR
-        pipeline["Pipeline"] --> observation["Observation<br/>canonical events,<br/>bounded history"] --> attention["Attention<br/>typed questions,<br/>the reading"] --> host["Participant host<br/>scheduling, room view,<br/>turn protocol, look-again"] --> guard["Authorization,<br/>receipts, contracts"]
-    end
-    subgraph models["Attention model routes"]
-        direction LR
-        chat["Chat models: OpenAI-compatible,<br/>Messages or Responses API,<br/>or the host's own model"] ~~~ typed["Typed decision models:<br/>decisions-api, e.g. Jev"]
-    end
-    subgraph agent["The agent"]
-        session["The user's own Claude Code,<br/>Hermes or Codex session"]
-    end
-    rooms <--> hosts
-    hosts -- "events" --> core
-    core -- "typed questions" --> models
-    core -- "a turn with the reading" --> agent
-    agent -- "its action, sent by the host" --> hosts
-```
+| Supplied integration | Channel connection | Agent execution |
+|---|---|---|
+| Claude Code | Nunchi's Discord transport only | Nunchi starts a dedicated Claude session and supplies its turns |
+| Codex app-server | Nunchi's Discord transport only | Nunchi starts the app-server, manages its thread and supplies turns |
+| Older Codex runner | Nunchi's Discord transport only | Nunchi invokes Codex with its tools disabled |
+| Hermes plugin (parked) | Hermes's admitted Discord or Telegram messages | The plugin injects turns that bypass native thread, session and identity settings |
+| Reference adapters | Generic JSONL, Discord, Matrix or Telegram | A plain model wrapper, not an integration with an existing agent harness |
 
-The shared core never names a host, platform or vendor; hosts plug into it
-and own the platform, the agent session and the sending. Around it, the
-operator CLI, dashboard and service supervisor configure rooms, and the
-behavior suite, conformance scenarios and unit tests check it.
-
-### Earlier implementation snapshot
-
-This diagram records the plan as of 2026-10-07, from
-[#94](https://github.com/mentatzoe/nunchi/issues/94) and measurements on
-[#86](https://github.com/mentatzoe/nunchi/issues/86). Its scene counts and
-evaluation steps describe that earlier work. The current
-[approved scene specifications](docs/evaluations/scenes/README.md) have been
-reviewed separately; their execution and scoring are for a later
-evaluation-design session.
-
-```mermaid
-flowchart TB
-    classDef done fill:#d8f0dc,stroke:#2e7d32,color:#1a1a1a
-    classDef next fill:#fff1c2,stroke:#a67c00,color:#1a1a1a
-    classDef later fill:#e8ecef,stroke:#607080,color:#1a1a1a
-    subgraph build["Implementation: the plan in issue 94"]
-        direction LR
-        p2["2. The reading<br/>on every turn"]:::done
-        p3["3. Live room view,<br/>look again"]:::done
-        p4["4. Typed<br/>questions"]:::done
-        p5["5. Memory and a<br/>social turn prompt"]:::done
-        p6["6. Rhythm:<br/>time, pauses"]:::next
-        p7["7. Remove<br/>Nunchi's nod"]:::done
-        p8["8. More<br/>model APIs"]:::done
-        p9["9. One library,<br/>every harness"]:::next
-        p2 --> p3 --> p4 --> p5 --> p6 --> p7 --> p8 --> p9
-    end
-    subgraph measure["Evaluation"]
-        direction LR
-        e1["Behavior suite:<br/>74 scenes, real models"]:::done
-        e2["Implementation baseline:<br/>one fixed agent"]:::done
-        e3["Refinement, later:<br/>other agent families,<br/>real agents"]:::later
-        e1 --> e2 --> e3
-    end
-    p1["1. The maintainer reviews the scenes' ranges"]:::next
-    p1 -.-> measure
-    measure -. "judges each step<br/>before and after" .-> build
-```
-
-In this snapshot, green meant done, amber next or ongoing, and grey later.
-The plan used one fixed agent to compare before and after. Trying other
-agent families and the real agents was a separate track
-([#116](https://github.com/mentatzoe/nunchi/issues/116)).
+These are not interchangeable combinations. Core accepts separate participant
+and transport inputs, but the shipped entry points still impose the
+dependencies above. The [harness contract](docs/harness-contract.md) and
+[integration guides](#product-and-integration-documentation) describe them.
 
 ## How V2 works today
 
@@ -268,14 +218,13 @@ labels are not the approved collection's outcomes or approval status.
 
 ## Product and integration documentation
 
-- [Completion outcome](docs/v2-completion-goal.md)
-- [Selected design](docs/architecture/v2-selected-design.md)
+- [Architecture goal and current gap](AGENTS.md#architecture-goal-and-current-gap)
 - [Portable V2 contract](docs/contracts/nunchi-v2.md)
 - [Shared foundation and operator handoff](docs/v2-shared-foundation.md)
 - [Install and operate](docs/INSTALL.md)
 - [Platform interface and conformance](docs/platform-v2.md)
 - [Harness contract](docs/harness-contract.md) and
-  [harness guide](docs/harness-guide.md): how every harness uses the library
+  [harness guide](docs/harness-guide.md): current integration mechanisms under review
 - [Reference adapters](docs/adapters.md)
 - [Verification and evidence](docs/v2-verification.md)
 - [Approved scene specifications](docs/evaluations/scenes/README.md) and
@@ -285,5 +234,6 @@ labels are not the approved collection's outcomes or approval status.
 Source review, clean-wheel installation, configured probes, deterministic
 tests, live provider evaluation, real-room evidence, integration, and release
 are distinct claims. The verification record states exactly which have passed.
-The final no-completion-before-verification gate is
-[issue #41](https://github.com/mentatzoe/nunchi/issues/41).
+The maintainer decides release readiness from the intended behavior and
+reproducible evidence. Historical acceptance plans do not settle the
+architecture under review.

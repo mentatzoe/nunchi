@@ -1,7 +1,9 @@
-# Rehearsals: a live model in each real harness (step 9f)
+# Rehearsal tooling and recorded runs
 
 This guide documents the existing rehearsal tooling and its dated run
-records. Its directed scenes and grades refer to the legacy fixtures in
+records, not the current delivery plan. Architecture review comes first
+([current goal](../AGENTS.md#architecture-goal-and-current-gap)). Its directed
+scenes and grades refer to the legacy fixtures in
 [`evals/behavior/`](../evals/behavior/README.md). The current
 [approved scene specifications](evaluations/scenes/README.md) are a separate
 collection; publishing their preparation artifacts does not execute them or

@@ -1,5 +1,9 @@
 # Shared Nunchi V2 foundation
 
+**Implementation reference, under architecture review.** The interfaces below
+describe existing code. Follow the [architecture goal](../AGENTS.md#architecture-goal-and-current-gap)
+when deciding what the library should own.
+
 This document is the platform-consumer and operator guide for the shared
 foundation introduced for issues #55, #56, and #40. That foundation merged in
 PR [#67](https://github.com/mentatzoe/nunchi/pull/67) on 2026-08-02, and later

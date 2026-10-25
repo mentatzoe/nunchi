@@ -1,14 +1,10 @@
 # Harness guide
 
-How to make a harness use Nunchi: Claude Code, Codex, Hermes, or one Nunchi
-has not met yet. This guide covers the library's side. Your harness's own
-documentation covers its side.
-
-**Status:** written in step 9d of [#94](https://github.com/mentatzoe/nunchi/issues/94),
-before the Hermes and Codex adapters (9e). Each adapter is built from this
-guide alone. Where the guide falls short, the guide is fixed. Two tests so
-far: separate agents built the Hermes plugin and the Codex app-server
-integration from it, and this version carries what they found.
+**Status: current implementation guide, under architecture review.**
+This guide describes how the existing integrations consume Nunchi. Its
+library-owned turns, connection choices and sending path are not the target
+architecture. Start a new design from the
+[architecture goal](../AGENTS.md#architecture-goal-and-current-gap).
 
 **The Hermes plugin is parked** (decided, 2026-10-10):
 the code and its CI lanes stay, and there is no new Hermes work until it is
@@ -27,7 +23,7 @@ Read first:
 - [`harness-contract.md`](harness-contract.md): what the library owns, what an
   integration supplies, and the parity table for known harnesses.
 
-## What you build
+## How current integrations are built
 
 An integration is a thin adapter. It connects three things the harness
 already has to three things the library already has:
@@ -38,9 +34,9 @@ already has to three things the library already has:
 | Tools, or a final answer | The room actions and their rules | Forward each room tool call, or hand over the final answer. |
 | A room connection, or the library's | `Room`: observation, attention, scheduling, memory | Hand every room event to the `Room`, and post what it commits. |
 
-Everything that decides behavior stays in the library: when the agent gets a
-turn, what it reads, looking again, steering, silence, memory, the secret
-guard. An adapter that decides any of that is a bug, even when it works.
+The current library controls scheduling, turn context, looking again,
+steering, silence, memory and the secret guard. This describes existing
+responsibilities; it does not justify moving agent ownership into Nunchi.
 
 ## The rules
 
@@ -61,9 +57,9 @@ guard. An adapter that decides any of that is a bug, even when it works.
   reach is the harness's to protect (D2, `AGENTS.md`); name the harness's
   sandbox setting in your README (step 2).
 
-## Choose a shape
+## Existing integration shapes
 
-Answer two questions about the harness.
+The current integrations differ in connection and delivery ownership:
 
 **Who owns the room connection?**
 
@@ -82,8 +78,9 @@ what cost the plugin Hermes's own thread, session and identity settings.
 **Gating the harness's own native turn** (the harness starts its run, and the
 integration lets it go, holds it, or adds the library's text) is the open
 redesign ([the plugin's README, "Before unparking"](../integrations/hermes-plugin/README.md#before-unparking)),
-not a settled shape. Gating alone loses silence and looking again (see the
-contract's "Topologies"), so the redesign has to say how it gets them back.
+not a settled implementation. The inspected Hermes version had hook and
+silence limitations (see the contract's "Topologies"); check those against
+the pinned version and intended behavior before choosing an approach.
 
 **How does the agent act in the room?**
 
@@ -983,9 +980,12 @@ session's environment, so the agent can read it with a shell command. Codex
 gives it to the room's MCP server, whose environment a command outside
 Codex's sandbox can read. The guard still keeps it out of the room.
 
-## Prove it
+## Checking the current implementation
 
-Every integration joins the turn conformance kit before it replaces anything.
+The existing turn conformance kit checks the current library-owned turn
+protocol. Its setup is described below. A replacement architecture needs
+checks for its agreed interfaces and behavior; it need not reproduce this
+protocol to pass review.
 
 1. Write a `KitIntegration`: an object with `name`, `posting` (`tools` or
    `final-answer`), `participant(profile=, guard=, agent=, privileged=False)`

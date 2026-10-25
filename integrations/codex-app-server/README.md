@@ -1,5 +1,10 @@
 # Nunchi for Codex: through `codex app-server`
 
+> **Architecture gap:** Nunchi starts this app-server, supplies its turns and
+> requires its own Discord transport and room tools. Those choices are under
+> review against the [library goal](../../AGENTS.md#architecture-goal-and-current-gap).
+> The agent harness should own lifecycle and turns; users should choose channels.
+
 **Status: implemented, verified offline against Codex CLI 0.160.1 (#94 step
 9e); a live runner, `nunchi-codex-app-server-runner`, but no live room yet.** The turn conformance kit and
 `tests/v2/test_codex_app_server.py` run the integration against a real

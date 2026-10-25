@@ -1,20 +1,18 @@
 # Nunchi V2 Contracts
 
-**Owner**: Codex owns the shared portable contracts. Consumers use these
-schemas rather than maintaining private variants.
+**Status: current implementation reference, under architecture review.**
+These contracts describe the schemas and validators used by today's code.
+They do not establish the target ownership of agents, turns or channels; see
+the [architecture goal](../../AGENTS.md#architecture-goal-and-current-gap).
+Consumers of the current implementation use the shared schemas rather than
+private variants. Source behavior alone does not establish installed, live or
+released status.
 
-**Status**: these six contracts are the implemented shared seam in the V2
-candidate. Candidate source behavior does not by itself establish installed,
-live, integrated, or released status.
-
-**Field-level authority**: this repository-owned reference and
-`docs/architecture/v2-selected-design.md` preserve the field inventory selected
-from Aleph Vault at `c834e8c`; the external path is provenance, not a
-contributor dependency. The program-canonical interface names and versions
-(`I-010F` at `@1`; `I-010D` at `@2`; `I-010A` at `@9`; `I-010E` at `@6`; `I-010C` at `@16`; `I-010B` at `@10`) are this
-slice's vocabulary layered over that inventory. A document the selected design
-declares valid that either validator rejects is a contract defect, never
-resolved by narrowing the corpus.
+The field inventory is documented here and in `schemas/v2/`. The runtime
+validator and JSON Schema validator are checked against the shared corpus in
+`evals/v2/contract/` by the runner in `tests/v2/contract/`. Report disagreements
+between them as defects; do not silently narrow the corpus to hide a validator
+failure.
 
 **Machine-readable contracts** (JSON Schema Draft 2020-12):
 
@@ -35,9 +33,8 @@ coordinator. Platform hosts still own their trusted policy source,
 authenticated approval seam, and native effect executors.
 
 Only the request carries an explicit generation tag, `schema_version: 2`
-(the design's own field; there is no separate `interface`/`version`
-envelope pair on any of the five documents — that was an attempt-2 local
-invention the selected design does not carry). A non-empty `request_id`
+(there is no separate `interface`/`version` envelope pair on the five
+attention documents). A non-empty `request_id`
 correlates the request, decision, wake, and receipt records for one
 attention pass. All five contracts are closed: an unexpected property
 rejects. V1 envelopes, reply-bearing fields, inferred-roster claims, and
@@ -183,8 +180,7 @@ A truthful attention request represents:
   `{participant_id, room_id, continuity_scope_id, trigger_event_id}`,
   `can_fetch_before`/`can_fetch_after`/`can_fetch_around_event`,
   `max_events_per_fetch`/`max_bytes_per_fetch`, optional `expires_at`) —
-  the selected design's own example embeds it, so the schema does not
-  forbid it (FR-014). The classifier-facing host-secret exclusion (FR-004)
+  the schema permits it on the wire. The classifier-facing host-secret exclusion
   is enforced where the classifier is actually invoked: the runtime path
   that constructs the model-facing projection redacts `continuation` down
   to coverage plus expansion-capability booleans before that call. This is
@@ -558,12 +554,10 @@ transport` (FR-010). Each record names its `stage`, its `writer`, and a
 | `participant-host` | `participant-host` | `wake_source`, `packet_event_count`, `packet_byte_count` (canonical actor-map plus event bytes), `delivered_event_ids`, `expansion_calls`, `invoked`, `outcome` (`sent`/`silent`/`unknown`) |
 | `transport` | `transport` | `delivery: sent/failed/unknown/unavailable`, optional `detail` |
 
-**`@2` amendment A1** (`evidence/v2/attention/dependency-010-post-acceptance-blocker.md`,
-discovered during slice 030 planning after slice 010's `@1` acceptance): the
-selected design at `c834e8c` requires the effective policy and its source to
-be inspectable in receipts, and an operator's explicit `NO_WAKE` override to
-the shared `WAKE` error-handling default to be separately receipted as
-operational failure policy, never as a social disposition. `@1` gave
+**`@2` receipt amendment**: the effective policy and its source are recorded
+in receipts. An operator's explicit `NO_WAKE` override to the shared `WAKE`
+error-handling default is recorded separately as operational failure policy,
+never as a social disposition. `@1` gave
 `policy_provenance` only to the trusted-bypass body and gave the error body
 no way to distinguish an operator override from an ordinary failure; `@2`
 adds the classifier-outcome body's required `policy_provenance` and the
@@ -625,8 +619,8 @@ conformance corpus exercises both validators:
   authoritative per-class `expected-counts.json` (updated in the same
   change as any corpus edit; counts are asserted loudly, and the on-disk
   corpus directory inventory is asserted closed at load time). The corpus
-  also carries the FR-014 authority-conformance class: named cases drawn
-  verbatim or field-complete from the selected design at `c834e8c`,
+  also carries the FR-014 authority-conformance class: cases imported from
+  the earlier design and retained as self-contained validation fixtures,
   schema-expressible and counted as their own manifest-tracked subset —
   never a fourth oracle-treatment class (CHK099).
 - **Runner**: the `tests/v2/contract/` suite. The stdlib
@@ -718,8 +712,8 @@ every runtime consumer must enforce them in its stdlib adapter:
 
 ## Examples
 
-The selected design's own example attention request, which validates
-verbatim (FR-014, `REQ-AUTH-001` in the authority-conformance corpus):
+An attention request that validates unchanged as `REQ-AUTH-001` in the
+authority-conformance corpus:
 
 ```json
 {

@@ -1,5 +1,11 @@
 # V2 reference adapters
 
+These are optional example integrations. Their commands construct a plain
+model participant; they do not connect every listed channel to an existing
+Claude Code, Codex or Hermes agent. Independent channel choice is part of the
+[architecture goal](../AGENTS.md#architecture-goal-and-current-gap), still to
+be implemented in the supplied harness integrations.
+
 All reference adapters share `ReferenceAdapterRuntime`. Native payloads are
 normalized before attention and cannot alter trusted binding or policy.
 

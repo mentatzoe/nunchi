@@ -1,8 +1,13 @@
 # Nunchi for Hermes: the `nunchi-room` plugin
 
+> **Architecture gap:** this parked plugin injects its own turns, bypassing
+> Hermes's native thread, session and identity settings. A replacement needs
+> to consume core within Hermes's native flow; see the
+> [architecture goal](../../AGENTS.md#architecture-goal-and-current-gap).
+
 **Status: Parked (2026-10-10).** The code, its tests and its CI lanes stay and
-keep running. There is no new Hermes work until the plugin is unparked (the maintainer
-and Claude as lead engineer). Why, what still works and how threads behave are
+keep running. There is no new Hermes work until the plugin is unparked.
+Why, what still works and how threads behave are
 in [Parked](#parked-2026-10-10); what unparking takes is in
 [Before unparking](#before-unparking). Where the plugin stood when it was
 parked: implemented, verified offline against Hermes main `a50406d9` (#94

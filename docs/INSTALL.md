@@ -1,8 +1,13 @@
 # Install and operate Nunchi V2
 
+**Current implementation:** these commands install and operate today's
+Nunchi runtime. Its agent startup and required channel connections are under
+[architecture review](../AGENTS.md#architecture-goal-and-current-gap). They
+are not prerequisites the intended library should impose.
+
 ## Artifact installation
 
-Build and install the exact candidate into a new environment:
+Build and install the revision being checked into a new environment:
 
 ```sh
 python3 -m pip install build

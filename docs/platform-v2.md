@@ -1,5 +1,10 @@
 # V2 platform interface and conformance
 
+**Architecture review:** this page documents current interfaces and controls.
+Its ownership of agent turns and delivery is part of the
+[implementation gap](../AGENTS.md#architecture-goal-and-current-gap), not a
+requirement for the replacement design.
+
 This is the current downstream interface for Claude Code and Codex, for the
 parked Hermes plugin, and for reference platform integrations. These
 implementations consume the shared owners but have not completed live
@@ -8,7 +13,7 @@ The normal participant-turn protocol is a shared interface; platform code
 does not redefine it. Nunchi never reacts on the participant's behalf: a "mhm"
 is the participant's own reaction in its own turn (#94 step 7).
 
-## Required owners
+## Current owners
 
 | Owner | Input | Output | Non-delegable responsibility |
 |---|---|---|---|
