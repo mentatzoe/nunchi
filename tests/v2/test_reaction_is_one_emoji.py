@@ -41,7 +41,7 @@ from nunchi.participant_model import (
 )
 from nunchi.reactions import REACTION_RULE, THUMBS_UP, is_one_emoji, reaction_refusal
 from nunchi.turn import SecretGuard, TurnParticipant
-from tests.v2.test_claude_code import OPPORTUNITY, PROFILE, test_wake
+from tests.v2.turn_fixtures import OPPORTUNITY, PROFILE, test_wake
 from tests.v2.test_participant_tool_turn import VISIBLE, _request
 from tests.v2.test_shared_foundation import CapturingParticipant, MhmTests, RecordingTransport, FixtureModel, foundation, message
 from tests.v2.test_turn import NAMES, RecordingDriver, Room
@@ -285,14 +285,14 @@ class EveryAdapterTakesWhatTheRulePassesTests(unittest.TestCase):
 
 
 class TheStandInHoldsTheCoresRuleTests(unittest.TestCase):
-    """The Discord stand-in (evals/rehearsal/fake_discord) refuses what the core refuses and nothing more.
+    """The Discord stand-in (tests/support/fake_discord) refuses what the core refuses and nothing more.
 
     One stricter than the core would lose the nod of a live run (the core commits, the stand-in refuses) and read it as the
     agent's fault: on Python 3.12 the old approximation refused 12 RGI emoji that Unicode 15.1 added.
     """
 
     def test_it_takes_every_emoji_of_unicode_16_0_and_every_shape_the_core_takes_and_refuses_the_rest(self):
-        from evals.rehearsal.fake_discord.world import emoji_ok
+        from tests.support.fake_discord.world import emoji_ok
 
         found = json.loads((Path(__file__).parent / "data" / "rgi-emoji.json").read_text(encoding="utf-8"))
         self.assertEqual([], [emoji for emoji in found["emoji"] if not emoji_ok(emoji)])
@@ -463,7 +463,7 @@ class ToolTurnTests(unittest.TestCase):
         from pathlib import Path
 
         from nunchi.turn_server import TurnServer
-        from tests.v2.test_claude_code import gate_post
+        from tests.v2.turn_fixtures import gate_post
 
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -584,31 +584,28 @@ class TheContractNamesTheChangeTests(unittest.TestCase):
 
     ROOT = Path(__file__).resolve().parents[2]
 
-    def test_the_participant_host_is_at_5_in_the_code_and_in_the_foundation_table_and_no_other_row_disagrees(self):
+    def test_interface_revisions_match_the_contract_table(self):
         import re
 
         from nunchi.v2_contracts import INTERFACE_VERSIONS
 
         self.assertEqual((5, 3), (INTERFACE_VERSIONS["I-040A"], INTERFACE_VERSIONS["I-040D"]))
-        table = (self.ROOT / "docs" / "v2-shared-foundation.md").read_text(encoding="utf-8")
+        table = (self.ROOT / "docs" / "contracts" / "nunchi.md").read_text(encoding="utf-8")
         rows = re.findall(r"^\| `(I-\d{3}[A-Z]) [A-Za-z0-9]+` \| `@(\d+)` \|", table, re.M)
         self.assertIn(("I-040A", "5"), rows)
         for interface, version in rows:
             with self.subTest(interface):
                 self.assertEqual(INTERFACE_VERSIONS[interface], int(version))
-        self.assertIn("`I-040A@5`", (self.ROOT / "docs" / "contracts" / "nunchi-v2.md").read_text(encoding="utf-8"))
+        self.assertIn("`I-040A@5`", (self.ROOT / "docs" / "contracts" / "nunchi.md").read_text(encoding="utf-8"))
         self.assertIn("`I-040A@5`", (self.ROOT / "docs" / "STABILITY.md").read_text(encoding="utf-8"))
 
-    def test_the_kit_plays_a_refused_word_nod_in_each_posting_style_and_the_parity_table_has_a_row_for_each(self):
+    def test_the_kit_has_a_refused_word_nod_for_each_posting_style(self):
         from nunchi.turn_conformance import SCENARIOS
 
         self.assertEqual(
             {"mhm-word": "tools", "final-mhm-word": "final-answer"},
             {name: scenario.posting for name, scenario in SCENARIOS.items() if name.endswith("mhm-word")},
         )
-        contract = (self.ROOT / "docs" / "harness-contract.md").read_text(encoding="utf-8")
-        for name in ("mhm-word", "final-mhm-word"):
-            self.assertRegex(contract, rf"(?m)^\| {name}: .* \| (pass|n/a) \|$")
 
     def test_each_driver_plays_both_scenarios_on_the_reference(self):
         from nunchi.turn_conformance import ReferenceIntegration, run_scenario

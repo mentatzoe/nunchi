@@ -1,19 +1,11 @@
-"""One participant in one room: the library's side, assembled once (#94 step 9d).
+"""Current shared room runtime, under architecture review.
 
-Around the agent's turn, every integration needs the same parts:
+Room assembles observation, attention, scheduling, the participant host and
+its delivery lane. It still owns turns and sending; these are implementation
+gaps against the library goal, not requirements for a harness integration.
+See docs/platform.md and AGENTS.md.
 
-- the room log (observation);
-- attention;
-- the scheduler;
-- the turn host with its commit point, memory and receipts;
-- the delivery lane, so taking in a message never waits on a turn.
-
-`Room` builds them from the shared config sections, the integration's
-participant and its transport. Every harness then gets the same behavior, and
-no integration wires the parts by hand (`docs/harness-guide.md`).
-
-`room_guard` builds the one secret guard for the room from the same config,
-and the host checks every action against it before anything leaves.
+room_guard builds the secret guard checked before output leaves this runtime.
 """
 
 from __future__ import annotations
@@ -370,7 +362,7 @@ class Room:
         It also drops the agent's remembered silences and reasons and the
         judgments made about messages, and it declares no gap. For a lost
         room connection, call ``cancel()`` and declare a gap instead; that
-        loses less of the room (`docs/harness-guide.md`, step 8).
+        preserves the retained conversation state (`docs/platform.md`).
         """
 
         self.lane.restart()

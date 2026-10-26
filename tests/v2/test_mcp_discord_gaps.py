@@ -47,7 +47,7 @@ import time
 import unittest
 from unittest import mock
 
-from evals.rehearsal.fake_discord.control import FakeDiscord
+from tests.support.fake_discord.control import FakeDiscord
 from nunchi.adapters.discord import DiscordPyTransport
 from nunchi.integrations.discord_participant_transport import MCPDiscordTransport, thread_of
 from nunchi.integrations.discord_room import DiscordRoomConnection
@@ -1159,74 +1159,6 @@ class SessionEndTests(unittest.TestCase):
         client.session_id = "s1"
         client.close()
         self.assertIsNone(client.session_id)
-
-
-class _Stop(BaseException):
-    """Ends a loop that would run forever."""
-
-
-class CodexRunnerLoopTests(unittest.TestCase):
-    """`nunchi-codex-room-runner` has its own serve loop: the same order as `DiscordRoomConnection.serve`."""
-
-    def run_main(self, client_class):
-        from unittest import mock
-
-        from nunchi.integrations import codex_v2
-
-        steps: list[str] = []
-        transport = {"url": "http://127.0.0.1:1/mcp", "timeout_seconds": 5, "output_key_env": "K"}
-
-        class Runtime:
-            def __init__(self, config, client):
-                pass
-
-            def register_transport(self):
-                steps.append("register")
-
-            def handle(self, params):
-                steps.append("handle")
-
-            def transport_interrupted(self):
-                steps.append("gap")
-
-        def sleep(_seconds):
-            raise _Stop
-
-        with (
-            mock.patch.object(codex_v2, "keep_private", return_value="private"),
-            mock.patch.object(codex_v2, "load_pinned_config", return_value={"transport": transport}),
-            mock.patch.object(codex_v2, "StreamableMCPClient", lambda *a, **k: client_class(steps)),
-            mock.patch.object(codex_v2, "CodexRoomRuntime", Runtime),
-            mock.patch.object(codex_v2.time, "sleep", sleep),
-        ):
-            with self.assertRaises(_Stop):
-                codex_v2.main(["--config", "c", "--config-sha256", "s"])
-        return steps
-
-    def test_it_opens_the_stream_marks_the_gap_and_registers_before_it_reads(self):
-        class Client:
-            def __init__(self, steps):
-                self.steps = steps
-
-            def connect(self):
-                self.steps.append("connect")
-
-            def open_stream(self):
-                self.steps.append("open_stream")
-                return self
-
-            def close(self):
-                self.steps.append("close")
-
-            def notifications(self, stream=None):
-                self.steps.append("read")
-                yield "notifications/nunchi/v2/discord-event", {}
-                raise OSError("the stream died")
-
-        self.assertEqual(
-            ["connect", "open_stream", "gap", "register", "read", "handle", "close", "gap"],
-            self.run_main(Client),
-        )
 
 
 # -- the setting, in the core --------------------------------------------------------------------------

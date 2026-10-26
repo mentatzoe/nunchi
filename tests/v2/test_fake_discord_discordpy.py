@@ -1,10 +1,9 @@
-"""The Discord stand-in through real discord.py (step 9f, PR 3a), configured as `nunchi-discord` runs it.
+"""The local Discord fixture through real discord.py.
 
 Only discord.py's REST base and first gateway URL are pointed at the
 stand-in, here in the test; everything else is discord.py as installed, so
 its aiohttp is an independent check on the stand-in's WebSocket codec (the
-transport shares it). It checks what discord.py needs before any column can
-read the room: ready within a few seconds, with the member chunk answered and
+transport shares it). It checks channel operations: ready within a few seconds, with the member chunk answered and
 ``guild.me`` set; ``permissions_for`` agreeing with the stand-in and with the
 transport's reaction capability across overwrites and in threads, for the
 bot and for a person; a person's message parsed with a Member author that
@@ -12,9 +11,8 @@ has roles (a missing key there is dropped silently); a thread known before
 its message; raw reaction events; the bot's own echo with its nonce; a
 reply; a resume; and a session Discord would end, which starts afresh.
 
-Skipped where discord.py is not installed. CI runs it with discord.py 2.7.1
-in the ``discord-standin`` job (Python 3.12, ``zlib-stream``) and the
-``hermes-plugin`` job (3.14, ``zstd-stream``).
+Skipped where discord.py is not installed. The checks use discord.py 2.7.1;
+compression depends on the installed Python version.
 """
 
 from __future__ import annotations
@@ -28,8 +26,8 @@ from unittest import mock
 
 from nunchi.mcp_discord.rest import DiscordRestClient, DiscordRestError
 
-from evals.rehearsal.fake_discord.control import FakeDiscord
-from evals.rehearsal.fake_discord.world import PERMISSIONS, bits, id_ms
+from tests.support.fake_discord.control import FakeDiscord
+from tests.support.fake_discord.world import PERMISSIONS, bits, id_ms
 
 try:
     import discord
@@ -170,8 +168,8 @@ class DiscordPyTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(forbidden.exception.code, 50013)
         self.assertClean()
 
-    async def test_the_routes_hermes_calls_are_read_by_discord_py(self):
-        """History, one message, a reaction read back, the slash-command sync and the application's flags: what `hermes gateway run` asks of Discord."""
+    async def test_history_reaction_and_application_routes_are_read_by_discord_py(self):
+        """History, one message, a reaction read back, the slash-command sync and the application's flags: the native Discord client routes."""
         room = self.channel("room")
         ids = [int(self.fd.post("alice", "room", f"message {number}")["id"]) for number in range(3)]
         found = [m async for m in room.history(limit=2, before=discord.Object(ids[2]))]

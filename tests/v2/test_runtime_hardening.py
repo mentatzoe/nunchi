@@ -1427,7 +1427,7 @@ class InstalledSurfaceTests(unittest.TestCase):
         with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
             cli.main(["admit"])
 
-    def test_packaging_and_codex_bundle_have_no_v1_execution_paths(self):
+    def test_packaging_has_no_v1_execution_paths(self):
         root = Path(__file__).resolve().parents[2]
         pyproject = (root / "pyproject.toml").read_text()
         self.assertIn('requires = ["setuptools==83.0.0"]', pyproject)
@@ -1447,27 +1447,6 @@ class InstalledSurfaceTests(unittest.TestCase):
             self.assertFalse(
                 (root / "evals" / "verdict_suite" / retired_module).exists()
             )
-        hooks = json.loads(
-            (
-                root
-                / "integrations"
-                / "codex"
-                / "nunchi-codex"
-                / "hooks"
-                / "hooks.json"
-            ).read_text()
-        )
-        tools = json.loads(
-            (
-                root
-                / "integrations"
-                / "codex"
-                / "nunchi-codex"
-                / ".mcp.json"
-            ).read_text()
-        )
-        self.assertEqual({"hooks": {}}, hooks)
-        self.assertEqual({"mcpServers": {}}, tools)
 
 
 if __name__ == "__main__":

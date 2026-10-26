@@ -1,5 +1,49 @@
 # Nunchi contributor guidance
 
+## Architecture goal and current gap
+
+**Agreed, 2026-10-25.** Nunchi is a library that gives existing agents social
+attention and room context through the channels people already use.
+
+- Core holds room background, participants, message history and metadata,
+  with create, read, update and delete APIs for gates and library consumers.
+- Core provides the two attention steps, social judgments, provider
+  connections and configuration for rooms, participants, agent metadata,
+  prompts and attention models. Agents and humans consume its APIs or tools.
+- Harness integrations consume core through their native extension points.
+  The harness owns agent startup, lifecycle and turns. The agent controls its
+  actions and communication.
+- Channel integrations supply context from the user's chosen channels.
+  Nunchi's adapters and MCP tools are optional examples, not prerequisites.
+  Explain actual compatibility limits so users can choose the tradeoff.
+
+**The implementation does not yet meet this goal.** Shared code still hosts
+participant turns, controls sending and limits each turn to one room action.
+Context CRUD and prompt configuration are incomplete. Keeping context and
+history in core is intentional; the ownership of agents and sending is not.
+
+**Integration retirement, decided 2026-10-26.** Remove the Claude Code, both
+Codex and Hermes plugin implementations, their launchers and integration-only
+checks. Offering a misleading integration is worse than offering none. There
+are no supplied harness integrations until replacements are designed. Git
+retains the old code. This supersedes the earlier Hermes parking decision and
+instructions to keep old integrations until replacements pass their checks.
+
+Core, provider connections and optional channel capabilities remain for
+review. Reference adapters run plain model participants; they do not integrate
+with existing agent harnesses. Retiring harness code does not approve the
+library-owned turns that remain in shared code.
+
+**Conversation rehearsal retirement, decided 2026-10-26.** Remove the old
+conversation runners, their scripted and live rehearsal paths, active CI jobs
+and instructions. Their scenarios and scoring do not implement the approved
+scenes. Keep isolated checks of retained core, provider and channel functions.
+End-to-end evaluation follows the architecture and evaluation design discussion.
+
+Current work is architecture review with the maintainer. Implementation of
+replacement interfaces and evaluation design follow that discussion. Current
+contracts describe code, not product intent or a mandate to resume old plans.
+
 ## What Nunchi is for
 
 Nunchi (눈치) is a social conversational gate for multi-turn conversations
@@ -14,9 +58,9 @@ It translates one-to-one habits into a many-to-many conversation.
 
 ## Social behavior
 
-**Agreed, 2026-10-19.** This section comes first. Where anything else in this
-repository disagrees with it, `docs/behavior.md` included, this section wins.
-Every change should make it more true.
+**Agreed, 2026-10-19.** This is the social purpose of the architecture above.
+Where other documents disagree with it, `docs/behavior.md` included, this
+section wins. Every change should make it more true.
 
 - Nunchi gives agents social activations. It is not a filter for "only
   contribute when you have something useful".
@@ -48,67 +92,34 @@ What this means for the work:
 - What is said shapes how the agent reads a message; who said it does not.
 - Describe rather than prescribe: much of real social behavior is emergent.
 
-## Reading the room
+## Draft status
 
-[`docs/behavior.md`](docs/behavior.md) describes the behavior in more detail.
-It is a draft written by Claude sessions, not yet agreed, and under review,
-yardstick first; only its lines marked agreed are decided. Judge a design by
-the conversation it produces, not by its mechanism. Rules from earlier
-versions give way wherever they block this behavior (agreed, 2026-10-04;
-[#94](https://github.com/mentatzoe/nunchi/issues/94)).
+`docs/behavior.md` is an agent-authored draft. Only statements explicitly
+marked agreed or decided are decisions, subject to later maintainer changes.
+The rest is proposed behavior or implementation commentary, not requirements
+to build. A difference between code and unagreed prose is a review question,
+not automatically a defect. The approved scene specifications retain their
+own agreed status.
 
-Reading the room means (a Claude summary, under the same review):
-
-- **Two steps, then the agent.** Step 1 asks whether this is conversation a
-  participant like this one could take part in; it is conservative and never
-  suppresses a message just because it was addressed to someone else. Step 2
-  reads what is happening and recommends the kinds of response that could
-  fit, with reasons. The agent then decides.
-- **The participant judges for itself.** Only the participant's own delegated
-  models, shaped by its identity, instructions, and the room, read the room
-  for it. Deterministic code never decides relevance, resolution, or
-  obligation.
-- **Every visible move is the agent's own act**, including a "mhm". Nunchi
-  never posts on the agent's behalf. (Nunchi's own nod was removed in step 7
-  of #94.)
-- **A conversation has memory, not a work queue.** Each participant keeps a
-  memory of the conversation: who asked what, what was answered and by whom,
-  its own moves and why. Every fact points to the messages it came from and
-  none obliges a reply. There is no obligation queue or inferred roster.
-- **Rhythm matters.** Pace, pauses, someone mid-thought, and the agent's own
-  share of the conversation are part of reading the room.
-- **Silence is a normal, correct outcome.** A woken participant contributes
-  directly or says nothing. It never sends a meta-answer about its attention.
-- **When unsure, pay attention.** Uncertainty wakes or defers. Wrongly
-  suppressing something that mattered is the worst error.
-- **Context is bounded and honest.** The participant sees a bounded, truthful
-  snapshot of the room, including what is missing, and its own earlier turns
-  as factual history.
-- **Other agents are participants.** Peer agents' messages are observed like
-  anyone else's. A participant's own messages never wake it.
-- **Continuity without revival.** Restarts and backfill restore facts, never
-  missed moments or stale turns.
-
-Today's code does not yet behave this way in several places; the table at the
-end of `docs/behavior.md` lists where. Treat each difference as a gap to close,
-not as the intended behavior.
+Judge designs by the conversations they produce. Earlier rules give way
+where they block agreed social behavior (agreed, 2026-10-04). This does not
+give the unagreed parts of a draft authority over code or other documents.
 
 ## One library, every harness
 
-Nunchi is a library that any agent harness can use. Every behavior in
-`docs/behavior.md` is implemented once, in the shared core, and reaches each
-harness through the same interfaces. A harness should not need its own copy
-of a behavior to get it (agreed, 2026-10-07).
+The goal is a library any agent harness can use. Agreed Nunchi behavior
+belongs in the shared core and reaches harnesses through shared interfaces.
+A harness should not need its own copy of a behavior to get it
+(agreed, 2026-10-07).
 
 The shared core is `src/nunchi` outside `integrations/` and `adapters/`, plus
 `schemas/` and `docs/contracts/`. It must not know about any specific agent
 host (Hermes, Codex, Claude Code), chat platform, or model vendor.
 
-An integration adapts one harness to the core: how that harness is installed,
-configured, started, and given its turns. It holds no social behavior of its
-own. When a behavior seems to need integration code, the core is missing an
-interface; add it there. If a core change only makes sense for one host or
-one vendor, the core needs a neutral interface instead.
+An integration connects a harness to core through the harness's public
+extension points, preserving its lifecycle, settings and native message flow.
+It does not duplicate Nunchi's social judgments or take control of the agent.
+If an integration needs a missing core capability, expose a neutral interface.
 
 - **Same behavior everywhere.** Building and testing a behavior through one
   harness first is fine. Until every supported harness has it, record the gap
@@ -127,53 +138,33 @@ one vendor, the core needs a neutral interface instead.
 - **Independent evidence.** Tests, evaluations, and benchmarks run on clean,
   pinned installs of each harness, never on anyone's own setup.
 - **D2, decided** (2026-10-11): keys the agent can reach are the harness's to
-  protect, as with any other keys the agent holds. Nunchi
-  keeps its own keys out of the room, and out of the agent's environment when
-  Nunchi starts the agent. Guarding what the agent's own commands can still
-  read is the job of the harness's sandbox and settings; each active
-  integration's README names them.
-- **Claude Code keeps Nunchi's own Discord transport** (Claude as lead
-  engineer, by principle, 2026-10-11;
-  [#69](https://github.com/mentatzoe/nunchi/issues/69),
-  [#70](https://github.com/mentatzoe/nunchi/issues/70)). Claude Code's
-  official Discord channel plugin acts in the room before Nunchi decides and
-  drops other agents' messages
-  ([README](integrations/claude-code/README.md#how-it-works)). The gate
-  reaches Claude Code only through its public extension points, a plugin and
-  the `stream-json` input mode, so Claude Code itself stays stock.
-- **The Hermes plugin is parked** (decided,
-  2026-10-10). It injects a turn of its own instead of riding Hermes's native
-  flow, so Hermes's thread, session and identity settings never apply to
-  Nunchi's turns, and following Hermes's rules for listing a plugin would cost
-  the agent its mentions. The code and its CI lanes stay; there is no new
-  Hermes work until it is unparked
-  ([README, Parked](integrations/hermes-plugin/README.md#parked-2026-10-10)).
-  Codex stays active.
-- **The old Hermes integration is removed** (decided 2026-10-11, for
-  now). It patched Hermes at runtime, which this rule forbids. Hermes has no
-  supported path until the plugin is unparked.
-- **D4, decided** (2026-10-10): Hermes's built-in commands stay Hermes's. The
-  plugin never drops or rewrites them; operators can restrict them with
-  `group_allow_admin_from`.
+  protect, as with any other keys the agent holds. Keep Nunchi's own keys out
+  of the room and out of subprocess environments an integration constructs
+  for agents. In-process integrations share the harness's environment and
+  must document which credentials the agent can reach. The harness's sandbox
+  and settings protect what its commands can read. Consumers must document
+  the relevant sandbox and credential settings.
+- **Channel limitations must be visible.** Document actual connector limits
+  so users can choose their channels. The inspected Claude Discord plugin's
+  bot filtering and history limits are recorded under
+  [channel compatibility](docs/adapters.md#channel-compatibility). They do not
+  justify requiring Nunchi's connector or taking control of an agent.
 
 ## Read first
 
-1. This file, starting with Social behavior. Its decisions take precedence
-   over older documents.
-2. `docs/behavior.md`, the detailed draft (see Reading the room). Where an
-   older design, contract, or spec conflicts with it, it wins; where it
-   conflicts with Social behavior, Social behavior wins.
-3. `docs/architecture/v2-selected-design.md` for the selected design.
-4. `docs/contracts/nunchi-v2.md` for the portable contract.
-5. `docs/v2-completion-goal.md` for what a complete release must prove.
-6. Source, schemas, tests, evaluations, evidence, and installed runtimes for
+1. This file: architecture goal, social behavior and draft status.
+2. `README.md`: current implementation, available capabilities and gaps.
+3. The relevant implementation reference: `docs/contracts/nunchi.md`,
+   `docs/platform.md`, or `docs/adapters.md`. Their current turn and sending
+   ownership is under architecture review.
+4. Source, schemas, tests, evaluations, evidence and installed runtimes for
    what actually exists and works.
+5. `docs/behavior.md` when discussing proposed behavior, using the draft
+   status above.
 
-Re-read this file and `docs/behavior.md` after each context compaction, when
-your session replaces its earlier history with a summary.
-
-Code and reproducible behavior determine implementation truth. Specs under
-`specs/` are reference material, not work authorization.
+Re-read this file after context compaction. Recover the maintainer's current
+goal and decisions before continuing. Code and reproducible behavior
+determine implementation truth; they do not decide product intent.
 
 ## Working with the maintainer (agreed, 2026-10-20)
 
@@ -202,11 +193,17 @@ Work as a thinking partner, not an executor.
   claim that V2 is complete.
 - Work on a short-lived branch from current `main`, open a PR, merge when CI is
   green, and delete the branch. Do not keep long-lived side branches. Always
-  merge: work left on a branch never lands (agreed, 2026-10-19).
+  merge: work left on a branch never lands (agreed, 2026-10-19). When the
+  maintainer asks for a PR for review, leave it open for that review.
 - Scale review to the size and risk of the change. A self-review with
   subagents is acceptable; say plainly that it is one. Cross-family
   independent review is not required for day-to-day delivery.
-- A release (a `v*` tag) still follows `docs/v2-completion-goal.md`.
+- The maintainer decides release readiness. Report deterministic,
+  installed-runtime and live checks separately, with pinned inputs and
+  reproducible results. A green CI run is not release acceptance.
+- Committed documentation must be enough to understand, build, test and
+  install Nunchi without private conversations or hidden product logic.
+  Document external runtime, account and configuration prerequisites.
 
 ## Working style
 
@@ -240,21 +237,6 @@ Work as a thinking partner, not an executor.
 
 - Work on the earliest missing behavior the product needs, and build only
   what the library needs for it.
-- The current milestone is every rehearsal left in step 9f of
-  [#94](https://github.com/mentatzoe/nunchi/issues/94) (4e, PR 5 and PR 6),
-  then the internal test track: the maintainer's own machine, one person, kept in-house.
-  All rehearsals are kept (agreed, 2026-10-10). Claude Code goes first, then
-  Codex (Claude's order as lead engineer).
-- Before building a step, price it in days, lines of code and credits (the
-  model and CI spend it takes). Name the eval arm that will show it working
-  (a setting of `evals/behavior`, or a rehearsal run), and read the plugin
-  rules of each harness it touches (Claude as lead engineer, 2026-10-11,
-  after step 9f ran days over).
-- Beyond the rehearsals kept (4e, PR 5 and PR 6, each priced before it is
-  built), write no more rehearsal code until a live run finds something that
-  needs it (Claude, 2026-10-11). Parked for later: trying these live rather
-  than building more eval library
-  ([#174](https://github.com/mentatzoe/nunchi/issues/174)).
 - When a shared interface changes, run every consumer's tests in the same PR
   and fix or flag what breaks.
 - A stale assignment, previous session owner, missing process artifact,
@@ -263,12 +245,10 @@ Work as a thinking partner, not an executor.
   continue other unblocked product work. Stop only when no safe in-scope work
   remains, and state the concrete dependency.
 - Do not narrow supported behavior, redefine completion, or drop a required
-  surface without the maintainer's explicit decision. Lines in this file and in
-  `docs/behavior.md` marked agreed or decided, with a date, are decided:
-  build them. The rest of both files was written by agents: treat it, like
-  rules marked as Claude's, as engineering calls, and change it with
-  evidence, never against a decision. Ask the maintainer only when a choice materially
-  changes product behavior or supported surfaces and no decision covers it,
+  surface without the maintainer's explicit decision. Apply the draft status
+  above and the current request when deciding what work is authorized.
+  Ask the maintainer only when a choice materially changes product behavior
+  or supported surfaces and no decision covers it,
   or when it touches security boundaries or requires an irreversible
   external action.
 - Plans, labels, reviews, and evidence files do not substitute for working
@@ -321,7 +301,6 @@ depend on one.
 ```sh
 python3 -m unittest
 python3 -m evals.verdict_suite.runner --list
-python3 -m evals.behavior.run --dry-run
 ```
 
 Deterministic tests are offline and prove deterministic behavior only. Whether
@@ -335,20 +314,18 @@ library packages record preparation, not protagonist runs or passing scores.
 Execution and scoring of this collection belong to a separate evaluation-design
 session.
 
-`evals/behavior/` and the manual `behavior-eval` workflow still use legacy
-fixtures. Their move ranges and review metadata do not define approval or
-required responses for the published scenes. Evaluation is moving to an
-existing framework such as DeepEval, and to tests of the installed library
-and its command line, not only its Python
-code (agreed, 2026-10-19;
-[#174](https://github.com/mentatzoe/nunchi/issues/174);
-[`evals/behavior/README.md`](evals/behavior/README.md#where-evaluation-is-going)).
+The legacy behavior runner and its manual workflow have been removed with the
+conversation rehearsals. Their fixtures and scoring remain in Git history.
+Evaluation is moving to an existing framework such as DeepEval and to tests of
+the installed library with real, pinned agents and integrations (agreed,
+2026-10-19; [#174](https://github.com/mentatzoe/nunchi/issues/174)). That design
+has not yet been agreed or implemented.
 Live provider and platform runs need explicit credentials and must record the
 installed version, identity, configuration, command, and complete result.
 
 Records of test runs on the maintainer's test server, which carries test talk only, may
 be published in this repository, which is public, once a scan finds none of
 the run's keys in them (agreed, 2026-10-18). Run
-`python3 -m evals.rehearsal.scan --out <records> --env
+`python3 -m evals.scan_records --out <records> --env
 <variable>`, with one `--env` for each key the run used. A hit deletes the
 records.

@@ -1,8 +1,7 @@
 """The turn's rules live in the core, the same for every harness (#94 step 9c).
 
 These tests drive `nunchi.turn` through a driver that is no particular
-harness, with tool names of its own choosing. The Claude Code gate's tests
-cover the same rules through its session and mod.
+harness, with tool names of its own choosing.
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ import unittest
 from nunchi.participant import TransportResult
 from nunchi.participant_model import build_participant_turn_request
 from nunchi.turn import MARKER_ONLY_REFUSAL, WAKE_MARKER, SecretGuard, Turn, TurnError, TurnParticipant
-from tests.v2.test_claude_code import OPPORTUNITY, PROFILE, test_wake
+from tests.v2.turn_fixtures import OPPORTUNITY, PROFILE, test_wake
 
 NAMES = {
     "send": "say",
@@ -157,12 +156,13 @@ class GuardTests(unittest.TestCase):
         self.assertFalse(self.refuses(original, "a-launch-secret-for-this-turn"))
 
     def test_a_subclass_keeps_its_own_shapes(self):
-        from nunchi.integrations.claude_code_gate import SecretGuard as GateGuard
+        class ShapedGuard(SecretGuard):
+            def __init__(self, values):
+                super().__init__(values, [re.compile(r"tok_[a-z]{8}")])
 
-        token = "M" * 24 + ".GaBcDe." + "y" * 30
-        grown = GateGuard([]).including(["a-launch-secret-for-this-turn"])
-        self.assertIsInstance(grown, GateGuard)
-        self.assertTrue(self.refuses(grown, f"the token is {token}"))
+        grown = ShapedGuard([]).including(["a-launch-secret-for-this-turn"])
+        self.assertIsInstance(grown, ShapedGuard)
+        self.assertTrue(self.refuses(grown, "the token is tok_abcdefgh"))
         self.assertTrue(self.refuses(grown, "a-launch-secret-for-this-turn"))
 
     def test_withhold_gives_later_turns_the_grown_guard_and_leaves_the_given_one(self):
@@ -1624,7 +1624,7 @@ class LocalTurnProtocolTests(unittest.TestCase):
         self.addCleanup(server.close)
 
     def post(self, path, body, secret=None):
-        from tests.v2.test_claude_code import gate_post
+        from tests.v2.turn_fixtures import gate_post
 
         return gate_post(self.socket_path, path, body, self.secret if secret is None else secret)
 
@@ -2052,18 +2052,6 @@ class PrivateTextTests(unittest.TestCase):
         for text in REAL_FINAL_ANSWERS:
             with self.subTest(text=text):
                 self.assertEqual((text.strip(), ""), self.split(text, final_answer=True))
-
-    def test_the_marker_is_the_cores_and_the_integrations_that_run_use_it(self):
-        from nunchi.integrations import claude_code_conformance, claude_code_gate
-
-        self.assertIs(WAKE_MARKER, claude_code_gate.WAKE_MARKER)
-        self.assertIs(WAKE_MARKER, claude_code_conformance.WAKE_MARKER)
-        # The wake id an integration reads back from the marker. The reader is the
-        # small one each integration carries (the parked Hermes plugin has the same
-        # line); this test no longer imports the plugin for it.
-        reader = re.compile(re.escape(WAKE_MARKER).replace(re.escape("{}"), "([A-Za-z0-9_-]+)"))
-        self.assertEqual("abc-_1", reader.search(WAKE_MARKER.format("abc-_1")).group(1))
-        self.assertEqual("abc-_1", claude_code_conformance._WAKE.match(WAKE_MARKER.format("abc-_1")).group(1))
 
     def test_a_large_adversarial_answer_is_decided_in_bounded_time(self):
         # The step 5 check found a cubic case; the rules now are single regexes.

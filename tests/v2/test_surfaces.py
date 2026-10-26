@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
-import hashlib
 import io
 import json
 import os
 from pathlib import Path
 import tempfile
-import threading
-import time
 import unittest
 from unittest import mock
 
@@ -22,13 +19,7 @@ from nunchi.adapters.matrix import MatrixTransport
 from nunchi.adapters.telegram import TelegramTransport
 from nunchi.adapters.discord import DiscordPyTransport, DurableGatewaySequence
 from nunchi.errors import ValidationError
-from nunchi.attention import ParticipantProfile
-from nunchi.integrations.codex_v2 import (
-    CodexParticipant,
-    CodexRoomRuntime,
-    MCPDiscordTransport,
-    _parse_codex_output,
-)
+from nunchi.integrations.discord_participant_transport import MCPDiscordTransport
 from nunchi.integrations.mcp_client import StreamableMCPClient
 from nunchi.mcp_discord.authorization import ToolAuthorizer, make_tool_authorization
 from nunchi.mcp_discord.events import v2_notification_from_dispatch
@@ -37,7 +28,6 @@ from nunchi.mcp_discord.rest import DiscordRestClient, DiscordRestError
 from nunchi.mcp_discord.tools import ToolExecutor
 from nunchi.observation import ParticipantBinding
 from nunchi.participant import TransportResult
-from nunchi.participant_model import ParticipantTurnProtocol
 
 
 BINDING = ParticipantBinding(
@@ -858,523 +848,8 @@ class ToolAuthorizationTests(unittest.TestCase):
                 self.assertEqual("unknown", payload["delivery"]["status"])
 
 
-class CodexSurfaceTests(unittest.TestCase):
-    @staticmethod
-    def _installed_codex():
-        return mock.patch(
-            "nunchi.integrations.codex_v2.shutil.which",
-            return_value="/trusted/bin/codex",
-        )
-
-    @staticmethod
-    def _codex_identity():
-        return (
-            ParticipantProfile(
-                profile_id="vigil",
-                participant_id="vigil",
-                actor_id="discord:actor:9",
-                instructions="Contribute carefully.",
-                provenance="trusted:test",
-                sha256="a" * 64,
-            ),
-            ParticipantBinding(
-                participant_id="vigil",
-                actor_id="discord:actor:9",
-                platform="discord",
-                room_id="42",
-                continuity_scope_id="discord:42",
-            ),
-        )
-
-    @staticmethod
-    def _wake():
-        return {
-            "request_id": "r",
-            "self": {
-                "participant_id": "vigil",
-                "actor_id": "discord:actor:9",
-            },
-            "room": {
-                "platform": "discord",
-                "id": "42",
-                "continuity_scope_id": "discord:42",
-            },
-            "actors": {
-                "discord:actor:9": {"kind": "bot"},
-                "discord:actor:42": {"kind": "human"},
-            },
-            "events": [
-                {
-                    "id": "e1",
-                    "type": "message",
-                    "author_id": "discord:actor:42",
-                    "text": "hello",
-                    "mentioned_actor_ids": [],
-                    "mentions_room": False,
-                }
-            ],
-            "trigger_event_id": "e1",
-            "coverage": {
-                "has_more_before": False,
-                "has_more_after": False,
-                "has_gaps": False,
-                "truncated_by": [],
-                "continuity": "restart-safe",
-                "has_restart_gap": False,
-            },
-            "attention": {"source": "WAKE"},
-        }
-
-    def test_codex_participant_rejects_arbitrary_process_configuration(self):
-        profile, binding = self._codex_identity()
-        with tempfile.TemporaryDirectory() as directory, self._installed_codex():
-            for config in (
-                {"binary": "/tmp/attacker"},
-                {"args": ["--full-auto"]},
-                {"working_directory": "/"},
-                {"timeout_seconds": float("inf")},
-            ):
-                with self.subTest(config=config), self.assertRaises(ValidationError):
-                    CodexParticipant(
-                        profile=profile,
-                        config=config,
-                        binding=binding,
-                        state_directory=directory,
-                    )
-
-    def test_codex_participant_requires_executable_on_trusted_path(self):
-        profile, binding = self._codex_identity()
-        with (
-            tempfile.TemporaryDirectory() as directory,
-            mock.patch(
-                "nunchi.integrations.codex_v2.shutil.which",
-                return_value=None,
-            ),
-            self.assertRaisesRegex(
-                ValidationError,
-                "Codex executable is not installed on trusted PATH",
-            ),
-        ):
-            CodexParticipant(
-                profile=profile,
-                config={"session_mode": "fresh"},
-                binding=binding,
-                state_directory=directory,
-            )
-
-    def test_codex_process_is_fixed_read_only_tool_less_and_env_bounded(self):
-        profile, binding = self._codex_identity()
-        wake = {
-            "request_id": "r",
-            "self": {
-                "participant_id": "vigil",
-                "actor_id": "discord:actor:9",
-            },
-            "room": {
-                "platform": "discord",
-                "id": "42",
-                "continuity_scope_id": "discord:42",
-            },
-            "actors": {
-                "discord:actor:9": {"kind": "bot"},
-                "discord:actor:42": {"kind": "human"},
-            },
-            "events": [
-                {
-                    "id": "e1",
-                    "type": "message",
-                    "author_id": "discord:actor:42",
-                    "text": "hello",
-                    "mentioned_actor_ids": [],
-                    "mentions_room": False,
-                }
-            ],
-            "trigger_event_id": "e1",
-            "coverage": {
-                "has_more_before": False,
-                "has_more_after": False,
-                "has_gaps": False,
-                "truncated_by": [],
-                "continuity": "restart-safe",
-                "has_restart_gap": False,
-            },
-            "attention": {"source": "WAKE"},
-        }
-        protocol = ParticipantTurnProtocol(
-            profile=profile,
-            wake=wake,
-            opportunity={
-                "generation": 1,
-                "lifecycle_id": "direct-library-call",
-                "deadline_id": "direct-library-call",
-                "permissions": {
-                    "revision": "direct-library-call",
-                    "ordinary_actions": ["message", "reply", "reaction"],
-                    "privileged_proposals": True,
-                },
-            },
-        )
-        action = {
-            "protocol": protocol.request["protocol"],
-            "binding": protocol.request["binding"],
-            "action": {"kind": "silence"},
-        }
-
-        class Process:
-            returncode = 0
-
-            def poll(self):
-                return 0
-
-            def communicate(self):
-                return (
-                    json.dumps(
-                        {
-                            "type": "item.completed",
-                            "item": {
-                                "type": "agent_message",
-                                "text": json.dumps(
-                                    {"action_json": json.dumps(action)}
-                                ),
-                            },
-                        }
-                    ),
-                    "",
-                )
-
-        with tempfile.TemporaryDirectory() as directory, self._installed_codex():
-            participant = CodexParticipant(
-                profile=profile,
-                config={"session_mode": "fresh", "timeout_seconds": 5},
-                binding=binding,
-                state_directory=directory,
-            )
-            with mock.patch(
-                "nunchi.integrations.codex_v2.subprocess.Popen",
-                return_value=Process(),
-            ) as popen:
-                result = participant(
-                    wake=wake,
-                    expand=lambda **_: {},
-                    cancel=threading.Event(),
-                )
-            schema = json.loads(participant.output_schema_path.read_text())
-        self.assertIsNone(result)
-        command = popen.call_args.args[0]
-        self.assertEqual("/trusted/bin/codex", command[0])
-        self.assertNotIn("--full-auto", command)
-        self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", command)
-        self.assertIn("--ignore-user-config", command)
-        self.assertIn("--ignore-rules", command)
-        self.assertIn("--strict-config", command)
-        self.assertIn("read-only", command)
-        self.assertIn("--output-schema", command)
-        self.assertNotIn("oneOf", schema)
-        self.assertEqual(["action_json"], schema["required"])
-        self.assertEqual(
-            {"action_json"},
-            set(schema["properties"]),
-        )
-        for feature in ("shell_tool", "unified_exec", "apps", "plugins"):
-            self.assertIn(feature, command)
-        child_env = popen.call_args.kwargs["env"]
-        self.assertNotIn("NUNCHI_DISCORD_TOKEN", child_env)
-        self.assertTrue(
-            set(child_env).issubset(
-                {
-                    "CODEX_HOME",
-                    "HOME",
-                    "LANG",
-                    "LC_ALL",
-                    "LOGNAME",
-                    "PATH",
-                    "TMPDIR",
-                    "USER",
-                }
-            )
-        )
-
-    def test_codex_expansions_share_one_turn_deadline(self):
-        profile, binding = self._codex_identity()
-        wake = self._wake()
-        opportunity = {
-            "generation": 1,
-            "lifecycle_id": "lifecycle-1",
-            "deadline_id": "deadline-1",
-            "permissions": {
-                "revision": "permissions-1",
-                "ordinary_actions": ["message", "reply", "reaction"],
-                "privileged_proposals": True,
-            },
-        }
-        protocol = ParticipantTurnProtocol(
-            profile=profile,
-            wake=wake,
-            opportunity=opportunity,
-        )
-        expansion = {
-            "protocol": protocol.request["protocol"],
-            "binding": protocol.request["binding"],
-            "action": {
-                "kind": "expand",
-                "direction": "before",
-                "max_events": 1,
-                "max_bytes": 256,
-            },
-        }
-        task_id = "019f9432-9300-7dd1-8225-d7f10f921968"
-        stdout = "\n".join(
-            (
-                json.dumps({"type": "thread.started", "thread_id": task_id}),
-                json.dumps(
-                    {
-                        "type": "item.completed",
-                        "item": {
-                            "type": "agent_message",
-                            "text": json.dumps(
-                                {"action_json": json.dumps(expansion)}
-                            ),
-                        },
-                    }
-                ),
-            )
-        )
-
-        class CompletedProcess:
-            returncode = 0
-
-            def poll(self):
-                return 0
-
-            def communicate(self):
-                return stdout, ""
-
-        class BlockingProcess:
-            returncode = None
-
-            def __init__(self):
-                self.terminated = False
-                self.killed = False
-
-            def poll(self):
-                return None
-
-            def terminate(self):
-                self.terminated = True
-
-            def wait(self, timeout):
-                self.wait_timeout = timeout
-                return 0
-
-            def kill(self):
-                self.killed = True
-
-        blocked = BlockingProcess()
-        with tempfile.TemporaryDirectory() as directory, self._installed_codex():
-            participant = CodexParticipant(
-                profile=profile,
-                config={"session_mode": "fresh", "timeout_seconds": 5},
-                binding=binding,
-                state_directory=directory,
-            )
-            with (
-                mock.patch(
-                    "nunchi.integrations.codex_v2.subprocess.Popen",
-                    side_effect=[CompletedProcess(), blocked],
-                ) as popen,
-                mock.patch(
-                    "nunchi.integrations.codex_v2.time.monotonic",
-                    side_effect=[0.0, 6.0],
-                ) as monotonic,
-            ):
-                result = participant.run_protocol(
-                    wake=wake,
-                    opportunity=opportunity,
-                    expand=lambda **_: {"events": []},
-                    cancel=threading.Event(),
-                )
-
-        self.assertIsNone(result)
-        self.assertEqual(2, popen.call_count)
-        self.assertEqual(2, monotonic.call_count)
-        self.assertTrue(blocked.terminated)
-        self.assertFalse(blocked.killed)
-
-    def test_codex_persistent_task_is_bound_to_profile_actor_room_and_behavior(self):
-        profile, binding = self._codex_identity()
-        thread_id = "019f9432-9300-7dd1-8225-d7f10f921968"
-        with tempfile.TemporaryDirectory() as directory, self._installed_codex():
-            first = CodexParticipant(
-                profile=profile,
-                config={"session_mode": "persistent", "model": "model-a"},
-                binding=binding,
-                state_directory=directory,
-            )
-            first._save_session(thread_id)
-            self.assertEqual(thread_id, first._load_session())
-            changed = CodexParticipant(
-                profile=profile,
-                config={"session_mode": "persistent", "model": "model-b"},
-                binding=binding,
-                state_directory=directory,
-            )
-            with self.assertRaises(RuntimeError):
-                changed._load_session()
-
-    def test_codex_registers_and_rejects_wrong_target_before_observation(self):
-        secret = "s" * 32
-        verifier = ToolAuthorizer(
-            secret=secret.encode(),
-            participant_routes={"vigil": frozenset({"42"})},
-        )
-
-        class Client:
-            def call_tool(self, name, arguments):
-                supplied = dict(arguments)
-                authorization = supplied.pop("_nunchi_authorization")
-                ok, detail = verifier.verify(
-                    authorization=authorization,
-                    tool=name,
-                    arguments=supplied,
-                )
-                if not ok:
-                    return {"isError": True, "content": detail}
-                return {
-                    "isError": False,
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(
-                                {
-                                    "registered": True,
-                                    "participant_id": "vigil",
-                                    "room_id": "42",
-                                    "transport_self_actor_id": "discord:actor:9",
-                                }
-                            ),
-                        }
-                    ],
-                }
-
-        with tempfile.TemporaryDirectory() as directory:
-            profile_path = Path(directory) / "profile.json"
-            profile_data = {
-                "profile_id": "vigil",
-                "participant_id": "vigil",
-                "actor_id": "discord:actor:9",
-                "instructions": "Contribute carefully.",
-                "provenance": "trusted:test",
-            }
-            raw = json.dumps(profile_data).encode()
-            profile_path.write_bytes(raw)
-            config = {
-                "schema_version": 2,
-                "binding": {
-                    "participant_id": "vigil",
-                    "actor_id": "discord:actor:9",
-                    "platform": "discord",
-                    "room_id": "42",
-                    "continuity_scope_id": "discord:42",
-                },
-                "profile": {
-                    "path": str(profile_path),
-                    "sha256": hashlib.sha256(raw).hexdigest(),
-                },
-                "attention": {
-                    "policy": {"preattention_enabled": False},
-                    "model": {},
-                },
-                "limits": {},
-                "state_directory": directory,
-                "transport": {
-                    "url": "http://127.0.0.1:3993/mcp",
-                    "timeout_seconds": 5,
-                    "output_key_env": "TEST_NUNCHI_OUTPUT_KEY",
-                },
-                "codex": {"session_mode": "fresh"},
-            }
-            with (
-                mock.patch.dict(
-                    os.environ,
-                    {"TEST_NUNCHI_OUTPUT_KEY": secret},
-                    clear=False,
-                ),
-                self._installed_codex(),
-            ):
-                runtime = CodexRoomRuntime(config, Client())
-            runtime.register_transport()
-            before = runtime.pipeline.observation.retained_events()
-            with self.assertRaises(ValidationError):
-                runtime.handle(
-                    {
-                        "schema_version": 2,
-                        "delivery_id": "d1",
-                        "room_id": "42",
-                        "event": None,
-                        "actors": {},
-                        "continuity_gap": False,
-                        "target_participant_id": "other",
-                        "transport_self_actor_id": "discord:actor:9",
-                    }
-                )
-            self.assertEqual(before, runtime.pipeline.observation.retained_events())
-
-    def test_codex_jsonl_parser_extracts_task_and_exact_action(self):
-        output = "\n".join(
-            [
-                json.dumps(
-                    {
-                        "type": "thread.started",
-                        "thread_id": "019f9432-9300-7dd1-8225-d7f10f921968",
-                    }
-                ),
-                json.dumps(
-                    {
-                        "type": "item.completed",
-                        "item": {
-                            "type": "agent_message",
-                            "text": json.dumps(
-                                {
-                                    "action_json": json.dumps(
-                                        {
-                                            "kind": "message",
-                                            "origin_event_id": "discord:message:1",
-                                            "text": "hello",
-                                        }
-                                    )
-                                }
-                            ),
-                        },
-                    }
-                ),
-            ]
-        )
-        thread_id, action = _parse_codex_output(output)
-        self.assertEqual("019f9432-9300-7dd1-8225-d7f10f921968", thread_id)
-        self.assertEqual("message", action["kind"])
-
-    def test_codex_jsonl_parser_rejects_malformed_action_envelope(self):
-        for text in (
-            '{"kind":"silence"}',
-            '{"action_json":"not-json"}',
-            '{"action_json":"[]"}',
-            '{"action_json":"{\\"kind\\":\\"silence\\"}","extra":true}',
-        ):
-            with self.subTest(text=text):
-                _, action = _parse_codex_output(
-                    json.dumps(
-                        {
-                            "type": "item.completed",
-                            "item": {
-                                "type": "agent_message",
-                                "text": text,
-                            },
-                        }
-                    )
-                )
-                self.assertIsNone(action)
-
-    def test_codex_mcp_transport_binds_exact_output(self):
+class MCPTransportTests(unittest.TestCase):
+    def test_mcp_transport_binds_exact_output(self):
         secret = b"y" * 32
         verifier = ToolAuthorizer(
             secret=secret,
@@ -1443,7 +918,7 @@ class CodexSurfaceTests(unittest.TestCase):
             client.calls,
         )
 
-    def test_codex_mcp_transport_consumes_only_exact_measured_capability(self):
+    def test_mcp_transport_consumes_only_exact_measured_capability(self):
         class Client:
             channel_id = "42"
             actor_id = "9"
@@ -1485,7 +960,7 @@ class CodexSurfaceTests(unittest.TestCase):
         self.assertFalse(unbound.supported)
         self.assertFalse(unbound.authenticated)
 
-    def test_codex_mcp_transport_treats_unattested_success_as_unknown(self):
+    def test_mcp_transport_treats_unattested_success_as_unknown(self):
         class Client:
             def call_tool(self, _name, _arguments):
                 return {"isError": False, "content": []}
@@ -1511,7 +986,7 @@ class CodexSurfaceTests(unittest.TestCase):
         )
         self.assertEqual("unknown", result.delivery)
 
-    def test_codex_mcp_transport_preserves_post_effect_unknown(self):
+    def test_mcp_transport_preserves_post_effect_unknown(self):
         class Client:
             def call_tool(self, _name, _arguments):
                 return {
@@ -1555,7 +1030,7 @@ class CodexSurfaceTests(unittest.TestCase):
         )
         self.assertEqual("unknown", result.delivery)
 
-    def test_codex_mcp_reply_requires_exact_effect_and_self(self):
+    def test_mcp_reply_requires_exact_effect_and_self(self):
         class Client:
             message = {}
 
@@ -1614,7 +1089,7 @@ class CodexSurfaceTests(unittest.TestCase):
                     transport.dispatch(action=action, wake=wake).delivery,
                 )
 
-    def test_codex_mcp_reaction_requires_exact_echo(self):
+    def test_mcp_reaction_requires_exact_echo(self):
         class Client:
             wrong = False
 

@@ -1,12 +1,10 @@
-# How Nunchi behaves
+# Social behavior draft
 
-**Status: Claude's draft, under review.** Claude sessions wrote this
-document, starting on 2026-10-04; it has not been agreed. Only its lines
-marked agreed are decided. Social behavior, at the top of
-[`AGENTS.md`](../AGENTS.md#social-behavior), wins wherever this document
-disagrees. Code, contracts, specs and older designs
-follow this document; where they conflict, the conflict is a gap to close
-([#94](https://github.com/mentatzoe/nunchi/issues/94)).
+**Status: draft, under review.** Follow the [draft-status guidance](../AGENTS.md#draft-status):
+only explicitly agreed statements are decisions, subject to later maintainer
+changes. The [architecture goal](../AGENTS.md#architecture-goal-and-current-gap)
+and [social purpose](../AGENTS.md#social-behavior) take precedence. Unagreed
+recommendations here do not prescribe implementation or authorize work.
 
 ## Purpose
 
@@ -20,12 +18,12 @@ reading of the room, so the agent can take part the way a socially aware
 person would. It translates one-to-one habits into a many-to-many
 conversation, across many turns and many participants.
 
-Social awareness can be learned and described explicitly. This document is
-that description. Every model and prompt in Nunchi should carry it.
+This draft explores how to describe social awareness explicitly. Its proposed
+behaviors and mechanisms remain open for discussion.
 
 ## What a socially aware participant does
 
-This is the yardstick. Every change is judged against it.
+Proposals for discussion, except where explicitly marked agreed:
 
 - **Reads who is talking to whom.** It knows a question to Codex is to
   Codex, and that a remark to the room includes it.
@@ -48,7 +46,7 @@ This is the yardstick. Every change is judged against it.
   answering at once bury the person who asked.
 - **Follows the room's own norms.** A room may set a stricter or looser bar.
 
-## How Nunchi does it
+## Proposed behavior and current mechanisms
 
 ### Step 1: is this conversation, and could someone like me take part?
 
@@ -182,11 +180,9 @@ floor.
   library packages are not protagonist runs or evidence of passing scenes.
   Running and scoring the collection belong to a separate evaluation-design
   session.
-- **Earlier fixtures retain their historical role.** The litmus corpus in
-  `evals/verdict_suite/fixtures/` and the older-format suite in
-  [`evals/behavior/`](../evals/behavior/README.md) document earlier experiments.
-  Their expected moves and review metadata do not define the published
-  scenes' purposes or approval.
+- **Old conversation fixtures are not evaluation criteria.** The retired
+  behavior runner's expectations remain in Git history. They do not define
+  the published scenes' purposes or approval.
 - **Deterministic tests prove plumbing only.**
 
 ## Fast decisions
@@ -201,10 +197,11 @@ need to be fast and cheap.
 - Any model provider can serve these steps
   ([#85](https://github.com/mentatzoe/nunchi/issues/85)).
 
-## Older rules this replaces
+## Earlier decisions and implementation changes
 
-The rules of earlier versions give way wherever they block this behavior
-(agreed, 2026-10-04). The rules replaced so far:
+Earlier rules give way where they block agreed social behavior
+(agreed, 2026-10-04). The notes below distinguish explicitly agreed changes
+from implementation history; they do not approve the rest of this draft:
 
 - the "sparse" attention instruction limited to "whether the supplied event is
   worth waking for now";
@@ -232,19 +229,15 @@ The rules of earlier versions give way wherever they block this behavior
   nobody has said" as an example of the reading. They don't fit Social
   behavior at the top of `AGENTS.md` (agreed, 2026-10-19).
 
-## Where the code is today
+## Implementation references
 
-| Behavior here | Today (`main`) |
-|---|---|
-| Step 1 suppresses only non-conversation | A typed question ("is this conversation?") decides; only a "no" suppresses, and a message addressed to someone else is still conversation. A "no" never suppresses when the judgment's most likely move is to speak, such as a CI line the agent promised to report on; with the agent's memory, the judgment knows of the promise after it has left the window |
-| Step 2 gives a social reading with reasons | Typed questions with pointers to messages (addressed to whom, asks for something, already answered and by which message, which earlier message it responds to, mid-thought, which moves fit); the reading the agent gets on every turn is written from the answers, and ends with the kinds of response that could fit and their probabilities. A chat model or a typed decision model can answer |
-| The agent's turn carries social context | The turn prompt describes how a socially aware person takes part in a group conversation, including letting someone finish a story told across several messages and answering as a person in the room would (the people there cannot see the agent's tools or machine); the turn carries the reading and the agent's conversation memory. A tool turn names the three normal choices in order, stay quiet, nod, speak, and offers a quiet tool for the first, so silence is a choice with a reason, as in a plain call |
-| Takes part socially, not only when it has something useful to add | Implemented, unverified (2026-10-19). The turn prompt says people join in for social reasons, not only to add something new (agree, joke, thank, correct someone, check what someone meant, follow up on what they said they would do), that saying nothing is a normal choice, and that the agent neither dominates nor vanishes (`participant_model.py`). Attention no longer asks whether the agent has something to add (I-010B@10), and describes staying quiet as a move, not "nothing is needed" (`attention_questions.py`). The example operator profile and the behavior suite's profiles say only who the agent is (`profiles/open-floor.json`, `evals/behavior/participants.json`). No behavior run has measured the new wording yet |
-| Conversation memory | The agent's own moves (what it said, replied and reacted to, and where it stayed quiet), each pointing at its message: the newest 8 visible moves and the latest 3 silences within a day. The threads: who asked what, and which messages responded, from attention's answers about each message it judged and from platform replies, plus the agent's own messages that others responded to; the newest 6 within a day. Each move may carry the agent's own reason at the time, in its words, never posted; the Claude Code participant keeps its reasons in its own session transcript instead. Its privileged proposals appear among its moves with what became of them, and it can withdraw one still awaiting approval (#90). When an operator's approval settles one, the agent gets a turn to tell the room itself, without a new message. Each move about a message also says who wrote it and what it said, so a promise still makes sense after the request has left the window. That holds for a message the agent posted too: the host keeps which message prompted it (the room shows it back with no trace of that) and the post points at it, and counts as a response on that message's thread, so the thread no longer reads unanswered (a restart forgets it). Attention's judgment carries the same memory, so it reads a message as the agent would; a typed model is not given it yet. The parked Hermes plugin has this memory too (the older Hermes integration, which did not, was removed on 2026-10-11). Messages that arrive while the agent is mid-turn wait: only the newest gets the next turn, but up to 3 it replaced are judged for the memory first, so a question asked meanwhile starts a thread; the newest one's judgment and turn then read them with it as one moment, attention names any that still calls for the agent, and step 1 never hides it (agreed, 2026-10-06). The judgment itself still sees a window of the newest 24 events, plus up to 6 older messages of the agent's direct exchange |
-| The agent sees the room as it is now | During its turn the agent can read the live room (older, newer, or new since it last looked), and before its first post it is shown what others said meanwhile, once; the parked Hermes plugin does too |
-| Pace and pauses | The judgment and the agent's turn get the room's pace as facts: the current time, how long ago the judged message came, how long the room was quiet before it, its author's run of quick messages, and the agent's own share and last post; a reading written from typed answers notes a quiet of an hour or more and a run of messages within five minutes. When the judgment's most likely move is to wait, and nothing new is said for five minutes, Nunchi looks again: it judges the same message again as a pause, and the agent may get a turn that knows it is looking again and remembers why it waited. It looks again once per quiet stretch; the Hermes plugin does too (the older Hermes integration, which did not, was removed on 2026-10-11). When an approved action finishes after the agent's turn, the agent gets a turn to say so; Nunchi never says it for the agent |
-| The agent can say it will report back, and is brought what it waits for | Nunchi reads each message as it arrives, a bot's status line included. A chat-model judgment carries the agent's memory, so it knows what the agent said it would do, and step 1 does not hide such a line when the judgment's most likely move is to speak; the turn's guide says this much and no more. Not yet: the typed decision model is not given the memory (`attention_questions.py`: with it, that route fell from 186 to 175 of 231 moments where the agent should speak), so on that route a status line the agent promised to report on can be passed over; messages that arrive while the agent is mid-turn wait, and only the newest gets the next turn (up to 3 it replaced are judged for the memory first); and the parked Hermes plugin drops other bots' messages unless the operator allows them (`discord.allow_bots`) |
-| The agent sends its own "mhm" | A judgment that leans to a "mhm" gives the agent a turn and any "mhm" is its own; Nunchi never reacts for it, and an older setting that turned Nunchi's nod on is ignored. In a tool turn the react tool's own description says it is the "mhm" and that the reaction is exactly one emoji; a word, a `:name:` code or two emoji is refused before anything is committed, with a tool error the agent reads, so the turn is not spent and it can still nod properly, stay quiet or speak |
+The [runtime guide](platform.md) describes the remaining code and its gaps.
+There are no supplied harness integrations. The former implementation table
+mixed dated observations with this draft's proposals and has been removed;
+Git retains it.
 
-The defects and the full history are in
-[#94](https://github.com/mentatzoe/nunchi/issues/94).
+The catch-up behavior above was agreed on 2026-10-06: attention reads messages
+that arrived while the participant was busy together with the newest message,
+so an earlier question is not hidden. The current implementation judges at most
+three superseded messages for memory before the newest message; that bound is
+an implementation detail, not the social goal.

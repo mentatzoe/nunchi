@@ -57,21 +57,19 @@ context fetch is not required when the full update was already delivered.
   is the protagonist being teased. The actual output remains intact. Scene
   approval does not endorse that classification.
 - Fifteen scenes designate Hermes as protagonist with integration `TBD`.
-  Hermes's [plugin remains parked](../../integrations/hermes-plugin/README.md).
-  Shared-library preparation does not prove a supported Hermes runtime. Preserve
-  the approved casting while resolving execution support explicitly.
-- Codex and Claude Code runtime/version fields describe the approved scene
-  targets. The continuation tabs describe the selected integrations' update
-  delivery, but live delivery and protagonist use remain untested here.
+  Codex and Claude Code runtime/version fields also describe approved scene
+  targets, not verified execution support. All supplied harness integrations
+  have since been retired. Preserve the approved casting while resolving
+  execution support explicitly. The saved preparation and continuation tabs
+  do not prove live update delivery or protagonist use.
 
 ## What remains for the separate session
 
 Evaluation design must establish how to run the installed library and production
 participants, observe activations and later updates, judge behavior, and report
-uncertainty and failures. The repository's existing behavioral runners and
-fixtures predate these approved specifications. They remain historical and
-implementation evidence; their schemas, fixed move expectations and rubrics do
-not decide the new design.
+uncertainty and failures. The earlier conversation runners, fixtures and scoring have been removed;
+Git retains them. Their fixed move expectations and rubrics do not decide the
+new design. Isolated component tests remain, but do not execute this collection.
 
 Keep scene purpose separate from measurement choices. The scene-spec question
 about when context-delivery assertions belong in ordinary tests remains open;

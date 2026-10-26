@@ -1,8 +1,8 @@
-"""One participant turn, the same for every harness (#94 step 9c).
+"""Current participant turn implementation, under architecture review.
 
-A harness runs the agent; this module holds the rules for what the agent may
-do inside its turn, once, so every integration gets the same behavior
-(`docs/harness-contract.md`, "The turn interface"):
+This module still constrains actions and sending. Those ownership choices are
+gaps against the library goal, not requirements for new harness integrations.
+See AGENTS.md and docs/platform.md. Current behavior includes:
 
 - one room action per turn;
 - staying quiet is a choice the agent can name: the quiet tool ends the turn
@@ -38,7 +38,7 @@ Nunchi's machinery; it measures leaks and never refuses a post.
 `Turn` is passive: whichever side runs the agent drives it. `TurnParticipant`
 is the participant the shared turn host invokes when the library hosts the
 room; it builds each `Turn` and hands it to the integration's `TurnDriver`,
-which starts the agent and forwards its calls.
+which drives the participant and forwards its calls.
 """
 
 from __future__ import annotations
@@ -97,7 +97,7 @@ class TurnError(NunchiError):
 
 # The marker an integration puts at the start of the turn's text when its
 # harness binds a model run by the text the run starts with
-# (`docs/harness-guide.md`). The agent reads it; the room never does.
+# (`docs/platform.md`). The agent reads it; the room never does.
 WAKE_MARKER = '<nunchi_wake id="{}"/>'
 # A whole wake marker on one line: this turn's, or an older one the agent
 # echoes from its history. "<nunchi_wake" named in prose, with no ">" after it

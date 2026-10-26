@@ -1,289 +1,81 @@
-# Nunchi V2
+# Nunchi
 
-Nunchi (눈치) is a social conversational gate for AI agents in multi-turn
-conversations with many participants. Agent harnesses answer every message
-they receive. Nunchi gives an agent the social awareness people use in a group
-conversation, so it can read the room and take part the way a socially aware
-person would: listen, nod, speak, or hold back.
+Nunchi (눈치) is a library intended to help existing AI agents read the room
+and take part in group conversations. Social participation includes listening,
+reacting, joking, disagreeing and staying silent; it does not have to be useful
+or productive.
 
-[`AGENTS.md`](AGENTS.md#social-behavior) opens with that behavior: agents
-take part socially, not only when they have something useful to add.
-[`docs/behavior.md`](docs/behavior.md) describes it in more detail, as a draft
-under review. [Issue #94](https://github.com/mentatzoe/nunchi/issues/94) records where V2
-drifted from it and the plan to bring it back.
+> **Architecture review in progress. No agent harness integrations are
+> currently supplied.** The Claude Code, Codex and Hermes integrations were
+> removed because they took control of agents' turns or lifecycle. Keeping
+> them available would present the wrong architecture as a usable integration.
+> Their code remains in Git history.
 
-## At a glance
+## The goal and the remaining gap
 
-### One message, start to finish
+Core holds room context and history, makes attention and social judgments,
+and exposes configurable APIs and tools. Harnesses own agent startup,
+lifecycle and turns. Agents control their actions and communication. Users
+choose their channels. The [agreed architecture goal](AGENTS.md#architecture-goal-and-current-gap)
+is the starting point for the review.
 
-```mermaid
-%%{init: {"flowchart": {"wrappingWidth": 360}}}%%
-flowchart TD
-    msg["A message, reaction or join<br/>arrives in a shared room"] --> adapter["The host turns it into<br/>one canonical event"]
-    adapter --> obs["Observation: the room's recent<br/>history and the agent's own<br/>exchange in it"]
-    obs --> s1
-    subgraph attention["Attention: the participant's own model answers typed questions"]
-        s1{"Step 1<br/>Is this conversation<br/>someone like me<br/>could join?"}
-        s2["Step 2: the reading<br/>Who is it addressed to?<br/>Does it ask for something?<br/>Was it answered, and where?<br/>What does it respond to?<br/>Is the author mid-thought?<br/>Which moves could fit?"]
-        s1 -- "yes, or unsure" --> s2
-    end
-    s1 -- "no: status report, bot noise,<br/>system event, own echo" --> hidden["Suppressed:<br/>the agent never sees it"]
-    s2 --> turn["The agent's turn: the reading, recent<br/>history, its memory of the room<br/>(its own moves, who asked what),<br/>the live room"]
-    turn --> decide{"The agent decides:<br/>speak, mhm, or stay quiet"}
-    decide -- "stay quiet" --> silent["Silence, recorded"]
-    decide -- "speak or mhm" --> look{"Before it goes out:<br/>did anyone else post<br/>while it was composing?"}
-    look -- "no" --> send["The host sends it<br/>to the room"]
-    look -- "yes" --> again{"It reads those messages<br/>and decides once more"}
-    again -- "send it as is,<br/>or change it" --> send
-    again -- "drop it" --> silent
-```
+Removing the integrations does not complete that goal. Shared code still
+hosts participant turns, controls sending and limits each turn to one room
+action. Context create/read/update/delete APIs and prompt configuration are
+incomplete. The replacement design must address these gaps before new harness
+integrations are built.
 
-Step 1 passes anything that might be conversation: a wrong suppression is
-invisible, a wrong pass costs one turn. Step 2's reading is a
-recommendation; the agent decides, and every visible move, a "mhm"
-included, is its own.
+## What remains available
 
-### How the parts fit
+- Context storage, observation, attention models, provider adapters, data
+  validation and authorization code, all subject to architecture review.
+- Optional JSONL, Discord, Matrix and Telegram [reference adapters](docs/adapters.md).
+  These run a plain model participant. They do not connect Nunchi to an
+  existing agent harness.
+- A shared [Discord MCP transport](integrations/mcp-discord/README.md).
+- Configuration, diagnostics, a local dashboard and service tools for the
+  existing runtime.
+- Deterministic tests and evaluation tooling. The [approved social scenes](docs/evaluations/scenes/README.md)
+  are specifications and preparation artifacts; they have not been executed
+  or scored as a collection.
 
-```mermaid
-flowchart TB
-    subgraph rooms["Rooms"]
-        direction LR
-        discord["Discord"] ~~~ telegram["Telegram"] ~~~ matrix["Matrix"] ~~~ generic["Any platform via JSONL"]
-    end
-    subgraph hosts["Hosts and integrations: they own the platform and start the agent"]
-        direction LR
-        cc["Claude Code<br/>a per-room gate and a mod"] ~~~ hermes["Hermes plugin<br/>(parked)"] ~~~ codex["Codex room runner"] ~~~ ref["Reference adapters"]
-    end
-    subgraph core["Shared core: names no agent host, platform or model vendor"]
-        direction LR
-        pipeline["Pipeline"] --> observation["Observation<br/>canonical events,<br/>bounded history"] --> attention["Attention<br/>typed questions,<br/>the reading"] --> host["Participant host<br/>scheduling, room view,<br/>turn protocol, look-again"] --> guard["Authorization,<br/>receipts, contracts"]
-    end
-    subgraph models["Attention model routes"]
-        direction LR
-        chat["Chat models: OpenAI-compatible,<br/>Messages or Responses API,<br/>or the host's own model"] ~~~ typed["Typed decision models:<br/>decisions-api, e.g. Jev"]
-    end
-    subgraph agent["The agent"]
-        session["The user's own Claude Code,<br/>Hermes or Codex session"]
-    end
-    rooms <--> hosts
-    hosts -- "events" --> core
-    core -- "typed questions" --> models
-    core -- "a turn with the reading" --> agent
-    agent -- "its action, sent by the host" --> hosts
-```
-
-The shared core never names a host, platform or vendor; hosts plug into it
-and own the platform, the agent session and the sending. Around it, the
-operator CLI, dashboard and service supervisor configure rooms, and the
-behavior suite, conformance scenarios and unit tests check it.
-
-### Earlier implementation snapshot
-
-This diagram records the plan as of 2026-10-07, from
-[#94](https://github.com/mentatzoe/nunchi/issues/94) and measurements on
-[#86](https://github.com/mentatzoe/nunchi/issues/86). Its scene counts and
-evaluation steps describe that earlier work. The current
-[approved scene specifications](docs/evaluations/scenes/README.md) have been
-reviewed separately; their execution and scoring are for a later
-evaluation-design session.
-
-```mermaid
-flowchart TB
-    classDef done fill:#d8f0dc,stroke:#2e7d32,color:#1a1a1a
-    classDef next fill:#fff1c2,stroke:#a67c00,color:#1a1a1a
-    classDef later fill:#e8ecef,stroke:#607080,color:#1a1a1a
-    subgraph build["Implementation: the plan in issue 94"]
-        direction LR
-        p2["2. The reading<br/>on every turn"]:::done
-        p3["3. Live room view,<br/>look again"]:::done
-        p4["4. Typed<br/>questions"]:::done
-        p5["5. Memory and a<br/>social turn prompt"]:::done
-        p6["6. Rhythm:<br/>time, pauses"]:::next
-        p7["7. Remove<br/>Nunchi's nod"]:::done
-        p8["8. More<br/>model APIs"]:::done
-        p9["9. One library,<br/>every harness"]:::next
-        p2 --> p3 --> p4 --> p5 --> p6 --> p7 --> p8 --> p9
-    end
-    subgraph measure["Evaluation"]
-        direction LR
-        e1["Behavior suite:<br/>74 scenes, real models"]:::done
-        e2["Implementation baseline:<br/>one fixed agent"]:::done
-        e3["Refinement, later:<br/>other agent families,<br/>real agents"]:::later
-        e1 --> e2 --> e3
-    end
-    p1["1. The maintainer reviews the scenes' ranges"]:::next
-    p1 -.-> measure
-    measure -. "judges each step<br/>before and after" .-> build
-```
-
-In this snapshot, green meant done, amber next or ongoing, and grey later.
-The plan used one fixed agent to compare before and after. Trying other
-agent families and the real agents was a separate track
-([#116](https://github.com/mentatzoe/nunchi/issues/116)).
-
-## How V2 works today
-
-Nunchi is a portable pre-attention gate for turn-aware participants in shared
-conversation. V2 has one path:
-
-`native event -> canonical observation -> participant-bound attention (typed
-questions) -> SUPPRESS, or one shared participant turn with the reading ->
-host-owned transport`
-
-Conversation events are observations, not reply obligations. Only the exact
-participant's delegated attention model may make the social suppression
-judgment. Deterministic host code owns identity, routing, context bounds,
-scheduling, cancellation, receipts, authorization, and the single output or
-effect commit point.
-
-## Current state
-
-V2 is on `main` and is partial: **merged, unverified**. Deterministic tests and
-the clean-install lanes for Claude Code, Codex and the parked Hermes plugin
-pass in CI. No surface has passed a live
-real-room check since the shared core was replaced in
-[PR #67](https://github.com/mentatzoe/nunchi/pull/67). V2 is not release-ready
-or complete, and there is no V2 release tag. Combined acceptance is tracked in
-[issue #41](https://github.com/mentatzoe/nunchi/issues/41).
-
-`main` contains the shared core; the operator CLI, dashboard, and service
-supervisor; packaging; generic/Discord/Matrix/Telegram reference adapters; the
-shared Discord MCP transport; the incomplete Codex and Claude Code
-integrations; and the parked Hermes plugin.
-
-The shared core has one versioned participant protocol. A judgment that leans
-to a "mhm" gives the agent a turn, and any "mhm" is the agent's own reaction;
-Nunchi never reacts for it (step 7 of the plan removed Nunchi's own nod). The attention
-model is chosen by configuration (`kind`), so the core names no agent host,
-chat platform, or model vendor.
-
-**Hermes.** Hermes has no supported path today. The old Hermes integration
-was removed on 2026-10-11, for now. It patched Hermes at
-runtime, which breaks the rule that an integration follows each harness's own
-plugin rules and never patches or reimplements the harness
-([`AGENTS.md`](AGENTS.md), One library, every harness). The Hermes plugin
-([`integrations/hermes-plugin/README.md`](integrations/hermes-plugin/README.md))
-is parked, not removed (2026-10-10): its code and CI lane stay, it has run
-offline only, and there is no new Hermes work until it is unparked. CI runs
-that plugin's turn conformance kit and tests inside a clean install of a pinned
-stock Hermes, with the model scripted; these are installed-runtime checks, not
-live ones. Historical Hermes evidence is not current proof.
-
-**Codex.** `nunchi-codex-app-server-runner` runs a Codex participant in a
-Discord room through `codex app-server`, with the user's own Codex model,
-sandbox, tools, MCP servers and skills. It passes its tests against a real,
-pinned `codex app-server`; it has not run in a real room. See
-[`integrations/codex-app-server/README.md`](integrations/codex-app-server/README.md).
-The older `nunchi-codex-room-runner` runs Codex with its tools turned off. It
-stays until the app-server runner has passed live checks
-([`integrations/codex/README.md`](integrations/codex/README.md)).
-
-**Claude Code.** `nunchi-claude-code-room-runner` is a per-room gate. It
-starts a dedicated Claude Code session that keeps the user's own Claude Code
-configuration, and a Nunchi mod inside that session gives the agent its room
-tools ([#43](https://github.com/mentatzoe/nunchi/issues/43)). Discord only.
-Deterministic tests and the mod's `claude plugin` checks pass; it has not run
-in a real room ([#39](https://github.com/mentatzoe/nunchi/issues/39)). See
-[`integrations/claude-code/README.md`](integrations/claude-code/README.md).
-
-There is no executable V1 `admit` command, PASS/ACK/ASK/SPEAK consumer,
-translation bridge, V1 prompt hook, send-time social reclassifier, or fallback.
+The implementation is incomplete and has no current end-to-end proof of the
+intended library architecture. Check [CI](https://github.com/mentatzoe/nunchi/actions/workflows/ci.yml)
+for a revision's test results. A passing test or package build does not establish
+that an agent reads a live room well.
 
 ## Install and inspect
 
 ```sh
 python3 -m venv .venv
-.venv/bin/python -m pip install .
+.venv/bin/python -m pip install '.[test]'
 .venv/bin/nunchi probe
 .venv/bin/nunchi-install probe
-.venv/bin/nunchi setup \
-  --profile vigil \
-  --participant-id vigil \
-  --actor-id discord:bot:9 \
-  --display-name Vigil \
-  --instructions 'Contribute carefully.' \
-  --platform discord \
-  --room-id 42 \
-  --room-name delivery \
-  --continuity-scope-id discord:channel:42 \
-  --attention-model provider/attention-model \
-  --participant-model provider/participant-model
-.venv/bin/nunchi diagnose --profile vigil
-.venv/bin/nunchi dashboard --profile vigil
 ```
 
-Optional installed surfaces:
+See [installation and configuration](docs/INSTALL.md) for the existing runtime
+and [command compatibility](docs/STABILITY.md) for its interfaces. Installing
+the package does not add Nunchi to Claude Code, Codex or Hermes.
+
+## Check the implementation
 
 ```sh
-python3 -m pip install '.[discord]'
-python3 -m pip install '.[mcp-discord]'
-nunchi-channel --probe
-nunchi-discord --probe
-nunchi-matrix --probe
-nunchi-telegram --probe
-nunchi-codex-room-runner --probe
-nunchi-claude-code-room-runner --probe
+.venv/bin/python -m unittest
+.venv/bin/python -m evals.verdict_suite.runner --list
+.venv/bin/python -m evals.verdict_suite.runner
 ```
 
-Hermes is not installed by the package. The parked Hermes plugin is installed
-by hand, as its own README says
-([`integrations/hermes-plugin/README.md`](integrations/hermes-plugin/README.md#install)).
+CI checks retained core and channel functions, data contracts and packaging.
+The old conversation rehearsals and behavior runner have been removed.
+Realistic evaluation with pinned library releases and real agent integrations
+remains a separate design task. The approved scenes have not been executed.
 
-The guided operator path creates and updates exact SHA-256 pins automatically;
-operators do not calculate hashes or hand-write JSON. Credentials are named
-only by trusted environment variable names in configuration; room payloads
-cannot redirect models, identity, routes, policy, receipt destinations, or
-output authority.
+## Read next
 
-## Verify
-
-```sh
-python3 -m pip install '.[test]'
-python3 -m unittest
-python3 -m evals.verdict_suite.runner --list
-python3 -m evals.verdict_suite.runner
-python3 -m evals.behavior.run --dry-run
-```
-
-`python3 -m unittest` runs the offline suite under `tests/v2`: V2 schemas and
-contracts, runtime, attention, authorization, scheduling, transport, operator
-and services, reference adapters, Codex, Hermes, Claude Code, and the guard
-that keeps the shared core agent- and provider-agnostic. Tests that need an
-installed Hermes host skip without one. The suite does not prove a built
-package or installed runtime; those require a fresh package build and isolated
-installation. Whether an agent reads the room well needs behavioral evaluation
-([#86](https://github.com/mentatzoe/nunchi/issues/86)); the deterministic
-scenarios do not measure it. The approved specifications live in
-[`docs/evaluations/scenes/`](docs/evaluations/scenes/README.md). Their saved
-library packages are preparation artifacts, not protagonist runs or evidence
-that a scene passed. Execution and scoring of this collection remain separate
-evaluation-design work.
-
-[`evals/behavior/`](evals/behavior/README.md) contains legacy fixtures;
-`--dry-run` checks their plumbing offline, and the manual `behavior-eval`
-workflow runs those fixtures against real models. Their move ranges and review
-labels are not the approved collection's outcomes or approval status.
-`tests/V1-REPLACEMENT.md` maps the removed V1 tests to their V2 coverage.
-
-## Product and integration documentation
-
-- [Completion outcome](docs/v2-completion-goal.md)
-- [Selected design](docs/architecture/v2-selected-design.md)
-- [Portable V2 contract](docs/contracts/nunchi-v2.md)
-- [Shared foundation and operator handoff](docs/v2-shared-foundation.md)
-- [Install and operate](docs/INSTALL.md)
-- [Platform interface and conformance](docs/platform-v2.md)
-- [Harness contract](docs/harness-contract.md) and
-  [harness guide](docs/harness-guide.md): how every harness uses the library
-- [Reference adapters](docs/adapters.md)
-- [Verification and evidence](docs/v2-verification.md)
-- [Approved scene specifications](docs/evaluations/scenes/README.md) and
-  [scene spec](docs/evaluations/scene-spec.md)
-- [Scene design and revision skill](skills/nunchi-scenes/SKILL.md)
-
-Source review, clean-wheel installation, configured probes, deterministic
-tests, live provider evaluation, real-room evidence, integration, and release
-are distinct claims. The verification record states exactly which have passed.
-The final no-completion-before-verification gate is
-[issue #41](https://github.com/mentatzoe/nunchi/issues/41).
+- [Architecture goal, social behavior and decisions](AGENTS.md)
+- [Behavior draft](docs/behavior.md)
+- [Data contracts](docs/contracts/nunchi.md)
+- [Current runtime components](docs/platform.md)
+- [Reference adapters and their limits](docs/adapters.md)
+- [Privileged-action authorization](docs/security/privileged-action-authorization.md)
+- [Scene specification](docs/evaluations/scene-spec.md) and [evaluation handoff](docs/evaluations/eval-design-handoff.md)

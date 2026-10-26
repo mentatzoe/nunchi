@@ -39,8 +39,7 @@ classifiers = [
 [project.optional-dependencies]
 discord = ["discord.py>=2.4"]
 mcp-discord = ["mcp>=1.10,<2"]
-# Source-only tests use the released-host parser; modern installed-host probes
-# use Hermes' own dependencies, never this extra to mask a missing host parser.
+# The test suite validates schemas and reads workflow YAML.
 test = ["jsonschema==4.26.0", "PyYAML==6.0.3"]
 
 [project.urls]
@@ -58,19 +57,7 @@ nunchi-matrix = "nunchi.adapters.matrix:main"
 nunchi-telegram = "nunchi.adapters.telegram:main"
 nunchi-discord = "nunchi.adapters.discord:main"
 nunchi-mcp-discord = "nunchi.mcp_discord.server:main"
-nunchi-codex-room-runner = "nunchi.integrations.codex_v2:main"
-nunchi-claude-code-room-runner = "nunchi.integrations.claude_code_v2:main"
-nunchi-codex-app-server-runner = "nunchi.integrations.codex_app_server.runner:main"
 nunchi-service-worker = "nunchi.service_worker:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-"nunchi.integrations" = [
-  "claude_code_mod/.claude-plugin/plugin.json",
-  "claude_code_mod/hooks/hooks.json",
-  "claude_code_mod/hooks/register.ts",
-  "claude_code_mod/hooks/register.test.ts",
-]
-"nunchi.integrations.hermes_plugin" = ["plugin.yaml"]

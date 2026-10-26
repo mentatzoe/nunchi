@@ -22,7 +22,6 @@ from nunchi.attention import ParticipantProfile
 from nunchi.dashboard import dashboard_handler, serve_dashboard
 from nunchi.errors import ValidationError
 from nunchi.install import InstallError, rollback, uninstall_state, upgrade, verify
-from nunchi.integrations.codex_v2 import CodexParticipant
 from nunchi.operator import (
     OperatorStore,
     ServiceManager,
@@ -502,13 +501,6 @@ class ParticipantProtocolTests(unittest.TestCase):
         with self.assertRaises(ParticipantModelError):
             self.protocol.consume(expansion, expand=lambda **_: {"events": []})
         self.assertEqual(3, len(calls))
-
-    def test_codex_is_a_native_invoker_of_the_core_bytes(self):
-        # Claude Code acts through tools; its turn uses the core tool-turn
-        # text instead (tests/v2/test_claude_code.py).
-        codex = object.__new__(CodexParticipant)
-        codex.profile = PROFILE
-        self.assertEqual(self.protocol.text, codex._prompt(self.protocol))
 
 
 def operator_config(*, services=()):

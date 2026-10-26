@@ -1,7 +1,13 @@
-# V2 reference adapters
+# Reference adapters and channel limits
+
+These optional examples run a plain model participant on a channel. There are
+currently no supplied integrations with existing agent harnesses. Independent
+channel choice is part of the
+[architecture goal](../AGENTS.md#architecture-goal-and-current-gap).
 
 All reference adapters share `ReferenceAdapterRuntime`. Native payloads are
 normalized before attention and cannot alter trusted binding or policy.
+The runtime still owns turns and sending; that ownership is under review.
 
 | Surface | Ingress | Output | Retained context | Explicit native limits |
 |---|---|---|---|---|
@@ -13,6 +19,32 @@ normalized before attention and cannot alter trusted binding or policy.
 `--probe` without configuration reports only static installed capabilities.
 Configured probes verify exact pinned configuration and required credentials
 but do not claim a live connection.
+
+## Channel compatibility
+
+Users should be able to choose a channel connector with its limits explained.
+Those limits can affect what Nunchi perceives; they do not justify requiring
+Nunchi's own transport or starting an agent on the user's behalf.
+
+For example, the official Claude Code Discord plugin was inspected at revision
+`58267944f92187b7d6a1c822165c96c81c864806`:
+
+- **Live messages from bots are filtered.** Nunchi could not observe those
+  messages through that plugin's live notifications.
+  [Source](https://github.com/anthropics/claude-plugins-official/blob/58267944f92187b7d6a1c822165c96c81c864806/external_plugins/discord/server.ts#L805).
+- **History has different limits.** `fetch_messages` can include bot messages,
+  but returns at most 100 messages, with no pagination argument. It formats
+  author names rather than author IDs, so that output alone cannot establish
+  exact participant identity.
+  [Source](https://github.com/anthropics/claude-plugins-official/blob/58267944f92187b7d6a1c822165c96c81c864806/external_plugins/discord/server.ts#L657).
+- **The connector signals receipt itself.** It sends a typing indicator and
+  an optional acknowledgement reaction before forwarding the message. An
+  empty `ackReaction` disables the reaction; the inspected handler has no
+  equivalent switch for typing.
+  [Source](https://github.com/anthropics/claude-plugins-official/blob/58267944f92187b7d6a1c822165c96c81c864806/external_plugins/discord/server.ts#L851).
+
+These are observations about that pinned connector, not a claim that a Nunchi
+integration exists or that later connector versions have the same limits.
 
 ## Platform capabilities in the operator surface
 
@@ -49,18 +81,15 @@ Input is one closed object per line:
 }
 ```
 
-Output is a host-attested JSONL action envelope only after participant
-contribution. Silence produces no transport line.
+The current runtime writes a JSONL action only after a participant contributes.
+Silence produces no transport line.
 
 ## Backfill
 
-Matrix's first `/sync` batch is recorded as context and token state, not
-scheduled as fresh work. Telegram establishes a finite startup frontier with
-one native negative-offset tail read (at most 100 updates): that tail is
-context-only, older pending updates are deliberately forgotten, and an
-explicit coverage gap is retained before ordinary long polling begins. A busy
-room therefore cannot hold Telegram in backfill forever or turn stale backlog
-into wake work.
+Matrix records its first `/sync` batch as context without waking participants.
+Telegram reads at most 100 recent updates on startup, keeps them as context,
+and discards older pending updates. It records that missing history before
+long polling begins, so startup cannot keep processing an endless backlog.
 
 Restart never schedules retained observations. A fresh Discord process has no
 durable gateway resume session, so both the shared and standalone transports
@@ -70,7 +99,7 @@ produces an explicit persistent gap.
 
 ## Errors
 
-Malformed or unconstructable native input is audited without a fabricated
+Input that cannot be converted to an event is audited without a fabricated
 social decision. Wrong routes, exact duplicates, and an event whose exact
 author or cause is transport-bound self are not wake eligible. Provider errors
 follow the configured `WAKE` or `NO_WAKE` operational policy and remain
@@ -79,9 +108,8 @@ response includes a stable message/event identity for the exact target room; a
 successful HTTP envelope with a missing or mismatched native acknowledgement
 remains `unknown`.
 
-Reaction capability is current native authority, not configured optimism. It
-decides whether the participant may react at all, and which reactions it may
-use; Nunchi never reacts on its behalf. The
+Reaction support comes from the platform's current permissions. It decides
+which reactions the participant may use. The
 shared Discord MCP transport measures the authenticated bot's effective guild
 roles and channel overwrites. Matrix binds `whoami` to the configured actor and
 compares that user with the room's `m.reaction` power level. A denial, missing

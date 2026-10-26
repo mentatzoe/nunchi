@@ -33,7 +33,6 @@ from unittest import mock
 import nunchi.private_process as private_process
 from nunchi.errors import ValidationError
 
-ROOT = Path(__file__).resolve().parents[2]
 SOURCE = Path(private_process.__file__).resolve().parents[1]
 KEY_NAME = "NUNCHI_TEST_PRIVATE_KEY"
 # CAP_SYS_PTRACE, from <linux/capability.h>.
@@ -230,20 +229,6 @@ class EntryPointTests(unittest.TestCase):
             self.assertEqual(3, module.main(self.PINNED))
         self.assertEqual(["private", "config"], order.calls)
 
-    def test_claude_code_runner(self):
-        from nunchi.integrations import claude_code_v2
-
-        self._pinned(claude_code_v2)
-
-    def test_codex_app_server_runner(self):
-        from nunchi.integrations.codex_app_server import runner
-
-        self._pinned(runner)
-
-    def test_codex_room_runner(self):
-        from nunchi.integrations import codex_v2
-
-        self._pinned(codex_v2)
 
     def test_reference_adapters(self):
         from nunchi.adapters import channel, discord, matrix, telegram
@@ -290,16 +275,6 @@ class EntryPointTests(unittest.TestCase):
             )
         self.assertEqual(4, code)
         self.assertEqual(["private", "config"], order.calls)
-
-    def test_no_hermes_integration_changes_hermes_s_process(self):
-        integrations = ROOT / "src" / "nunchi" / "integrations"
-        paths = [*integrations.glob("hermes*.py"), *(integrations / "hermes_plugin").glob("*.py")]
-        self.assertTrue(paths)
-        for path in paths:
-            with self.subTest(module=path.name):
-                text = path.read_text(encoding="utf-8")
-                self.assertNotIn("keep_private", text)
-                self.assertNotIn("PR_SET_DUMPABLE", text)
 
 
 if __name__ == "__main__":

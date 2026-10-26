@@ -1,11 +1,11 @@
 # Privileged action authorization boundary
 
-**Status: merged, unverified.** `AuthorizationCoordinator` in
-`src/nunchi/authorization.py` enforces the
-`I-010F PrivilegedActionAuthorizationV2@1` facts at the host's single
-effect-commit point. Deterministic tests cover it. What is still missing:
-most entry points ship no executor, there is no authenticated operator
-approval surface, and there is no live evidence.
+**Status: implemented; deterministic checks only.** `AuthorizationCoordinator`
+in `src/nunchi/authorization.py` checks `I-010F PrivilegedActionAuthorizationV2@1`
+before dispatching an effect. The reference adapters supply no executors, there
+is no shipped authenticated approval surface, and no live run has verified a
+privileged effect. The shared host and its ownership of turns remain under
+[architecture review](../../AGENTS.md#architecture-goal-and-current-gap).
 
 ## What is protected
 
@@ -68,8 +68,8 @@ and the allow cannot outlive the expiry that recheck set.
   If that record cannot be written, the commit stays open, which is the
   conservative reading.
 - **Open commits after restart are UNKNOWN.** A commit still open at startup
-  means the process stopped during the native call, so the effect may exist.
-  It loads as `UNKNOWN`: ordinary replay is refused. If the target supports
+  does not establish whether the executor ran: a crash can happen before,
+  during or after the native call. It loads as `UNKNOWN`: ordinary replay is refused. If the target supports
   idempotency, a fresh policy check may retry with the original idempotency
   key; otherwise a new authenticated approval that shows the exact operation,
   origin, and duplicate-effect risk is required for one retry. A confirmed
@@ -96,8 +96,8 @@ and the allow cannot outlive the expiry that recheck set.
   authority: it is an ordinary turn, and any further privileged action is a
   new proposal. Withdrawn, expired and cancelled proposals never ran, so
   they start no turn; the next turn's memory shows them.
-- **The agent can withdraw.** A `withdraw` action (`room_withdraw` for the
-  Claude Code gate) names a proposal still awaiting approval. The
+- **The agent can withdraw.** A `withdraw` action names a proposal still
+  awaiting approval. The
   coordinator drops its challenge, so no operator can approve it, and marks
   it `withdrawn`. It counts as the turn's one action. Withdrawing anything
   else, or another participant's proposal, fails and changes nothing.
@@ -109,14 +109,10 @@ revoked, mismatched, replayed, or not durably persisted.
 
 ## What is still missing
 
-- **Executors.** The reference adapters wire the coordinator when an
-  `authorization` policy is configured but pass no executors, so every
-  privileged proposal is denied. The Codex runner disables privileged actions.
-  Hermes does not use the coordinator; its tools keep Hermes's native
-  approvals. Only the Claude Code gate has an executor
-  (`workspace.file.write`, with a private `workspace_root`); its agent
-  proposes through `mcp__nunchi__room_propose` and withdraws through
-  `mcp__nunchi__room_withdraw`.
+- **Executors.** Reference adapters can wire the coordinator with an
+  `authorization` policy, but supply no executors. They deny privileged
+  proposals. The retired Claude Code gate was the only supplied harness
+  executor; it is no longer available.
 - **Authenticated operator approval surface.** `pending_for_operator()` and
   `complete_authenticated_approval()` are library methods. No shipped command,
   dashboard, or transport calls them, so an `APPROVAL_REQUIRED` proposal

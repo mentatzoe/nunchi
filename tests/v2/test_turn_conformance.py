@@ -7,8 +7,6 @@ import unittest
 from unittest import mock
 
 from nunchi import pipeline, turn, turn_conformance as kit
-from nunchi.integrations import claude_code_conformance
-from nunchi.integrations.claude_code_conformance import ClaudeCodeKitIntegration
 from nunchi.observation import ObservationProvider
 
 
@@ -17,15 +15,18 @@ def _run(integrations):
 
 
 class TurnConformanceTests(unittest.TestCase):
-    def test_the_reference_and_the_claude_code_gate_pass_every_scenario_for_their_style(self):
+    def test_the_reference_passes_every_scenario_for_each_posting_style(self):
         results = _run(
-            [kit.ReferenceIntegration("tools"), kit.ReferenceIntegration("final-answer"), ClaudeCodeKitIntegration()]
+            [kit.ReferenceIntegration("tools"), kit.ReferenceIntegration("final-answer")]
         )
         failing = [(r["integration"], r["scenario"], r["failures"]) for r in results if r["status"] == "fail"]
         self.assertEqual([], failing)
-        passed = {(r["integration"], r["scenario"]) for r in results if r["status"] == "pass"}
-        tools = {name for name, scenario in kit.SCENARIOS.items() if scenario.posting == "tools"}
-        self.assertEqual(tools, {name for integration, name in passed if integration == "Claude Code gate"})
+        for posting in ("tools", "final-answer"):
+            applicable = {name for name, scenario in kit.SCENARIOS.items()
+                          if scenario.posting == posting and not scenario.launch_secret}
+            passed = {r["scenario"] for r in results
+                      if r["integration"] == f"reference ({posting})" and r["status"] == "pass"}
+            self.assertEqual(applicable, passed)
 
     def test_the_checks_catch_broken_rules(self):
         with mock.patch.object(turn.Turn, "look_again", lambda self, action: None), mock.patch.object(
@@ -177,18 +178,11 @@ class TurnConformanceTests(unittest.TestCase):
         for name in ("final-not-own-words", "final-no-answer"):
             with self.subTest(name):
                 self.assertEqual("n/a", kit.run_scenario(name, NeverStandsIn())["status"])
-                self.assertEqual("n/a", kit.run_scenario(name, ClaudeCodeKitIntegration())["status"])
         self.assertEqual("pass", kit.run_scenario("final-silence-forms", NeverStandsIn())["status"])
 
-    def test_the_launch_secret_scenario_needs_a_launch_secret_and_catches_a_leak(self):
+    def test_the_launch_secret_scenario_does_not_apply_without_a_launch_secret(self):
         # The reference turn has no launch secret: the scenario does not apply.
         self.assertEqual("n/a", kit.run_scenario("launch-secret", kit.ReferenceIntegration("tools"))["status"])
-        self.assertEqual("pass", kit.run_scenario("launch-secret", ClaudeCodeKitIntegration())["status"])
-        # A server that does not withhold its secret lets the agent post it.
-        with mock.patch.object(turn.TurnParticipant, "withhold", lambda self, values: None):
-            result = kit.run_scenario("launch-secret", ClaudeCodeKitIntegration())
-        self.assertEqual("fail", result["status"])
-        self.assertIn("the launch secret was not refused", result["failures"][0])
 
     def test_the_pause_and_outcome_checks_catch_a_library_that_does_not_start_them(self):
         later = {"pause", "outcome", "final-pause", "final-outcome"}
@@ -225,7 +219,6 @@ class TurnConformanceTests(unittest.TestCase):
 
         results = run_gap()
         self.assertEqual({"gap": "pass", "final-gap": "pass"}, {name: r["status"] for name, r in results.items()})
-        self.assertEqual("pass", kit.run_scenario("gap", ClaudeCodeKitIntegration())["status"])
         # A library that never says it.
         with mock.patch("nunchi.participant_model.gap_turn_note", lambda request: ""):
             results = run_gap()
@@ -566,16 +559,6 @@ class LeakCountTests(unittest.TestCase):
             result = kit.run_scenario("harness-failure", _reference("harness-failure"), timeout=2)
         self.assertEqual("fail", result["status"])
         self.assertIn("deadline", " ".join(result["failures"]))
-        # Claude Code: a gate that reads only the result's subtype takes the
-        # API error for the agent's last words.
-        def subtype_only(message):
-            return {"ok": message.get("subtype") == "success", "detail": "success", "note": message.get("result")}
-
-        with mock.patch.object(claude_code_conformance, "turn_ending", subtype_only):
-            result = kit.run_scenario("harness-failure", ClaudeCodeKitIntegration())
-        self.assertEqual("fail", result["status"])
-        self.assertIn("must end as a failure", " ".join(result["failures"]))
-        self.assertEqual("pass", kit.run_scenario("harness-failure", ClaudeCodeKitIntegration())["status"])
 
 
 def _gapped():
