@@ -1,88 +1,53 @@
-# V2 stability boundary
+# Commands and compatibility
 
-No V2 release has been tagged; the last tag is `v0.2.0`. This page records
-the current commands, schemas and compatibility behavior. It does not promise
-that the ownership or interfaces will survive the
-[architecture review](../AGENTS.md#architecture-goal-and-current-gap).
+These are the current interfaces, under [architecture review](../AGENTS.md#architecture-goal-and-current-gap).
+They are not a promise that the replacement library will retain today's turn
+ownership or API shapes. Document names stay stable as the library changes;
+wire formats and executable interfaces retain explicit versions.
 
-## Public commands
+## Installed commands
 
-Shared core and operator surface:
+| Command | Purpose |
+|---|---|
+| `nunchi attention`, `validate`, `probe` | Request attention, validate data, inspect the installed interfaces |
+| `nunchi setup`, `config`, `diagnose`, `dashboard` | Configure and inspect the existing runtime |
+| `nunchi service`, `uninstall` | Manage configured services and profiles |
+| `nunchi-install` | Manage private configuration and state directories |
+| `nunchi-conformance` | Run deterministic lifecycle scenarios |
+| `nunchi-turn-conformance` | Check the existing turn protocol with a reference participant |
+| `nunchi-channel`, `nunchi-discord`, `nunchi-matrix`, `nunchi-telegram` | Run the optional plain-model reference adapters |
+| `nunchi-mcp-discord` | Run the shared Discord transport |
+| `nunchi-service-worker` | Internal process used by `nunchi service` |
 
-- `nunchi attention|validate|probe` — one attention judgment, contract
-  validation, and installed interface provenance.
-- `nunchi setup|config|diagnose|dashboard|service|uninstall` — the operator
-  surface. `config` has `show|validate|rollback|add-room`; `service`
-  has `start|stop|restart|status|logs|reset|install|uninstall`.
-- `nunchi-install init|verify|upgrade|rollback|uninstall|probe` — private
-  config and state roots.
-- `nunchi-conformance` — the deterministic V2 lifecycle scenarios
-  (`python3 -m evals.verdict_suite.runner` is the repository wrapper).
+There are no Claude Code, Codex or Hermes integration commands or bundled
+plugins. Upgrading does not uninstall an older integration from someone else's
+harness configuration. Stop any old runner separately; do not point it at the
+new package and expect it to work.
 
-Reference adapters and the shared transport:
+## Data and behavior
 
-- `nunchi-channel`
-- `nunchi-discord`
-- `nunchi-matrix`
-- `nunchi-telegram`
-- `nunchi-mcp-discord`
+The [contract reference](contracts/nunchi.md) lists current interface revisions
+and validation rules. In the existing implementation:
 
-Integrations:
+- Unknown fields are rejected. Native IDs are strings; participant identity
+  comes from an authenticated actor ID, independently of names and aliases.
+- Attention can return `SUPPRESS`, `WAKE` or `DEFER`. Bypass and operational
+  errors are recorded separately from social judgments. A model suggesting a
+  nod gives the participant a turn; Nunchi does not react on its behalf.
+- Attention providers receive the same questions. OpenAI-compatible routes
+  require an explicit `base_url`; there is no default provider endpoint.
+- A reaction must be exactly one emoji (`I-040A@5`). Words, shortcodes and
+  custom `name:id` values are rejected before dispatch.
+- Continuation handles stay outside model input, are bound to one participant
+  and room, expire, and are discarded on restart.
+- Privileged actions require authorization for the exact operation, with
+  current policy, identity, approval and replay checks.
+- Missing platform capabilities are reported as limits rather than inferred.
 
-- `nunchi-codex-room-runner` — reduced: Discord only, read-only Codex
-  sandbox, privileged actions disabled. It stays until
-  `nunchi-codex-app-server-runner` passes live checks.
+Older receipt journals containing `ACK` records remain readable. An old `ack`
+configuration setting is ignored. Executable V1 requests, commands and hooks
+have been removed; old state is not migrated into new conversation turns.
 
-Removed on 2026-10-11 (for now): `nunchi-hermes-dashboard` and
-`nunchi-hermes-lifecycle`, with the `hermes_agent.plugins` entry point, belonged
-to the old Hermes integration, which patched Hermes. The parked Hermes plugin
-ships no command and no entry point.
-
-Installed, with additional integration limitations:
-
-- `nunchi-claude-code-room-runner` — the Claude Code gate and its mod
-  ([#43](https://github.com/mentatzoe/nunchi/issues/43)). Its configuration and
-  the mod's room tools may still change: it depends on Claude Code's mods API,
-  which is early access, and it has no live proof.
-- `nunchi-codex-app-server-runner` — Codex through `codex app-server`, with
-  the user's own Codex configuration. It has no live proof yet, and is to
-  replace `nunchi-codex-room-runner`.
-- `nunchi-service-worker` — internal supervisor that `nunchi service` starts.
-
-No V1 request, verdict, hook, responder, configuration, or exit-code contract
-is stable or executable.
-
-## Compatibility rules
-
-- Contract documents are closed; unknown fields fail validation.
-- Native IDs remain strings and canonical IDs are platform-qualified.
-- `self.actor_id` is exact transport/host binding, independent of aliases,
-  names, and roles.
-- Attention dispositions are `SUPPRESS`, `WAKE`, and `DEFER`. A judgment
-  that leans to a "mhm" is `DEFER`, and the participant sends any "mhm"
-  itself; Nunchi never reacts for it (#94 step 7 removed `ACK` and
-  `config set-ack`). Receipt journals written before then still read, and a
-  config that still has an `ack` setting loads with it ignored. Bypass and
-  operational error are distinct non-social statuses.
-- Attention is answered as fixed typed questions (steps 1 and 2 of reading
-  the room); the decision records the answers (`I-010B@6`). A chat model and
-  a typed decision model answer the same questions.
-- Attention model configuration selects its implementation with `kind`
-  (default `openai-compatible`; the adapters and the Claude Code and Codex
-  runners add `decisions-api`, `messages-api` and `responses-api`). The `openai-compatible` attention model and
-  the OpenAI-compatible participant model require an explicit `base_url`;
-  there is no default endpoint, and a configuration without one fails
-  validation. Operator profiles accept `kind` and an optional
-  `credential_env` per model.
-- A reaction is exactly one emoji (`I-040A@5`): a participant's reaction that is a word, a shortcode name or a custom `name:id`
-  is refused before anything is committed, whichever way the participant acts.
-- Receipt ownership and ordering are immutable.
-- Continuation authority is host-only, bound, bounded, expiring, and discarded
-  on restart.
-- Privileged authorization binds the exact requester origin, participant,
-  route, capability, resource, operation digest, policy revision, expiry,
-  approval, revocation state, and one-use effect commit.
-- Platform-native absences are explicit capability facts, never invented.
-
-A change to any of these requires a contract version change, conformance
-updates, and downstream review.
+Changes to a public data shape or accepted behavior need an interface-version
+review, updated validation and checks of affected consumers. A library release
+number alone does not identify a wire format.

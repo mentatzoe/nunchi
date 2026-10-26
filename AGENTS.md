@@ -17,18 +17,26 @@ attention and room context through the channels people already use.
   Nunchi's adapters and MCP tools are optional examples, not prerequisites.
   Explain actual compatibility limits so users can choose the tradeoff.
 
-**The implementation does not yet meet this goal.** The supplied Claude Code
-and Codex integrations start agents and require Nunchi's Discord transport.
-The shared turn code controls sending and limits each turn to one room action.
-Context CRUD and prompt configuration are incomplete. These are gaps to
-review, not requirements for the library. Keeping context and history in core
-is intentional.
+**The implementation does not yet meet this goal.** Shared code still hosts
+participant turns, controls sending and limits each turn to one room action.
+Context CRUD and prompt configuration are incomplete. Keeping context and
+history in core is intentional; the ownership of agents and sending is not.
 
-This replaces the earlier instructions requiring library-owned agent turns
-and Nunchi's Discord transport. Current work is architecture review with the
-maintainer; implementation and evaluation design follow that discussion.
-Existing contracts describe the implementation under review. They do not
-override this goal or authorize resuming the previous delivery plan.
+**Integration retirement, decided 2026-10-26.** Remove the Claude Code, both
+Codex and Hermes plugin implementations, their launchers and integration-only
+checks. Offering a misleading integration is worse than offering none. There
+are no supplied harness integrations until replacements are designed. Git
+retains the old code. This supersedes the earlier Hermes parking decision and
+instructions to keep old integrations until replacements pass their checks.
+
+Core, provider connections and optional channel capabilities remain for
+review. Reference adapters run plain model participants; they do not integrate
+with existing agent harnesses. Retiring harness code does not approve the
+library-owned turns that remain in shared code.
+
+Current work is architecture review with the maintainer. Implementation of
+replacement interfaces and evaluation design follow that discussion. Current
+contracts describe code, not product intent or a mandate to resume old plans.
 
 ## What Nunchi is for
 
@@ -128,34 +136,21 @@ If an integration needs a missing core capability, expose a neutral interface.
   of the room and out of subprocess environments an integration constructs
   for agents. In-process integrations share the harness's environment and
   must document which credentials the agent can reach. The harness's sandbox
-  and settings protect what its commands can read; each active integration's
-  README names them.
-- **Channel limitations must be visible.** The inspected Claude Discord
-  plugin filters live bot messages; its history tool has separate limits.
-  These affect the context available to Nunchi, but do not justify requiring
-  Nunchi's connector. See the
-  [integration's limits and source references](integrations/claude-code/README.md#channel-choice-and-limits).
-- **The Hermes plugin is parked** (decided,
-  2026-10-10). It injects a turn of its own instead of riding Hermes's native
-  flow, so Hermes's thread, session and identity settings never apply to
-  Nunchi's turns, and following Hermes's rules for listing a plugin would cost
-  the agent its mentions. The code and its CI lanes stay; there is no new
-  Hermes work until it is unparked
-  ([README, Parked](integrations/hermes-plugin/README.md#parked-2026-10-10)).
-- **The old Hermes integration is removed** (decided 2026-10-11, for
-  now). It patched Hermes at runtime, which this rule forbids. Hermes has no
-  supported path until the plugin is unparked.
-- **D4, decided** (2026-10-10): Hermes's built-in commands stay Hermes's. The
-  plugin never drops or rewrites them; operators can restrict them with
-  `group_allow_admin_from`.
+  and settings protect what its commands can read. Consumers must document
+  the relevant sandbox and credential settings.
+- **Channel limitations must be visible.** Document actual connector limits
+  so users can choose their channels. The inspected Claude Discord plugin's
+  bot filtering and history limits are recorded under
+  [channel compatibility](docs/adapters.md#channel-compatibility). They do not
+  justify requiring Nunchi's connector or taking control of an agent.
 
 ## Read first
 
 1. This file: architecture goal, social behavior and draft status.
-2. `README.md`: current implementation, supported combinations and gaps.
-3. The relevant implementation reference: `docs/contracts/nunchi-v2.md`,
-   `docs/harness-contract.md`, `docs/harness-guide.md`, or an integration's
-   README. Their current ownership rules are under architecture review.
+2. `README.md`: current implementation, available capabilities and gaps.
+3. The relevant implementation reference: `docs/contracts/nunchi.md`,
+   `docs/platform.md`, or `docs/adapters.md`. Their current turn and sending
+   ownership is under architecture review.
 4. Source, schemas, tests, evaluations, evidence and installed runtimes for
    what actually exists and works.
 5. `docs/behavior.md` when discussing proposed behavior, using the draft

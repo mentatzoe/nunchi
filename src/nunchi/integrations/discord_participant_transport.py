@@ -1,6 +1,6 @@
-"""One shared Discord consumer transport for every V2 platform integration.
+"""Shared Discord transport helpers for current library consumers.
 
-`docs/platform-v2.md` defines a single shared Discord consumer contract: verify
+`integrations/mcp-discord/README.md` describes the current transport: verify
 the pinned binding, submit through the authenticated session, and report `sent`
 only when the tool payload attests the exact native room, self, content, reply
 target, and new native identity.  Every other acknowledgement is `unknown`.

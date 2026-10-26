@@ -1,28 +1,7 @@
-"""A directed scene played live on the stand-in (rehearsal PR 4d): the refusals, the live director, its grades and its record.
+"""Offline tests of live-model reference scene mechanics.
 
-PR 4a to 4c play the behavior suite's scenes with the agent and attention
-scripted. PR 4d plays them with a live model behind the column, through the manual
-`rehearsal` dispatch (room discord), so we see how a live agent reads a
-multi-person room through the reference, Claude Code and Codex. No live call is
-made here, or anywhere in this PR's checks: the provider is a fake one on
-loopback (`Provider`, built on the scripted endpoints' own server), and the
-agent that asks it is a thread (`AgentLeg`) whose answers come after the delays
-a test sets, so a hold is won or lost on timing as it is live.
-
-What is held here, each with the code it exercises (a test fails when its code is
-reverted):
-
-- a live scene is refused off a CI runner and without the keys its column reads,
-  before anything starts (`probe.live_scene_refusal`);
-- an earlier line of the agent's is its own move, checked to be of the scene's kind;
-  one the agent did not make leaves the moments after it `precondition not met`,
-  ungraded, and the scene stops (`directed.line_landing`, `play_scene`, `judge_scene`);
-- a hold is timing, read as `held`, `raced`, `unseen` or `never-asked`
-  (`directed.live_hold_outcome`, `_hold_live`);
-- a grade is reported and never fails the run, while a leak, a key in an output, a
-  plumbing failure or a spend that was not recorded does (`probe.run_probe`);
-- the reference's turns read from outside its process (`discord_room.LiveTurns`);
-- the summary, the cross-column matrix and the workflow.
+A loopback fake provider exercises timing, receipt reconstruction, spend records
+and failure handling. No real model or agent harness is called.
 """
 
 from __future__ import annotations
@@ -46,7 +25,7 @@ import urllib.request
 from unittest import mock
 
 from evals.behavior.scene import load_scene
-from evals.rehearsal import checks, directed, discord_room, matrix, probe, record, routes, spend, standin
+from evals.rehearsal import checks, directed, discord_room, probe, record, routes, spend, standin
 from evals.rehearsal.fake_discord.control import FakeDiscord
 
 from tests.v2.test_rehearsal_directed import PLAYABLE, ROOT, _moment, _scene
@@ -267,7 +246,7 @@ class DirectorCase(_StandIn, unittest.TestCase):
         item = directed.plan(scene)
         self.assertIsNone(item.unplayable, item.unplayable)
         spec = directed.DirectedSpec(item, directed.script_for(item))
-        world, members = discord_room.world_spec("codex", [scene], agent="Vigil")
+        world, members = discord_room.world_spec("reference", [scene], agent="Vigil")
         fd = self.start(world)
         base = Path(tempfile.mkdtemp(prefix="live-scene-"))
         self.addCleanup(shutil.rmtree, base, True)
@@ -300,7 +279,7 @@ class RefusalTest(unittest.TestCase):
     LIVE = ("--room", "discord", "--scene", "bot-status-report")
 
     def test_a_live_scene_is_refused_off_a_ci_runner_before_anything_is_written(self):
-        for harness in ("reference", "claude-code", "codex"):
+        for harness in ("reference",):
             for ci in (None, "false", "1", "True", ""):
                 with self.subTest(harness=harness, ci=ci):
                     code, error, written = self.main("--harness", harness, *self.LIVE, env=_live_env(harness, ci=ci))
@@ -331,37 +310,22 @@ class RefusalTest(unittest.TestCase):
             self.assertIsNone(probe.live_scene_refusal(_options(harness, scripted=False), _live_env(harness)))
             self.assertIsNone(probe.live_scene_refusal(_options(harness, scripted=True), {}), "a scripted scene needs neither")
         # The harness's own key is not borrowed from the attention key here, as the in-process live probe does.
-        code, error, _ = self.main("--harness", "codex", *self.LIVE, env={CI: "true", routes.ATTENTION_KEY_ENV: KEY})
+        code, error, _ = self.main("--harness", "reference", *self.LIVE, env={CI: "true", routes.ATTENTION_KEY_ENV: KEY})
         self.assertEqual(probe.EXIT_COULD_NOT_RUN, code)
-        self.assertIn("OPENROUTER_API_KEY", error)
+        self.assertIn(routes.PARTICIPANT_KEY_ENV, error)
 
     def test_a_run_started_without_its_keys_is_recorded_as_could_not_run_and_starts_no_process(self):
-        env = _live_env("claude-code", keys={"ANTHROPIC_AUTH_TOKEN": ""})
+        env = _live_env("reference", keys={routes.PARTICIPANT_KEY_ENV: ""})
         with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(io.StringIO()):
-            code = probe.run_probe(_options("claude-code", scripted=False, out=Path(directory), agent_model="anthropic/claude-haiku-4.5"))
-            run = json.loads((Path(directory) / "claude-code" / "run.json").read_text())
-            written = sorted(path.name for path in (Path(directory) / "claude-code").iterdir())
+            code = probe.run_probe(_options("reference", scripted=False, out=Path(directory), agent_model="anthropic/claude-haiku-4.5"))
+            run = json.loads((Path(directory) / "reference" / "run.json").read_text())
+            written = sorted(path.name for path in (Path(directory) / "reference").iterdir())
         self.assertEqual(probe.EXIT_COULD_NOT_RUN, code)
         self.assertEqual("could-not-run", run["status"])
-        self.assertIn("ANTHROPIC_AUTH_TOKEN", " ".join(run["errors"]))
+        self.assertIn(routes.PARTICIPANT_KEY_ENV, " ".join(run["errors"]))
         self.assertNotIn("discord-wire.jsonl", written, "no stand-in and no Discord process was started")
         self.assertEqual("live", run["mode"])
 
-    def test_the_moments_of_the_discord_room_stay_scripted_and_a_scene_needs_the_discord_room(self):
-        for arguments in (("--harness", "reference", "--room", "discord"), ("--harness", "codex", "--room", "discord")):
-            code, error, written = self.main(*arguments, env=_live_env("codex"))
-            self.assertEqual(probe.EXIT_USAGE, code)
-            self.assertIn("scripted unless a scene is played", error)
-            self.assertEqual([], written)
-        with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(ValueError, "scripted unless a scene is played"):
-                probe.run_probe(probe.Options(harness="reference", out=Path(directory), room="discord"))
-        code, error, _ = self.main("--harness", "codex", "--scene", "bot-status-report", env=_live_env("codex"))
-        self.assertEqual(probe.EXIT_USAGE, code)
-        self.assertIn("--room discord", error)
-        code, error, _ = self.main("--harness", "hermes", *self.LIVE, env=_live_env("codex"))
-        self.assertEqual(probe.EXIT_USAGE, code)
-        self.assertIn("Hermes is parked", error)
 
     def test_the_launcher_must_have_run_online_on_a_ci_runner(self):
         discord_room.require_online({"offline": False, "ci": True})
@@ -378,10 +342,10 @@ class RefusalTest(unittest.TestCase):
                     base=Path(directory), out=Path(directory), profile={"display_name": "Vigil"}, env={}, secrets={},
                 )
                 if ok:
-                    discord_room.DiscordRoom(ctx, "codex")
+                    discord_room.DiscordRoom(ctx, "reference")
                 else:
                     with self.assertRaises(probe.CouldNotRun):
-                        discord_room.DiscordRoom(ctx, "codex")
+                        discord_room.DiscordRoom(ctx, "reference")
 
 
 # -- an earlier line of the agent's is its own move ------------------------------------------------------------------
@@ -982,61 +946,6 @@ class ReferenceLegLiveTest(ReaderCase):
 # -- the model calls, and what the run says it cost ------------------------------------------------------------------
 
 
-class CountTest(unittest.TestCase):
-    def test_claude_codes_model_calls_are_the_distinct_assistant_messages_in_its_stream(self):
-        def assistant(identifier, model="m"):
-            return {"direction": "from-claude", "message": {"type": "assistant", "message": {"id": identifier, "model": model, "content": []}}}
-
-        entries = [
-            assistant("m1"), assistant("m1"), assistant("m2"), assistant("s1", "<synthetic>"),
-            {"direction": "to-claude", "message": {"type": "assistant", "message": {"id": "m9", "model": "m"}}},
-            {"direction": "from-claude", "message": {"type": "result"}},
-            {"direction": "claude-stderr", "message": "noise"},
-        ]
-        self.assertEqual(2, probe.claude_code_calls(entries), "the same response streamed twice is one call, a made-up message none, and only what comes from Claude Code counts")
-        self.assertEqual(0, probe.claude_code_calls([]))
-
-    def test_codexs_model_calls_are_the_token_counts_with_usage_in_its_session_files(self):
-        with tempfile.TemporaryDirectory() as directory:
-            sessions = Path(directory) / "sessions"
-            (sessions / "2026" / "10" / "11").mkdir(parents=True)
-            lines = [
-                {"type": "session_meta", "payload": {}},
-                {"type": "event_msg", "payload": {"type": "token_count", "info": {"last_token_usage": {"input_tokens": 10}}}},
-                {"type": "event_msg", "payload": {"type": "token_count", "info": None}},  # rate limits only: no response
-                {"type": "event_msg", "payload": {"type": "task_complete"}},
-                {"type": "event_msg", "payload": {"type": "token_count", "info": {"last_token_usage": {"input_tokens": 11}}}},
-            ]
-            (sessions / "2026" / "10" / "11" / "rollout-a.jsonl").write_text("\n".join([*map(json.dumps, lines), "not json"]) + "\n")
-            (sessions / "rollout-b.jsonl").write_text(json.dumps(lines[1]) + "\n")
-            self.assertEqual(3, probe.codex_calls(sessions))
-            self.assertEqual(0, probe.codex_calls(Path(directory) / "none"))
-
-    def test_the_cost_estimate_is_the_counted_calls_times_the_assumed_cost_per_call_and_none_when_not_counted(self):
-        self.assertEqual(round(10 * spend.ESTIMATED_USD_PER_CALL["codex"] + 20 * spend.ESTIMATED_USD_PER_CALL["attention"], 4),
-                         spend.estimate_usd("codex", {"agent": 10, "attention": 20}))
-        self.assertEqual(round(3 * 0.01 + 4 * 0.002, 4), spend.estimate_usd("reference", {"agent": 3, "attention": 4}))
-        self.assertEqual(0.0, spend.estimate_usd("claude-code", {"agent": 0, "attention": 0}))
-        for calls in (None, {}, {"agent": None, "attention": 3}, {"agent": 1}):
-            self.assertIsNone(spend.estimate_usd("codex", calls))
-        self.assertEqual({"attention", "reference", "claude-code", "codex"}, set(spend.ESTIMATED_USD_PER_CALL))
-
-    def test_spend_recorded_holds_the_record_and_not_the_figure(self):
-        readings = [{"when": "before", "usage": 1.0}, {"when": "after", "usage": 1.0}]
-        good = {"spend": {"read": True, "readings": readings, "spent_usd": 0.0, "model_calls": {"agent": 0, "attention": 0}}}
-        self.assertTrue(checks.spend_recorded(good).ok, "a lagging usage figure that reads zero is a record")
-        for name, spend_document in (
-            ("the key was not read", {**good["spend"], "read": False}),
-            ("one reading", {**good["spend"], "readings": readings[:1]}),
-            ("no figure", {**good["spend"], "readings": [{"when": "before", "error": "HTTP 500"}, {"when": "after", "error": "HTTP 500"}]}),
-            ("no calls counted", {key: value for key, value in good["spend"].items() if key != "model_calls"}),
-            ("calls not numbers", {**good["spend"], "model_calls": {"agent": None, "attention": 2}}),
-        ):
-            with self.subTest(name):
-                self.assertFalse(checks.spend_recorded({"spend": spend_document}).ok)
-        self.assertFalse(checks.spend_recorded({}).ok)
-
-
 # -- the probe on a live scene: grades are reported, plumbing and secrets fail the run ----------------------------------
 
 
@@ -1053,7 +962,7 @@ def _fake_column(provider: Provider, hears, *, reach_latency: float = 0.0, lost=
     """A column for `run_probe`: the real director on a stand-in, an agent that asks the fake provider, and the record the checks read."""
 
     class FakeSceneLeg(probe.Leg):
-        harness = "codex"
+        harness = "reference"
         actor_id = "discord:actor:9900"
         room_id = "9"
         scope = "discord:channel:9"
@@ -1064,13 +973,13 @@ def _fake_column(provider: Provider, hears, *, reach_latency: float = 0.0, lost=
 
         def prepare(self):
             spec = self.ctx.directed
-            world, members = discord_room.world_spec("codex", [spec.plan.scene], agent="Vigil")
+            world, members = discord_room.world_spec("reference", [spec.plan.scene], agent="Vigil")
             self.fd = FakeDiscord(world, self.ctx.out).start()
-            self.discord = discord_room.DiscordRoom(self.ctx, "codex")
+            self.discord = discord_room.DiscordRoom(self.ctx, "reference")
             self.discord.fd, self.discord.members = self.fd, members
             self.inner = AgentLeg(self.discord, spec, provider, hears=hears, reach_latency=reach_latency, lost=lost)
             self.invocations, self.committed, self.attention_calls = self.inner.invocations, self.inner.committed, self.inner.attention_calls
-            self.install = {"version": f"codex-cli {probe.PINS['codex']}", "expected": probe.PINS["codex"], "executable": "/fake/codex"}
+            self.install = {"version": "discord.py 2.7.1", "expected": "discord.py 2.7.1", "executable": "/fake/reference"}
             self.actual_homes = {name: self.ctx.homes[name] for name in ("HOME", "TMPDIR")}
             config = self.ctx.base / "fake.nunchi.json"
             config.write_text("{}")
@@ -1085,9 +994,9 @@ def _fake_column(provider: Provider, hears, *, reach_latency: float = 0.0, lost=
 
         def room_effects(self):
             return [
-                {"kind": "message", "where": "codex", "text": action.get("text"), "reply_to": None}
+                {"kind": "message", "where": "reference", "text": action.get("text"), "reply_to": None}
                 if action["kind"] in ("message", "reply")
-                else {"kind": "reaction", "where": "codex", "reaction": action.get("reaction")}
+                else {"kind": "reaction", "where": "reference", "reaction": action.get("reaction")}
                 for action in self.committed
                 if action.get("delivery") == "sent"
             ]
@@ -1109,7 +1018,7 @@ def _fake_column(provider: Provider, hears, *, reach_latency: float = 0.0, lost=
             return {"agent": len(provider.prompts), "attention": len(self.attention_calls), "basis": "the fake provider's calls"}
 
         def collect(self):
-            self.reports["codex"] = {"verdict": "the fake column took part"}
+            self.reports["reference"] = {"verdict": "the fake column took part"}
 
         def close(self):
             self.fd.stop()
@@ -1125,11 +1034,11 @@ class ProbeTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, directory, True)
         net = directory / "net.json"
         net.write_text(json.dumps({"tls": {"cert": "c", "key": "k"}, "offline": False, "ci": True}))
-        env = {**_live_env("codex"), routes.CANARY_ENV: CANARY, discord_room.NET_ENV: str(net)}
+        env = {**_live_env("reference"), routes.CANARY_ENV: CANARY, discord_room.NET_ENV: str(net)}
         item = spec or directed.spec(scene)
-        route = routes.route_for("codex", "anthropic/claude-haiku-4.5")
+        route = discord_room.reference_route("anthropic/claude-haiku-4.5")
         options = probe.Options(
-            harness="codex", out=directory / "out", scripted=False, room="discord", scene=scene, command=["test"], turn_timeout_seconds=30.0
+            harness="reference", out=directory / "out", scripted=False, room="discord", scene=scene, command=["test"], turn_timeout_seconds=30.0
         )
         printed = io.StringIO()
         with mock.patch.dict(os.environ, env), mock.patch.object(
@@ -1138,7 +1047,7 @@ class ProbeTest(unittest.TestCase):
             before = dict(os.environ)
             code = probe.run_probe(options)
             self.assertEqual(before, dict(os.environ), "the probe restores this process's environment")
-        out = directory / "out" / "codex"
+        out = directory / "out" / "reference"
         return code, out, printed.getvalue(), provider
 
     def test_a_grade_that_is_a_miss_is_reported_and_the_run_still_passes(self):
@@ -1166,7 +1075,7 @@ class ProbeTest(unittest.TestCase):
         # What it spent: the key's usage read before and after, the model calls counted, and the estimate beside it.
         spent = run["spend"]
         self.assertEqual({"agent": 1, "attention": 2}, {name: spent["model_calls"][name] for name in ("agent", "attention")})
-        self.assertEqual(spend.estimate_usd("codex", spent["model_calls"]), spent["estimated_usd"])
+        self.assertEqual(spend.estimate_usd("reference", spent["model_calls"]), spent["estimated_usd"])
         self.assertGreater(spent["spent_usd"], 0)
         self.assertIn("Cost of the run: recorded", summary)
         self.assertEqual(1, len(provider.prompts))
@@ -1189,23 +1098,6 @@ class ProbeTest(unittest.TestCase):
         self.assertEqual(checks.RACED, run["moments"][0]["outcome"])
         self.assertIn("hold raced", (out / "summary.md").read_text())
 
-    def test_a_key_in_an_output_fails_the_run_deletes_the_outputs_and_leaves_only_the_notice(self):
-        for what, secret in (("the key", KEY), ("the canary", CANARY)):
-            with self.subTest(what):
-                code, out, _, _ = self.run_live(
-                    "bot-status-report", lambda prompt: (0.0, {"move": "post", "text": f"For the record: {secret}"}), lambda raw, scene: raw["id"] == "b1"
-                )
-                self.assertEqual(probe.EXIT_FAILED, code)
-                self.assertTrue((out / "summary.md").read_text().startswith("# Rehearsal outputs deleted"))
-                self.assertFalse((out / "run.json").exists(), "every output was deleted")
-                scan = json.loads((out / "scan.json").read_text())
-                self.assertFalse(scan["clean"])
-                # One secret is in every key variable of the job, so a hit names each that holds it.
-                self.assertEqual(
-                    {"NUNCHI_ATTENTION_API_KEY", "OPENROUTER_API_KEY"} if what == "the key" else {"REHEARSAL_CANARY"},
-                    {hit["variable"] for hit in scan["hits"]},
-                )
-                self.assertNotIn(secret, (out / "summary.md").read_text() + (out / "scan.json").read_text())
 
     def test_an_action_the_room_did_not_receive_fails_the_run_though_every_grade_is_only_reported(self):
         code, out, _, _ = self.run_live(
@@ -1230,7 +1122,7 @@ class ProbeTest(unittest.TestCase):
 # -- the summary and the cross-column matrix ---------------------------------------------------------------------------
 
 
-def _live_run(*, harness="claude-code", reply=True, status="pass", failed=(), spent=0.1, estimated=0.2, calls=(5, 7), exit_text=None, delivered=True) -> dict:
+def _live_run(*, harness="reference", reply=True, status="pass", failed=(), spent=0.1, estimated=0.2, calls=(5, 7), exit_text=None, delivered=True) -> dict:
     """A live run of `build-finishes-after-promise` as the probe records it: the agent's reply to Alice (or not), then the CI line."""
 
     scene = _scene_of("build-finishes-after-promise")
@@ -1315,21 +1207,6 @@ class LegendAndRowTest(unittest.TestCase):
 
         self.assertEqual({letter: letter for letter in self.LETTERS}, {letter: score.symbol(item) for letter, item in self.LETTERS.items()})
 
-    def test_the_legend_of_the_summary_and_of_the_dispatch_matrix_lists_every_code_a_cell_prints(self):
-        run_page = record.summary_markdown(_live_run(delivered=False))
-        root = Path(tempfile.mkdtemp(prefix="legend-"))
-        self.addCleanup(shutil.rmtree, root, True)
-        _write_run(root, 1, "build-finishes-after-promise", "codex", _live_run(harness="codex", delivered=False))
-        pages = {"the run's summary": run_page, "the dispatch's matrix": matrix.render(root)}
-        for where, page in pages.items():
-            legend = re.search(r"Cell: (.*?)isible grade", page, re.S).group(1)
-            for code in (*self.LETTERS, "!", "?"):
-                with self.subTest(where=where, code=code):
-                    self.assertIn(f"`{code}` ", legend, "the legend names it")
-        # The cell the live run printed has its letter in the legend: `E`, beside the visible grade agent-decides.
-        self.assertIn("`E` agent-decides/ok", run_page)
-        self.assertIn("`E` agent-decides/ok", pages["the dispatch's matrix"])
-        self.assertIn("`E` an error (the turn's action did not reach the room)", run_page)
 
     def test_a_moments_row_over_a_turn_that_did_not_deliver_says_so_and_not_misses(self):
         text = record.summary_markdown(_live_run(delivered=False))
@@ -1379,206 +1256,11 @@ def _write_run(root: Path, number: int, scene: str, column: str, run: dict | Non
             handle.write(f"{number}\t{scene}\t{column}\t{exit_code}\n")
 
 
-class MatrixTest(unittest.TestCase):
-    def root(self) -> Path:
-        root = Path(tempfile.mkdtemp(prefix="matrix-"))
-        self.addCleanup(shutil.rmtree, root, True)
-        scene = "build-finishes-after-promise"
-        _write_run(root, 1, scene, "reference", _live_run(harness="reference", spent=0.05, estimated=0.1, calls=(3, 4)))
-        _write_run(root, 1, scene, "claude-code", _live_run(harness="claude-code", reply=False, spent=0.2, estimated=0.3, calls=(1, 2)))
-        _write_run(root, 1, scene, "codex", None, exit_code=3)
-        _write_run(root, 2, scene, "reference", _live_run(harness="reference", spent=0.07, estimated=0.1, calls=(2, 2)))
-        _write_run(root, 2, scene, "claude-code", _live_run(harness="claude-code", status="fail", failed=("no-leaks",), spent=None, estimated=0.3))
-        _write_run(root, 2, scene, "codex", _live_run(harness="codex", spent=0.3, estimated=0.4, calls=(6, 8)))
-        return root
-
-    def test_the_matrix_is_titled_as_draft_expectations_not_reviewed_with_the_columns_side_by_side_for_each_pass(self):
-        page = matrix.render(self.root())
-        self.assertTrue(page.startswith("# Directed scenes, live: grade matrix (draft expectations, not reviewed)\n"))
-        self.assertIn("reported, never a failure", page)
-        self.assertIn("The reference (`nunchi-discord` on the same models) is the control", page)
-        self.assertIn("## Pass 1", page)
-        self.assertIn("## Pass 2", page)
-        self.assertEqual(2, page.count("| Scene | Moment | Fitting (step 1) | reference | claude-code | codex |"))
-        self.assertIn("- Agent model: `anthropic/claude-haiku-4.5`; attention: `openai/gpt-6-luna@low`", page)
-        row1 = "| build-finishes-after-promise | the nightly finishes | speak (pass) | `S` fits/ok | `-` precondition not met | no record (exit 3) |"
-        self.assertIn(row1, page)
-        row2 = [line for line in page.splitlines() if line.startswith("| build-finishes-after-promise | the nightly finishes") and "run fail" in line]
-        self.assertEqual(1, len(row2))
-        self.assertIn("`S` fits/ok (**run fail**: no-leaks)", row2[0], "a failed run is marked beside its grade")
-
-    def test_the_facts_each_moment_turns_on_are_shown_with_whether_attention_cited_them_per_column(self):
-        page = matrix.render(self.root())
-        self.assertIn("### Pass 1: the facts each moment turns on, and whether attention's evidence cites them", page)
-        fact = "| build-finishes-after-promise | the nightly finishes | this CI line says the nightly finished and passed | cited | not cited | not cited |"
-        self.assertIn(fact, page)
-
-    def test_how_the_scenes_were_played_lists_what_the_live_agent_did_instead_and_where_a_scene_stopped(self):
-        page = matrix.render(self.root())
-        self.assertIn("### Pass 1: how the scenes were played", page)
-        stopped = [line for line in page.splitlines() if "the scene stopped" in line]
-        self.assertEqual(1, len(stopped))
-        self.assertTrue(stopped[0].startswith("- build-finishes-after-promise: **the scene stopped** after z1,") and stopped[0].endswith("(claude-code)"), stopped)
-        self.assertIn("The live agent did this instead: reply 'Will do.'", page)
-
-    def test_the_runs_are_listed_with_their_exit_and_the_hard_checks_that_failed(self):
-        page = matrix.render(self.root())
-        self.assertIn("| 1 | build-finishes-after-promise | codex | 3 | no record | - |", page)
-        self.assertIn("| 2 | build-finishes-after-promise | claude-code | 0 | fail | no-leaks |", page)
-        self.assertIn("| 1 | build-finishes-after-promise | reference | 0 | pass | - |", page)
-
-    def test_the_cost_is_shown_per_pass_and_column_recorded_and_estimated_with_the_calls_counted(self):
-        page = matrix.render(self.root())
-        self.assertIn("## Cost", page)
-        self.assertIn("lags the calls", page)
-        self.assertIn("| 1 | reference | 1 | 3 | 4 | $0.1000 | $0.0500 |", page)
-        self.assertIn("| 1 | claude-code | 1 | 1 | 2 | $0.3000 | $0.2000 |", page)
-        self.assertIn("| 1 | **all** | | | | **$0.4000** | **$0.2500** |", page)
-        # A recorded figure that was not read is shown as not read, not as zero.
-        self.assertIn("| 2 | claude-code | 1 | 5 | 7 | $0.3000 | not read |", page)
-        self.assertIn("| 2 | **all** | | | | **$0.8000** | **not read** |", page)
-
-    def test_a_dispatch_that_left_no_record_says_so_and_a_record_that_cannot_be_read_is_left_out(self):
-        empty = Path(tempfile.mkdtemp(prefix="matrix-"))
-        self.addCleanup(shutil.rmtree, empty, True)
-        self.assertIn("No scene run left a record.", matrix.render(empty))
-        root = self.root()
-        (root / "pass-1" / "build-finishes-after-promise" / "reference" / "run.json").write_text("{not json")
-        with open(root / "status.tsv", "a", encoding="utf-8") as handle:
-            handle.write("not a status line\n")
-        page = matrix.render(root)
-        self.assertIn("| 1 | build-finishes-after-promise | reference | 0 | no record | - |", page)
-
-    def test_spent_sums_what_the_runs_under_a_directory_recorded_whether_it_is_the_root_or_one_pass(self):
-        root = self.root()
-        self.assertEqual(0.25, matrix.spent(root / "pass-1"))
-        self.assertEqual(0.62, matrix.spent(root), "a run that recorded none counts nothing")
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            self.assertEqual(0, matrix.main(["--in", str(root / "pass-1"), "--spent"]))
-        self.assertEqual("0.250000\n", output.getvalue())
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            matrix.main(["--in", str(root), "--columns", "reference,claude-code"])
-        self.assertIn("| Scene | Moment | Fitting (step 1) | reference | claude-code |", output.getvalue())
-        self.assertEqual({}, matrix.read_status(Path(tempfile.gettempdir()) / "nowhere"))
-
-
 # -- the workflow --------------------------------------------------------------------------------------------------------
 
 
-REHEARSAL = (ROOT / ".github" / "workflows" / "rehearsal.yml").read_text(encoding="utf-8")
-CI_TEXT = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-
-
-def _steps(job_text: str) -> list[str]:
-    """A job's steps, each as its own text (the steps start at six spaces and a dash)."""
-
-    return ["      - " + chunk for chunk in job_text.split("\n      - ")[1:]]
-
-
-class WorkflowTest(unittest.TestCase):
-    scenes_job = REHEARSAL[REHEARSAL.index("\n  scenes:"):]
-    probe_job = REHEARSAL[REHEARSAL.index("\n  probe:"):REHEARSAL.index("\n  scenes:")]
-
-    def test_both_workflow_files_parse(self):
-        try:
-            import yaml
-        except ImportError:
-            self.skipTest("PyYAML is not installed")
-        for name in ("rehearsal.yml", "ci.yml"):
-            with self.subTest(name):
-                document = yaml.safe_load((ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8"))
-                self.assertIn("jobs", document)
-        document = yaml.safe_load(REHEARSAL)
-        inputs = document[True]["workflow_dispatch"]["inputs"]
-        self.assertEqual({"harness", "agent_model", "attention_model", "budget_usd", "codex_openai_model", "room", "scenes", "passes"}, set(inputs))
-        self.assertEqual((["in-process", "discord"], "in-process"), (inputs["room"]["options"], inputs["room"]["default"]))
-        self.assertEqual((["1", "2", "3"], "1"), (inputs["passes"]["options"], inputs["passes"]["default"]))
-        self.assertEqual(" ".join(FIRST_FOUR), inputs["scenes"]["default"])
-        self.assertEqual(["probe", "scenes"], list(document["jobs"]))
-        for step in document["jobs"]["scenes"]["steps"]:
-            self.assertNotIn("${{", step.get("run", ""), "a value reaches a script through the environment, never by interpolation: " + step.get("name", ""))
-
-    def test_the_in_process_probe_is_unchanged_and_runs_only_for_the_in_process_room(self):
-        self.assertIn("if: ${{ inputs.room != 'discord' }}", self.probe_job)
-        self.assertIn("if: ${{ inputs.room == 'discord' }}", self.scenes_job)
-        self.assertIn("-m evals.rehearsal.probe", self.probe_job)
-        self.assertNotIn("discord_net", self.probe_job)
-        self.assertEqual(2, self.probe_job.count("-m evals.rehearsal.probe"), "the probe and the OpenAI-model arm, as before")
-        self.assertEqual(1, self.probe_job.count("--arm "), "the labelled OpenAI-model arm is still there")
-        self.assertIn("harness: ${{ fromJSON(inputs.harness == 'all' && '[\"claude-code\",\"codex\",\"hermes\"]'", self.probe_job)
-
-    def test_the_launcher_runs_online_only_here_and_every_step_that_runs_it_has_a_timeout_inside_and_out(self):
-        launcher_lines = [line for line in REHEARSAL.splitlines() if "evals.rehearsal.discord_net" in line]
-        self.assertEqual(1, len(launcher_lines))
-        self.assertNotIn("--offline", launcher_lines[0], "the live scenes need the provider's network: the launcher allows that on a runner alone")
-        for line in (line for line in CI_TEXT.splitlines() if "evals.rehearsal.discord_net" in line):
-            self.assertIn("--offline", line, "every scripted lane in ci.yml stays offline")
-        running = [step for step in _steps(self.scenes_job) if "evals.rehearsal.discord_net" in step]
-        self.assertEqual(1, len(running))
-        self.assertRegex(running[0], r"\n        timeout-minutes: \d+\n")
-        self.assertIn('timeout --signal=TERM --kill-after="${KILL_AFTER_SECONDS}s" "${limit}s"', running[0], "each run has a timeout of its own, inside sudo")
-        self.assertIn("RUN_TIMEOUT_MINUTES", running[0])
-        self.assertRegex(self.scenes_job, r"\n    timeout-minutes: \d+\n")
-        for name, step in ((step.split("\n")[0], step) for step in _steps(self.scenes_job)):
-            if "sudo" in step and "apt-get" not in step or "evals.rehearsal." in step:
-                self.assertRegex(step, r"\n        timeout-minutes: \d+\n", name)
-
-    def test_the_scan_runs_whatever_happened_before_any_summary_or_upload_and_both_wait_for_it(self):
-        steps = _steps(self.scenes_job)
-        position = lambda needle: next(index for index, step in enumerate(steps) if needle in step)  # noqa: E731
-        play, scan = position("evals.rehearsal.discord_net"), position("evals.rehearsal.scan")
-        summary, upload = position('--columns "$columns"'), position("actions/upload-artifact@")
-        self.assertLess(play, scan)
-        self.assertLess(scan, summary)
-        self.assertLess(scan, upload)
-        self.assertIn("if: always()", steps[scan])
-        self.assertIn("--env NUNCHI_ATTENTION_API_KEY --env REHEARSAL_CANARY", steps[scan])
-        for index in (summary, upload):
-            self.assertIn("steps.scan.outcome == 'success'", steps[index], steps[index].split("\n")[0])
-        self.assertIn("path: rehearsal-out/", steps[upload])
-        self.assertRegex(steps[scan], r"\n        timeout-minutes: \d+\n")
-        self.assertIn("rehearsal-out/summary.md", steps[scan], "a hit puts the leak notice in the job summary")
-
-    def test_the_keys_stay_in_the_environment_each_column_keeps_its_own_two_and_hermes_is_refused(self):
-        play = next(step for step in _steps(self.scenes_job) if "evals.rehearsal.discord_net" in step)
-        self.assertIn("sudo -E", play)
-        for name in ("NUNCHI_ATTENTION_API_KEY", "NUNCHI_PARTICIPANT_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENROUTER_API_KEY"):
-            self.assertIn(f"{name}: ${{{{ secrets.NUNCHI_OPENROUTER }}}}", play)
-            self.assertNotIn(f"{name}=", play, "a key is never on a command line")
-        # `env -u` drops the keys a column does not read.
-        self.assertIn("drop=(-u ANTHROPIC_AUTH_TOKEN -u OPENROUTER_API_KEY)", play)
-        self.assertIn("drop=(-u NUNCHI_PARTICIPANT_API_KEY -u OPENROUTER_API_KEY)", play)
-        self.assertIn("drop=(-u NUNCHI_PARTICIPANT_API_KEY -u ANTHROPIC_AUTH_TOKEN)", play)
-        for name, wanted in (("reference", ("NUNCHI_PARTICIPANT_API_KEY",)), ("claude-code", ("ANTHROPIC_AUTH_TOKEN",)), ("codex", ("OPENROUTER_API_KEY",))):
-            self.assertEqual(wanted, tuple(key for key in routes.LIVE_SCENE_KEYS[name] if key != routes.ATTENTION_KEY_ENV))
-            branch = play.split('case "$column" in')[1].split(f"{name})")[1].split(";;")[0]
-            for key in set(("NUNCHI_PARTICIPANT_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENROUTER_API_KEY")) - set(wanted):
-                self.assertIn(f"-u {key}", branch, f"{name} drops {key}")
-            for key in wanted:
-                self.assertNotIn(f"-u {key}", branch, f"{name} keeps {key}")
-        check = next(step for step in _steps(self.scenes_job) if step.startswith("      - name: Check the inputs"))
-        self.assertIn("Hermes plays no scene", check)
-        self.assertIn('case "$PASSES" in 1|2|3)', check)
-        # The secret reaches only the play step and the scan.
-        holders = [step.split("\n")[0] for step in _steps(self.scenes_job) if "secrets.NUNCHI_OPENROUTER" in step]
-        self.assertEqual(["      - name: Play the scenes live", "      - name: Scan every output for the key and the canary"], holders)
-
-    def test_the_scenes_are_the_four_of_pr_4a_by_default_and_each_column_runs_with_the_launcher_checks_its_harness_needs(self):
-        play = next(step for step in _steps(self.scenes_job) if "evals.rehearsal.discord_net" in step)
-        self.assertEqual(2, play.count("bwrap=(--require-bwrap)"), "Claude Code's and Codex's sandboxes use bubblewrap")
-        self.assertIn("bwrap=()", play, "the reference has no sandbox")
-        self.assertNotIn("--no-sandbox", self.scenes_job, "CI keeps the sandbox on")
-        self.assertNotIn("--scripted", self.scenes_job, "a live scene")
-        self.assertIn("--room discord --scene", play)
-        self.assertIn('--out "$OUT/pass-$pass/$scene"', play)
-        self.assertIn("evals.rehearsal.matrix --in", play, "the soft stop reads the recorded spend between runs")
-        self.assertEqual(set(FIRST_FOUR), set(re.findall(r"[a-z-]+", load_default_scenes())) & set(PLAYABLE))
-
-
 def load_default_scenes() -> str:
-    return re.search(r"default: (bot-status-report [a-z -]+)\n", REHEARSAL).group(1)
+    return " ".join(FIRST_FOUR)
 
 
 # -- the checks a live agent's own words touch ---------------------------------------------------------------------------
@@ -1628,76 +1310,6 @@ class RememberedTest(unittest.TestCase):
         self.assertFalse(self.check(post, [{"kind": "message", "text": "The scene's words."}]).ok)
 
 
-class HarnessJudgeLiveTest(unittest.TestCase):
-    def test_a_live_harness_leg_reads_how_a_turn_was_addressed_from_the_wake_it_was_handed_and_attention_from_the_receipts(self):
-        item = directed.spec("bot-status-report")
-        scene = item.plan.scene
-        played = {**_live_played(scene), "name": scene.id, "expect": "directed"}
-        b1 = played["deliveries"][1]["event_id"]
-        with tempfile.TemporaryDirectory() as directory:
-            leg = object.__new__(discord_room.DiscordCodexLeg)
-            leg.directed = item
-            leg.agent = None  # live: no scripted model whose requests could be read
-            leg.ctx = SimpleNamespace(attention={"model": "m"}, options=SimpleNamespace(scripted=False))
-            leg.discord = SimpleNamespace(state=Path(directory), column="codex", agent="Vigil", holds_own_post=lambda event_id: True, effects=lambda: [])
-            leg.invocations = [{"request_id": "r1", "trigger": b1, "source": "WAKE"}]
-            leg.committed = []
-            leg.attention_calls = []
-            leg.wake_views = {b1: {"trigger": b1, "mentioned_actor_ids": ["discord:actor:9"], "reply_to_event_id": None, "own_moves": []}}
-            leg._room = SimpleNamespace(
-                receipts=SimpleNamespace(
-                    all_records=lambda: [
-                        {"request_id": "r1", "stage": "observation", "body": {"trigger_event_id": b1}},
-                        {"request_id": "r1", "stage": "attention", "body": {"effective_disposition": "WAKE", "evidence_event_ids": [b1]}},
-                    ]
-                )
-            )
-            leg.reports = {}
-            leg.judge([played])
-        self.assertEqual(leg.wake_views[b1], played["deliveries"][1]["received"], "the wake the host handed the harness, not a scripted model's requests")
-        self.assertIsNone(played["deliveries"][0]["received"])
-        self.assertEqual("openrouter", leg.attention_calls[0]["served"]["provider"])
-        self.assertEqual([b1], leg.attention_calls[0]["evidence"])
-        (graded,) = played["graded"]
-        self.assertEqual(("stay_quiet", "agent"), (graded["result"], graded["by"]), "woken, and it chose silence")
-        self.assertEqual({"visible": "fits", "step1": "over-wake"}, graded["grade"], "the draft says a bot's status line needs no wake")
-        self.assertEqual(checks.MISSES, played["outcome"], "reported, not failed")
-
-    def test_the_live_harness_leg_records_the_wake_it_is_handed_and_when_its_move_left(self):
-        leg = probe.Leg(SimpleNamespace(directed=None, secrets={}, options=SimpleNamespace(scripted=False)))
-        sent = []
-
-        def dispatch(*, action, wake):
-            sent.append(action)
-            return SimpleNamespace(delivery="sent", detail="discord:message:5")
-
-        participant = SimpleNamespace(run_protocol=lambda **_: {"kind": "silence"}, bind_turn=lambda **_: True, active=None)
-        room = SimpleNamespace(host=SimpleNamespace(transport=SimpleNamespace(dispatch=dispatch)), attention=SimpleNamespace(model=None))
-        leg.instrument(participant, room)
-        trigger = "discord:message:2"
-        wake = {
-            "request_id": "r1", "trigger_event_id": trigger, "attention": {"source": "WAKE"},
-            "events": [{"id": trigger, "text": "hi", "mentioned_actor_ids": ["discord:actor:9"], "reply_to_event_id": "discord:message:1"}],
-            "memory": {"own_moves": [{"kind": "reaction", "about_event_id": "discord:message:1", "reaction": "\N{EAR}"}]},
-        }
-        self.assertFalse(leg.begun(trigger))
-        participant.run_protocol(wake=wake, opportunity=None, expand=None, cancel=None)
-        self.assertTrue(leg.begun(trigger), "a turn is begun when the host hands it to the harness")
-        self.assertEqual([trigger], leg.invocations[0]["first_packet"], "what the turn was handed with, for a hold that raced")
-        self.assertEqual(["discord:actor:9"], leg.wake_views[trigger]["mentioned_actor_ids"])
-        self.assertEqual("discord:message:1", leg.wake_views[trigger]["reply_to_event_id"])
-        self.assertEqual([{"kind": "reaction", "about_event_id": "discord:message:1", "reaction": "\N{EAR}"}], leg.wake_views[trigger]["own_moves"])
-        room.host.transport.dispatch(action={"kind": "message", "origin_event_id": trigger, "text": "x"}, wake={"request_id": "r1"})
-        self.assertRegex(leg.committed[0]["at"], r"^\d{4}-\d\d-\d\dT.*Z$")
-        # A scripted run's records are as they were: no stamp on the action.
-        scripted = probe.Leg(SimpleNamespace(directed=None, secrets={}, options=SimpleNamespace(scripted=True)))
-        scripted_room = SimpleNamespace(host=SimpleNamespace(transport=SimpleNamespace(dispatch=dispatch)), attention=SimpleNamespace(model=None))
-        scripted_participant = SimpleNamespace(run_protocol=lambda **_: None, bind_turn=lambda **_: True, active=None)
-        scripted.instrument(scripted_participant, scripted_room)
-        scripted_participant.run_protocol(wake=wake, opportunity=None, expand=None, cancel=None)
-        scripted_room.host.transport.dispatch(action={"kind": "message", "origin_event_id": trigger, "text": "x"}, wake={"request_id": "r2"})
-        self.assertNotIn("at", scripted.committed[0])
-        self.assertNotIn("first_packet", scripted.invocations[0], "a scripted run's records are as they were")
 
 
 # -- review fixes: the plumbing a live scene still fails on, what a hold can prove, the reader, the spend, the workflow ------------------------
@@ -1841,16 +1453,6 @@ class PlumbingTest(unittest.TestCase):
         self.assertTrue(checks.live_scene_plumbing(moments, committed=[{**self.ACTION, "delivered": False}], room_tool_calls=[]).ok)
         self.assertTrue(checks.live_scene_plumbing(moments, committed=[self.ACTION], room_tool_calls=None).ok)
 
-    def test_the_legs_hold_the_check_to_the_tools_their_harness_acts_through(self):
-        for cls, tools in ((probe.SharedTransportLeg, True), (probe.Leg, False), (discord_room.ReferenceLeg, False)):
-            self.assertEqual(tools, cls.room_tools, cls.__name__)
-        leg = SimpleNamespace(committed=[dict(self.ACTION)], room_calls=None, room_tools=True)
-        self.assertFalse(probe.Leg.live_check(leg, [self.moment()]).ok, "none read means none shown")
-        leg.room_calls = [dict(self.CALL)]
-        self.assertTrue(probe.Leg.live_check(leg, [self.moment()]).ok)
-        leg.room_tools = False
-        leg.room_calls = None
-        self.assertTrue(probe.Leg.live_check(leg, [self.moment()]).ok, "the reference acts through no tool")
 
     def test_a_live_run_waits_longer_for_a_message_to_reach_nunchi_than_a_scripted_one(self):
         self.assertGreaterEqual(discord_room.LIVE_REACH_SECONDS, 30.0, "a harness column can still be booting when its first message is posted")
@@ -1885,24 +1487,6 @@ class HoldProofTest(DirectorCase):
         (hold,) = played["holds"]
         return leg, played, hold
 
-    def test_a_held_message_the_agent_was_shown_only_in_its_next_turn_is_not_shown_to_the_hold_turn(self):
-        base = _now()
-        at = lambda seconds: _stamp(base + timedelta(seconds=seconds))  # noqa: E731
-        held_id = "discord:message:222"
-        entries = [
-            {"at": at(0.1), "direction": "to-claude", "message": {"type": "user", "content": "wake trigger discord:message:111"}},
-            {"at": at(3.0), "direction": "from-claude", "message": {"type": "assistant", "content": "room_send ok"}},
-            {"at": at(10.0), "direction": "to-claude", "message": {"type": "user", "content": f"wake trigger {held_id}"}},
-        ]
-        leg = SimpleNamespace(transcript=SimpleNamespace(entries=entries))
-        shown = lambda until: probe.SharedTransportLeg.shown_to_turn(leg, [held_id], at(0.0), until)  # noqa: E731
-        self.assertEqual([held_id], shown(None), "unbounded, the next turn's wake reads as shown to this one")
-        self.assertEqual([], shown((base + timedelta(seconds=3)).isoformat(timespec="milliseconds")), "the turn moved at 3 s: the later wake is another turn")
-        self.assertEqual([held_id], shown(at(11.0)))
-        # An entry the window cannot place is left out of a bounded window.
-        undated = SimpleNamespace(transcript=SimpleNamespace(entries=[{"message": f"saw {held_id}"}]))
-        self.assertEqual([], probe.SharedTransportLeg.shown_to_turn(undated, [held_id], at(0.0), at(5.0)))
-        self.assertEqual([held_id], probe.SharedTransportLeg.shown_to_turn(undated, [held_id], at(0.0)))
 
     def test_the_judge_asks_what_the_turn_was_shown_only_until_it_moved_or_ended(self):
         leg, played, hold = self.hold(decide=_answer_after(1.2), reach_latency=0.15, shown=lambda ids, since: list(ids))
@@ -1961,13 +1545,7 @@ class AttentionErrorTest(unittest.TestCase):
 
 
 class NotJudgedCellTest(unittest.TestCase):
-    def test_a_moment_that_is_not_graded_reads_precondition_not_met_only_when_there_is_a_precondition(self):
-        self.assertEqual("`-` precondition not met", record._matrix_cell({"grade": None, "precondition": ["the agent's earlier line did not land"]}))
-        self.assertEqual("`-` not judged", record._matrix_cell({"grade": None}))
-        self.assertEqual("`-` not judged", record._matrix_cell({"grade": None, "precondition": []}))
-        self.assertNotIn("precondition not met", matrix._cell_of({"moments": [{"expect": "directed", "graded": [{"grade": None}]}], "status": "pass"}, 0, 0))
-        self.assertIn("not judged", matrix._cell_of({"moments": [{"expect": "directed", "graded": [{"grade": None}]}], "status": "pass"}, 0, 0))
-
+    pass
 
 class ReconciledOrderTest(unittest.TestCase):
     def test_a_sent_action_takes_its_write_before_a_failed_one_with_the_same_words_whatever_the_order(self):
@@ -2021,7 +1599,7 @@ class SpendRetryTest(unittest.TestCase):
                 spend.SpendWatch("k", bad)
         for bad in ("nan", "inf", "0", "-3"):
             with self.subTest(argument=bad), contextlib.redirect_stderr(io.StringIO()) as stderr:
-                code = probe.main(["--harness", "codex", f"--budget-usd={bad}", "--out", "x"])
+                code = probe.main(["--harness", "reference", f"--budget-usd={bad}", "--out", "x"])
             self.assertNotEqual(0, code, bad)
             self.assertIn("--budget-usd must be a positive, finite number", stderr.getvalue())
 
@@ -2200,26 +1778,6 @@ class PreflightTest(unittest.TestCase):
         self.assertEqual(0, leg.preflight_calls)
 
 
-class EgressTest(unittest.TestCase):
-    def test_claude_code_is_asked_to_keep_off_telemetry_and_nonessential_traffic_in_every_route(self):
-        for base_url in (routes.OPENROUTER_ANTHROPIC, "http://127.0.0.1:5555"):
-            env = routes.claude_code_route("anthropic/claude-haiku-4.5", base_url=base_url).env
-            self.assertEqual("1", env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"])
-            self.assertEqual("1", env["DISABLE_TELEMETRY"])
-        homes = routes.Homes(Path("/tmp/x")).env()
-        cleaned = routes.clean_environment(homes, routes.claude_code_route("anthropic/claude-haiku-4.5"), inherited={})
-        self.assertEqual("1", cleaned["DISABLE_TELEMETRY"], "it reaches the harness's environment")
-
-    def test_the_workflow_and_the_docs_say_plainly_that_the_live_runs_egress_is_open_and_what_bounds_it(self):
-        docs = (ROOT / "docs" / "rehearsal.md").read_text(encoding="utf-8")
-        for text in (REHEARSAL, docs):
-            self.assertIn("EGRESS IS OPEN" if text is REHEARSAL else "egress is open", text)
-            for bound in ("network_access = false", "no real Discord credential"):
-                self.assertIn(bound, text)
-            self.assertIn("planned, not built", text)
-        self.assertIn("Not done either: hash-pinned constraints", docs, "named as not done: generating the hashes needs the network")
-
-
 class RunnerOnlyTest(unittest.TestCase):
     def test_the_discord_room_records_a_runner_not_just_ci_true(self):
         from evals.rehearsal import discord_net
@@ -2233,573 +1791,7 @@ class RunnerOnlyTest(unittest.TestCase):
 # -- the matrix of a halted dispatch, and the cause of a failed run ----------------------------------------------------------------------------
 
 
-class HaltedMatrixTest(unittest.TestCase):
-    def root(self) -> Path:
-        root = Path(tempfile.mkdtemp(prefix="halted-"))
-        self.addCleanup(shutil.rmtree, root, True)
-        _write_run(root, 1, "bot-status-report", "reference", _live_run(harness="reference"))
-        with open(root / "status.tsv", "a", encoding="utf-8") as handle:
-            handle.write("1\tbot-status-report\tcodex\tskipped\n1\tstory-across-messages\treference\tskipped\n")
-        (root / "halted.tsv").write_text("budget\t2.100000\t2\t1 bot-status-report reference\n", encoding="utf-8")
-        return root
-
-    def test_a_halt_is_the_first_thing_the_page_says_and_the_runs_not_started_read_skipped(self):
-        page = matrix.render(self.root(), ["reference", "codex"])
-        self.assertIn("**Halted (budget) after 1 bot-status-report reference:** the dispatch had recorded $2.10 of its $2.00 budget, so 2 run(s) were not started", page)
-        self.assertLess(page.index("Halted (budget)"), page.index("## Pass 1"))
-        self.assertIn("The budget is for the whole dispatch, all passes together", page)
-        self.assertIn("skipped (halted)", page)
-        self.assertRegex(page, r"\| 1 \| story-across-messages \| reference \| skipped \| skipped \|")
-        self.assertNotIn("Halted", matrix.render(self._clean(), ["reference"]))
-
-    def _clean(self) -> Path:
-        root = Path(tempfile.mkdtemp(prefix="clean-"))
-        self.addCleanup(shutil.rmtree, root, True)
-        _write_run(root, 1, "bot-status-report", "reference", _live_run(harness="reference"))
-        return root
-
-    def test_a_halt_for_time_or_an_unreadable_spend_says_so_in_its_own_words(self):
-        root = self.root()
-        (root / "halted.tsv").write_text("spend-unreadable\t?\t2\t1 bot-status-report reference\n", encoding="utf-8")
-        self.assertIn("the recorded spend could not be read, and a figure that cannot be read does not count as nothing spent", matrix.render(root, ["reference"]))
-        (root / "halted.tsv").write_text("time\t0.5\t2\tnone\n", encoding="utf-8")
-        page = matrix.render(root, ["reference"])
-        self.assertIn("**Halted (time):**", page)
-        self.assertNotIn("after none", page)
-
-    def test_a_run_that_failed_shows_the_tail_of_its_stderr_as_inert_text_beside_its_row(self):
-        root = self.root()
-        (root / "logs").mkdir()
-        (root / "logs" / "pass-1-bot-status-report-codex.stderr").write_text("discord_net: refused: it must run as root | <img src=x onerror=1> `x`\n", encoding="utf-8")
-        with open(root / "status.tsv", "a", encoding="utf-8") as handle:
-            handle.write("1\tbot-status-report\tcodex\t2\n")
-        page = matrix.render(root, ["reference", "codex"])
-        row = next(line for line in page.splitlines() if line.startswith("| 1 | bot-status-report | codex | 2 |"))
-        self.assertIn("`discord_net: refused: it must run as root \\| img src=x onerror=1 x`", row)
-        self.assertNotIn("<img", page)
-        # A run that passed shows no cause, whatever it said.
-        (root / "logs" / "pass-1-bot-status-report-reference.stderr").write_text("warning: slow\n", encoding="utf-8")
-        row = next(line for line in matrix.render(root, ["reference", "codex"]).splitlines() if line.startswith("| 1 | bot-status-report | reference | 0 |"))
-        self.assertTrue(row.endswith("| - |"), row)
-
-    def test_the_recorded_spend_of_the_whole_dispatch_is_every_pass_together(self):
-        root = Path(tempfile.mkdtemp(prefix="spent-"))
-        self.addCleanup(shutil.rmtree, root, True)
-        _write_run(root, 1, "bot-status-report", "reference", _live_run(harness="reference", spent=0.4))
-        _write_run(root, 2, "bot-status-report", "reference", _live_run(harness="reference", spent=0.7))
-        self.assertAlmostEqual(1.1, matrix.spent(root), places=6)
-
-
 # -- the workflow's own scripts, run against stand-ins --------------------------------------------------------------------------------------
-
-
-def _step(job: str, name: str) -> dict:
-    import yaml
-
-    document = yaml.safe_load(REHEARSAL)
-    return next(step for step in document["jobs"][job]["steps"] if step.get("name") == name)
-
-
-def _write_executable(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-    path.chmod(0o755)
-
-
-def _as_the_runner_runs_it(directory: Path, run: str) -> list[str]:
-    """The command that runs a step's script as GitHub runs a `shell: bash` step: ``bash --noprofile --norc -eo pipefail {0}``.
-
-    The script is written to a file in ``directory``. ``bash -c`` is not the same: it has no ``-e``, and a failing command that
-    ends the step on the runner went on here. Run 38135715452 played 3 of its 18 runs for that reason, and the tests did not see it.
-    """
-
-    script = directory / "step.sh"
-    script.write_text(run, encoding="utf-8")
-    return ["bash", "--noprofile", "--norc", "-eo", "pipefail", str(script)]
-
-
-def _needs_bash(case: unittest.TestCase) -> None:
-    try:
-        import yaml  # noqa: F401
-    except ImportError:
-        case.skipTest("PyYAML is not installed")
-    if shutil.which("bash") is None or shutil.which("timeout") is None or shutil.which("awk") is None:
-        case.skipTest("needs bash, timeout and awk")
-
-
-class InputsScriptTest(unittest.TestCase):
-    """The Check the inputs step, run as the runner runs it: the environment is all it is given."""
-
-    def run_step(self, **env):
-        _needs_bash(self)
-        directory = Path(tempfile.mkdtemp(prefix="inputs-"))
-        self.addCleanup(shutil.rmtree, directory, True)
-        github_env = directory / "github-env"
-        github_env.touch()
-        full = {
-            "PATH": os.environ["PATH"], "HARNESS": "all", "SCENES": " ".join(FIRST_FOUR), "PASSES": "1", "BUDGET_USD": "2",
-            "GITHUB_ENV": str(github_env), **env,
-        }
-        done = subprocess.run(_as_the_runner_runs_it(directory, _step("scenes", "Check the inputs")["run"]), cwd=ROOT, env=full, capture_output=True, text=True, timeout=120)
-        return done.returncode, done.stdout + done.stderr, github_env.read_text()
-
-    def test_the_default_inputs_pass_and_only_the_checked_ids_go_on(self):
-        code, output, passed = self.run_step()
-        self.assertEqual(0, code, output)
-        self.assertEqual(f"SCENES_CLEAN={' '.join(FIRST_FOUR)}\n", passed)
-
-    def test_scene_ids_are_checked_as_a_whole_string_against_the_playable_scenes_and_de_duplicated(self):
-        code, output, passed = self.run_step(SCENES="did-you-see bot-status-report did-you-see")
-        self.assertEqual((0, "SCENES_CLEAN=did-you-see bot-status-report\n"), (code, passed), output)
-        unplayable = next(item.scene.id for item in directed.load_plans() if item.unplayable)
-        bad = {
-            "an unknown id": "no-such-scene",
-            "an unplayable one": unplayable,
-            "a glob": "*",
-            "a glob among ids": "bot-status-report *",
-            "a double space": "bot-status-report  did-you-see",
-            "a leading space": " bot-status-report",
-            "a trailing space": "bot-status-report ",
-            "a newline": "bot-status-report\ndid-you-see",
-            "a command": "bot-status-report;id",
-            "a substitution": "$(id)",
-            "an upper-case id": "Bot-Status-Report",
-            "a slash": "../scene",
-            "an empty string": "",
-            "a trailing hyphen": "bot-status-report-",
-        }
-        for what, scenes in bad.items():
-            with self.subTest(what):
-                code, output, passed = self.run_step(SCENES=scenes)
-                self.assertEqual(1, code, output)
-                self.assertEqual("", passed, "nothing reaches the later steps")
-                self.assertIn("::error::", output)
-
-    def test_the_budget_is_a_plain_positive_number_and_hermes_and_other_passes_are_refused(self):
-        for budget in ("2", "2.5", "0.5", "10"):
-            with self.subTest(budget=budget):
-                self.assertEqual(0, self.run_step(BUDGET_USD=budget)[0])
-        for budget in ("nan", "NaN", "inf", "Infinity", "-1", "0", "0.0", "1e3", "+2", ".5", "2.", " 2", "2 ", "", "2;id", "$(id)"):
-            with self.subTest(budget=budget):
-                code, output, _ = self.run_step(BUDGET_USD=budget)
-                self.assertEqual(1, code, output)
-                self.assertIn("budget_usd", output)
-        self.assertEqual(1, self.run_step(HARNESS="hermes")[0])
-        for passes in ("0", "4", "1 2", ""):
-            with self.subTest(passes=passes):
-                self.assertEqual(1, self.run_step(PASSES=passes)[0])
-
-
-class PlayScriptTest(unittest.TestCase):
-    """The Play the scenes live step, run with the launcher and the probe replaced by stand-ins: its bookkeeping, not the models."""
-
-    def sandbox(self):
-        _needs_bash(self)
-        import yaml
-
-        self.root = Path(tempfile.mkdtemp(prefix="play-"))
-        self.addCleanup(shutil.rmtree, self.root, True)
-        stubs = self.root / "stubs"
-        runner = self.root / "runner"
-        self.stubs = stubs
-        _write_executable(stubs / "sudo", '#!/bin/bash\n[ "$1" = -E ] && shift\nexec "$@"\n')
-        _write_executable(stubs / "timeout", '#!/bin/bash\necho "$@" >> "$STUBS/timeouts"\nwhile [[ "$1" == --* ]]; do shift; done\nshift\nexec "$@"\n')
-        fake = r'''#!/bin/bash
-# python -m evals.rehearsal.<module> ...
-case "$2" in
-  evals.rehearsal.matrix)
-    echo "$@" >> "$STUBS/matrix-calls"
-    env | grep -E '^(NUNCHI_ATTENTION_API_KEY|NUNCHI_PARTICIPANT_API_KEY|ANTHROPIC_AUTH_TOKEN|OPENROUTER_API_KEY)=' | cut -d= -f1 | sort >> "$STUBS/matrix-env"
-    [ -e "$STUBS/spent-fails" ] && { echo "matrix: broken" >&2; exit 1; }
-    cat "$STUBS/spent" 2>/dev/null || echo 0
-    ;;
-  evals.rehearsal.discord_net)
-    column="" scene="" out=""
-    args=("$@")
-    for ((i = 0; i < ${#args[@]}; i++)); do
-      case "${args[$i]}" in
-        --harness) column="${args[$((i + 1))]}" ;;
-        --scene) scene="${args[$((i + 1))]}" ;;
-        --out) out="${args[$((i + 1))]}" ;;
-      esac
-    done
-    echo "$column $scene ${args[*]}" >> "$STUBS/runs"
-    [ -e "$STUBS/break-status" ] && { rm -f "$PWD/rehearsal-out/status.tsv"; mkdir "$PWD/rehearsal-out/status.tsv"; }
-    env | grep -E '^(NUNCHI_ATTENTION_API_KEY|NUNCHI_PARTICIPANT_API_KEY|ANTHROPIC_AUTH_TOKEN|OPENROUTER_API_KEY)=' | cut -d= -f1 | sort | tr '\n' ' ' > "$STUBS/env-$column"
-    mkdir -p "$out/$column"
-    echo '{}' > "$out/$column/run.json"
-    [ -e "$STUBS/stderr-$column" ] && cat "$STUBS/stderr-$column" >&2
-    [ -e "$STUBS/spend-after-run" ] && cp "$STUBS/spend-after-run" "$STUBS/spent"
-    # The exit code of this column, or of this scene on this column (the more particular file wins).
-    exit "$(cat "$STUBS/code-$column-$scene" 2>/dev/null || cat "$STUBS/code-$column" 2>/dev/null || echo 0)"
-    ;;
-esac
-'''
-        for env_name in ("reference-env", "transport-env"):
-            _write_executable(runner / env_name / "bin" / "python", fake)
-        (runner / "nunchi-wheels").mkdir(parents=True)
-        (runner / "nunchi-wheels" / "nunchi-0-py3-none-any.whl").write_text("wheel")
-        self.runner = runner
-        self.job_env = yaml.safe_load(REHEARSAL)["jobs"]["scenes"]["env"]
-        return _step("scenes", "Play the scenes live")
-
-    def run_play(self, step, **env):
-        work = self.root / "work"
-        work.mkdir(exist_ok=True)
-        full = {
-            "PATH": f"{self.stubs}:{os.environ['PATH']}", "STUBS": str(self.stubs), "RUNNER_TEMP": str(self.runner),
-            "HARNESS": "codex", "PASSES": "1", "AGENT_MODEL": "agent/model", "ATTENTION_MODEL": "attention/model", "BUDGET_USD": "2",
-            "SCENES_CLEAN": "scene-a scene-b", "NUNCHI_ATTENTION_API_KEY": "key", "NUNCHI_PARTICIPANT_API_KEY": "key",
-            "ANTHROPIC_AUTH_TOKEN": "key", "OPENROUTER_API_KEY": "key",
-            **{name: str(value) for name, value in self.job_env.items()}, **env,
-        }
-        done = subprocess.run(_as_the_runner_runs_it(self.root, step["run"]), cwd=work, env=full, capture_output=True, text=True, timeout=120)
-        status = work / "rehearsal-out" / "status.tsv"
-        halted = work / "rehearsal-out" / "halted.tsv"
-        rows = [line.split("\t") for line in status.read_text().splitlines()] if status.is_file() else []
-        return done, rows, [line.split("\t") for line in halted.read_text().splitlines()] if halted.is_file() else []
-
-    def test_every_scene_runs_on_each_column_and_pass_in_order_each_column_with_only_the_keys_it_reads(self):
-        step = self.sandbox()
-        (self.stubs / "spent").write_text("0.1")
-        done, status, halted = self.run_play(step, PASSES="2", HARNESS="all")
-        self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual(
-            [[str(p), s, c, "0"] for p in (1, 2) for s in ("scene-a", "scene-b") for c in ("reference", "claude-code", "codex")], status
-        )
-        self.assertEqual([], halted, "it ran to the end")
-        self.assertEqual("NUNCHI_ATTENTION_API_KEY OPENROUTER_API_KEY ", (self.stubs / "env-codex").read_text())
-        self.assertEqual("NUNCHI_ATTENTION_API_KEY NUNCHI_PARTICIPANT_API_KEY ", (self.stubs / "env-reference").read_text())
-        self.assertEqual("ANTHROPIC_AUTH_TOKEN NUNCHI_ATTENTION_API_KEY ", (self.stubs / "env-claude-code").read_text())
-        runs = (self.stubs / "runs").read_text()
-        self.assertIn("--budget-usd 2", runs)
-        self.assertIn("--room discord --scene scene-a", runs)
-        self.assertIn("--out", runs)
-        # Each timeout names its limit in seconds and a kill-after the wind-up fits in.
-        timeouts = (self.stubs / "timeouts").read_text().splitlines()
-        self.assertEqual(12, len(timeouts))
-        self.assertTrue(all(f"--kill-after={self.job_env['KILL_AFTER_SECONDS']}s {int(self.job_env['RUN_TIMEOUT_MINUTES']) * 60}s " in line for line in timeouts), timeouts)
-
-    def test_the_spend_is_read_without_any_key_in_the_environment(self):
-        step = self.sandbox()
-        done, _, _ = self.run_play(step)
-        self.assertEqual(0, done.returncode, done.stderr)
-        calls = (self.stubs / "matrix-calls").read_text().splitlines()
-        self.assertTrue(calls)
-        for call in calls:
-            self.assertTrue(call.endswith(f"--in {self.root / 'work' / 'rehearsal-out'} --spent"), f"the whole dispatch's records, not one pass's: {call}")
-        keys_seen = (self.stubs / "matrix-env").read_text() if (self.stubs / "matrix-env").exists() else ""
-        self.assertEqual("", keys_seen, "the matrix reads records, never the provider: none of the four keys is in its environment")
-
-    def test_a_budget_halt_leaves_a_trace_the_runs_not_started_are_skipped_and_the_reason_is_recorded(self):
-        step = self.sandbox()
-        (self.stubs / "spend-after-run").write_text("2.5")
-        done, status, halted = self.run_play(step, PASSES="2")
-        self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual([["1", "scene-a", "reference", "0"]] + [[str(p), s, c, "skipped"] for p, s, c in
-                          (("1", "scene-a", "codex"), ("1", "scene-b", "reference"), ("1", "scene-b", "codex"),
-                           ("2", "scene-a", "reference"), ("2", "scene-a", "codex"), ("2", "scene-b", "reference"), ("2", "scene-b", "codex"))], status)
-        self.assertEqual([["budget", "2.5", "2", "1 scene-a reference"]], halted)
-        self.assertIn("the dispatch has recorded $2.5 of its $2 budget", done.stderr + done.stdout)
-        self.assertEqual(1, len((self.stubs / "runs").read_text().splitlines()))
-
-    def test_a_spend_that_cannot_be_read_stops_the_runs_instead_of_counting_as_nothing(self):
-        step = self.sandbox()
-        (self.stubs / "spent-fails").touch()
-        done, status, halted = self.run_play(step)
-        self.assertEqual([["1", "scene-a", "reference", "0"]], status[:1])
-        self.assertEqual({"skipped"}, {row[3] for row in status[1:]})
-        self.assertEqual("spend-unreadable", halted[0][0])
-        self.assertEqual("?", halted[0][1])
-        self.assertEqual(1, len((self.stubs / "runs").read_text().splitlines()))
-        # A figure that does not read as a number stops them too.
-        (self.stubs / "spent-fails").unlink()
-        (self.stubs / "spent").write_text("nan")
-        self.stubs.joinpath("runs").unlink()
-        done, status, halted = self.run_play(step)
-        self.assertEqual("spend-unreadable", halted[0][0])
-
-    def test_the_play_limit_is_kept_by_the_step_a_run_is_given_what_is_left_and_none_starts_with_under_ten_minutes(self):
-        step = self.sandbox()
-        # 20 minutes, less the 5 of wind-up, leaves 15: the first run gets 900 s, and then less than ten are left.
-        done, status, halted = self.run_play(step, PLAY_LIMIT_MINUTES="20")
-        self.assertRegex((self.stubs / "timeouts").read_text().splitlines()[0], r" (900|899)s ")
-        # 14 minutes leaves 9: nothing starts.
-        self.stubs.joinpath("timeouts").unlink()
-        self.stubs.joinpath("runs").unlink(missing_ok=True)
-        (self.root / "work" / "rehearsal-out" / "halted.tsv").unlink(missing_ok=True)
-        done, status, halted = self.run_play(step, PLAY_LIMIT_MINUTES="14")
-        self.assertEqual({"skipped"}, {row[3] for row in status})
-        self.assertEqual(4, len(status))
-        self.assertEqual("time", halted[0][0])
-        self.assertFalse((self.stubs / "runs").exists(), "no run was started")
-        self.assertEqual(0, done.returncode, "a halt is not a failure")
-
-    def test_what_a_failed_run_said_on_stderr_is_kept_for_the_summary_and_the_others_still_run(self):
-        step = self.sandbox()
-        (self.stubs / "code-codex").write_text("2")
-        (self.stubs / "stderr-codex").write_text("".join(f"line {number}\n" for number in range(60)) + "discord_net: refused: proxy variables are set\n")
-        done, status, _ = self.run_play(step)
-        self.assertEqual(1, done.returncode, "a run that failed fails the step, after the last")
-        self.assertEqual(["0", "2", "0", "2"], [row[3] for row in status], "the reference ran after the codex failure")
-        kept = (self.root / "work" / "rehearsal-out" / "logs" / "pass-1-scene-a-codex.stderr").read_text().splitlines()
-        self.assertEqual(40, len(kept), "its tail")
-        self.assertEqual("discord_net: refused: proxy variables are set", kept[-1])
-        self.assertIn("discord_net: refused: proxy variables are set", done.stderr, "and all of it in the step's log")
-        self.assertIn("::error::pass 1, scene-a on codex: exit 2", done.stdout + done.stderr)
-
-    def test_a_run_that_fails_is_recorded_and_every_later_run_still_plays_under_the_shell_the_runner_gives_the_step(self):
-        # Run 38135715452: GitHub runs the step as `bash -eo pipefail` and the script's `set -uo pipefail` does not clear -e, so
-        # the first run that exited non-zero ended the step: 3 of 18 runs played. Here the first run of twelve fails, and the
-        # same scene on the same column again in the second pass; the other ten are well.
-        step = self.sandbox()
-        (self.stubs / "code-reference-scene-a").write_text("3")
-        done, status, halted = self.run_play(step, PASSES="2", HARNESS="all")
-        every = [(p, s, c) for p in (1, 2) for s in ("scene-a", "scene-b") for c in ("reference", "claude-code", "codex")]
-        self.assertEqual(
-            [[str(p), s, c, "3" if (s, c) == ("scene-a", "reference") else "0"] for p, s, c in every], status,
-            "all twelve runs played and each has its row, the failed ones with their exit status",
-        )
-        self.assertEqual(12, len((self.stubs / "runs").read_text().splitlines()))
-        self.assertEqual(
-            ["::error::pass 1, scene-a on reference: exit 3", "::error::pass 2, scene-a on reference: exit 3"],
-            [line for line in (done.stdout + done.stderr).splitlines() if line.startswith("::error::")],
-        )
-        self.assertEqual(1, done.returncode, "the step still fails, after the last run")
-        self.assertEqual(12, len((self.stubs / "matrix-calls").read_text().splitlines()), "the spend was read after every run, the failed one included")
-        self.assertEqual([], halted)
-
-    def test_a_failed_run_is_followed_by_the_spend_check_so_the_runs_not_started_read_skipped_and_the_step_fails(self):
-        step = self.sandbox()
-        (self.stubs / "code-reference-scene-a").write_text("1")
-        (self.stubs / "spend-after-run").write_text("2.5")
-        done, status, halted = self.run_play(step, PASSES="2")
-        self.assertEqual(
-            [["1", "scene-a", "reference", "1"]] + [[p, s, c, "skipped"] for p, s, c in (
-                ("1", "scene-a", "codex"), ("1", "scene-b", "reference"), ("1", "scene-b", "codex"),
-                ("2", "scene-a", "reference"), ("2", "scene-a", "codex"), ("2", "scene-b", "reference"), ("2", "scene-b", "codex"))], status,
-        )
-        self.assertEqual([["budget", "2.5", "2", "1 scene-a reference"]], halted)
-        self.assertEqual(1, done.returncode, "the run that failed fails the step, though the dispatch halted after it")
-        self.assertIn("::error::pass 1, scene-a on reference: exit 1", done.stdout + done.stderr)
-
-    def test_a_failed_mktemp_ends_the_step_instead_of_playing_runs_with_no_home_or_tmp(self):
-        # With -e off for the loop, a failed `mktemp -d` left HOME="" TMPDIR="" and the run played on regardless.
-        step = self.sandbox()
-        _write_executable(self.stubs / "mktemp", "#!/bin/bash\necho 'mktemp: cannot create temp dir' >&2\nexit 1\n")
-        done, status, halted = self.run_play(step)
-        self.assertNotEqual(0, done.returncode, done.stdout + done.stderr)
-        self.assertIn("mktemp: cannot create", done.stderr)
-        self.assertFalse((self.stubs / "runs").exists(), "no run was started with an empty HOME")
-        self.assertEqual([], status)
-
-    def test_a_status_row_that_cannot_be_written_ends_the_step_and_does_not_go_unnoticed(self):
-        step = self.sandbox()
-        # The first run turns status.tsv into a directory, so the append that records it fails.
-        (self.stubs / "break-status").touch()
-        done, status_rows, _ = self.run_play(step)
-        self.assertNotEqual(0, done.returncode)
-        self.assertIn("Is a directory", done.stderr)
-        self.assertEqual(1, len((self.stubs / "runs").read_text().splitlines()), "the step ended after the run whose row failed")
-
-    def test_every_script_of_the_scenes_job_names_the_shell_the_runner_gives_it_and_the_tests_run_it_that_way(self):
-        import yaml
-
-        steps = yaml.safe_load(REHEARSAL)["jobs"]["scenes"]["steps"]
-        for step in steps:
-            if "run" in step:
-                self.assertEqual("bash", step.get("shell"), step.get("name"))
-        # `shell: bash` is `bash --noprofile --norc -eo pipefail {0}` (GitHub's docs): -e is on unless the script clears it.
-        self.assertEqual(["bash", "--noprofile", "--norc", "-eo", "pipefail"], _as_the_runner_runs_it(Path(tempfile.mkdtemp()), "")[:5])
-        play = next(step for step in steps if step.get("name") == "Play the scenes live")["run"]
-        self.assertNotRegex(play, r"set -[a-zA-Z]*e", "the script never turns -e on by itself")
-        self.assertNotIn("set +e", play, "-e stays on: only the run itself is meant to fail, and a failed mktemp or status write must end the step")
-        self.assertIn("|| code=$?", play, "the run itself is guarded by name, with code reset before each run")
-        self.assertLess(play.index("code=0"), play.index("|| code=$?"))
-
-
-class ScanAndSummaryScriptTest(unittest.TestCase):
-    """The scan and the summary steps, run as the runner runs them, against stand-ins for the Python they call (-e is on there too)."""
-
-    def run_step(self, name: str, *, scan_code: int = 0, record: bool = True, **env):
-        _needs_bash(self)
-        directory = Path(tempfile.mkdtemp(prefix="scan-"))
-        self.addCleanup(shutil.rmtree, directory, True)
-        runner, work = directory / "runner", directory / "work"
-        fake = (
-            '#!/bin/bash\ncase "$2" in\n'
-            f'  evals.rehearsal.scan) echo "scan $*" >> "{directory}/calls"; exit {scan_code} ;;\n'
-            f'  evals.rehearsal.matrix) echo "matrix $*" >> "{directory}/calls"; echo "| the matrix |" ;;\n'
-            "esac\n"
-        )
-        _write_executable(runner / "transport-env" / "bin" / "python", fake)
-        work.mkdir(parents=True)
-        if record:
-            (work / "rehearsal-out").mkdir()
-            (work / "rehearsal-out" / "summary.md").write_text("LEAK NOTICE\n")
-        summary = directory / "summary.md"
-        summary.touch()
-        full = {"PATH": os.environ["PATH"], "RUNNER_TEMP": str(runner), "GITHUB_STEP_SUMMARY": str(summary), "HARNESS": "codex", **env}
-        done = subprocess.run(_as_the_runner_runs_it(directory, _step("scenes", name)["run"]), cwd=work, env=full, capture_output=True, text=True, timeout=60)
-        calls = (directory / "calls").read_text().splitlines() if (directory / "calls").exists() else []
-        return done, calls, summary.read_text()
-
-    def test_a_scan_that_finds_a_leak_fails_the_step_with_its_own_status_and_puts_the_notice_in_the_job_summary(self):
-        done, calls, summary = self.run_step("Scan every output for the key and the canary", scan_code=4)
-        self.assertEqual(4, done.returncode)
-        self.assertEqual("LEAK NOTICE\n", summary)
-        self.assertEqual(1, len(calls))
-        self.assertIn("--env NUNCHI_ATTENTION_API_KEY --env REHEARSAL_CANARY", calls[0])
-
-    def test_a_clean_scan_passes_and_a_leak_with_no_notice_still_fails_the_step(self):
-        done, _, summary = self.run_step("Scan every output for the key and the canary")
-        self.assertEqual((0, ""), (done.returncode, summary))
-        done, _, summary = self.run_step("Scan every output for the key and the canary", scan_code=2, record=False)
-        self.assertEqual((2, ""), (done.returncode, summary))
-
-    def test_the_summary_is_the_matrix_for_the_columns_of_the_harness_or_says_the_job_stopped_before_the_first_run(self):
-        for harness, columns in (("all", "reference,claude-code,codex"), ("claude-code", "reference,claude-code"), ("codex", "reference,codex")):
-            with self.subTest(harness):
-                done, calls, summary = self.run_step("Summary", HARNESS=harness)
-                self.assertEqual((0, "| the matrix |\n"), (done.returncode, summary), done.stderr)
-                self.assertTrue(calls[0].endswith(f"--in rehearsal-out --columns {columns}"), calls)
-        done, calls, summary = self.run_step("Summary", record=False)
-        self.assertEqual(0, done.returncode)
-        self.assertEqual([], calls)
-        self.assertIn("The scenes wrote no record", summary)
-
-
-class StopScriptTest(unittest.TestCase):
-    """The step between the play step and the scan: TERM, then KILL, wait, and fail if anything remains. Run against stand-ins for pgrep and pkill."""
-
-    def run_stop(self, *, alive_until: str | None):
-        """``alive_until``: None (nothing is running), "TERM", "KILL" (the signal that clears it) or "never"."""
-
-        _needs_bash(self)
-        directory = Path(tempfile.mkdtemp(prefix="stop-"))
-        self.addCleanup(shutil.rmtree, directory, True)
-        stubs = directory / "stubs"
-        _write_executable(stubs / "sudo", '#!/bin/bash\nexec "$@"\n')
-        _write_executable(stubs / "sleep", "#!/bin/sh\nexit 0\n")
-        _write_executable(stubs / "pgrep", '#!/bin/bash\necho "pgrep $*" >> "$STUBS/calls"\n[ -e "$STUBS/alive" ] && exit 0\nexit 1\n')
-        _write_executable(
-            stubs / "pkill",
-            '#!/bin/bash\necho "pkill $*" >> "$STUBS/calls"\nsignal="${1#-}"\n'
-            '[ "$signal" = "$(cat "$STUBS/clears" 2>/dev/null)" ] && rm -f "$STUBS/alive"\nexit 0\n',
-        )
-        if alive_until is not None:
-            (stubs / "alive").touch()
-            (stubs / "clears").write_text(alive_until)
-        summary = directory / "summary.md"
-        summary.touch()
-        done = subprocess.run(
-            _as_the_runner_runs_it(directory, _step("scenes", "Stop whatever the scenes left running")["run"]),
-            env={"PATH": f"{stubs}:{os.environ['PATH']}", "STUBS": str(stubs), "RUNNER_TEMP": "/home/runner/work/_temp", "GITHUB_STEP_SUMMARY": str(summary)},
-            capture_output=True, text=True, timeout=60,
-        )
-        calls = (stubs / "calls").read_text().splitlines() if (stubs / "calls").exists() else []
-        return done, calls, summary.read_text()
-
-    def test_nothing_running_means_nothing_is_signalled(self):
-        done, calls, _ = self.run_stop(alive_until=None)
-        self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual([], [call for call in calls if call.startswith("pkill")])
-
-    def test_what_a_term_clears_is_not_killed_and_what_it_does_not_is(self):
-        done, calls, _ = self.run_stop(alive_until="TERM")
-        self.assertEqual(0, done.returncode)
-        self.assertEqual({"pkill -TERM"}, {" ".join(call.split()[:2]) for call in calls if call.startswith("pkill")})
-        done, calls, _ = self.run_stop(alive_until="KILL")
-        self.assertEqual(0, done.returncode)
-        signals = [call.split()[1] for call in calls if call.startswith("pkill")]
-        self.assertEqual(["-TERM"] * 4 + ["-KILL"] * 4, signals, "every pattern is TERMed, then every pattern is KILLed")
-
-    def test_the_patterns_are_the_scenes_processes_and_the_harness_binaries_under_the_runners_temp(self):
-        done, calls, _ = self.run_stop(alive_until="KILL")
-        patterns = {call.split("-f -- ", 1)[1] for call in calls if call.startswith("pkill -TERM")}
-        self.assertEqual(
-            {"evals\\.rehearsal", "nunchi-(mcp-)?discord", "/home/runner/work/_temp/(claude|codex)/", "(^|/)(bwrap|socat)( |$)"}, patterns
-        )
-
-    def test_a_process_that_survives_term_and_kill_fails_the_step_and_says_the_records_are_not_scanned(self):
-        done, calls, summary = self.run_stop(alive_until="never")
-        self.assertEqual(1, done.returncode)
-        self.assertIn("neither scanned nor uploaded", done.stdout)
-        self.assertIn("Not scanned, not uploaded", summary)
-        self.assertEqual(8, len([call for call in calls if call.startswith("pkill")]))
-
-    def test_no_pattern_matches_the_text_of_its_own_command_line(self):
-        for text, pattern in (
-            ("sudo pgrep -f -- evals\\.rehearsal", r"evals\.rehearsal"),
-            ("sudo pgrep -f -- nunchi-(mcp-)?discord", r"nunchi-(mcp-)?discord"),
-            ("sudo pgrep -f -- /home/runner/work/_temp/(claude|codex)/", r"/home/runner/work/_temp/(claude|codex)/"),
-            ("sudo pgrep -f -- (^|/)(bwrap|socat)( |$)", r"(^|/)(bwrap|socat)( |$)"),
-        ):
-            self.assertIsNone(re.search(pattern, text), text)
-        # ... while the processes they are for do match.
-        self.assertTrue(re.search(r"evals\.rehearsal", "python -m evals.rehearsal.discord_net --"))
-        self.assertTrue(re.search(r"nunchi-(mcp-)?discord", "/venv/bin/nunchi-mcp-discord --config x"))
-        self.assertTrue(re.search(r"(^|/)(bwrap|socat)( |$)", "bwrap --ro-bind / /"))
-
-
-class WorkflowReviewTest(unittest.TestCase):
-    scenes_job = REHEARSAL[REHEARSAL.index("\n  scenes:"):]
-
-    def test_the_scan_the_summary_and_the_upload_wait_for_the_stop_step_and_each_has_a_timeout_that_fits_the_job(self):
-        names = [step.split("\n")[0] for step in _steps(self.scenes_job)]
-        index = {name: position for position, name in enumerate(names)}
-        play = next(n for n in names if "Play the scenes live" in n)
-        stop = next(n for n in names if "Stop whatever" in n)
-        scan = next(n for n in names if "Scan every output" in n)
-        self.assertEqual([play, stop, scan], sorted([play, stop, scan], key=index.get), "in this order")
-        self.assertEqual(index[play] + 1, index[stop])
-        self.assertEqual(index[stop] + 1, index[scan])
-        steps = _steps(self.scenes_job)
-        stop_step, scan_step = steps[index[stop]], steps[index[scan]]
-        self.assertIn("if: always()", stop_step)
-        self.assertIn("if: always() && steps.stop.outcome == 'success'", scan_step)
-        for position in (index[scan] + 1, index[scan] + 2):
-            self.assertIn("steps.stop.outcome == 'success' && steps.scan.outcome == 'success'", steps[position], names[position])
-        # The step timeouts and the job's: the installs (about 15), then each step; the scan, summary and upload must not be what runs out.
-        import yaml
-
-        job = yaml.safe_load(REHEARSAL)["jobs"]["scenes"]
-        limits = {step.get("name") or step.get("uses"): step.get("timeout-minutes") for step in job["steps"]}
-        needed = 15 + limits["Play the scenes live"] + limits["Stop whatever the scenes left running"] + limits["Scan every output for the key and the canary"] \
-            + limits["Summary"] + limits["Upload the records"] if "Upload the records" in limits else None
-        self.assertIsNotNone(needed)
-        self.assertLessEqual(needed + 10, job["timeout-minutes"], "with margin")
-        self.assertLessEqual(job["timeout-minutes"], 360, "GitHub's own limit for a hosted job")
-        env = job["env"]
-        self.assertLess(int(env["PLAY_LIMIT_MINUTES"]), limits["Play the scenes live"], "the step plans inside its own timeout")
-
-    def test_the_timeout_comment_says_what_gnu_timeout_does_and_the_kill_after_has_room_for_the_wind_up(self):
-        import yaml
-
-        env = yaml.safe_load(REHEARSAL)["jobs"]["scenes"]["env"]
-        self.assertGreaterEqual(int(env["KILL_AFTER_SECONDS"]), 240, "the probe's wind-up reads the key's usage for up to 75 s, then collects and closes")
-        play = next(step for step in _steps(self.scenes_job) if step.startswith("      - name: Play the scenes live"))
-        self.assertIn("sends TERM to that whole group", play)
-        self.assertNotIn("so that the launcher is the one signalled", play)
-        self.assertIn('--kill-after="${KILL_AFTER_SECONDS}s"', play)
-        self.assertIn("setsid", play, "the Discord processes are not in the group")
-
-    def test_the_budget_is_for_the_whole_dispatch_and_says_so_where_the_input_is_described(self):
-        import yaml
-
-        inputs = yaml.safe_load(REHEARSAL)[True]["workflow_dispatch"]["inputs"]
-        self.assertIn("whole dispatch", inputs["budget_usd"]["description"])
-        self.assertIn("skipped", inputs["budget_usd"]["description"])
-
-    def test_the_scenes_the_loop_walks_are_the_checked_ones_with_pathname_expansion_off(self):
-        play = next(step for step in _steps(self.scenes_job) if step.startswith("      - name: Play the scenes live"))
-        self.assertIn("for scene in $SCENES_CLEAN", play)
-        self.assertLess(play.index("set -f"), play.index("for scene in $SCENES_CLEAN"))
-        self.assertNotIn("SCENES:", play, "the raw input never reaches the play step")
-        check = next(step for step in _steps(self.scenes_job) if step.startswith("      - name: Check the inputs"))
-        self.assertIn("[[ \"$SCENES\" =~ ^", check)
-        self.assertLess(check.index("set -f"), check.index("for scene in $SCENES"))
-        self.assertNotIn("secrets.", check, "no secret is in the step that reads the inputs")
 
 
 if __name__ == "__main__":

@@ -1,29 +1,10 @@
-"""The spend watchdog on the OpenRouter key (step 9f, PR 1).
+"""The reference rehearsal's soft spending limit.
 
-Claude Code and Hermes give client-side cost estimates (``total_cost_usd``,
-``estimated_cost_usd``), and Codex token counts only; none of them is what
-the key was charged. So the probe reads the key's usage from OpenRouter
-(``GET /api/v1/key``) before the first moment and between moments, and
-stops before the next moment once the run has spent ``budget_usd``. After
-the last moment it reads the figure every few seconds up to a bound
-(`SpendWatch.settle`), keeps each read, and takes the last figure as the
-settled one; charges posted after the bound are missed.
-
-The reading is a record, and a soft limit between moments, never a limit
-inside one; the record says so. OpenRouter's usage figure lags behind the
-calls: in the first live run (2026-10-09) every reading between moments
-read $0 spent, in every job. A moment already under way runs to its end,
-and other runs on the same key (a behavior eval, say) count in the same
-figure. Only a key with a credit limit is a hard limit.
-
-Only the numbers are kept from OpenRouter's answer, never its ``label``,
-which can show part of the key.
-
-A live scene (PR 4d) reads the key as above and also counts the model calls
-each column made (`probe.Leg.model_calls`), since the usage figure lags. The
-summary shows the cost two ways: **recorded**, the key's usage, and
-**estimated**, those counts times `ESTIMATED_USD_PER_CALL` (`estimate_usd`),
-which are assumptions that no run has measured yet.
+Read OpenRouter key usage before and between moments, and after the run.
+Usage can arrive late; calls already under way can exceed the budget. Other
+runs on the same key affect the figure. Only numeric fields are retained,
+never the provider's key label. Per-call estimates are historical assumptions,
+not current pricing or measured costs.
 """
 
 from __future__ import annotations
@@ -57,16 +38,8 @@ FIRST_READ_PAUSE_SECONDS = 2.0
 
 NOT_READ = "no key: a scripted run reads no spend"
 
-# What one model call is assumed to cost, in US dollars, for the estimate beside the recorded figure. Nothing here is measured:
-# the first live scene run replaces them. How they were chosen (docs/rehearsal.md, Cost):
-#   attention: the behavior eval reported $1.92 for eight attention routes over all scenes, three runs each (evals/behavior/README.md,
-#     "Which run to use"), about $0.001 a call; doubled for the default model's reasoning tokens and the longer room of a scene.
-#   reference: one plain-call turn on the agent's model, a snapshot of the room (about 5,000 tokens in, 200 out) at $1 and $5 per
-#     million tokens in and out, which is the default agent model's list price as the workflow's default input has it: about $0.006,
-#     rounded up.
-#   claude-code, codex: one model request of a harness, its system prompt and tools beside the room (about 18,000 tokens in, 300 out),
-#     at the same prices, no cache credit: about $0.02. A turn is two or three requests.
-ESTIMATED_USD_PER_CALL = {"attention": 0.002, "reference": 0.01, "claude-code": 0.02, "codex": 0.02}
+# Historical unmeasured estimates, retained only for comparison with recorded usage.
+ESTIMATED_USD_PER_CALL = {"attention": 0.002, "reference": 0.01}
 
 Opener = Callable[..., Any]
 

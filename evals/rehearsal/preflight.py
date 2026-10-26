@@ -7,7 +7,7 @@ It fails when:
 
 - a proxy variable is set: ``HTTP_PROXY``, ``HTTPS_PROXY``, ``ALL_PROXY``,
   ``WS_PROXY``, ``WSS_PROXY`` or ``DISCORD_PROXY``, in any case. The
-  transport's REST calls follow one, and so does Hermes's discord.py, and
+  transport's REST calls and discord.py may follow one, and
   the proxy resolves Discord's names itself, past the private ``/etc/hosts``;
 - one of Discord's names does not resolve to 127.0.0.1 alone;
 - with ``--nonce``: a TLS GET of ``https://discord.com/api/v10/_preflight/<nonce>``

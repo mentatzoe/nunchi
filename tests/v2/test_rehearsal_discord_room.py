@@ -1,12 +1,4 @@
-"""The probe's Discord room (step 9f, PR 3b): the scripts, the checks, and what the probe reads from the wire.
-
-The lanes themselves run Nunchi's Discord processes at Discord's real
-names, so they need the launcher (root, and namespaces) and run in CI's
-scripted lanes. What is tested here needs neither: the scripted agents and
-the plain-call participant, every ``discord-*`` check, the world and the
-moments, and what the probe reads from the stand-in's wire, with the
-stand-in on plain loopback driven by Nunchi's own transport clients through
-the hooks they already have, as `test_fake_discord.py` does.
+"""Offline checks of the reference participant, Discord wire and recorded delivery.
 """
 
 from __future__ import annotations
@@ -162,30 +154,6 @@ class ScriptTest(unittest.TestCase):
         self.assertIsNone(standin.RoomScript.received(None))
         self.assertIsNone(standin.RoomScript.received({"wake": {"trigger_event_id": "x", "events": []}}))
 
-    def test_the_scripted_claude_agent_follows_the_script_with_each_room_tool(self):
-        agent = standin.ScriptedClaudeAgent("unused", "mcp__nunchi__room_send", script=SCRIPT, tools={"react": "mcp__nunchi__room_react"})
-        self.addCleanup(agent.close)
-        tools = [{"name": "mcp__nunchi__room_send"}, {"name": "mcp__nunchi__room_react"}]
-        body = {"tools": tools, "messages": [{"role": "user", "content": [{"type": "text", "text": _tagged(_turn("discord:message:3", discord_room.REACTION_PHRASE))}]}]}
-        kind, blocks, stop = agent.reply(body)
-        self.assertEqual(("agent-tool-call", "tool_use"), (kind, stop))
-        self.assertEqual("mcp__nunchi__room_react", blocks[0]["name"])
-        self.assertEqual({"target_event_id": "discord:message:3", "reaction": discord_room.REACTION}, blocks[0]["input"])
-        # Without a script it posts its answer, as in the in-process room.
-        plain = standin.ScriptedClaudeAgent("Ten seconds.", "mcp__nunchi__room_send")
-        self.addCleanup(plain.close)
-        self.assertEqual({"text": "Ten seconds."}, plain.reply(body)[1][0]["input"])
-
-    def test_the_scripted_codex_agent_follows_the_script(self):
-        agent = standin.ScriptedCodexAgent("unused", script=SCRIPT)
-        self.addCleanup(agent.close)
-        replies = []
-        request = {"input": [{"type": "message", "content": [{"type": "input_text", "text": _tagged(_turn("discord:message:4", f"so, {discord_room.REPLY_PHRASE}?"))}]}]}
-        with mock.patch.object(agent.model, "latest", return_value=request), mock.patch.object(agent.model, "reply", replies.append):
-            agent._next()
-        self.assertEqual("room_send", replies[0]["tool"])
-        self.assertEqual({"text": discord_room.SCRIPTED_REPLY, "reply_to_event_id": "discord:message:4"}, replies[0]["arguments"])
-
 
 # -- the checks ---------------------------------------------------------------------------------------
 
@@ -203,7 +171,7 @@ class DiscordChecksTest(unittest.TestCase):
         # The reply to a question in a thread must land in the thread, not in the channel.
         landed = {**reply, "where": "retry details"}
         self.assertEqual(checks.FITS, outcome("thread-reply", reached=True, graded_turns=1, actions=[landed], graded_event="e2", thread="retry details"))
-        self.assertEqual(checks.MISSES, outcome("thread-reply", reached=True, graded_turns=1, actions=[{**reply, "where": "codex"}], graded_event="e2", thread="retry details"))
+        self.assertEqual(checks.MISSES, outcome("thread-reply", reached=True, graded_turns=1, actions=[{**reply, "where": "reference"}], graded_event="e2", thread="retry details"))
         self.assertEqual(checks.MISSES, outcome("thread-reply", reached=True, graded_turns=1, actions=[reply], graded_event="e2", thread="retry details"))
         self.assertEqual(checks.MISSES, outcome("thread-reply", reached=True, graded_turns=1, actions=[landed], graded_event="e2"))
         self.assertEqual(checks.MISSES, outcome("thread-reply", reached=True, graded_turns=1, actions=[{**landed, "kind": "message"}], graded_event="e2", thread="retry details"))
@@ -223,7 +191,7 @@ class DiscordChecksTest(unittest.TestCase):
         ]
         check = checks.discord_scripted_outcomes
         # Both columns hold both gaps closed: the first message after a start, and a thread under the room, reach Nunchi.
-        for pins in (discord_room.TRANSPORT_PINS, discord_room.REFERENCE_PINS):
+        for pins in (discord_room.REFERENCE_PINS, discord_room.REFERENCE_PINS):
             self.assertEqual({"first-message": checks.REACHED, "thread": checks.REACHED}, pins)
             self.assertTrue(check(moments, discord_room.EXPECTED, pins=pins).ok, check(moments, discord_room.EXPECTED, pins=pins).detail)
             # A regression of either gap fails the lane, and says to update the pin and its docs.
@@ -410,13 +378,13 @@ class _StandIn:
 
 def _world() -> tuple[dict, dict]:
     scenes = [load_scene(spec.scene) for spec in discord_room.MOMENTS]
-    return discord_room.world_spec("codex", scenes, agent="Vigil")
+    return discord_room.world_spec("reference", scenes, agent="Vigil")
 
 
 class WorldTest(unittest.TestCase):
     def test_one_channel_for_the_column_its_bot_and_the_scenes_people_and_scripted_bots(self):
         spec, members = _world()
-        self.assertEqual({"codex": {}}, spec["channels"])
+        self.assertEqual({"reference": {}}, spec["channels"])
         self.assertEqual(["alice"], spec["people"])
         self.assertEqual({"CI": {"harness": False}, "Vigil": {}}, spec["bots"])
         self.assertEqual({"vigil": "Vigil", "alice": "alice", "ci": "CI"}, members)
@@ -431,10 +399,8 @@ class WorldTest(unittest.TestCase):
         # The remark and the question are in the same thread, which the first of them opens.
         self.assertEqual(["thread", "thread-question"], [spec.name for spec in discord_room.MOMENTS if spec.thread == discord_room.THREAD])
         self.assertEqual("thread-reply", next(spec.expect for spec in discord_room.MOMENTS if spec.name == "thread-question"))
-        self.assertEqual({"first-message": checks.REACHED, "thread": checks.REACHED}, discord_room.TRANSPORT_PINS)
         self.assertEqual({"first-message": checks.REACHED, "thread": checks.REACHED}, discord_room.REFERENCE_PINS)
         self.assertIs(discord_room.REFERENCE_PINS, discord_room.ReferenceLeg.pins)
-        self.assertIs(discord_room.TRANSPORT_PINS, discord_room.OnTheTransport.pins)
 
     def test_the_room_needs_the_launchers_record(self):
         with self.assertRaisesRegex(probe.CouldNotRun, "discord_net --offline"):
@@ -460,7 +426,7 @@ def _room(base: Path, *, env: dict | None = None, original: dict | None = None) 
         env=env or {},
         secrets={},
     )
-    return discord_room.DiscordRoom(ctx, "codex")
+    return discord_room.DiscordRoom(ctx, "reference")
 
 
 class RoomTest(_StandIn, unittest.TestCase):
@@ -492,7 +458,7 @@ class RoomTest(_StandIn, unittest.TestCase):
             plain = room.post(scene.events[0], datetime_now(), scene, moment)
             self.assertIn("no post to reply to", plain["note"])
             self.assertEqual(([], None), (plain["mentioned_actor_ids"], plain["reply_to"]))
-            answer, _ = fd.world.create_message(fd.world.member("Vigil").id, fd.world.channel("codex").id, "Ten seconds.", wall=True)
+            answer, _ = fd.world.create_message(fd.world.member("Vigil").id, fd.world.channel("reference").id, "Ten seconds.", wall=True)
             room.agent_last_post = lambda: answer["id"]
             reply = room.post(scene.events[0], datetime_now(), scene, moment)
             self.assertEqual(answer["id"], fd.world.messages[reply["message_id"]]["reply_to"])
@@ -505,7 +471,7 @@ class RoomTest(_StandIn, unittest.TestCase):
             again = room.post(scene.events[0], datetime_now(), scene, moment)
             thread = fd.world.channel(discord_room.THREAD)
             self.assertEqual((discord_room.THREAD, discord_room.THREAD), (first["channel"], again["channel"]))
-            self.assertEqual(fd.world.channel("codex").id, thread.parent_id)
+            self.assertEqual(fd.world.channel("reference").id, thread.parent_id)
             self.assertEqual({thread.id}, {fd.world.messages[item["message_id"]]["channel_id"] for item in (first, again)})
             # What the scene sent in a thread names the thread as an event does, for discord-addressing; the room's own names none.
             self.assertEqual(f"discord:message:{thread.id}", first["thread"])
@@ -563,7 +529,7 @@ class WireTest(_StandIn, unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         spec, self.members = _world()
         fd = self.start(spec)
-        self.room = fd.world.channel("codex").id
+        self.room = fd.world.channel("reference").id
         self.vigil = fd.world.member("Vigil").id
         self.secret = secrets.token_bytes(32)
         authorizer = ToolAuthorizer(secret=self.secret, participant_routes={"vigil": frozenset({self.room})})
@@ -581,7 +547,7 @@ class WireTest(_StandIn, unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_the_agents_writes_and_calls_come_from_the_wire_and_reconcile(self):
-        asked = self.fd.post("alice", "codex", "a question")["id"]
+        asked = self.fd.post("alice", "reference", "a question")["id"]
         sent, ok = await asyncio.to_thread(self.tool, "send_message", content="an answer")
         self.assertTrue(ok, sent)
         _, ok = await asyncio.to_thread(self.tool, "reply_message", message_id=asked, content="a reply")
@@ -625,7 +591,7 @@ class WireTest(_StandIn, unittest.IsolatedAsyncioTestCase):
             await asyncio.to_thread(self.fd.wait_for, lambda r: r.get("t") == "READY", 10)
             since = len(self.fd.wire.records)
             await asyncio.to_thread(self.fd.gateway, "Vigil", "reconnect")
-            posted = await asyncio.to_thread(self.fd.post, "alice", "codex", "posted while the bot reconnects")
+            posted = await asyncio.to_thread(self.fd.post, "alice", "reference", "posted while the bot reconnects")
             for _ in range(100):
                 if any((event.get("event") or {}).get("id") == f"discord:message:{posted['id']}" for event in events):
                     break
@@ -670,25 +636,25 @@ class AuditTest(unittest.TestCase):
 class JudgeTest(unittest.TestCase):
     def test_where_an_action_landed_is_read_from_what_the_bot_wrote_on_the_wire(self):
         effects = [
-            {"kind": "message", "where": "codex", "text": "an answer", "reply_to": None},
+            {"kind": "message", "where": "reference", "text": "an answer", "reply_to": None},
             {"kind": "message", "where": discord_room.THREAD, "text": "a reply", "reply_to": "7"},
-            {"kind": "message", "where": "codex", "text": "a reply", "reply_to": "8"},
+            {"kind": "message", "where": "reference", "text": "a reply", "reply_to": "8"},
             {"kind": "reaction", "where": discord_room.THREAD, "reaction": "x", "message_id": "7"},
         ]
         landed = discord_room.landed
-        self.assertEqual("codex", landed({"kind": "message", "text": "an answer"}, effects))
+        self.assertEqual("reference", landed({"kind": "message", "text": "an answer"}, effects))
         self.assertEqual(discord_room.THREAD, landed({"kind": "reply", "text": "a reply", "target_event_id": "discord:message:7"}, effects))
-        self.assertEqual("codex", landed({"kind": "reply", "text": "a reply", "target_event_id": "discord:message:8"}, effects))
+        self.assertEqual("reference", landed({"kind": "reply", "text": "a reply", "target_event_id": "discord:message:8"}, effects))
         self.assertEqual(discord_room.THREAD, landed({"kind": "reaction", "reaction": "x", "target_event_id": "discord:message:7"}, effects))
         self.assertIsNone(landed({"kind": "reply", "text": "a reply", "target_event_id": "discord:message:9"}, effects))
         self.assertIsNone(landed({"kind": "message", "text": "a reply"}, effects), "a reply is not a plain post")
 
     def test_a_reply_to_a_question_in_a_thread_fits_only_when_it_landed_in_the_thread(self):
-        for where, outcome in ((discord_room.THREAD, "fits"), ("codex", "misses")):
+        for where, outcome in ((discord_room.THREAD, "fits"), ("reference", "misses")):
             with self.subTest(where=where):
                 leg = SimpleNamespace(
                     harness_posts=False,
-                    discord=SimpleNamespace(column="codex"),
+                    discord=SimpleNamespace(column="reference"),
                     committed=[{"request_id": "r1", "kind": "reply", "text": discord_room.SCRIPTED_THREAD_REPLY,
                                 "target_event_id": "discord:message:600", "delivery": "sent"}],
                     room_effects=lambda where=where: [
@@ -705,7 +671,7 @@ class JudgeTest(unittest.TestCase):
     def test_each_moment_reads_its_graded_turns_delivered_actions(self):
         leg = SimpleNamespace(
             harness_posts=False,
-            discord=SimpleNamespace(column="codex", holds_own_post=lambda event_id: event_id == "discord:message:1"),
+            discord=SimpleNamespace(column="reference", holds_own_post=lambda event_id: event_id == "discord:message:1"),
             committed=[
                 {"request_id": "r1", "kind": "reply", "text": "t", "target_event_id": "discord:message:2", "delivery": "sent"},
                 {"request_id": "r2", "kind": "reaction", "reaction": "x", "target_event_id": "discord:message:3", "delivery": "failed"},
@@ -772,13 +738,6 @@ class TerminationTest(unittest.TestCase):
 
 
 class DiscordCommandTest(unittest.TestCase):
-    def test_the_discord_room_is_scripted_and_the_reference_lives_only_there(self):
-        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stderr(io.StringIO()) as error:
-            self.assertEqual(probe.EXIT_USAGE, probe.main(["--harness", "reference", "--scripted", "--out", directory]))
-            self.assertEqual(probe.EXIT_USAGE, probe.main(["--harness", "codex", "--room", "discord", "--out", directory]))
-            self.assertEqual(probe.EXIT_USAGE, probe.main(["--harness", "hermes", "--room", "discord", "--out", directory]))
-            self.assertEqual([], list(Path(directory).iterdir()))
-        self.assertIn("--room discord --scripted", error.getvalue())
 
     def test_without_the_launcher_the_discord_room_could_not_run_and_started_nothing(self):
         with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ, {}, clear=False):
@@ -791,11 +750,6 @@ class DiscordCommandTest(unittest.TestCase):
             self.assertFalse((out / "discord-wire.jsonl").exists())
         self.assertEqual(probe.EXIT_COULD_NOT_RUN, code)
         self.assertIn("runs inside the launcher", " ".join(run["errors"]))
-
-    def test_the_in_process_room_stays_the_default(self):
-        parsed = probe._parser().parse_args(["--harness", "codex", "--out", "x"])
-        self.assertEqual("standin", parsed.room)
-        self.assertEqual(probe.MOMENTS, probe._room_parts(probe.Options(harness="codex", out=Path("x")))[1])
 
 
 if __name__ == "__main__":

@@ -1,17 +1,4 @@
-"""The rehearsal probe (#94 step 9f, PRs 1 and 2): routes, scan, record, spend, checks, and each harness's leg.
-
-Everything here is offline. The Claude Code leg runs the real
-`ClaudeCodeRoomRuntime` and its session manager against a faked ``claude``
-that does what the Nunchi mod does inside a real one (attach, bind, call a
-room tool over the gate's socket) and speaks stream-json, as
-`nunchi.integrations.claude_code_conformance` fakes the session; its modes
-are the failures a pass must never hide (no mod, a failed model call, a turn
-past the host's deadline, a post over Discord's limit), with dead attention,
-an unattested acknowledgement and an undelivered message beside them. The
-scripted probe for each harness runs where its pinned install is present
-(``NUNCHI_CLAUDE_BIN``, ``NUNCHI_CODEX_BIN``; Hermes with discord.py in this
-Python): CI's Claude Code, Codex and Hermes lanes run this module, and each
-skips elsewhere.
+"""Offline tests for reference rehearsal records, checks and secret scanning.
 """
 
 from __future__ import annotations
@@ -56,53 +43,6 @@ SLUG = "anthropic/claude-haiku-4.5"
 class RoutesTest(unittest.TestCase):
     SECRET = "sk-or-v1-" + "f" * 40
 
-    def test_claude_code_goes_to_openrouter_with_its_key_named_not_valued(self):
-        route = routes.claude_code_route(SLUG)
-        self.assertEqual("https://openrouter.ai/api", route.env["ANTHROPIC_BASE_URL"])
-        self.assertEqual("", route.env["ANTHROPIC_API_KEY"])
-        self.assertEqual(("ANTHROPIC_AUTH_TOKEN",), route.secret_env)
-        for name in routes.CLAUDE_BACKGROUND_MODEL_ENV:
-            self.assertEqual(SLUG, route.env[name])
-        with mock.patch.dict(os.environ, {"ANTHROPIC_AUTH_TOKEN": self.SECRET, "NUNCHI_ATTENTION_API_KEY": self.SECRET}):
-            self.assertNotIn(self.SECRET, json.dumps(route.describe()))
-
-    def test_the_codex_config_parses_and_names_its_key_variable(self):
-        for scripted, base_url in ((False, routes.OPENROUTER), (True, "http://127.0.0.1:5555/v1")):
-            with self.subTest(scripted=scripted):
-                text = routes.codex_config(SLUG, base_url=base_url, scripted=scripted)
-                config = tomllib.loads(text)
-                self.assertEqual(SLUG, config["model"])
-                self.assertEqual("openrouter", config["model_provider"])
-                provider = config["model_providers"]["openrouter"]
-                self.assertEqual(base_url, provider["base_url"])
-                self.assertEqual("responses", provider["wire_api"])
-                self.assertEqual("OPENROUTER_API_KEY", provider["env_key"])
-                self.assertIs(False, provider["supports_websockets"])
-                self.assertEqual("workspace-write", config["sandbox_mode"])
-                self.assertIs(False, config["sandbox_workspace_write"]["network_access"])
-                self.assertEqual(scripted, "request_max_retries" in provider)
-                self.assertNotIn("sk-", text)
-
-    def test_hermes_runs_every_call_on_the_agents_model(self):
-        live = routes.hermes_model_config(SLUG, ["title_generation", "vision"])
-        self.assertEqual(
-            {"default": SLUG, "provider": "openrouter", "base_url": routes.OPENROUTER, "api_key": ""}, live["model"]
-        )
-        self.assertEqual({"provider": "openrouter", "model": SLUG}, live["auxiliary"]["title_generation"])
-        self.assertEqual({"title_generation", "vision"}, set(live["auxiliary"]))
-        scripted = routes.hermes_model_config(SLUG, ["vision"], scripted_base_url="http://127.0.0.1:1/v1")
-        self.assertEqual("custom", scripted["model"]["provider"])
-        self.assertEqual("http://127.0.0.1:1/v1", scripted["auxiliary"]["vision"]["base_url"])
-
-    def test_the_hermes_section_withholds_the_openrouter_key(self):
-        section = routes.hermes_section("1100")
-        self.assertEqual("discord", section["platform"])
-        self.assertEqual("1100", section["chat_id"])
-        self.assertIn("OPENROUTER_API_KEY", section["withheld_env"])
-        self.assertIn("DISCORD_BOT_TOKEN", section["withheld_env"])
-        from nunchi.integrations.hermes_plugin.plugin import HermesRoute
-
-        self.assertEqual("discord", HermesRoute.from_section(section).platform)
 
     def test_attention_is_the_chat_route_at_the_requested_effort(self):
         config = routes.attention_config("openai/gpt-6-luna@low")
@@ -115,41 +55,6 @@ class RoutesTest(unittest.TestCase):
         for label in ("openai/gpt-6-luna@loud", "responses:openai/gpt-6-luna@low", "messages:anthropic/claude-haiku-4.5@low"):
             with self.subTest(label=label), self.assertRaises(ValueError):
                 routes.attention_config(label)
-
-    def test_a_clean_user_keeps_only_the_path_locale_network_and_homes(self):
-        with tempfile.TemporaryDirectory() as directory:
-            homes = routes.Homes(Path(directory)).create()
-            inherited = {"PATH": "/bin", "LANG": "C.UTF-8", "GITHUB_TOKEN": "ghp_" + "x" * 36, "HOME": "/home/runner"}
-            env = routes.clean_environment(homes, routes.claude_code_route(SLUG), inherited=inherited)
-        self.assertNotIn("GITHUB_TOKEN", env)
-        self.assertEqual(homes["HOME"], env["HOME"])
-        for name in ("HOME", "TMPDIR", "CODEX_HOME", "HERMES_HOME", "CLAUDE_CONFIG_DIR"):
-            self.assertTrue(env[name].startswith(directory), name)
-        self.assertEqual("/bin", env["PATH"])
-
-    def test_claude_code_knows_each_slug_by_its_own_model_id(self):
-        self.assertEqual(routes.ClaudeModel("claude-haiku-4-5", "default"), routes.claude_code_model(SLUG))
-        for slug, model in routes.CLAUDE_CODE_MODELS.items():
-            with self.subTest(slug=slug):
-                self.assertTrue(slug.startswith("anthropic/claude-"))
-                self.assertIn(model.permission_mode, ("default", "auto"))
-        with self.assertRaisesRegex(ValueError, "CLAUDE_CODE_MODELS"):
-            routes.claude_code_model("openai/gpt-6-luna")
-
-    def test_every_harness_has_its_pin_and_key_name(self):
-        for harness in routes.HARNESSES:
-            self.assertIn(harness, routes.PINS)
-            self.assertIn(harness, routes.HARNESS_KEY_ENV)
-
-    def test_attention_beside_hermes_reads_hermess_own_key_and_no_nunchi_name(self):
-        # Hermes runs the plugin in its own process and strips OPENROUTER_API_KEY from the
-        # agent's terminal; it would pass a NUNCHI_* name on.
-        self.assertEqual("OPENROUTER_API_KEY", routes.attention_key_env("hermes"))
-        for harness in ("claude-code", "codex"):
-            self.assertEqual("NUNCHI_ATTENTION_API_KEY", routes.attention_key_env(harness))
-        config = routes.attention_config("openai/gpt-6-luna@low", api_key_env=routes.attention_key_env("hermes"))
-        self.assertEqual("OPENROUTER_API_KEY", config["api_key_env"])
-        self.assertIn("OPENROUTER_API_KEY", routes.hermes_section("1100")["withheld_env"])
 
 
 # -- scan ---------------------------------------------------------------------------------------------
@@ -280,62 +185,51 @@ class RecordTest(unittest.TestCase):
         self.assertEqual(hashlib.sha256(raw).hexdigest(), entry["sha256"])
         self.assertEqual(raw.decode(), entry["content"])
 
-    def test_a_home_snapshot_sees_a_new_or_changed_home(self):
-        with tempfile.TemporaryDirectory() as directory:
-            home = Path(directory) / ".codex"
-            absent = record.home_snapshot(home)
-            self.assertFalse(absent["exists"])
-            home.mkdir()
-            (home / "config.toml").write_text("a")
-            first = record.home_snapshot(home)
-            self.assertTrue(first["exists"])
-            (home / "auth.json").write_text("b")
-            self.assertNotEqual(first, record.home_snapshot(home))
 
     def test_providers_are_found_wherever_a_transcript_names_them(self):
         found = record.served_providers({"choices": [], "provider": "Anthropic", "model": SLUG, "nested": [{"provider": "Google"}]})
         self.assertEqual([{"provider": "Anthropic", "model": SLUG}, {"provider": "Google"}], found)
 
     def test_the_summary_leads_with_the_truth(self):
-        page = record.summary_markdown({"harness": "codex", "mode": "live", "status": "could-not-run", "errors": ["Codex is not installed"]})
+        page = record.summary_markdown({"harness": "reference", "mode": "live", "status": "could-not-run", "errors": ["Codex is not installed"]})
         self.assertIn("**Could not run:**", page)
         self.assertIn("Codex is not installed", page)
 
     def test_a_pass_without_a_delivered_post_says_the_room_tools_were_not_exercised(self):
-        quiet = record.summary_markdown({"harness": "claude-code", "mode": "live", "status": "pass", "moments": [
+        quiet = record.summary_markdown({"harness": "reference", "mode": "live", "status": "pass", "moments": [
             {"name": "direct-question", "posts": []}]})
         self.assertIn("**Passed, without a room action:**", quiet)
-        posted = record.summary_markdown({"harness": "claude-code", "mode": "live", "status": "pass", "moments": [
+        posted = record.summary_markdown({"harness": "reference", "mode": "live", "status": "pass", "moments": [
             {"name": "direct-question", "posts": [{"delivered": True, "text": "On it."}]}]})
         self.assertIn("**Passed:** every hard check held", posted)
 
     def test_an_arm_is_named_in_the_summarys_title(self):
-        page = record.summary_markdown({"harness": "codex", "mode": "live", "arm": "OpenAI-model arm for R3", "status": "pass"})
-        self.assertTrue(page.startswith("# Rehearsal probe: codex (live, OpenAI-model arm for R3)\n"))
+        page = record.summary_markdown({"harness": "reference", "mode": "live", "arm": "OpenAI-model arm for R3", "status": "pass"})
+        self.assertTrue(page.startswith("# Rehearsal probe: reference (live, OpenAI-model arm for R3)\n"))
 
     def test_a_failed_runs_summary_opens_with_every_reason_and_each_verdict_in_full(self):
         verdict = "blocked on a model route (R3): " + "x" * 700
         run = {
-            "harness": "codex",
+            "harness": "reference",
             "mode": "live",
             "status": "fail",
             "checks": [
-                {"name": "pins-and-isolation", "ok": True, "detail": "codex-cli 0.160.1"},
+                {"name": "pins-and-isolation", "ok": True, "detail": "discord.py 2.7.1"},
                 {"name": "turns-bound-and-ended", "ok": False, "detail": "turn r1 on e1 failed: TurnError: the agent's turn ended"},
                 {"name": "attention-judged", "ok": True, "detail": "3 of 3 attention call(s) returned a judgment"},
             ],
-            "reports": {"codex": {"verdict": verdict, "room_tool_called": False, "tool_calls": [{"tool": "x"}], "turns": [{"error": "e"}] * 9}},
+            "reports": {"reference": {"verdict": verdict, "room_tool_called": False, "tool_calls": [{"tool": "x"}], "turns": [{"error": "e"}] * 9}},
         }
         head = record.summary_markdown(run).splitlines()[:7]
         self.assertEqual("**Failed:** turns-bound-and-ended did not hold.", head[2])
         self.assertEqual("- **turns-bound-and-ended:** turn r1 on e1 failed: TurnError: the agent's turn ended", head[4])
         self.assertEqual("- Attention: 3 of 3 attention call(s) returned a judgment", head[5])
-        self.assertEqual(f"- codex: {verdict}", head[6])
-        self.assertIn("- codex.room_tool_called: false", record.summary_markdown(run))
+        self.assertEqual(f"- reference: {verdict}", head[6])
+        self.assertIn("- reference.room_tool_called: false", record.summary_markdown(run))
 
     def test_a_stop_at_the_budget_is_named_among_the_first_reasons(self):
         run = {
-            "harness": "hermes",
+            "harness": "reference",
             "mode": "live",
             "status": "fail",
             "checks": [{"name": "turns-bound-and-ended", "ok": False, "detail": "no wake reached the harness"}],
@@ -351,7 +245,7 @@ class RecordTest(unittest.TestCase):
                        "series": [[0.0, 10.0], [5.0, None], [10.0, 10.06]], **last}
             spend_document = {"budget_usd": 2.0, "limit": spend.SOFT_LIMIT_NOTE, "read": True, "spent_usd": 0.06,
                               "readings": [{"when": "before the first moment", "usage": 10.0}, reading]}
-            return record.summary_markdown({"harness": "codex", "mode": "live", "status": "pass", "spend": spend_document})
+            return record.summary_markdown({"harness": "reference", "mode": "live", "status": "pass", "spend": spend_document})
 
         self.assertIn("a record, and a soft limit between moments, never a limit inside one", page())
         self.assertIn("charges posted after the bound are missed", spend.SOFT_LIMIT_NOTE)
@@ -362,12 +256,6 @@ class RecordTest(unittest.TestCase):
             page(),
         )
         self.assertIn("the settled figure is the last one read (none: no read gave a figure)", page(usage=None))
-
-    def test_where_a_scripted_harness_reached_is_among_the_first_lines(self):
-        detail = "its model at the scripted endpoint http://127.0.0.1:1; through its proxy settings it tried to reach nothing else"
-        run = {"harness": "claude-code", "mode": "scripted", "status": "pass", "reports": {"claude_code": {"verdict": "v", "network": {"detail": detail}}}}
-        head = record.summary_markdown(run).splitlines()[:6]
-        self.assertEqual(f"- claude_code network: {detail}", head[5])
 
 
 class TurnsOnOthersMessagesTest(unittest.TestCase):
@@ -381,108 +269,6 @@ class TurnsOnOthersMessagesTest(unittest.TestCase):
         own = checks.turns_on_others_messages([*turns, {"request_id": "r2", "trigger": "own-post"}], ["e0", "e1"])
         self.assertFalse(own.ok)
         self.assertIn("turn r2 on own-post", own.detail)
-
-
-class CodexVerdictTest(unittest.TestCase):
-    """The Codex verdict names R3 only on evidence of it; any other failure is named as what it is."""
-
-    NAMESPACE = "{\"error\": {\"message\": \"Invalid value: 'namespace'. Supported values are: 'function'.\"}}"
-
-    def _verdict(self, *turns, room_calls=0, wakes=1, tools_offered=None):
-        return probe.codex_verdict(room_calls=room_calls, turns=list(turns), wakes=wakes, tools_offered=tools_offered)
-
-    def test_a_room_tool_call_settles_the_route(self):
-        self.assertIn("a room tool was called", self._verdict({"status": "completed", "error": None}, room_calls=1))
-
-    def test_only_a_namespace_refusal_or_missing_tools_is_r3(self):
-        refused = self._verdict({"status": "failed", "error": self.NAMESPACE})
-        self.assertTrue(refused.startswith("blocked on a model route (R3): the provider refused Codex's namespace tools"), refused)
-        self.assertIn("Invalid value: 'namespace'", refused)
-        named = self._verdict({"status": "failed", "error": "400: tool type namespace is not supported"})
-        self.assertTrue(named.startswith("blocked on a model route (R3)"), named)
-        missing = self._verdict({"status": "completed", "error": None}, tools_offered=False)
-        self.assertEqual("no room tool was called: the room tools were missing from what the model got (R3)", missing)
-        for error in (
-            "unexpected status 402 Payment Required: Insufficient credits",
-            "unexpected status 401 Unauthorized: No auth credentials found",
-            "unexpected status 400 Bad Request: Invalid value: 'web_search'",
-            # A Linux-namespace error from the sandbox is not the provider refusing the tool type.
-            "sandbox setup failed: bwrap: No permissions to create new namespace",
-        ):
-            with self.subTest(error=error):
-                verdict = self._verdict({"status": "failed", "error": error})
-                self.assertEqual(f"Codex's turn failed: {error}", verdict)
-                self.assertNotIn("R3", verdict)
-
-    def test_a_failed_codex_turn_is_a_failure_in_its_words(self):
-        turns = [{"status": "completed", "error": None}, {"status": "failed", "error": "stream disconnected"}, {"status": "failed", "error": None}]
-        self.assertEqual(
-            ["Codex ended a turn as failed: stream disconnected", "Codex ended a turn as failed: no detail"], probe.codex_failures(turns)
-        )
-        self.assertEqual([], probe.codex_failures([{"status": "completed", "error": None}, {"status": "interrupted", "error": None}]))
-
-    def test_a_turn_without_a_room_tool_is_reported_as_that(self):
-        silent = self._verdict({"status": "completed", "error": None}, tools_offered=True)
-        self.assertEqual("no room tool was called: the turn ended without one", silent)
-        self.assertEqual(silent, self._verdict({"status": "completed", "error": None}))
-        self.assertIn("did not complete (interrupted)", self._verdict({"status": "interrupted", "error": None}))
-        self.assertIn("no end reported", self._verdict(wakes=1))
-        self.assertEqual("no turn started", self._verdict(wakes=0))
-
-
-class CodexLegTest(unittest.TestCase):
-    """`CodexLeg.collect` on the turns Codex reported, with the runner stubbed: a turn that failed after its post fails the run."""
-
-    def _run_check(self, turns):
-        """The run's turns-bound-and-ended for one turn that posted through the room tool, as Codex ended it."""
-
-        from nunchi.integrations.codex_app_server.integration import MCP_SERVER_NAME
-
-        directory = Path(tempfile.mkdtemp(prefix="nrx-"))
-        self.addCleanup(shutil.rmtree, directory, True)
-        ctx = probe.Context(
-            options=probe.Options(harness="codex", out=directory / "out", scripted=True),
-            out=directory / "out" / "codex",
-            base=directory / "base",
-            homes={"CODEX_HOME": str(directory / "codex-home")},
-            env={},
-            secrets={routes.OUTPUT_KEY_ENV: "k" * 48},
-            route=routes.route_for("codex", SLUG),
-            attention={},
-            profile=probe._profile(),
-        )
-        leg = probe.CodexLeg(ctx)
-        # What the integration collected from Codex: the room tool's call, and how Codex ended the turn.
-        integration = mock.Mock(
-            tool_items={"i1": {"type": "mcpToolCall", "server": MCP_SERVER_NAME, "tool": "room_send", "status": "completed"}},
-            completed_turns=turns,
-            warnings=[],
-            declined=[],
-        )
-        leg.runner = mock.Mock(integration=integration, status=lambda: {"codex_sandbox": {"type": "workspaceWrite"}})
-        # What the probe saw: the turn was bound and posted, and the host recorded the post.
-        leg.invocations = [{"request_id": "r1", "trigger": "e1", "bound": True, "result": {"kind": "message", "text": probe.SCRIPTED_ANSWER}}]
-        leg.committed = [{"request_id": "r1", "kind": "message", "text": probe.SCRIPTED_ANSWER, "delivery": "sent", "delivered": True}]
-        leg._room = object()
-        leg.receipts = lambda: [{"request_id": "r1", "stage": "participant-host", "body": {"invoked": True, "outcome": "unknown"}}]
-        leg.collect()
-        document = {"environment": {"harness_keys": [], "canary": routes.CANARY_ENV}, "nunchi": {}, "moments": []}
-        run_checks = probe._checks(leg, document, base=directory / "base", before=[], after=[], scripted=True)
-        return leg, next(check for check in run_checks if check.name == "turns-bound-and-ended")
-
-    def test_a_turn_that_failed_after_its_post_fails_the_run(self):
-        leg, check = self._run_check({"t1": {"id": "t1", "status": "completed", "error": None}})
-        self.assertTrue(check.ok, check.detail)
-        self.assertEqual([], leg.harness_failures)
-        # The room tool posted, then the model call carrying its result failed, so Codex ended the turn as failed.
-        why = "Codex ended a turn as failed: stream disconnected before completion"
-        leg, check = self._run_check({"t1": {"id": "t1", "status": "failed", "error": {"message": "stream disconnected before completion"}}})
-        report = leg.reports["codex"]
-        self.assertTrue(report["room_tool_called"])
-        self.assertEqual([{"status": "failed", "error": "stream disconnected before completion"}], report["turns"])
-        self.assertEqual([why], leg.harness_failures)
-        self.assertFalse(check.ok)
-        self.assertEqual(why, check.detail)
 
 
 # -- spend ---------------------------------------------------------------------------------------------
@@ -635,12 +421,12 @@ class ChecksTest(unittest.TestCase):
 
     def _pins(self, **changes):
         arguments = dict(
-            harness_version="codex-cli 0.160.1",
-            expected="0.160.1",
-            actual_homes={"HOME": f"{self.BASE}/home", "CODEX_HOME": f"{self.BASE}/codex-home"},
+            harness_version="discord.py 2.7.1",
+            expected="2.7.1",
+            actual_homes={"HOME": f"{self.BASE}/home", "XDG_CONFIG_HOME": f"{self.BASE}/reference-home"},
             base=self.BASE,
-            user_homes_before=[{"path": "/root/.codex", "exists": False}],
-            user_homes_after=[{"path": "/root/.codex", "exists": False}],
+            user_homes_before=[{"path": "/root/.reference", "exists": False}],
+            user_homes_after=[{"path": "/root/.reference", "exists": False}],
         )
         arguments.update(changes)
         return checks.pins_and_isolation(**arguments)
@@ -649,25 +435,25 @@ class ChecksTest(unittest.TestCase):
         self.assertTrue(self._pins().ok)
         self.assertIn("never created", self._pins().detail)
         for change, why in (
-            ({"harness_version": "codex-cli 0.161.0"}, "not the pinned"),
-            ({"actual_homes": {"HOME": "", "CODEX_HOME": f"{self.BASE}/codex-home"}}, "got no HOME"),
-            ({"actual_homes": {"HERMES_HOME": "/root/.hermes"}}, "outside the run's directory"),
+            ({"harness_version": "discord.py 2.8.0"}, "not the pinned"),
+            ({"actual_homes": {"HOME": "", "XDG_CONFIG_HOME": f"{self.BASE}/reference-home"}}, "got no HOME"),
+            ({"actual_homes": {"XDG_CONFIG_HOME": "/root/.reference"}}, "outside the run's directory"),
             ({"actual_homes": {"HOME": f"{self.BASE}-other/home"}}, "outside the run's directory"),
             ({"actual_homes": {}}, "not read"),
-            ({"user_homes_after": [{"path": "/root/.codex", "exists": True, "entries": 1, "listing_sha256": "a"}]}, "created"),
+            ({"user_homes_after": [{"path": "/root/.reference", "exists": True, "entries": 1, "listing_sha256": "a"}]}, "created"),
         ):
             with self.subTest(why=why):
                 check = self._pins(**change)
                 self.assertFalse(check.ok)
                 self.assertIn(why, check.detail)
-        existing = {"path": "/root/.codex", "exists": True, "entries": 2, "listing_sha256": "a"}
+        existing = {"path": "/root/.reference", "exists": True, "entries": 2, "listing_sha256": "a"}
         self.assertTrue(self._pins(user_homes_before=[existing], user_homes_after=[existing]).ok)
         changed = self._pins(user_homes_before=[existing], user_homes_after=[{**existing, "listing_sha256": "b"}])
         self.assertFalse(changed.ok)
         self.assertIn("changed", changed.detail)
 
     def test_only_the_harnesss_own_key_reaches_its_processes_and_none_its_shell(self):
-        harness = {"what": "codex app-server", "env": ["OPENROUTER_API_KEY", "REHEARSAL_CANARY"], "secrets": ["OPENROUTER_API_KEY", "REHEARSAL_CANARY"]}
+        harness = {"what": "reference app-server", "env": ["OPENROUTER_API_KEY", "REHEARSAL_CANARY"], "secrets": ["OPENROUTER_API_KEY", "REHEARSAL_CANARY"]}
         shell = {"process": "the agent's terminal", "agent_shell": True, "env": ["REHEARSAL_CANARY"], "secrets": ["REHEARSAL_CANARY"]}
         keys = {"harness_keys": ["OPENROUTER_API_KEY"], "canary": "REHEARSAL_CANARY"}
         passed = self._pins(processes=[harness, shell], **keys)
@@ -677,7 +463,7 @@ class ChecksTest(unittest.TestCase):
         leaky_shell = {**shell, "secrets": ["NUNCHI_ATTENTION_API_KEY", "REHEARSAL_CANARY"]}
         unread = {"process": "the agent's terminal", "agent_shell": True, "error": "ImportError: no tools"}
         for processes, why in (
-            ([nunchi], "codex app-server got a key in NUNCHI_ATTENTION_API_KEY"),
+            ([nunchi], "reference app-server got a key in NUNCHI_ATTENTION_API_KEY"),
             ([harness, leaky_shell], "the agent's terminal got a key in NUNCHI_ATTENTION_API_KEY"),
             ([{**shell, "secrets": ["OPENROUTER_API_KEY"]}], "the agent's terminal got a key in OPENROUTER_API_KEY"),
             ([unread], "could not be read"),
@@ -691,9 +477,9 @@ class ChecksTest(unittest.TestCase):
         return {
             "commit": {"sha": "a" * 40},
             "nunchi": {"version": "2.0.0", "wheel": {"file": "n.whl", "sha256": "b" * 64}},
-            "harness_install": {"version": "codex-cli 0.160.1", "executable": "/x/codex"},
-            "configs": [{"name": "codex user config", "sha256": "d" * 64}],
-            "commands": [{"argv": ["codex"]}],
+            "harness_install": {"version": "discord.py 2.7.1", "executable": "/x/reference"},
+            "configs": [{"name": "reference user config", "sha256": "d" * 64}],
+            "commands": [{"argv": ["reference"]}],
             "moments": [{"name": "direct-question"}],
         }
 
@@ -853,93 +639,6 @@ class ChecksTest(unittest.TestCase):
 
 
 class StandInTest(unittest.TestCase):
-    SECRET = b"o" * 48
-
-    def _client(self):
-        return standin.StandInRoomClient(
-            participant_id="vigil", room_id="1100", actor_id="discord:actor:9900", secret=self.SECRET, display_name="Vigil"
-        )
-
-    def _binding(self):
-        return ParticipantBinding(
-            participant_id="vigil", actor_id="discord:actor:9900", platform="discord", room_id="1100",
-            continuity_scope_id="discord:channel:1100",
-        )
-
-    def _registered(self):
-        client = self._client()
-        connection = DiscordRoomConnection(client=client, binding=self._binding(), secret=self.SECRET, label="t", surface="t")
-        connection.register()
-        return client, MCPDiscordTransport(client, "1100", "vigil", "discord:actor:9900", self.SECRET)
-
-    def test_registration_gets_the_exact_attestation(self):
-        client, _ = self._registered()
-        self.assertTrue(client.registered)
-        self.assertTrue(client.wire.entries[0]["ok"])
-        self.assertEqual("discord:actor:9900", client.wire.entries[0]["answer"]["transport_self_actor_id"])
-
-    def test_a_post_reads_sent_through_the_real_transport_and_echoes_back(self):
-        client, transport = self._registered()
-        wake = {"request_id": "req-1", "room": {"id": "1100"}}
-        result = transport.dispatch(action={"kind": "message", "text": "Ten seconds."}, wake=wake)
-        self.assertEqual("sent", result.delivery)
-        self.assertEqual([{"kind": "message", "message_id": result.detail.split(":")[-1], "text": "Ten seconds.", "reply_to": None}], client.effects)
-        echo = client.take_echoes()
-        self.assertEqual("discord:actor:9900", echo[0]["author_id"])
-        self.assertEqual([], client.take_echoes())
-        self.assertEqual("req-1", client.wire.entries[-1]["request_id"])
-        self.assertNotIn("_nunchi_authorization", json.dumps(client.wire.entries))
-        reply = transport.dispatch(
-            action={"kind": "reply", "target_event_id": "discord:message:5", "text": "Yes."}, wake=wake
-        )
-        self.assertEqual("sent", reply.delivery)
-        self.assertEqual("discord:message:5", client.take_echoes()[0]["reply_to_event_id"])
-        reaction = transport.dispatch(
-            action={"kind": "reaction", "target_event_id": "discord:message:5", "reaction": "👂", "operation": "add"},
-            wake=wake,
-        )
-        self.assertEqual("sent", reaction.delivery)
-        self.assertTrue(transport.reaction_capability().allows("👂"))
-
-    def test_the_transports_own_checks_refuse_what_discord_would(self):
-        # The shared transport's ToolExecutor, not a copy: an over-long or empty post, or a
-        # reply to a target that is not a snowflake, is refused, and nothing reaches the room.
-        client, transport = self._registered()
-        wake = {"request_id": "req-2", "room": {"id": "1100"}}
-        for action, why in (
-            ({"kind": "message", "text": "x" * 2001}, "2000-character limit"),
-            ({"kind": "message", "text": "  "}, "non-empty"),
-            ({"kind": "reply", "target_event_id": "discord:message:abc", "text": "Yes."}, "snowflake"),
-        ):
-            with self.subTest(why=why):
-                self.assertEqual("failed", transport.dispatch(action=action, wake=wake).delivery)
-                self.assertIn(why, client.wire.entries[-1]["refused"])
-        self.assertEqual([], client.effects)
-
-    def test_an_acknowledgement_without_the_exact_identity_reads_unknown(self):
-        client, transport = self._registered()
-        create = standin._StandInDiscord.create_message
-
-        def wrong_author(rest, channel_id, content, *, reply_to_message_id=None):
-            message = create(rest, channel_id, content, reply_to_message_id=reply_to_message_id)
-            return {**message, "author": {**message["author"], "id": "1"}}
-
-        with mock.patch.object(standin._StandInDiscord, "create_message", wrong_author):
-            result = transport.dispatch(action={"kind": "message", "text": "Ten seconds."}, wake={"request_id": "r", "room": {"id": "1100"}})
-        self.assertEqual("unknown", result.delivery)
-
-    def test_a_call_without_a_valid_authorization_is_refused(self):
-        client = self._client()
-        answer = client.call_tool("send_message", {"channel_id": "1100", "content": "hi"})
-        self.assertTrue(answer["isError"])
-        self.assertIn("not authenticated", client.wire.entries[-1]["refused"])
-        client, _ = self._registered()
-        other = MCPDiscordTransport(client, "1100", "vigil", "discord:actor:9900", b"x" * 48)
-        result = other.dispatch(action={"kind": "message", "text": "hi"}, wake={"request_id": "r", "room": {"id": "1100"}})
-        self.assertEqual("failed", result.delivery)
-        self.assertIn("MAC", client.wire.entries[-1]["refused"])
-        self.assertEqual([], client.effects)
-
     def test_scripted_attention_wakes_only_for_its_phrase(self):
         attention = standin.ScriptedAttention(["sensible default timeout"])
         self.addCleanup(attention.close)
@@ -954,787 +653,5 @@ class StandInTest(unittest.TestCase):
         self.assertEqual(["WAKE", "SUPPRESS"], [item["disposition"] for item in attention.judged])
         self.assertEqual("scripted", model.last_response["provider"])
 
-    @staticmethod
-    def _post(origin, path, body, headers=None):
-        """One request as Claude Code makes it; the answer's status, content type and body."""
-
-        connection = http.client.HTTPConnection(origin.removeprefix("http://"), timeout=10)
-        connection.request("POST", path, json.dumps(body), {"content-type": "application/json", **(headers or {})})
-        response = connection.getresponse()
-        answer = (response.status, response.getheader("Content-Type"), response.read().decode())
-        connection.close()
-        return answer
-
-    @staticmethod
-    def _events(text):
-        events = []
-        for chunk in text.strip().split("\n\n"):
-            lines = dict(line.split(": ", 1) for line in chunk.splitlines())
-            events.append((lines["event"], json.loads(lines["data"])))
-        return events
-
-    def test_the_scripted_claude_agent_calls_the_room_tool_once_then_ends_its_turn(self):
-        tool = "mcp__nunchi__room_send"
-        agent = standin.ScriptedClaudeAgent("Ten seconds.", tool)
-        self.addCleanup(agent.close)
-        self.assertTrue(agent.base_url.startswith("http://127.0.0.1:"))
-        self.assertFalse(agent.base_url.endswith("/v1"), "Claude Code adds /v1/messages itself")
-        request = {
-            "model": SLUG,
-            "stream": True,
-            "tools": [{"name": "Bash"}, {"name": tool}],
-            "messages": [{"role": "user", "content": [{"type": "text", "text": "<nunchi_wake id=\"w\"/>"}]}],
-        }
-        secret = "scripted-placeholder-" + "k" * 24
-        status, kind, text = self._post(agent.base_url, "/v1/messages?beta=true", request, {"authorization": f"Bearer {secret}"})
-        self.assertEqual((200, "text/event-stream"), (status, kind))
-        events = self._events(text)
-        self.assertEqual(
-            ["message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop"],
-            [name for name, _ in events],
-        )
-        self.assertEqual(SLUG, events[0][1]["message"]["model"])
-        block = events[1][1]["content_block"]
-        self.assertEqual(("tool_use", tool), (block["type"], block["name"]))
-        self.assertEqual({"text": "Ten seconds."}, json.loads(events[2][1]["delta"]["partial_json"]))
-        self.assertEqual("tool_use", events[4][1]["delta"]["stop_reason"])
-        # The room tool's result comes back: a short final text ends the turn.
-        result = {"role": "user", "content": [{"type": "tool_result", "tool_use_id": block["id"], "content": "Done."}]}
-        _, _, text = self._post(agent.base_url, "/v1/messages?beta=true", {**request, "messages": [*request["messages"], result]})
-        events = self._events(text)
-        self.assertEqual("text", events[1][1]["content_block"]["type"])
-        self.assertEqual("end_turn", events[4][1]["delta"]["stop_reason"])
-        # A streamed call without the room tools (Claude Code's own) gets a short text.
-        _, _, text = self._post(agent.base_url, "/v1/messages", {"model": SLUG, "stream": True, "messages": [{"role": "user", "content": "title?"}]})
-        self.assertEqual("Room", self._events(text)[2][1]["delta"]["text"])
-        # Nothing else is answered: a call without stream (Claude Code's fallback when it cannot
-        # read the stream) gets a 404, so a broken stream fails the turn instead of passing on it.
-        status, kind, text = self._post(agent.base_url, "/v1/messages", {**request, "stream": False})
-        self.assertEqual((404, "application/json"), (status, kind))
-        self.assertEqual("not_found_error", json.loads(text)["error"]["type"])
-        self.assertEqual(404, self._post(agent.base_url, "/v1/messages/count_tokens", request)[0])
-        self.assertEqual(404, self._post(agent.base_url, "/v1/other", {})[0])
-        kinds = [entry["kind"] for entry in agent.requests()]
-        self.assertEqual(["agent-tool-call", "agent", "other", "unknown", "unknown", "unknown"], kinds)
-        # Which credential came, never its value.
-        self.assertEqual("bearer", agent.requests()[0]["credential"])
-        self.assertNotIn(secret, json.dumps(agent.requests()))
-
-    def test_the_refusing_proxy_refuses_and_names_everything_sent_through_it(self):
-        proxy = standin.RefusingProxy()
-        self.addCleanup(proxy.close)
-        environment = proxy.environment()
-        self.assertEqual(proxy.url, environment["HTTPS_PROXY"])
-        self.assertEqual(proxy.url, environment["http_proxy"])
-        self.assertEqual("127.0.0.1,localhost", environment["NO_PROXY"])
-        host = proxy.url.removeprefix("http://")
-        for _ in range(2):
-            connection = http.client.HTTPConnection(host, timeout=10)
-            connection.set_tunnel("api.anthropic.com", 443)
-            with self.assertRaisesRegex(OSError, "403"):
-                connection.request("GET", "/")
-            connection.close()
-        connection = http.client.HTTPConnection(host, timeout=10)
-        connection.request("POST", "http://example.com/metrics", body=b"{}", headers={"content-type": "application/json"})
-        self.assertEqual(403, connection.getresponse().status)
-        connection.close()
-        self.assertEqual(
-            [
-                {"method": "CONNECT", "target": "api.anthropic.com:443", "count": 2},
-                {"method": "POST", "target": "example.com:80", "count": 1},
-            ],
-            proxy.tried(),
-        )
-
 
 # -- the Claude Code leg, with a faked claude ------------------------------------------------------
-
-
-FAKE_CLAUDE = r'''#!{python}
-"""A faked `claude`: what the Nunchi mod does in a real session, over stream-json and the gate's socket.
-
-A ``mode`` file beside it picks a failure: ``no-mod`` (the mod never loads), ``is-error`` (the model
-call fails), ``error-after-post`` (the call after the room post fails), ``no-room-tool`` (the post
-goes through the gate, but the model called only Bash), ``hang`` (the turn outlives the host's
-deadline), ``long`` (a post over Discord's limit), ``leak`` (the canary in a post), ``unrecognized``
-(Claude Code does not know the model), ``auto`` (the session starts in auto mode). With proxy
-settings it tries Anthropic's API through them as it starts and as it exits, as Claude Code does.
-"""
-import http.client, json, os, re, socket, sys, time
-from pathlib import Path
-here = Path(__file__).resolve().parent
-mode = (here / "mode").read_text().strip() if (here / "mode").exists() else ""
-def note(entry):
-    with open(here / "record.jsonl", "a") as handle:
-        handle.write(json.dumps(entry) + "\n")
-if sys.argv[1:2] == ["--version"]:
-    print("2.1.289 (Claude Code)")
-    sys.exit(0)
-argv = sys.argv[1:]
-model = argv[argv.index("--model") + 1] if "--model" in argv else "default"
-settings = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "settings.json"
-note({"argv": argv, "env_names": sorted(os.environ), "cwd": os.getcwd(),
-      "auth_token_set": bool(os.environ.get("ANTHROPIC_AUTH_TOKEN")),
-      "api_key_empty": os.environ.get("ANTHROPIC_API_KEY") == "",
-      "base_url": os.environ.get("ANTHROPIC_BASE_URL"),
-      "proxy": os.environ.get("HTTPS_PROXY"), "no_proxy": os.environ.get("NO_PROXY"),
-      "settings": json.loads(settings.read_text()) if settings.exists() else None})
-def phone_home():
-    """As a real Claude Code does when it starts and exits: try Anthropic's API through its proxy settings."""
-    connection = http.client.HTTPConnection(os.environ["HTTPS_PROXY"].removeprefix("http://"), timeout=10)
-    connection.set_tunnel("api.anthropic.com", 443)
-    try:
-        connection.request("GET", "/")
-    except OSError as exc:
-        return str(exc)
-    finally:
-        connection.close()
-    return "reached"
-class Connection(http.client.HTTPConnection):
-    def connect(self):
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.connect(os.environ["NUNCHI_CLAUDE_CODE_GATE_SOCKET"])
-def post(path, body):
-    connection = Connection("nunchi-gate", timeout=60)
-    connection.request("POST", path, json.dumps(body), {"content-type": "application/json",
-                       "x-nunchi-session": os.environ["NUNCHI_CLAUDE_CODE_GATE_SESSION"]})
-    answer = json.loads(connection.getresponse().read())
-    connection.close()
-    return answer
-def emit(message):
-    sys.stdout.write(json.dumps(message) + "\n")
-    sys.stdout.flush()
-session = "6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5"
-def result(**fields):
-    emit({"type": "result", "subtype": "success", "is_error": False, "session_id": session,
-          "result": "Posted my answer.", "total_cost_usd": 0.0, "modelUsage": {model: {}}, **fields})
-plugin_dir = argv[argv.index("--plugin-dir") + 1]
-if os.environ.get("HTTPS_PROXY"):
-    note({"phone_home": phone_home()})
-if mode == "unrecognized":
-    sys.stderr.write('[claude-code:unrecognized_model] {"model":"%s","query_source":"sdk"}\n' % model)
-    sys.stderr.flush()
-if mode == "no-mod":
-    emit({"type": "system", "subtype": "init", "session_id": session, "model": model, "plugins": [],
-          "plugin_errors": [{"name": "nunchi", "error": "the plugin failed to load"}], "permissionMode": "default"})
-else:
-    emit({"type": "system", "subtype": "init", "session_id": session, "model": model,
-          "plugins": [{"name": "nunchi", "path": plugin_dir}], "plugin_errors": [],
-          "permissionMode": "auto" if mode == "auto" else "default", "apiKeySource": "ANTHROPIC_AUTH_TOKEN"})
-    post("/v1/attach", {})
-turn = 0
-for line in sys.stdin:
-    message = json.loads(line)
-    if message.get("type") != "user":
-        continue
-    turn += 1
-    if mode == "no-mod":
-        # Nothing binds the turn: the model answers in text, which never reaches the room.
-        emit({"type": "assistant", "message": {"model": model, "content": [{"type": "text", "text": "Ten seconds."}]}})
-        result(result="Ten seconds.")
-        continue
-    text = message["message"]["content"][0]["text"]
-    match = re.match(r'<nunchi_wake id="([A-Za-z0-9_-]+)"/>', text)
-    turn_id = "fake-turn-%d" % turn
-    bound = post("/v1/turn-start", {"turn_id": turn_id, "wake_id": match.group(1) if match else None})
-    if mode == "is-error":
-        failure = "API Error: 400 anthropic/claude-haiku-4.5 is not a valid model ID"
-        result(subtype="error_during_execution", is_error=True, result=failure, errors=[failure], modelUsage={})
-        continue
-    if mode == "hang":
-        time.sleep(12)
-    answer = {answer}
-    if mode == "long":
-        answer = "Ten seconds. " + "x" * 2100
-    if mode == "leak":
-        answer = "my canary is " + os.environ.get("REHEARSAL_CANARY", "?")
-        emit({"type": "assistant", "message": {"model": model, "content": [{"type": "text", "text": answer}]}})
-    called = "Bash" if mode == "no-room-tool" else "mcp__nunchi__room_send"
-    emit({"type": "assistant", "message": {"model": model, "content": [
-        {"type": "tool_use", "id": "toolu_fake_%d" % turn, "name": called, "input": {"text": answer}}]}})
-    note({"bound": bound, "answer": post("/v1/tool", {"turn_id": turn_id, "tool": "mcp__nunchi__room_send",
-                                                       "input": {"text": answer}})})
-    if mode == "error-after-post":
-        # The call that carries the room tool's result fails, after the post was delivered.
-        result(is_error=True, result="API Error: 400 scripted: broken second call", modelUsage={})
-        continue
-    emit({"type": "assistant", "message": {"model": model, "content": [{"type": "text", "text": "Posted."}]}})
-    result()
-if os.environ.get("HTTPS_PROXY"):
-    note({"phone_home_at_exit": phone_home()})
-'''
-
-
-class _DeadAttention(standin.ScriptedAttention):
-    """Attention whose provider answers every call with HTTP 503."""
-
-    def _handler(self):
-        from http.server import BaseHTTPRequestHandler
-
-        class Handler(BaseHTTPRequestHandler):
-            protocol_version = "HTTP/1.1"
-
-            def log_message(self, *_args):
-                pass
-
-            def do_POST(self):  # noqa: N802
-                self.rfile.read(int(self.headers.get("Content-Length", "0")))
-                payload = b'{"error": {"message": "no provider is available", "code": 503}}'
-                self.send_response(503)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
-
-        return Handler
-
-
-def _wrong_author():
-    """The stand-in's Discord acknowledges each post with another author: the library cannot attest it."""
-
-    create = standin._StandInDiscord.create_message
-
-    def create_message(rest, channel_id, content, *, reply_to_message_id=None):
-        message = create(rest, channel_id, content, reply_to_message_id=reply_to_message_id)
-        return {**message, "author": {**message["author"], "id": "1"}}
-
-    return mock.patch.object(standin._StandInDiscord, "create_message", create_message)
-
-
-class _Ok(BaseHTTPRequestHandler):
-    """A local server that answers every GET with ``ok``."""
-
-    def do_GET(self):  # noqa: N802
-        self.send_response(200)
-        self.send_header("Content-Length", "2")
-        self.end_headers()
-        self.wfile.write(b"ok")
-
-    def log_message(self, *_args):
-        pass
-
-
-class ClaudeCodeLegTest(unittest.TestCase):
-    """The real runtime and session manager, with the claude process faked; each failure fails the run."""
-
-    def _run(self, mode="", *, turn_timeout=60.0, patches=(), sandbox=True, credentials=()):
-        directory = Path(tempfile.mkdtemp(prefix="nrc-"))
-        self.addCleanup(lambda: __import__("shutil").rmtree(directory, ignore_errors=True))
-        bin_dir = directory / "bin"
-        bin_dir.mkdir()
-        # The fixed credential directory Claude Code reads, here without the host's own.
-        remote = directory / "remote"
-        remote.mkdir()
-        for name in credentials:
-            (remote / name).write_text("not a credential")
-        patches = [*patches, mock.patch.object(probe, "CLAUDE_CODE_FIXED_CREDENTIALS", remote)]
-        fake = bin_dir / "claude"
-        source = FAKE_CLAUDE.replace("{python}", sys.executable).replace("{answer}", repr(probe.SCRIPTED_ANSWER))
-        fake.write_text(source, encoding="utf-8")
-        fake.chmod(0o700)
-        if mode:
-            (bin_dir / "mode").write_text(mode)
-        # Scripted attention and placeholder keys; the faked claude stands in for the model.
-        options = probe.Options(
-            harness="claude-code",
-            out=directory / "out",
-            scripted=True,
-            sandbox=sandbox,
-            claude_bin=str(fake),
-            turn_timeout_seconds=turn_timeout,
-            command=["test"],
-        )
-        before = dict(os.environ)
-        with contextlib.ExitStack() as stack:
-            for patch in patches:
-                stack.enter_context(patch)
-            printed = stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
-            code = probe.run_probe(options)
-        self.assertEqual(before, dict(os.environ), "the probe restores this process's environment")
-        records = [json.loads(line) for line in (bin_dir / "record.jsonl").read_text().splitlines()]
-        return code, directory / "out" / "claude-code", records, printed.getvalue()
-
-    def _failed(self, mode, check, why, **options):
-        """A run that fails: exit 1, status fail, and ``check`` failed with ``why`` in summary.md's first lines."""
-
-        code, out, _records, printed = self._run(mode, **options)
-        run = json.loads((out / "run.json").read_text())
-        self.assertEqual(1, code, printed)
-        self.assertEqual("fail", run["status"])
-        failed = {item["name"]: item["detail"] for item in run["checks"] if not item["ok"]}
-        self.assertIn(check, failed, run["checks"])
-        self.assertIn(why, failed[check])
-        summary = (out / "summary.md").read_text()
-        head = "\n".join(summary.splitlines()[:10])
-        self.assertIn("**Failed:**", head)
-        self.assertIn(f"- **{check}:**", head)
-        self.assertIn(why, head)
-        return run, summary, out
-
-    def test_the_leg_binds_posts_once_and_records_what_claude_code_showed(self):
-        code, out, records, printed = self._run()
-        run = json.loads((out / "run.json").read_text())
-        self.assertEqual(0, code, printed)
-        self.assertEqual("pass", run["status"])
-        self.assertTrue(all(check["ok"] for check in run["checks"]), run["checks"])
-        self.assertEqual(
-            [
-                "pins-and-isolation",
-                "record-complete",
-                "turns-bound-and-ended",
-                "turns-on-others-messages",
-                "attention-judged",
-                "one-room-action-per-turn",
-                "no-leaks",
-                "scripted-outcomes",
-            ],
-            [check["name"] for check in run["checks"]],
-        )
-        moments = {moment["name"]: moment for moment in run["moments"]}
-        self.assertEqual(0, moments["bot-status-report"]["graded_turns"])
-        self.assertEqual("fits", moments["bot-status-report"]["outcome"])
-        self.assertEqual(
-            [{"text": probe.SCRIPTED_ANSWER, "delivery": "sent", "delivered": True}], moments["direct-question"]["posts"]
-        )
-        self.assertEqual("fits", moments["direct-question"]["outcome"])
-        report = run["reports"]["claude_code"]
-        self.assertTrue(report["mod_loaded"]["attached_to_the_gate"])
-        self.assertEqual(["nunchi"], report["mod_loaded"]["init_plugins"])
-        self.assertTrue(report["turn_bound"])
-        self.assertTrue(report["model"]["accepted"])
-        self.assertIn(SLUG, report["model"]["named_in_transcript"])
-        # The session ran as the clean user, with the route and without Nunchi's keys.
-        start = next(entry for entry in records if "argv" in entry)
-        self.assertEqual(SLUG, start["argv"][start["argv"].index("--model") + 1])
-        self.assertIn("--plugin-dir", start["argv"])
-        self.assertTrue(start["auth_token_set"])
-        self.assertTrue(start["api_key_empty"])
-        # Scripted, Claude Code reaches only this machine: its model at the scripted Messages
-        # endpoint, and everything else through a proxy that refuses it and names it.
-        report = run["reports"]["claude_code"]
-        route = run["models"]["agent"]["route"]
-        self.assertTrue(start["base_url"].startswith("http://127.0.0.1:"))
-        self.assertEqual(start["base_url"], route["base_url"])
-        self.assertEqual(start["base_url"], route["env"]["ANTHROPIC_BASE_URL"])
-        self.assertEqual(route["env"]["HTTPS_PROXY"], start["proxy"])
-        self.assertEqual("127.0.0.1,localhost", start["no_proxy"])
-        self.assertIn("403", next(entry["phone_home"] for entry in records if "phone_home" in entry))
-        # What it tries as it exits is in the record too: the proxy is read once Claude Code has stopped.
-        self.assertIn("403", next(entry["phone_home_at_exit"] for entry in records if "phone_home_at_exit" in entry))
-        self.assertEqual([{"method": "CONNECT", "target": "api.anthropic.com:443", "count": 2}], report["network"]["tried_to_reach"])
-        self.assertEqual({"readable": [], "detail": "none readable"}, report["fixed_credentials"])
-        self.assertEqual([], report["failures"])
-        self.assertEqual(["mcp__nunchi__room_send"], report["tool_calls"])
-        self.assertTrue(report["room_tool_called"])
-        # The README's settings, and the slug mapped to the id Claude Code knows the model by.
-        self.assertEqual({**routes.CLAUDE_SETTINGS, "modelOverrides": {"claude-haiku-4-5": SLUG}}, start["settings"])
-        self.assertEqual([], report["not_as_configured"])
-        self.assertEqual([SLUG], report["model"]["answered_as"])
-        for name in ("NUNCHI_ATTENTION_API_KEY", "NUNCHI_REHEARSAL_OUTPUT_KEY", "GITHUB_TOKEN"):
-            self.assertNotIn(name, start["env_names"])
-        self.assertIn("REHEARSAL_CANARY", start["env_names"])
-        self.assertTrue(start["cwd"].startswith(run["isolation"]["work_directory"]))
-        self.assertEqual(
-            [{"ok": True, "text": "Done: the room accepted this action."}], [entry["answer"] for entry in records if "answer" in entry]
-        )
-        # The record names the variables each process actually got, and never holds their values.
-        environment = run["environment"]
-        commands = {command["what"]: command for command in run["commands"]}
-        session = commands["the room's Claude Code session, launched by the runtime"]
-        self.assertEqual(start["argv"], session["argv"][1:])
-        self.assertTrue(set(session["env"]) <= set(start["env_names"]))
-        self.assertIn("NUNCHI_CLAUDE_CODE_GATE_SOCKET", session["env"])
-        # The proxy settings Claude Code's processes got, which this process never holds.
-        for name in ("HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy"):
-            self.assertIn(name, session["env"])
-            self.assertIn(name, commands["the harness's version, for the record"]["env"])
-        self.assertEqual(["ANTHROPIC_AUTH_TOKEN", "REHEARSAL_CANARY"], session["secrets"])
-        for what in ("the harness's version, for the record", "the runtime's version floor (claude_code_version)"):
-            self.assertEqual(["ANTHROPIC_AUTH_TOKEN", "REHEARSAL_CANARY"], commands[what]["secrets"])
-            self.assertFalse([name for name in commands[what]["env"] if name.startswith("NUNCHI_")])
-        self.assertEqual(1, sum(1 for command in run["commands"] if "session" in command["what"]))
-        self.assertEqual(["NUNCHI_ATTENTION_API_KEY", "NUNCHI_REHEARSAL_OUTPUT_KEY"], environment["nunchi_process_only"])
-        self.assertEqual("NUNCHI_ATTENTION_API_KEY", environment["attention_key"])
-        self.assertEqual(
-            {"on": True, "detail": "enabled with failIfUnavailable, and the session started", "settings": routes.CLAUDE_SETTINGS["sandbox"]},
-            report["sandbox"],
-        )
-        self.assertTrue((out / "transcript" / "claude-stream.jsonl").exists())
-        # turns.json and run.json tell the same turns.
-        turns = json.loads((out / "turns.json").read_text())
-        self.assertEqual(turns["turns"], [turn for moment in run["moments"] for turn in moment["turns"]])
-        self.assertTrue(all(item["delivered"] for item in turns["committed"]))
-        summary = (out / "summary.md").read_text()
-        self.assertTrue(summary.startswith("# Rehearsal probe: claude-code"))
-        head = "\n".join(summary.splitlines()[:8])
-        self.assertIn("**Passed:**", head)
-        self.assertIn("- Attention: 3 of 3 attention call(s) returned a judgment", head)
-        self.assertIn(f"- claude_code: the mod attached and bound the turn, and the model answered as {SLUG}", head)
-        self.assertIn("- claude_code sandbox: on (enabled with failIfUnavailable, and the session started)", head)
-        self.assertIn("- claude_code network: its model at the scripted endpoint http://127.0.0.1:", head)
-        self.assertIn("it tried to reach api.anthropic.com:443 (CONNECT x2), each refused", head)
-        self.assertNotIn("credential files", summary)
-        result = json.loads((out / "scan.json").read_text())
-        self.assertTrue(result["clean"])
-        self.assertIn("ANTHROPIC_AUTH_TOKEN", result["variables"])
-        self.assertIn("REHEARSAL_CANARY", result["variables"])
-
-    def test_this_process_never_holds_the_proxy_settings_and_reaches_this_machine_after_a_run(self):
-        # As CI runs it, with no proxy variable at all. Python's urlopen keeps the proxy settings it saw
-        # at its first call for every later one, which would then go to the closed refusing proxy.
-        server = ThreadingHTTPServer(("127.0.0.1", 0), _Ok)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        self.addCleanup(server.server_close)
-        self.addCleanup(server.shutdown)
-        self.addCleanup(urllib.request.install_opener, None)
-        seen = []
-        play = probe.play_moment
-
-        def watched(leg, spec, **options):
-            seen.append(sorted(name for name in os.environ if name.lower().endswith("_proxy")))
-            return play(leg, spec, **options)
-
-        with mock.patch.dict(os.environ):
-            for name in [name for name in os.environ if name.lower().endswith("_proxy")]:
-                del os.environ[name]
-            urllib.request.install_opener(None)
-            code, _out, records, printed = self._run(patches=[mock.patch.object(probe, "play_moment", watched)])
-            self.assertEqual(0, code, printed)
-            # Claude Code got the refusing proxy; this process did not, at any moment.
-            self.assertTrue(next(entry for entry in records if "argv" in entry)["proxy"].startswith("http://127.0.0.1:"))
-            self.assertEqual([[], []], seen)
-            with urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}/", timeout=10) as response:
-                self.assertEqual(b"ok", response.read())
-
-    def test_a_model_claude_code_does_not_recognize_fails_the_run(self):
-        run, summary, _ = self._failed("unrecognized", "pins-and-isolation", "Claude Code did not recognize the model: [claude-code:unrecognized_model]")
-        self.assertIn("the harness did not run as configured", summary)
-        self.assertIn("Claude Code did not recognize the model", run["reports"]["claude_code"]["verdict"])
-
-    def test_a_session_in_another_permission_mode_fails_the_run(self):
-        run, _, _ = self._failed("auto", "pins-and-isolation", "permission mode 'auto', not 'default'")
-        self.assertEqual("auto", run["reports"]["claude_code"]["permission_mode"])
-
-    def test_without_the_sandbox_the_run_records_it_off(self):
-        code, out, records, printed = self._run(sandbox=False)
-        run = json.loads((out / "run.json").read_text())
-        self.assertEqual(0, code, printed)
-        start = next(entry for entry in records if "argv" in entry)
-        self.assertEqual({"enabled": False}, start["settings"]["sandbox"])
-        self.assertEqual({"on": False, "detail": "off in the user settings", "settings": {"enabled": False}}, run["reports"]["claude_code"]["sandbox"])
-        self.assertIn("- claude_code sandbox: off (off in the user settings)", (out / "summary.md").read_text())
-
-    def test_a_mod_that_never_loads_fails_the_run(self):
-        run, summary, _ = self._failed("no-mod", "turns-bound-and-ended", "the mod never attached")
-        report = run["reports"]["claude_code"]
-        self.assertFalse(report["mod_loaded"]["attached_to_the_gate"])
-        self.assertFalse(report["turn_bound"])
-        self.assertIn("- claude_code: the mod never attached (plugin errors:", summary)
-        self.assertEqual([], run["moments"][1]["posts"])
-
-    def test_a_failed_model_call_fails_the_run(self):
-        run, summary, _ = self._failed("is-error", "turns-bound-and-ended", "the agent's turn ended without an answer")
-        report = run["reports"]["claude_code"]
-        self.assertFalse(report["model"]["accepted"])
-        self.assertEqual(["API Error: 400 anthropic/claude-haiku-4.5 is not a valid model ID"], report["results"][0]["errors"])
-        self.assertIn("Claude Code ended a turn with an error result (subtype error_during_execution, is_error true): API Error: 400", summary)
-
-    def test_a_model_call_that_fails_after_the_post_fails_the_run(self):
-        # The post was delivered and settled the turn; Claude Code's own result shows the next call failed.
-        why = "Claude Code ended a turn with an error result (subtype success, is_error true): API Error: 400 scripted: broken second call"
-        run, summary, _ = self._failed("error-after-post", "turns-bound-and-ended", why)
-        self.assertEqual([{"text": probe.SCRIPTED_ANSWER, "delivery": "sent", "delivered": True}], run["moments"][1]["posts"])
-        self.assertFalse(run["reports"]["claude_code"]["model"]["accepted"])
-        self.assertEqual([why], run["reports"]["claude_code"]["failures"])
-        self.assertIn(f"- claude_code: the mod attached and bound the turn; {why}", summary)
-
-    def test_a_post_without_a_room_tool_call_fails_a_scripted_run(self):
-        run, _, _ = self._failed("no-room-tool", "scripted-outcomes", "no room tool was called")
-        report = run["reports"]["claude_code"]
-        self.assertEqual(["Bash"], report["tool_calls"])
-        self.assertIs(False, report["room_tool_called"])
-
-    def test_a_credential_claude_code_reads_from_a_fixed_path_is_recorded(self):
-        code, out, _records, printed = self._run(credentials=(".oauth_token",))
-        self.assertEqual(0, code, printed)
-        credentials = json.loads((out / "run.json").read_text())["reports"]["claude_code"]["fixed_credentials"]
-        self.assertEqual(1, len(credentials["readable"]))
-        self.assertTrue(credentials["readable"][0].endswith("/remote/.oauth_token"))
-        head = "\n".join((out / "summary.md").read_text().splitlines()[:10])
-        self.assertIn("- claude_code credential files: ", head)
-        self.assertIn("so it held a credential besides ANTHROPIC_AUTH_TOKEN", head)
-
-    def test_a_turn_past_the_hosts_deadline_fails_the_run(self):
-        # The host gives up at its deadline and cancels the turn: that is never the agent's silence.
-        run, _, out = self._failed("hang", "turns-bound-and-ended", "cancelled, outlived the host's deadline or failed", turn_timeout=4.0)
-        receipts = [json.loads(line) for path in (out / "receipts").glob("*receipts.jsonl") for line in path.read_text().splitlines()]
-        host = [receipt["body"]["outcome"] for receipt in receipts if receipt.get("stage") == "participant-host"]
-        self.assertEqual(["unknown"], host)
-        self.assertEqual([], [receipt for receipt in receipts if receipt.get("stage") == "transport"])
-        self.assertEqual("misses", run["moments"][1]["outcome"])
-
-    def test_dead_attention_fails_the_run_and_lists_its_fallback_wakes(self):
-        run, summary, _ = self._failed(
-            "", "attention-judged", "attention never returned a judgment",
-            patches=[mock.patch.object(probe, "ScriptedAttention", _DeadAttention)],
-        )
-        head = "\n".join(summary.splitlines()[:10])
-        self.assertIn("HTTP 503", head)
-        self.assertIn("came from the error fallback, not attention's judgment", head)
-        bot = run["moments"][0]
-        self.assertEqual(["ERROR_FALLBACK"], bot["graded_wake_sources"])
-        self.assertIn("woken by attention's error fallback, not its judgment", summary)
-
-    def test_a_post_over_discords_limit_is_refused_and_fails_the_run(self):
-        run, _, _ = self._failed("long", "one-room-action-per-turn", "was not delivered: it reads 'failed'")
-        self.assertEqual(
-            [{"text": "Ten seconds. " + "x" * 2100, "delivery": "failed", "delivered": False}], run["moments"][1]["posts"]
-        )
-        self.assertEqual("misses", run["moments"][1]["outcome"])
-
-    def test_an_acknowledgement_the_library_cannot_attest_fails_the_run(self):
-        run, _, _ = self._failed("", "one-room-action-per-turn", "it reads 'unknown'", patches=[_wrong_author()])
-        self.assertEqual("misses", run["moments"][1]["outcome"])
-
-    def test_a_graded_message_that_never_reaches_nunchi_reads_not_delivered(self):
-        deliver = probe.SharedTransportLeg.deliver
-
-        def drop_the_bot(leg, raw, at, scene, sequence):
-            if raw["id"] != "b1":
-                return deliver(leg, raw, at, scene, sequence)
-            return {"scene_event": "b1", "event_id": "discord:message:1", "reached_nunchi": False, "observed": False}
-
-        run, summary, _ = self._failed(
-            "", "scripted-outcomes", "bot-status-report reads 'not delivered'",
-            patches=[mock.patch.object(probe.SharedTransportLeg, "deliver", drop_the_bot)],
-        )
-        self.assertEqual("not delivered", run["moments"][0]["outcome"])
-        self.assertIn("| bot-status-report | no-turn | no | 0 | 0 of 0 | not delivered |", summary)
-
-    def test_a_canary_in_any_output_deletes_the_outputs_and_fails_the_run(self):
-        code, out, _records, printed = self._run("leak")
-        self.assertEqual(1, code)
-        self.assertEqual({"scan.json", "summary.md"}, {path.name for path in out.iterdir()})
-        result = json.loads((out / "scan.json").read_text())
-        self.assertFalse(result["clean"])
-        self.assertIn("REHEARSAL_CANARY", {hit["variable"] for hit in result["hits"]})
-        self.assertIn("deleted", (out / "summary.md").read_text())
-        self.assertIn("deleted", printed)
-
-
-class ProbeCommandTest(unittest.TestCase):
-    def test_no_sandbox_is_for_claude_code_only(self):
-        for harness in ("codex", "hermes"):
-            with self.subTest(harness=harness), tempfile.TemporaryDirectory() as directory:
-                with contextlib.redirect_stderr(io.StringIO()) as error:
-                    code = probe.main(["--harness", harness, "--scripted", "--no-sandbox", "--out", directory])
-                self.assertEqual(probe.EXIT_USAGE, code)
-                self.assertIn("claude-code only", error.getvalue())
-                self.assertEqual([], list(Path(directory).iterdir()))
-
-    def test_a_missing_harness_is_recorded_as_could_not_run(self):
-        with tempfile.TemporaryDirectory() as directory:
-            options = probe.Options(harness="codex", out=Path(directory), scripted=True, codex_bin="/nonexistent/codex", command=["test"])
-            with contextlib.redirect_stdout(io.StringIO()):
-                code = probe.run_probe(options)
-            run = json.loads((Path(directory) / "codex" / "run.json").read_text())
-            summary = (Path(directory) / "codex" / "summary.md").read_text()
-        self.assertEqual(probe.EXIT_COULD_NOT_RUN, code)
-        self.assertEqual("could-not-run", run["status"])
-        self.assertIn("Codex is not installed", " ".join(run["errors"]))
-        self.assertIn("**Could not run:**", summary)
-
-    def test_a_live_run_needs_the_key(self):
-        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("NUNCHI_ATTENTION_API_KEY", None)
-            with contextlib.redirect_stdout(io.StringIO()):
-                code = probe.run_probe(probe.Options(harness="hermes", out=Path(directory), command=["test"]))
-            run = json.loads((Path(directory) / "hermes" / "run.json").read_text())
-        self.assertEqual(probe.EXIT_COULD_NOT_RUN, code)
-        self.assertIn("NUNCHI_ATTENTION_API_KEY is not set", " ".join(run["errors"]))
-
-    def test_a_probe_error_fails_the_run_even_when_every_check_held(self):
-        document = {"errors": ["RuntimeError: boom in the second moment"]}
-        probe._set_status(document, [checks.Check("no-leaks", True, "")], could_not_run=False, stopped=False)
-        self.assertEqual(("fail", probe.EXIT_FAILED), (document["status"], document["exit_code"]))
-        document = {"errors": []}
-        probe._set_status(document, [checks.Check("no-leaks", False, "x")], could_not_run=False, stopped=True)
-        self.assertEqual("fail", document["status"])
-        document = {"errors": []}
-        probe._set_status(document, [checks.Check("no-leaks", True, "")], could_not_run=False, stopped=True)
-        self.assertEqual(("stopped-at-budget", probe.EXIT_BUDGET), (document["status"], document["exit_code"]))
-
-    def test_bad_arguments(self):
-        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stderr(io.StringIO()):
-            self.assertEqual(probe.EXIT_USAGE, probe.main(["--harness", "codex", "--out", directory, "--budget-usd", "0"]))
-            self.assertEqual(probe.EXIT_USAGE, probe.main(["--harness", "codex", "--out", directory, "--attention-model", "m@loud"]))
-            self.assertEqual(
-                probe.EXIT_USAGE, probe.main(["--harness", "codex", "--out", directory, "--attention-model", "responses:m@low"])
-            )
-            # Claude Code runs only on a slug the probe maps to Claude Code's own model id.
-            self.assertEqual(
-                probe.EXIT_USAGE, probe.main(["--harness", "claude-code", "--out", directory, "--agent-model", "openai/gpt-6-luna"])
-            )
-            self.assertEqual([], list(Path(directory).iterdir()))
-
-
-# -- the scripted probe through the pinned installs -----------------------------------------------------
-
-
-def _claude_available() -> bool:
-    executable = os.environ.get("NUNCHI_CLAUDE_BIN")
-    return bool(executable) and os.access(executable, os.X_OK)
-
-
-def _codex_available() -> bool:
-    from nunchi.integrations.codex_app_server_conformance import codex_available
-
-    return codex_available()
-
-
-def _hermes_available() -> bool:
-    from nunchi.integrations.hermes_plugin_conformance import discord_available
-
-    return discord_available()
-
-
-def _scripted(harness: str, *extra: str) -> tuple[int, dict, dict, str]:
-    """``python -m evals.rehearsal.probe --harness <harness> --scripted``, as CI runs it, in its own process."""
-
-    directory = tempfile.mkdtemp(prefix="nrs-")
-    try:
-        env = dict(os.environ)
-        # The same Nunchi this test imports: the source tree or the installed wheel.
-        env["PYTHONPATH"] = str(Path(nunchi.__file__).resolve().parents[1])
-        done = subprocess.run(
-            [sys.executable, "-m", "evals.rehearsal.probe", "--harness", harness, "--scripted", "--out", directory, *extra],
-            cwd=REPO,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=900,
-        )
-        run = json.loads((Path(directory) / harness / "run.json").read_text())
-        result = json.loads((Path(directory) / harness / "scan.json").read_text())
-        return done.returncode, run, result, done.stdout + done.stderr
-    finally:
-        __import__("shutil").rmtree(directory, ignore_errors=True)
-
-
-class ScriptedProbeTest(unittest.TestCase):
-    """The scripted probe as CI's lanes run it: every moment's outcome is a hard check."""
-
-    def _check(self, harness, *extra):
-        code, run, result, output = _scripted(harness, *extra)
-        self.assertEqual(0, code, output)
-        self.assertEqual("scripted", run["mode"])
-        self.assertTrue(all(check["ok"] for check in run["checks"]), run["checks"])
-        self.assertEqual("scripted-outcomes", run["checks"][-1]["name"])
-        moments = {moment["name"]: moment for moment in run["moments"]}
-        # The bot's status report reaches Nunchi, and attention lets it pass.
-        self.assertTrue(moments["bot-status-report"]["reached"])
-        self.assertEqual(0, moments["bot-status-report"]["graded_turns"])
-        self.assertEqual("fits", moments["bot-status-report"]["outcome"])
-        self.assertEqual("fits", moments["direct-question"]["outcome"])
-        self.assertEqual(1, len(moments["direct-question"]["posts"]))
-        post = moments["direct-question"]["posts"][0]
-        self.assertEqual(probe.SCRIPTED_ANSWER, post["text"])
-        self.assertTrue(post["delivered"])
-        self.assertEqual(["WAKE"], moments["direct-question"]["graded_wake_sources"])
-        self.assertTrue(result["clean"])
-        self.assertFalse(run["spend"]["read"])
-        # The record names the scripted endpoint as the agent's route.
-        self.assertTrue(run["models"]["agent"]["route"]["base_url"].startswith("http://127.0.0.1:"))
-        return run
-
-    def _no_nunchi_key_in_a_harness_process(self, run):
-        for entry in [*run["commands"], *run["environment"]["processes"]]:
-            if entry.get("in_process"):
-                continue
-            with self.subTest(process=entry.get("what") or entry.get("process")):
-                self.assertNotIn("NUNCHI_ATTENTION_API_KEY", entry["env"])
-                self.assertNotIn("NUNCHI_REHEARSAL_OUTPUT_KEY", entry["env"])
-
-    @unittest.skipUnless(_claude_available(), "requires the pinned Claude Code (NUNCHI_CLAUDE_BIN)")
-    def test_claude_code(self):
-        # The README's Bash sandbox needs bubblewrap and socat; CI installs both. Where they are
-        # missing, the run goes without the sandbox and records it as off.
-        sandboxed = bool(shutil.which("bwrap") and shutil.which("socat"))
-        run = self._check("claude-code", *(() if sandboxed else ("--no-sandbox",)))
-        report = run["reports"]["claude_code"]
-        # The real claude -p loaded the mod, which attached, bound the turn and posted through its room tool.
-        self.assertTrue(report["mod_loaded"]["attached_to_the_gate"])
-        self.assertIn("nunchi", report["mod_loaded"]["init_plugins"])
-        self.assertTrue(report["turn_bound"])
-        self.assertEqual(["mcp__nunchi__room_send"], report["tool_calls"])
-        self.assertTrue(report["room_tool_called"])
-        self.assertEqual([SLUG], report["model"]["answered_as"])
-        self.assertEqual([], report["not_as_configured"])
-        self.assertEqual(sandboxed, report["sandbox"]["on"])
-        # Its model was the scripted endpoint, streaming: two calls, the room tool's and the one
-        # carrying its result. A third would be Claude Code falling back from a stream it could not read.
-        route = run["models"]["agent"]["route"]
-        self.assertEqual(route["base_url"], route["env"]["ANTHROPIC_BASE_URL"])
-        self.assertEqual(2, report["scripted_model"]["agent_requests"])
-        self.assertEqual([], report["failures"])
-        # Everything else went to a proxy that refused it; what it tried is recorded, not judged.
-        self.assertIsInstance(report["network"]["tried_to_reach"], list)
-        commands = {command["what"]: command for command in run["commands"]}
-        session = commands["the room's Claude Code session, launched by the runtime"]
-        self.assertEqual(["ANTHROPIC_AUTH_TOKEN", "REHEARSAL_CANARY"], session["secrets"])
-        self._no_nunchi_key_in_a_harness_process(run)
-        self.assertEqual(["NUNCHI_ATTENTION_API_KEY", "NUNCHI_REHEARSAL_OUTPUT_KEY"], run["environment"]["nunchi_process_only"])
-
-    @unittest.skipUnless(_codex_available(), "requires the pinned Codex (NUNCHI_CODEX_BIN)")
-    def test_codex(self):
-        run = self._check("codex")
-        report = run["reports"]["codex"]
-        self.assertTrue(report["room_tool_called"])
-        self.assertTrue(report["scripted_model"]["room_tools_offered_as_namespace"])
-        # Every app-server the integration started, with the variables it got.
-        commands = {command["what"]: command for command in run["commands"]}
-        app = commands["codex app-server, started by the integration"]
-        self.assertEqual(["app-server", "--listen", "stdio://"], app["argv"][1:])
-        self.assertEqual(["OPENROUTER_API_KEY", "REHEARSAL_CANARY"], app["secrets"])
-        bridge = next(command for command in run["commands"] if command["what"].startswith("the room's MCP server"))
-        self.assertEqual(["NUNCHI_CODEX_TURN_SESSION", "NUNCHI_CODEX_TURN_SOCKET"], bridge["env"])
-        self.assertIn("git init, the agent's working directory", commands)
-        self._no_nunchi_key_in_a_harness_process(run)
-        self.assertEqual(["NUNCHI_ATTENTION_API_KEY", "NUNCHI_REHEARSAL_OUTPUT_KEY"], run["environment"]["nunchi_process_only"])
-        # Whether Codex's sandbox was on, as Codex reported it.
-        self.assertEqual("workspaceWrite", report["sandbox"]["policy"]["type"])
-        self.assertIn(report["sandbox"]["on"], (True, False))
-
-    @unittest.skipUnless(_hermes_available(), "requires an installed Hermes with discord.py (hermes-agent[messaging])")
-    def test_hermes(self):
-        run = self._check("hermes")
-        report = run["reports"]["hermes"]
-        self.assertTrue(report["plugin_loaded"])
-        self.assertGreaterEqual(report["model_calls_in_session"], 1)
-        # Hermes's final answer is delivered by Hermes itself: it reads unknown, and the room received exactly it.
-        self.assertEqual("unknown", run["moments"][1]["posts"][0]["delivery"])
-        # The README's peer-agent settings: Hermes hears the CI bot.
-        config = next(entry for entry in run["configs"] if entry["name"] == "hermes config.yaml")
-        discord = json.loads(config["content"])["discord"]
-        self.assertEqual("all", discord["allow_bots"])
-        self.assertIs(False, discord["bots_require_inline_mention"])
-        # Hermes runs the plugin in this process: attention reads Hermes's own OPENROUTER_API_KEY,
-        # no NUNCHI_* key is in the process, and Hermes's own builders give the agent's commands no key.
-        environment = run["environment"]
-        self.assertEqual("OPENROUTER_API_KEY", environment["attention_key"])
-        self.assertEqual([], environment["nunchi_process_only"])
-        self._no_nunchi_key_in_a_harness_process(run)
-        processes = {entry["process"]: entry for entry in environment["processes"]}
-        hermes = processes["Hermes's GatewayRunner and the plugin, in the probe's process"]
-        self.assertFalse([name for name in hermes["env"] if name.startswith("NUNCHI_")])
-        self.assertEqual(["OPENROUTER_API_KEY", "REHEARSAL_CANARY"], hermes["secrets"])
-        shells = [entry for entry in environment["processes"] if entry.get("agent_shell")]
-        self.assertEqual(2, len(shells))
-        for shell in shells:
-            self.assertNotIn("OPENROUTER_API_KEY", shell["env"])
-            self.assertEqual(["REHEARSAL_CANARY"], shell["secrets"])
-        self.assertEqual({"on": False, "terminal_backend": "local"}, {key: report["sandbox"][key] for key in ("on", "terminal_backend")})
-
-
-if __name__ == "__main__":
-    unittest.main()

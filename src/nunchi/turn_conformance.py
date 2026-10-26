@@ -1,9 +1,11 @@
-"""Conformance for the agent's turn, through any integration (#94 step 9d).
+"""Checks for the current shared turn implementation.
 
-Every harness must give its agent the same turn (`docs/harness-contract.md`).
-This kit checks that: a scripted agent plays a scenario's turns through an
-integration's real path, and the kit compares what the room and the agent saw
-with what the turn's rules say. The results make the parity table.
+The supplied harness integrations were retired. By default this kit checks
+the reference implementation directly; callers can supply an external
+`KitIntegration` for comparison. A scripted agent plays each scenario, and
+the kit compares what the room and the agent saw with the current turn rules.
+These checks describe the implementation under architecture review, not
+requirements for replacement integrations.
 
 Most scenarios are one turn, started by a message. Two have a second turn that
 the library starts itself, with no new message: after a pause, when it looks
@@ -16,8 +18,8 @@ nothing and is not a room action. Tool posting only: in final-answer posting
 the silence marker is the quiet (``final-silence``). An integration names a
 tool for the role, and its surface calls it by role like any other.
 
-Two scenarios, ``gap`` and ``final-gap``, start the room the way an
-integration must (`docs/harness-guide.md`): with a continuity gap declared
+Two scenarios, ``gap`` and ``final-gap``, start the current room implementation
+with a continuity gap declared
 before the first message. The turn that reads the room across it must say so
 in the library's one plain sentence, and the turn after the agent has taken
 one past it must not (agreed, 2026-10-10).
@@ -562,7 +564,7 @@ class _DirectDriver(TurnDriver):
 
 
 class ReferenceIntegration:
-    """The core turn with no harness around it: what every integration must match.
+    """The current core turn with no harness around it.
 
     In final-answer posting its harness reports what the scripted model
     wrote, treats ``NO_REPLY`` as silence too, and can put its own text in

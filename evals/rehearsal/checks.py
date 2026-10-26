@@ -1,56 +1,8 @@
-"""The probe's hard checks, and what it reports without judging (step 9f, PR 1).
+"""Checks for the current reference participant and Discord rehearsal.
 
-A pass means exactly this: the pinned harness, run as a clean user, reached
-its model and took part in the room through Nunchi, with live attention
-judging. Each hard check that fails fails the harness, and its reason leads
-summary.md:
-
-1. **pins-and-isolation**: the harness is the pinned version; the homes its
-   integration handed it (HOME, TMPDIR, and CODEX_HOME, HERMES_HOME or
-   CLAUDE_CONFIG_DIR) are under the run's directory; the real user's
-   ``~/.codex`` and ``~/.hermes`` were not created or changed; no process
-   the run recorded got a key but the harness's own (Nunchi's keys stay in
-   Nunchi's process), and the agent's own commands get no key at all where
-   the harness's builder shows their environment (Hermes's terminal); and
-   the harness showed nothing that says it ran otherwise than configured
-   (Claude Code: a model it did not recognize, or another permission mode
-   than the pinned version starts in for that model).
-2. **record-complete**: the record holds what AGENTS.md asks for.
-3. **turns-bound-and-ended**: at least one wake reached the harness, and
-   every turn the library handed it was bound to its wake and ended with the
-   harness's own result. The participant-host receipt is authoritative: a
-   turn the host recorded as ``unknown`` with nothing handed to the room was
-   cancelled, timed out or failed. A named failure fails too: the harness
-   did not take the turn, which is never read as silence. So does a turn
-   the harness itself ended in error, even after its post (Claude Code's
-   error result, Codex's failed turn), in the harness's own words.
-4. **attention-judged**: attention returned at least one judgment. Failed
-   calls, and the wakes their error fallback caused, are counted and listed.
-5. **one-room-action-per-turn**: no turn made more than one room action,
-   and each was delivered: it reads ``sent``, or, for a harness that posts
-   its final answer itself (Hermes), the room received exactly that text.
-6. **no-leaks**: the room got only what the library committed, and no
-   committed post names Nunchi's machinery: the conformance kit's own count
-   (`nunchi.turn_conformance.leaks`). A gap the integration declares reads as
-   a failure with its name, never as a pass.
-7. **scripted-outcomes** (``--scripted`` only): with the model and attention
-   scripted, each moment's outcome is known, so it is checked.
-
-A run in the Discord room (``--room discord``, PR 3b) holds seven more, the
-``discord-*`` checks, listed with them below. With ``--scene`` (PR 4a, the
-reference; PR 4b, Claude Code and Codex too) the run plays one behavior scene,
-and its scripted check is `directed_outcomes` in place of `scripted_outcomes`
-(since PR 4c it also holds the agent's own earlier lines to the scene and the
-holds that put a message into a turn); for Claude Code and Codex it holds one
-more, `room_errors`.
-
-Neither the key nor the canary may be in any output: the scan
-(`scan.enforce`) fails the run after the record is written.
-
-In a live run, whether a moment got a post or no turn is the model's to
-decide: the probe reports it next to what the moment expects, and never
-fails on it. A moment whose graded message never reached Nunchi reads ``not
-delivered``.
+These verify delivery, receipts, process isolation and scripted outcomes. Their
+current turn contract is under architecture review. Live grades are observations
+against legacy draft fixtures, not product acceptance criteria.
 """
 
 from __future__ import annotations
@@ -93,15 +45,14 @@ def pins_and_isolation(
 ) -> Check:
     """The pinned harness, run as a clean user and as configured, the real user's homes untouched, and keys kept where they belong.
 
-    ``actual_homes`` are the homes the integration handed the harness, read
-    from the environment it starts the harness with (Hermes, in this process:
-    the kit's own home under the run's TMPDIR). ``processes`` are the
+    ``actual_homes`` are the paths in the reference process environment.
+    ``processes`` are the
     recorded commands and processes, each with the ``secrets`` among its
     variables (names); one marked ``agent_shell`` is the environment of the
     agent's own commands. A process may hold the harness's own key
     (``harness_keys``) and the ``canary``; the agent's shell only the canary.
     ``not_as_configured`` is what the harness showed of running otherwise
-    than the probe set it up (`probe.claude_code_report`).
+    than the probe set it up.
     """
 
     problems: list[str] = []
@@ -282,7 +233,7 @@ def delivered(committed: Sequence[Mapping[str, Any]], room_effects: Sequence[Map
     """Whether each committed action reached the room.
 
     An action is delivered when its transport attested it ``sent``. A
-    harness that posts its final answer itself (Hermes, ``harness_posts``)
+    caller that posts its final answer itself (``harness_posts``)
     leaves its delivery ``unknown`` by design: there it is delivered when the
     room received exactly that text, each message in the room matching one
     answer at most.
@@ -328,7 +279,7 @@ def no_leaks(
     The kit's leak count (`turn_conformance.leaks`), with the room's effects
     as what the harness showed and ``ids`` the turns' request ids and tool
     names. ``known_gaps`` are what the integration declares its harness shows
-    by itself (`HERMES_KNOWN_GAPS`), scoped to `PROBE_SCENARIO`: a match is
+    by itself, scoped to `PROBE_SCENARIO`: a match is
     named as that gap, and fails the check too (a declared gap reads as a gap,
     never as a pass).
     """
@@ -396,7 +347,7 @@ def scripted_outcomes(moments: Sequence[Mapping[str, Any]], answer: str, *, room
 
     Scripted attention wakes only for the direct question, and the scripted
     agent posts ``answer`` once. So each moment fits, no other message starts
-    a turn, the one post is ``answer``, and, for Codex and Claude Code, it
+    a turn, the one post is ``answer``, and, when tool calls are supplied, it
     went through a room tool (``room_tool_called``). A wait for the room to go
     quiet that timed out fails too (`unsettled`).
     """
@@ -440,7 +391,7 @@ def scripted_outcomes(moments: Sequence[Mapping[str, Any]], answer: str, *, room
 # 13. **discord-continuity**: the continuity gap the column's process
 #     declares when it starts reached the participant; after op 7, every bot
 #     resumed its session (no new IDENTIFY) and the message posted meanwhile
-#     reached Nunchi. On the shared transport and in Hermes, also no
+#     reached Nunchi. On the shared transport, also no
 #     continuity gap after op 7: not in the transport's journal, not in the
 #     participant's observations. The reference marks a stream gap on any
 #     disconnect; that is recorded, not failed.
@@ -451,7 +402,7 @@ def scripted_outcomes(moments: Sequence[Mapping[str, Any]], answer: str, *, room
 #     Two things the room log must give the agent are checked: the next turn
 #     after its reaction holds that reaction in memory, and the reply's
 #     target resolves to the agent's own post (pinned the other way for
-#     Hermes, a known gap).
+#     an explicitly recorded delivery gap).
 #
 # With ``--scripted``, `discord_scripted_outcomes` checks each moment of the
 # Discord room. A moment that expects ``report`` is reported, not graded,
@@ -482,13 +433,9 @@ def discord_moment_outcome(
     ``thread`` (the action's ``where``, read from the wire), not in the
     channel. ``report`` reads `NOT_DELIVERED` or `REACHED`: it is never graded.
 
-    A harness that posts its final answer itself (``posts_itself``, Hermes)
-    makes no Discord reply: a ``reply`` fits one plain message the turn was
-    about the graded message (``origin_event_id``) that the wire shows posted
-    as a plain message (``replied_to`` None), and a ``thread-reply`` the
-    same message landing in the main ``channel``, where Hermes starts every
-    run, not in the thread: gaps pinned until Hermes or its plugin closes
-    them (integrations/hermes-plugin/README.md, Known gaps).
+    ``posts_itself`` supports recorded callers that deliver a plain final
+    message rather than a Discord reply. This compatibility path does not
+    apply to the reference participant.
     """
 
     if expect in ("post", "no-turn"):
@@ -597,8 +544,8 @@ def directed_outcomes(moments: Sequence[Mapping[str, Any]], *, room_tool_calls: 
     have reached Nunchi (a lost message changes the room the graded one is read
     in), no committed action may lie outside the graded turns
     (``other_actions``: the chatter, which the script leaves silent), and no
-    wait for the room to go quiet may have timed out (`unsettled`). For Claude
-    Code and Codex, which act through a room tool, ``room_tool_calls`` (the
+    wait for the room to go quiet may have timed out (`unsettled`). Optional
+    ``room_tool_calls`` (the
     calls the harness's own record shows, `room_call_for` reads them) must
     back every delivered action: each post or nod must have a completed call
     of the right tool with the same words or the same message and reaction,
@@ -733,7 +680,7 @@ def live_scene_plumbing(
     have reached Nunchi (a message that did not changes the room every later
     moment is read in, and the run tested nothing there), and every action the
     agent's turns delivered to the room must be one the harness's own record
-    shows it made. For Claude Code and Codex, which act through a room tool,
+    shows it made. When room tool records are supplied,
     ``room_tool_calls`` (the calls that record shows) must back each delivered
     action in ``committed`` (`room_call_for`: a completed call of the right
     tool with the same words, or the same message and reaction, one call for
@@ -848,7 +795,7 @@ def room_errors(lane_errors: Sequence[Any], serve_errors: Sequence[Any]) -> Chec
     ``lane_errors`` are what the in-process room's worker met (`Room.errors`),
     and ``serve_errors`` the exceptions that ended the runner's serve loop
     (`DiscordRoomConnection.serve`, on its thread). Both are recorded for every
-    Claude Code and Codex run and empty in every run that passed; a scene run
+    caller run and empty in every run that passed; a scene run
     fails on either, since a lane that met an error may have dropped a message
     or a turn the record then does not show.
     """
@@ -1024,7 +971,7 @@ def discord_continuity(
     starts (``gap``, its delivery id, or None when the participant never
     saw one): it cannot know what happened before it connected, and says so.
     Every column declares one: the shared transport, the reference and the
-    Hermes plugin (when its room starts).
+    reference adapter (when its room starts).
 
     Each of ``reconnects`` is one bot's op 7: ``resumed`` (RESUME sent and
     RESUMED answered), ``identified_again``, ``message_reached`` (the
@@ -1129,9 +1076,8 @@ def discord_addressing(
     next turn after the agent's reaction must hold that reaction in its
     ``own_moves``, and the reply's target must resolve to the agent's own post
     (``reply_resolves`` on the delivery). The second is pinned either way,
-    because a harness may not give the library what it needs: it is True for
-    every column but Hermes, whose gap it pins until Hermes closes it, and a
-    pin that no longer holds fails and says to update it.
+    because a caller may not supply the required context. The reference
+    expects the target to resolve; a changed result fails the check.
 
     In a directed scene (``expect`` ``directed``) every message the director
     posted is checked, not only the graded ones. It records the pings the scene

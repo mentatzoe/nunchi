@@ -1,19 +1,4 @@
-"""Holds and the agent's own earlier lines (rehearsal PR 4c): the scenes where timing and the agent's own history matter.
-
-PR 4a and 4b play four multi-person scenes through the reference, Claude Code
-and Codex. PR 4c plays seven more, which need what a one-person test cannot
-show: a message that lands while the agent is composing, a question asked while
-it is busy, a promise it made and must keep, a nod it gave and is asked about.
-The director never posts as the agent, so the agent's earlier lines are its own
-scripted moves on the messages they answer (`standin.Line`), checked to have
-landed exactly, and a turn is held at the scripted model endpoint (`standin.Gate`)
-while the director posts what lands in it.
-
-These tests need neither a harness nor the launcher. They hold the plan of each
-scene, the gate, the script's draft and decision, the endpoints' reading of the
-page the core's look before posting shows the agent, the director's order of
-posting, how a hold and a line are judged, and the hard checks, each with the
-mutation that must fail it.
+"""Offline tests for reference scene timing, participant history and scripted holds.
 """
 
 from __future__ import annotations
@@ -33,8 +18,11 @@ from evals.behavior.score import agent_move
 from evals.rehearsal import checks, directed, discord_room, record, standin
 
 from tests.v2.test_rehearsal_directed import FIRST_FOUR, NEWS, SEVEN, _moment, _news, _scene
-from tests.v2.test_rehearsal_directed_harness import QUIET, REACT, SEND
 from tests.v2.test_rehearsal_discord_room import _tagged, _turn
+
+SEND = "send_message"
+REACT = "add_reaction"
+QUIET = "silence"
 
 DURING = ("answered-while-composing", "never-mind-while-composing")
 # What each scene's agent says earlier, by its event, and the message it says it on: the plan of PR 4c.
@@ -333,7 +321,7 @@ class NewsTest(unittest.TestCase):
         codex = {"input": [{"type": "message", "content": [{"type": "input_text", "text": _tagged(turn)}]},
                            {"type": "function_call_output", "call_id": "c", "output": self.PAGE}]}
         plain = {"messages": [{"role": "user", "content": json.dumps({"participant_turn": turn, "context_pages": [{"note": self.PAGE, "events": []}]})}]}
-        for name, body in (("claude", claude), ("claude blocks", blocks), ("codex", codex), ("plain", plain)):
+        for name, body in (("claude", claude), ("claude blocks", blocks), ("reference", codex), ("plain", plain)):
             with self.subTest(column=name):
                 self.assertIn("discord:message:5", standin.news_shown(body))
                 self.assertIn(standin.NEWS_MARK, standin.news_shown(body))
@@ -378,64 +366,6 @@ class EndpointTest(unittest.TestCase):
         thread.start()
         return thread, got
 
-    def test_the_scripted_claude_endpoint_holds_a_turns_first_call_drafts_then_decides_on_the_page(self):
-        item, moment, text = _held()
-        gate = item.script.gates[moment.event]
-        agent = standin.ScriptedClaudeAgent("unused", SEND, script=item.script, tools={"react": REACT, "quiet": QUIET})
-        self.addCleanup(agent.close)
-        turn = _turn("discord:message:7", text)
-        first = {"tools": [{"name": SEND}, {"name": REACT}, {"name": QUIET}], "messages": [{"role": "user", "content": [{"type": "text", "text": _tagged(turn)}]}]}
-        thread, got = self.asking(lambda: agent.reply(first))
-        self.assertTrue(gate.wait_asked(2))
-        time.sleep(0.2)
-        self.assertNotIn("answer", got, "the model's first answer is held")
-        gate.release()
-        thread.join(2)
-        kind, blocks, stop = got["answer"]
-        self.assertEqual(("agent-tool-call", "tool_use"), (kind, stop))
-        self.assertEqual({"text": standin.SCENE_DRAFT.format(event=moment.event)}, blocks[0]["input"])
-        # The room tool's answer is the page: the agent drops its post and says it stays quiet, with the quiet tool.
-        second = copy.deepcopy(first)
-        second["messages"].append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": NEWS}]})
-        kind, blocks, stop = agent.reply(second)
-        self.assertEqual(("agent-tool-call", "tool_use"), (kind, stop))
-        self.assertEqual(
-            (QUIET, {"why": standin.SCENE_QUIET["stay_quiet"].format(event=moment.event)}), (blocks[0]["name"], blocks[0]["input"])
-        )
-        self.assertEqual([NEWS], gate.news)
-        # A result that is not the page ends the turn as it always did.
-        done = copy.deepcopy(first)
-        done["messages"].append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "Posted."}]})
-        self.assertEqual(("agent", "end_turn"), agent.reply(done)[::2])
-        self.assertEqual([NEWS], gate.news)
-
-    def test_the_scripted_codex_endpoint_holds_a_turns_first_call_drafts_then_decides_on_the_page(self):
-        item, moment, text = _held("never-mind-while-composing")
-        gate = item.script.gates[moment.event]
-        agent = standin.ScriptedCodexAgent("unused", script=item.script)
-        self.addCleanup(agent.close)
-        message = {"type": "message", "content": [{"type": "input_text", "text": _tagged(_turn("discord:message:7", text))}]}
-        replies: list[dict] = []
-        requests = {"input": [message]}
-        with mock.patch.object(agent.model, "latest", side_effect=lambda: requests), mock.patch.object(agent.model, "reply", replies.append):
-            thread, _ = self.asking(agent._next)
-            self.assertTrue(gate.wait_asked(2))
-            time.sleep(0.2)
-            self.assertEqual([], replies, "the model's first answer is held")
-            gate.release()
-            thread.join(2)
-            self.assertEqual(("room_send", {"text": standin.SCENE_DRAFT.format(event=moment.event)}), (replies[0]["tool"], replies[0]["arguments"]))
-            requests = {"input": [message, {"type": "function_call_output", "call_id": "c", "output": NEWS}]}
-            agent._next()
-            self.assertEqual(
-                ("room_quiet", {"why": standin.SCENE_QUIET["stay_quiet"].format(event=moment.event)}),
-                (replies[1]["tool"], replies[1]["arguments"]),
-                "shown the page, the agent drops its post and says it stays quiet, with the quiet tool",
-            )
-            requests = {"input": [message, {"type": "function_call_output", "call_id": "c", "output": "Posted."}]}
-            agent._next()
-            self.assertEqual({"text": "Posted my answer."}, replies[2])
-        self.assertEqual([NEWS], gate.news)
 
     def test_the_scripted_participant_holds_a_turns_first_call_drafts_then_decides_on_the_page(self):
         item, moment, text = _held()
@@ -498,7 +428,7 @@ class WordFirstTest(unittest.TestCase):
         codex = {"input": [{"type": "message", "content": [{"type": "input_text", "text": _tagged(turn)}]},
                            {"type": "function_call_output", "call_id": "c", "output": REFUSED}]}
         plain = {"messages": [{"role": "user", "content": json.dumps({"participant_turn": turn, "context_pages": [{"note": REFUSED, "events": []}]}, ensure_ascii=False)}]}
-        for name, body in (("claude", claude), ("codex", codex), ("plain", plain)):
+        for name, body in (("claude", claude), ("reference", codex), ("plain", plain)):
             with self.subTest(column=name):
                 self.assertIn(standin.REFUSAL_MARK, standin.refusal_shown(body))
                 self.assertIsNone(standin.news_shown(body), "a refusal is not the page of news")
@@ -541,44 +471,6 @@ class WordFirstTest(unittest.TestCase):
                 self.assertNotEqual(standin.SCENE_WORD, action.get("reaction"), (scene_id, moment.label))
             self.assertEqual(0, spoken.script.words_tried)
 
-    def test_the_claude_endpoint_reacts_with_the_word_then_with_the_emoji_on_the_tools_refusal_and_then_ends_the_turn(self):
-        item = directed.spec(self.SCENE, word_first=True)
-        moment, turn = _nod_moment(item)
-        agent = standin.ScriptedClaudeAgent("unused", SEND, script=item.script, tools={"react": REACT, "quiet": QUIET})
-        self.addCleanup(agent.close)
-        first = {"tools": [{"name": SEND}, {"name": REACT}, {"name": QUIET}], "messages": [{"role": "user", "content": [{"type": "text", "text": _tagged(turn)}]}]}
-        kind, blocks, stop = agent.reply(first)
-        self.assertEqual(("agent-tool-call", "tool_use", REACT, standin.SCENE_WORD), (kind, stop, blocks[0]["name"], blocks[0]["input"]["reaction"]))
-        second = copy.deepcopy(first)
-        second["messages"] += [{"role": "assistant", "content": blocks},
-                               {"role": "user", "content": [{"type": "tool_result", "tool_use_id": blocks[0]["id"], "content": REFUSED, "is_error": True}]}]
-        kind, blocks, stop = agent.reply(second)
-        self.assertEqual(("agent-tool-call", "tool_use", REACT, standin.SCENE_NOD), (kind, stop, blocks[0]["name"], blocks[0]["input"]["reaction"]))
-        third = copy.deepcopy(second)
-        third["messages"] += [{"role": "assistant", "content": blocks},
-                              {"role": "user", "content": [{"type": "tool_result", "tool_use_id": blocks[0]["id"], "content": "Done: the room accepted this action."}]}]
-        self.assertEqual(("agent", "end_turn"), agent.reply(third)[::2])
-        self.assertEqual((1, 1), (item.script.words_tried, item.script.words_refused))
-
-    def test_the_codex_endpoint_does_the_same_on_the_tool_answer_of_an_item(self):
-        item = directed.spec(self.SCENE, word_first=True)
-        moment, turn = _nod_moment(item)
-        agent = standin.ScriptedCodexAgent("unused", script=item.script)
-        self.addCleanup(agent.close)
-        message = {"type": "message", "content": [{"type": "input_text", "text": _tagged(turn)}]}
-        replies: list[dict] = []
-        requests = {"input": [message]}
-        with mock.patch.object(agent.model, "latest", side_effect=lambda: requests), mock.patch.object(agent.model, "reply", replies.append):
-            agent._next()
-            requests = {"input": [message, {"type": "function_call_output", "call_id": "c1", "output": REFUSED}]}
-            agent._next()
-            requests = {"input": [message, {"type": "function_call_output", "call_id": "c2", "output": "Done: the room accepted this action."}]}
-            agent._next()
-        self.assertEqual(
-            [("room_react", standin.SCENE_WORD), ("room_react", standin.SCENE_NOD)], [(r["tool"], r["arguments"]["reaction"]) for r in replies[:2]]
-        )
-        self.assertEqual({"text": "Posted my answer."}, replies[2])
-        self.assertEqual((1, 1), (item.script.words_tried, item.script.words_refused))
 
     def test_the_scripted_participant_answers_the_word_and_then_the_emoji_on_the_next_page(self):
         item = directed.spec(self.SCENE, word_first=True)
@@ -617,14 +509,14 @@ class WordFirstTest(unittest.TestCase):
 
         from evals.rehearsal import probe
 
-        for argv in (["--harness", "codex", "--room", "discord", "--scripted"], ["--harness", "codex", "--room", "discord", "--scene", self.SCENE]):
+        for argv in (["--harness", "reference", "--room", "discord", "--scripted"], ["--harness", "reference", "--room", "discord", "--scene", self.SCENE]):
             with self.subTest(argv=argv), tempfile.TemporaryDirectory() as out, redirect_stderr(io.StringIO()) as err:
                 self.assertEqual(probe.EXIT_USAGE, probe.main([*argv, "--out", out, "--nod-with-a-word-first"]))
                 self.assertIn("--nod-with-a-word-first scripts the agent's nod", err.getvalue())
-        options = probe.Options(harness="codex", out=Path("/tmp/x"), scripted=True, room="discord", scene=self.SCENE, word_first=True)
+        options = probe.Options(harness="reference", out=Path("/tmp/x"), scripted=True, room="discord", scene=self.SCENE, word_first=True)
         _, specs, _ = probe._room_parts(options)
         self.assertTrue(specs[0].script.word_first)
-        _, specs, _ = probe._room_parts(probe.Options(harness="codex", out=Path("/tmp/x"), scripted=True, room="discord", scene=self.SCENE))
+        _, specs, _ = probe._room_parts(probe.Options(harness="reference", out=Path("/tmp/x"), scripted=True, room="discord", scene=self.SCENE))
         self.assertFalse(specs[0].script.word_first)
 
 
@@ -1002,7 +894,7 @@ class JudgeHoldTest(unittest.TestCase):
         self.assertIn("answered-while-composing, the turn on q1: hold raced", failed.detail)
         self.assertNotIn("graded miss", failed.detail, "the moment was not played as scripted, which is not a miss")
         self.assertNotIn("where the script is quiet", failed.detail)
-        self.assertIn("hold raced", record.summary_markdown({"harness": "codex", "mode": "scripted", "status": "fail", "checks": [], "moments": [played]}))
+        self.assertIn("hold raced", record.summary_markdown({"harness": "reference", "mode": "scripted", "status": "fail", "checks": [], "moments": [played]}))
 
     def test_a_director_that_releases_the_turn_before_the_held_message_has_reached_nunchi_fails_the_run(self):
         for scene_id, early in (("answered-while-composing", "a1"), ("never-mind-while-composing", "n1"), ("asked-while-busy", "s1")):
@@ -1288,7 +1180,7 @@ class RecordTest(unittest.TestCase):
 
     def test_the_summary_says_asked_while_busy_was_played_in_another_order_and_what_that_means_live(self):
         _, _, played = _run("asked-while-busy")
-        text = record.summary_markdown({"harness": "codex", "mode": "scripted", "status": "pass", "checks": [], "moments": [played]})
+        text = record.summary_markdown({"harness": "reference", "mode": "scripted", "status": "pass", "checks": [], "moments": [played]})
         self.assertIn("played in another order than the scene's", text)
         self.assertIn("The scene has z1, s1, v1, z2; played, z1, s1, z2, v1", text)
         self.assertIn("may drop it once it has been shown them", text)
@@ -1297,7 +1189,7 @@ class RecordTest(unittest.TestCase):
         # A hold whose turn plays no line that the scene puts among the held messages changes no order.
         for scene_id in DURING:
             _, _, other = _run(scene_id)
-            self.assertNotIn("another order", record.summary_markdown({"harness": "codex", "mode": "scripted", "status": "pass", "checks": [], "moments": [other]}))
+            self.assertNotIn("another order", record.summary_markdown({"harness": "reference", "mode": "scripted", "status": "pass", "checks": [], "moments": [other]}))
 
     def test_a_reaction_line_is_described_by_its_emoji_and_a_reply_by_its_words(self):
         _, _, played = _run("did-you-see")
@@ -1311,25 +1203,10 @@ class RecordTest(unittest.TestCase):
 
     def test_the_matrix_marks_a_hold_that_did_not_hold(self):
         _, _, played = _run("answered-while-composing", early=("a1",), news=False)
-        text = record.summary_markdown({"harness": "claude-code", "mode": "scripted", "status": "fail", "checks": [], "moments": [played]})
+        text = record.summary_markdown({"harness": "reference", "mode": "scripted", "status": "fail", "checks": [], "moments": [played]})
         self.assertIn("hold raced", text)
         _, _, held = _run("answered-while-composing")
-        self.assertNotIn("hold held", record.summary_markdown({"harness": "claude-code", "mode": "scripted", "status": "pass", "checks": [], "moments": [held]}))
-
-
-class DocsTest(unittest.TestCase):
-    ROOT = Path(__file__).resolve().parents[2]
-
-    def test_the_order_asked_while_busy_is_played_in_is_stated_as_a_deviation_where_the_scenes_are_listed(self):
-        for path in ("docs/rehearsal.md", "CHANGELOG.md", "evals/behavior/README.md"):
-            with self.subTest(path=path):
-                text = " ".join((self.ROOT / path).read_text(encoding="utf-8").split())
-                self.assertIn("another order than", text)
-                self.assertIn("asked-while-busy", text)
-        text = " ".join((self.ROOT / "docs" / "rehearsal.md").read_text(encoding="utf-8").split())
-        self.assertIn("holds only after z2", text)
-        self.assertIn("may drop the reply after the look page", text)
-        self.assertNotIn("changes nothing about what it owes Alice", text)
+        self.assertNotIn("hold held", record.summary_markdown({"harness": "reference", "mode": "scripted", "status": "pass", "checks": [], "moments": [held]}))
 
 
 if __name__ == "__main__":

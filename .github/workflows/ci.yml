@@ -34,20 +34,22 @@ jobs:
 
   discord-standin:
     # The rehearsals' Discord stand-in (docs/rehearsal.md) through real
-    # discord.py, pinned as Hermes pins it; the test job drives it through
-    # Nunchi's own Discord clients. On Python 3.12 discord.py asks for
-    # zlib-stream; the hermes-plugin job runs the same checks on 3.14
-    # (zstd-stream). The pin check runs first, so a missing or other
-    # discord.py fails the job instead of skipping its tests. Then the
-    # reference, nunchi-discord, runs unmodified on the stand-in in the
-    # probe's Discord room, and plays eleven behavior scenes, directed and graded.
-    name: Discord stand-in (discord.py 2.7.1)
+    # discord.py; the test job drives it through Nunchi's Discord clients.
+    # Python 3.12 exercises zlib-stream; Python 3.14 exercises zstd-stream.
+    # The pin check prevents missing dependencies from silently skipping tests.
+    # The reference runner then exercises legacy scripted fixtures. These
+    # check mechanics, not social quality or the approved scene collection.
+    name: Discord stand-in (py${{ matrix.python-version }}, discord.py 2.7.1)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
       - name: Install the pinned discord.py
         run: python -m pip install 'discord.py==2.7.1' 'aiohttp==3.14.3'
       - name: The vendored shape pin matches discord.py 2.7.1
@@ -55,7 +57,7 @@ jobs:
       - name: The stand-in through discord.py
         run: python -m unittest tests.v2.test_fake_discord_discordpy -v
       - name: Make the canary for the Discord room lane's scan
-        # A random value the probe puts in the harness's environment, where no
+        # A random value the probe puts in the process environment, where no
         # key variable names it: only the scan can find it in an output.
         shell: bash
         run: |
@@ -69,8 +71,7 @@ jobs:
         # attention, no key. The launcher (root, hence sudo -E) maps
         # Discord's real names to the stand-in in a private namespace with
         # only loopback (--offline) and runs the probe as the runner user.
-        # nunchi-discord has no sandbox, so no --require-bwrap and no
-        # bubblewrap here. Each moment's outcome and the seven discord-*
+        # Each moment's outcome and the seven discord-*
         # checks are hard checks.
         id: discord_reference_lane
         timeout-minutes: 15
@@ -91,8 +92,8 @@ jobs:
             /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness reference --scripted --room discord \
             --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-discord-out"
       - name: Scan the failed Discord room lane's record for the key and the canary
-        # Only after a failure of the lane above, and as the rehearsal workflow
-        # does: this repository is public, so the record is uploaded only when
+        # Only after a failure of the lane above: this repository is public,
+        # so the record is uploaded only when
         # the scan passes. The lane's keys are per-run placeholders the probe
         # scans for itself; the canary is the value made above. A hit deletes
         # the record and fails this step.
@@ -108,19 +109,15 @@ jobs:
         if: failure() && steps.discord_reference_scan.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rehearsal-discord-reference-${{ github.run_id }}-${{ github.run_attempt }}
+          name: rehearsal-discord-reference-py${{ matrix.python-version }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/rehearsal-discord-out/
           if-no-files-found: ignore
-      - name: Eleven behavior scenes directed on the stand-in, graded (docs/rehearsal.md)
-        # The same reference, in the same virtualenv, plays eleven of the behavior
-        # suite's scenes one run each: a director posts the scene's people and
-        # bot as Discord messages, and each graded moment is graded from the
-        # scene's own expectations (draft expectations, with the scripted agent
-        # and attention, no key). Seven of them need the agent's own earlier lines
-        # (played by the agent, some on a cue the director adds) or a message that
-        # lands while a turn is held; their time is compressed. Each run is inside the launcher with
-        # --offline and a fresh HOME and TMPDIR, as the lane above. A run that
-        # fails does not stop the others; the step fails after the last.
+      - name: Legacy scripted scene mechanics (docs/rehearsal.md)
+        # Eleven legacy fixtures exercise delivery, history and turn timing
+        # with scripted attention and participant responses. Expectations are
+        # fixture checks, not approved-scene evaluation or live behavior proof.
+        # Each run uses an offline namespace and fresh HOME and TMPDIR. Run all
+        # fixtures and fail the step if any fails.
         id: discord_scenes_lane
         timeout-minutes: 20
         shell: bash
@@ -138,8 +135,7 @@ jobs:
               --scene "$scene" --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-directed/$scene" \
               || { echo "::error::the scene $scene failed"; failed=1; }
           done
-          # The story once more, with the agent's nod first a word that the core refuses before it commits anything (a tool error, or
-          # the turn's next page), and then the emoji, in the same turn: the lane's one case of a refused reaction (run 38135715452).
+          # Also check that a refused word reaction can be retried as an emoji.
           LANE_HOME="$(mktemp -d)"
           LANE_TMP="$(mktemp -d)"
           sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline -- \
@@ -163,315 +159,41 @@ jobs:
         if: failure() && steps.discord_scenes_scan.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rehearsal-discord-scenes-${{ github.run_id }}-${{ github.run_attempt }}
+          name: rehearsal-discord-scenes-py${{ matrix.python-version }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/rehearsal-directed/
           if-no-files-found: ignore
 
-  hermes-plugin:
-    # The turn conformance kit and the plugin's tests inside a real Hermes
-    # gateway, on a clean install of a pinned Hermes; only the model is
-    # scripted (docs/harness-guide.md, "Checking the current implementation"). Both lanes run: Telegram,
-    # and Discord through Hermes's stock Discord adapter, whose discord.py
-    # comes with the [messaging] extra. The last step runs Hermes's own
-    # gateway process, `hermes gateway run`, with the plugin on the Discord
-    # stand-in at Discord's real names (docs/rehearsal.md, the Hermes column).
-    name: Hermes plugin (Hermes main a50406d9)
+  mcp-discord:
+    # Preserve the shared transport's SDK compatibility checks independently
+    # of agent harnesses. The tests use local stand-ins, with no live services.
+    name: Discord MCP transport (mcp ${{ matrix.mcp-version }})
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Check out Hermes
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: NousResearch/hermes-agent
-          ref: a50406d9b7474b060450d2dcaff8743c977d296a
-          path: hermes-agent
-          fetch-depth: 0
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          # Current Hermes gates its core dependencies on Python 3.14.
-          python-version: "3.14"
-      - name: Install Nunchi's wheel and untouched Hermes in a clean virtualenv
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          python -m pip wheel --no-deps . --wheel-dir "$RUNNER_TEMP/nunchi-wheels"
-          python -m venv "$RUNNER_TEMP/hermes-env"
-          "$RUNNER_TEMP/hermes-env/bin/python" -m pip install --upgrade pip
-          git clone --no-local --no-checkout hermes-agent "$RUNNER_TEMP/stock-hermes"
-          git -C "$RUNNER_TEMP/stock-hermes" checkout --detach "$(git -C hermes-agent rev-parse HEAD)"
-          "$RUNNER_TEMP/hermes-env/bin/python" -m pip install -e "$RUNNER_TEMP/stock-hermes[messaging]"
-          "$RUNNER_TEMP/hermes-env/bin/python" -m pip install --no-deps "$RUNNER_TEMP"/nunchi-wheels/*.whl
-      - name: Turn conformance kit through the plugin
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$RUNNER_TEMP"
-          hermes-env/bin/nunchi-turn-conformance --integration reference --integration nunchi.integrations.hermes_plugin_conformance
-      - name: Plugin tests inside the gateway
-        run: |
-          "$RUNNER_TEMP/hermes-env/bin/python" -m unittest tests.v2.test_hermes_plugin -v
-      - name: The Discord stand-in through Hermes's discord.py on Python 3.14 (docs/rehearsal.md)
-        shell: bash
-        run: |
-          set -euo pipefail
-          "$RUNNER_TEMP/hermes-env/bin/python" -m evals.rehearsal.fake_discord.shapes --check
-          "$RUNNER_TEMP/hermes-env/bin/python" -m unittest tests.v2.test_fake_discord_discordpy -v
-      - name: The rehearsal probe through Hermes, scripted (docs/rehearsal.md)
-        # The same probe the manual rehearsal workflow runs live, offline: the
-        # kit's scripted model endpoint, scripted attention, no key. With both
-        # scripted, each moment's outcome is a hard check, so the probe fails
-        # when the scripted turn does not happen. Its tests run here, where
-        # Hermes is installed, so the scripted probe's own test runs too, and
-        # so do the tests of the Hermes column of the Discord room (they need
-        # neither Hermes nor root; the lane itself is the last step).
-        shell: bash
-        run: |
-          set -euo pipefail
-          "$RUNNER_TEMP/hermes-env/bin/python" -m unittest tests.v2.test_rehearsal tests.v2.test_rehearsal_discord_hermes -v
-          "$RUNNER_TEMP/hermes-env/bin/python" -m evals.rehearsal.probe --harness hermes --scripted \
-            --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-out"
-      - name: Make the canary for the Discord room lane's scan
-        # A random value the probe puts in the harness's environment, where no
-        # key variable names it: only the scan can find it in an output.
-        shell: bash
-        run: |
-          set -euo pipefail
-          canary="canary-$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
-          echo "::add-mask::$canary"
-          echo "REHEARSAL_CANARY=$canary" >> "$GITHUB_ENV"
-      - name: The rehearsal probe in the Discord room, through hermes gateway run, scripted (docs/rehearsal.md)
-        # Hermes's own gateway process (`hermes gateway run`), unmodified,
-        # with the Nunchi plugin loaded from a fresh HERMES_HOME written as
-        # the plugin's README says, on the Discord stand-in at Discord's real
-        # names; the model and attention are scripted, no key. The launcher
-        # (root, hence sudo -E) maps the names to the stand-in in a private
-        # namespace with only loopback (--offline) and runs the probe as the
-        # runner user. Hermes's default terminal backend is `local`, which is
-        # unsandboxed, so there is no --require-bwrap and no bubblewrap here.
-        # The probe's Python is Hermes's: the Discord process is `hermes
-        # gateway run` from the same virtualenv. Each moment's outcome and the
-        # seven discord-* checks are hard checks.
-        id: discord_hermes_lane
-        shell: bash
-        run: |
-          set -euo pipefail
-          PY="$RUNNER_TEMP/hermes-env/bin/python"
-          "$PY" -m pip freeze
-          LANE_HOME="$(mktemp -d)"
-          LANE_TMP="$(mktemp -d)"
-          sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline -- \
-            /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness hermes --scripted --room discord \
-            --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-discord-out"
-      - name: Scan the failed Discord room lane's record for the key and the canary
-        # Only after a failure of the lane above, and as the rehearsal workflow
-        # does: this repository is public, so the record is uploaded only when
-        # the scan passes. The lane's keys are per-run placeholders the probe
-        # scans for itself; the canary is the value made above. A hit deletes
-        # the record and fails this step.
-        id: discord_hermes_scan
-        if: failure() && steps.discord_hermes_lane.outcome == 'failure'
-        timeout-minutes: 5
-        shell: bash
-        run: |
-          set -uo pipefail
-          python -m evals.rehearsal.scan --out "$RUNNER_TEMP/rehearsal-discord-out" \
-            --env NUNCHI_ATTENTION_API_KEY --env REHEARSAL_CANARY
-      - name: Keep the failed Discord room lane's record
-        if: failure() && steps.discord_hermes_scan.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: rehearsal-discord-hermes-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/rehearsal-discord-out/
-          if-no-files-found: ignore
-
-  codex-app-server:
-    # The turn conformance kit and the integration's tests through a real
-    # `codex app-server` from a clean install of a pinned Codex, with a
-    # throwaway HOME and CODEX_HOME per run; only the model is scripted
-    # (docs/harness-guide.md, "Prove it").
-    name: Codex app-server (Codex CLI 0.160.1)
-    runs-on: ubuntu-latest
-    env:
-      CODEX_VERSION: "0.160.1"
-      # The mcp-discord extra (mcp>=1.10,<2), pinned, for nunchi-mcp-discord in the Discord room.
-      MCP_VERSION: "1.28.1"
+    strategy:
+      fail-fast: false
+      matrix:
+        mcp-version: ["1.10.0", "1.28.1"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
-      - name: Install Nunchi's wheel and the pinned Codex in clean locations
+      - name: Install the pinned transport dependencies
         shell: bash
+        env:
+          MCP_VERSION: ${{ matrix.mcp-version }}
         run: |
           set -euo pipefail
-          python -m pip install --upgrade pip
-          python -m pip wheel --no-deps . --wheel-dir "$RUNNER_TEMP/nunchi-wheels"
-          python -m venv "$RUNNER_TEMP/codex-env"
-          "$RUNNER_TEMP/codex-env/bin/python" -m pip install --no-deps "$RUNNER_TEMP"/nunchi-wheels/*.whl
-          mkdir -p "$RUNNER_TEMP/codex"
-          npm install --prefix "$RUNNER_TEMP/codex" --no-audit --no-fund "@openai/codex@${CODEX_VERSION}"
-          echo "NUNCHI_CODEX_BIN=$RUNNER_TEMP/codex/node_modules/.bin/codex" >> "$GITHUB_ENV"
-      - name: Turn conformance kit through codex app-server
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$RUNNER_TEMP"
-          codex-env/bin/nunchi-turn-conformance --integration reference --integration nunchi.integrations.codex_app_server_conformance
-      - name: Integration tests through codex app-server
-        run: |
-          "$RUNNER_TEMP/codex-env/bin/python" -m unittest tests.v2.test_codex_app_server -v
-      - name: The rehearsal probe through codex app-server, scripted (docs/rehearsal.md)
-        # The same probe the manual rehearsal workflow runs live, offline: the
-        # kit's scripted Responses endpoint, scripted attention, no key. With
-        # both scripted, each moment's outcome and the room tool call are hard
-        # checks, so the probe fails when the scripted turn does not happen.
-        # Its tests run here, where Codex is installed, so the scripted probe's
-        # own test runs too.
-        shell: bash
-        run: |
-          set -euo pipefail
-          "$RUNNER_TEMP/codex-env/bin/python" -m unittest tests.v2.test_rehearsal -v
-          "$RUNNER_TEMP/codex-env/bin/python" -m evals.rehearsal.probe --harness codex --scripted \
-            --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-out"
-      - name: Make the canary for the Discord room lane's scan
-        # A random value the probe puts in the harness's environment, where no
-        # key variable names it: only the scan can find it in an output.
-        shell: bash
-        run: |
-          set -euo pipefail
-          canary="canary-$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
-          echo "::add-mask::$canary"
-          echo "REHEARSAL_CANARY=$canary" >> "$GITHUB_ENV"
-      - name: The rehearsal probe in the Discord room, through codex app-server, scripted (docs/rehearsal.md)
-        # The same scripted probe on the Discord stand-in at Discord's real
-        # names, with Nunchi's own nunchi-mcp-discord process, unmodified, as
-        # the transport; the Codex runner stays in the probe's process. The
-        # launcher (root, hence sudo -E) maps the names to the stand-in in a
-        # private namespace with only loopback (--offline), and runs the probe
-        # as the runner user. Codex's Linux sandbox is bubblewrap (the one on
-        # PATH, else its bundled copy; codex-rs/linux-sandbox/README.md at
-        # 0.160.1), so --require-bwrap checks here that it runs, as in the
-        # claude-code-mod job. sudo resets PATH, so the probe gets this
-        # step's (Node). Each moment's outcome, the room tool call and the
-        # seven discord-* checks are hard checks.
-        id: discord_codex_lane
-        timeout-minutes: 15
-        shell: bash
-        run: |
-          set -euo pipefail
-          PY="$RUNNER_TEMP/codex-env/bin/python"
-          "$PY" -m pip install "mcp==${MCP_VERSION}"
-          "$PY" -m pip freeze
-          # The shared transport's gap tests, on the real MCP SDK (they skip
-          # where the extra is absent, as in the unittest job).
-          "$PY" -m unittest tests.v2.test_mcp_discord_gaps -v
-          # The launcher's bubblewrap check, as in the claude-code-mod job.
-          sudo apt-get update -q
-          sudo apt-get install -y -q bubblewrap
-          if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = "1" ]; then
-            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          python -m venv "$RUNNER_TEMP/mcp-env"
+          PY="$RUNNER_TEMP/mcp-env/bin/python"
+          if [ "$MCP_VERSION" = "1.10.0" ]; then
+            # MCP 1.10.0 imports an internal API removed by pydantic 2.14.
+            "$PY" -m pip install "mcp==${MCP_VERSION}" "pydantic<2.14"
+          else
+            "$PY" -m pip install "mcp==${MCP_VERSION}"
           fi
-          LANE_HOME="$(mktemp -d)"
-          LANE_TMP="$(mktemp -d)"
-          sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline --require-bwrap -- \
-            /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness codex --scripted --room discord \
-            --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-discord-out"
-      - name: The shared transport's gap tests on the lowest supported mcp (mcp==1.10.0)
-        # pyproject.toml declares mcp>=1.10 for the mcp-discord extra, and the
-        # lanes pin the newest (MCP_VERSION). This installs the floor, as the
-        # extra would, into a separate venv with the wheel and runs the gap
-        # tests on it, so the range stays honest: below 1.10 the SDK hands a
-        # tool call no HTTP request and the transport cannot register. pydantic
-        # is held below 2.14, which dropped an internal function that mcp 1.10.0
-        # imports; a fresh install resolves the newest mcp and is not affected.
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m venv "$RUNNER_TEMP/mcp-floor-env"
-          "$RUNNER_TEMP/mcp-floor-env/bin/python" -m pip install --no-deps "$RUNNER_TEMP"/nunchi-wheels/*.whl
-          "$RUNNER_TEMP/mcp-floor-env/bin/python" -m pip install "mcp==1.10.0" "pydantic<2.14"
-          "$RUNNER_TEMP/mcp-floor-env/bin/python" -m pip freeze
-          "$RUNNER_TEMP/mcp-floor-env/bin/python" -m unittest tests.v2.test_mcp_discord_gaps -v
-      - name: Scan the failed Discord room lane's record for the key and the canary
-        # Only after a failure of the lane above, and as the rehearsal workflow
-        # does: this repository is public, so the record is uploaded only when
-        # the scan passes. The lane's keys are per-run placeholders the probe
-        # scans for itself; the canary is the value made above. A hit deletes
-        # the record and fails this step.
-        id: discord_codex_scan
-        if: failure() && steps.discord_codex_lane.outcome == 'failure'
-        timeout-minutes: 5
-        shell: bash
-        run: |
-          set -uo pipefail
-          python -m evals.rehearsal.scan --out "$RUNNER_TEMP/rehearsal-discord-out" \
-            --env NUNCHI_ATTENTION_API_KEY --env REHEARSAL_CANARY
-      - name: Keep the failed Discord room lane's record
-        if: failure() && steps.discord_codex_scan.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: rehearsal-discord-codex-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/rehearsal-discord-out/
-          if-no-files-found: ignore
-      - name: Eleven behavior scenes directed through codex app-server, scripted, graded (docs/rehearsal.md)
-        # Right after the Discord room lane above, in the same virtualenv and
-        # with the same pinned Codex. The eleven behavior scenes the
-        # discord-standin job plays on the reference are played here, one run
-        # each: a director posts the scene's people and bot as Discord
-        # messages, the harness takes part in them through its own
-        # nunchi-mcp-discord, and each graded moment is graded from the
-        # scene's own expectations (draft expectations; the agent and
-        # attention are scripted, no key). The reference is the control: a miss
-        # only this column has is the integration's. Each run is inside the
-        # launcher with --offline and --require-bwrap and a fresh HOME and
-        # TMPDIR, as the lane above (Codex's bubblewrap, installed there). A run that fails
-        # does not stop the others; the step fails after the last.
-        id: discord_codex_scenes_lane
-        timeout-minutes: 20
-        shell: bash
-        run: |
-          set -uo pipefail
-          PY="$RUNNER_TEMP/codex-env/bin/python"
-          failed=0
-          for scene in bot-status-report story-across-messages said-it-would-check mention-in-busy-room \
-            asked-while-busy answered-while-composing never-mind-while-composing build-finishes-after-promise \
-            build-finishes-long-after-promise did-you-see addressee-never-answers; do
-            LANE_HOME="$(mktemp -d)"
-            LANE_TMP="$(mktemp -d)"
-            sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline --require-bwrap -- \
-              /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness codex --scripted --room discord \
-              --scene "$scene" --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-directed/$scene" \
-              || { echo "::error::the scene $scene failed"; failed=1; }
-          done
-          # The story once more, with the agent's nod first a word that the core refuses before it commits anything (a tool error, or
-          # the turn's next page), and then the emoji, in the same turn: the lane's one case of a refused reaction (run 38135715452).
-          LANE_HOME="$(mktemp -d)"
-          LANE_TMP="$(mktemp -d)"
-          sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline --require-bwrap -- \
-            /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness codex --scripted --room discord \
-            --scene story-across-messages --nod-with-a-word-first --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" \
-            --out "$RUNNER_TEMP/rehearsal-directed/story-across-messages-word-first" \
-            || { echo "::error::the scene story-across-messages with a word first failed"; failed=1; }
-          exit "$failed"
-      - name: Scan the failed scene runs' records for the key and the canary
-        # As for the lane above: only after a failure, and the record is uploaded
-        # only when the scan passes. It covers every scene's output.
-        id: discord_codex_scenes_scan
-        if: failure() && steps.discord_codex_scenes_lane.outcome == 'failure'
-        timeout-minutes: 5
-        shell: bash
-        run: |
-          set -uo pipefail
-          python -m evals.rehearsal.scan --out "$RUNNER_TEMP/rehearsal-directed" \
-            --env NUNCHI_ATTENTION_API_KEY --env REHEARSAL_CANARY
-      - name: Keep the failed scene runs' records
-        if: failure() && steps.discord_codex_scenes_scan.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: rehearsal-discord-codex-scenes-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/rehearsal-directed/
-          if-no-files-found: ignore
+          "$PY" -m pip freeze
+      - name: Check shared transport gaps and recovery on the real SDK
+        run: '"$RUNNER_TEMP/mcp-env/bin/python" -m unittest tests.v2.test_mcp_discord_gaps -v'
 
   package:
     name: clean-install packaging
@@ -498,192 +220,10 @@ jobs:
           /tmp/venv/bin/python -c "import nunchi; print(nunchi.__file__)"
           /tmp/venv/bin/nunchi probe
           /tmp/venv/bin/nunchi-conformance
-          /tmp/venv/bin/nunchi-turn-conformance --integration reference --integration nunchi.integrations.claude_code_conformance
+          /tmp/venv/bin/nunchi-turn-conformance --integration reference
           /tmp/venv/bin/nunchi-install probe
           /tmp/venv/bin/nunchi-channel --probe
           /tmp/venv/bin/nunchi-discord --probe
           /tmp/venv/bin/nunchi-matrix --probe
           /tmp/venv/bin/nunchi-telegram --probe
-          /tmp/venv/bin/nunchi-codex-room-runner --probe
-          /tmp/venv/bin/nunchi-codex-app-server-runner --probe
-          /tmp/venv/bin/nunchi-claude-code-room-runner --probe | /tmp/venv/bin/python -c "import json, sys; assert json.load(sys.stdin)['mod_version'], 'the Claude Code mod is missing from the wheel'"
           echo "packaging smoke OK"
-
-  claude-code-mod:
-    # The mod validated and tested against the pinned Claude Code, then the
-    # rehearsal probe through the real `claude -p` and the mod on a clean
-    # install of the same version, offline: a scripted Anthropic Messages
-    # endpoint as the model (ANTHROPIC_BASE_URL), scripted attention, no key,
-    # and a proxy that refuses, and records, whatever else Claude Code sends
-    # through its proxy settings (docs/rehearsal.md). Each moment's outcome
-    # and the room tool call are hard checks, so the mod's first real turn is
-    # checked on every push. Bash runs in Claude Code's sandbox, as the
-    # README's user settings say, so bubblewrap and socat are installed as in
-    # the rehearsal workflow. The probe's tests run here, where Claude Code is
-    # installed, so the scripted probe's own test runs too.
-    name: Claude Code mod
-    runs-on: ubuntu-latest
-    env:
-      # The mod needs the mods API; keep this at or above MINIMUM_CLAUDE_CODE.
-      # The rehearsal probe checks it against its pin (evals/rehearsal/routes.py, PINS).
-      CLAUDE_CODE_VERSION: "2.1.289"
-      # The mcp-discord extra (mcp>=1.10,<2), pinned, for nunchi-mcp-discord in the Discord room.
-      MCP_VERSION: "1.28.1"
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Validate the mod against the pinned Claude Code
-        run: npx --yes "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" plugin validate --strict src/nunchi/integrations/claude_code_mod
-      - name: Run the mod's tests against the pinned Claude Code
-        run: npx --yes "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" plugin test src/nunchi/integrations/claude_code_mod
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: "3.12"
-      - name: Install Nunchi's wheel and the pinned Claude Code in clean locations
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          python -m pip wheel --no-deps . --wheel-dir "$RUNNER_TEMP/nunchi-wheels"
-          python -m venv "$RUNNER_TEMP/claude-env"
-          "$RUNNER_TEMP/claude-env/bin/python" -m pip install --no-deps "$RUNNER_TEMP"/nunchi-wheels/*.whl
-          mkdir -p "$RUNNER_TEMP/claude"
-          npm install --prefix "$RUNNER_TEMP/claude" --no-audit --no-fund "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
-          echo "NUNCHI_CLAUDE_BIN=$RUNNER_TEMP/claude/node_modules/.bin/claude" >> "$GITHUB_ENV"
-      - name: Install bubblewrap for Claude Code's sandbox
-        # As in the rehearsal workflow: Claude Code's Bash sandbox needs
-        # bubblewrap and socat, and Ubuntu 24.04 restricts unprivileged user
-        # namespaces through AppArmor. With the README's failIfUnavailable,
-        # no session starts without them, and the probe fails.
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update -q
-          sudo apt-get install -y -q bubblewrap socat
-          if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = "1" ]; then
-            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          fi
-          bwrap --ro-bind / / true || { echo "::error::bubblewrap cannot run here, so Claude Code's sandbox in its README's user settings cannot start"; exit 1; }
-      - name: The rehearsal probe through claude -p, scripted (docs/rehearsal.md)
-        # With the README's sandbox on: this step never passes --no-sandbox.
-        shell: bash
-        run: |
-          set -euo pipefail
-          "$RUNNER_TEMP/claude-env/bin/python" -m unittest tests.v2.test_rehearsal -v
-          "$RUNNER_TEMP/claude-env/bin/python" -m evals.rehearsal.probe --harness claude-code --scripted \
-            --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-out"
-      - name: Make the canary for the Discord room lane's scan
-        # A random value the probe puts in the harness's environment, where no
-        # key variable names it: only the scan can find it in an output.
-        shell: bash
-        run: |
-          set -euo pipefail
-          canary="canary-$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
-          echo "::add-mask::$canary"
-          echo "REHEARSAL_CANARY=$canary" >> "$GITHUB_ENV"
-      - name: The rehearsal probe in the Discord room, through claude -p, scripted (docs/rehearsal.md)
-        # The same scripted probe on the Discord stand-in at Discord's real
-        # names, with Nunchi's own nunchi-mcp-discord process, unmodified, as
-        # the transport; the Claude Code runner stays in the probe's process.
-        # The launcher (root, hence sudo -E) maps the names to the stand-in
-        # in a private namespace with only loopback (--offline), checks
-        # (--require-bwrap) that bubblewrap (installed above), which Claude
-        # Code's sandbox uses, runs there as the runner user, and runs the
-        # probe as that user. sudo resets PATH, so the probe gets this step's
-        # (Node). With the README's sandbox on: this step never passes
-        # --no-sandbox. Each moment's outcome, the room tool call and the
-        # seven discord-* checks are hard checks.
-        id: discord_claude_lane
-        timeout-minutes: 15
-        shell: bash
-        run: |
-          set -euo pipefail
-          PY="$RUNNER_TEMP/claude-env/bin/python"
-          "$PY" -m pip install "mcp==${MCP_VERSION}"
-          "$PY" -m pip freeze
-          # The shared transport's gap tests, on the real MCP SDK (they skip
-          # where the extra is absent, as in the unittest job).
-          "$PY" -m unittest tests.v2.test_mcp_discord_gaps -v
-          LANE_HOME="$(mktemp -d)"
-          LANE_TMP="$(mktemp -d)"
-          sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline --require-bwrap -- \
-            /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness claude-code --scripted --room discord \
-            --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-discord-out"
-      - name: Scan the failed Discord room lane's record for the key and the canary
-        # Only after a failure of the lane above, and as the rehearsal workflow
-        # does: this repository is public, so the record is uploaded only when
-        # the scan passes. The lane's keys are per-run placeholders the probe
-        # scans for itself; the canary is the value made above. A hit deletes
-        # the record and fails this step.
-        id: discord_claude_scan
-        if: failure() && steps.discord_claude_lane.outcome == 'failure'
-        timeout-minutes: 5
-        shell: bash
-        run: |
-          set -uo pipefail
-          python -m evals.rehearsal.scan --out "$RUNNER_TEMP/rehearsal-discord-out" \
-            --env NUNCHI_ATTENTION_API_KEY --env REHEARSAL_CANARY
-      - name: Keep the failed Discord room lane's record
-        if: failure() && steps.discord_claude_scan.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: rehearsal-discord-claude-code-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/rehearsal-discord-out/
-          if-no-files-found: ignore
-      - name: Eleven behavior scenes directed through claude -p, scripted, graded (docs/rehearsal.md)
-        # Right after the Discord room lane above, in the same virtualenv and
-        # with the same pinned Claude Code. The eleven behavior scenes the
-        # discord-standin job plays on the reference are played here, one run
-        # each: a director posts the scene's people and bot as Discord
-        # messages, the harness takes part in them through its own
-        # nunchi-mcp-discord, and each graded moment is graded from the
-        # scene's own expectations (draft expectations; the agent and
-        # attention are scripted, no key). The reference is the control: a miss
-        # only this column has is the integration's. Each run is inside the
-        # launcher with --offline and --require-bwrap and a fresh HOME and
-        # TMPDIR, as the lane above (the README's Bash sandbox on: this step never passes --no-sandbox). A run that fails
-        # does not stop the others; the step fails after the last.
-        id: discord_claude_scenes_lane
-        timeout-minutes: 20
-        shell: bash
-        run: |
-          set -uo pipefail
-          PY="$RUNNER_TEMP/claude-env/bin/python"
-          failed=0
-          for scene in bot-status-report story-across-messages said-it-would-check mention-in-busy-room \
-            asked-while-busy answered-while-composing never-mind-while-composing build-finishes-after-promise \
-            build-finishes-long-after-promise did-you-see addressee-never-answers; do
-            LANE_HOME="$(mktemp -d)"
-            LANE_TMP="$(mktemp -d)"
-            sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline --require-bwrap -- \
-              /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness claude-code --scripted --room discord \
-              --scene "$scene" --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-directed/$scene" \
-              || { echo "::error::the scene $scene failed"; failed=1; }
-          done
-          # The story once more, with the agent's nod first a word that the core refuses before it commits anything (a tool error, or
-          # the turn's next page), and then the emoji, in the same turn: the lane's one case of a refused reaction (run 38135715452).
-          LANE_HOME="$(mktemp -d)"
-          LANE_TMP="$(mktemp -d)"
-          sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline --require-bwrap -- \
-            /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness claude-code --scripted --room discord \
-            --scene story-across-messages --nod-with-a-word-first --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" \
-            --out "$RUNNER_TEMP/rehearsal-directed/story-across-messages-word-first" \
-            || { echo "::error::the scene story-across-messages with a word first failed"; failed=1; }
-          exit "$failed"
-      - name: Scan the failed scene runs' records for the key and the canary
-        # As for the lane above: only after a failure, and the record is uploaded
-        # only when the scan passes. It covers every scene's output.
-        id: discord_claude_scenes_scan
-        if: failure() && steps.discord_claude_scenes_lane.outcome == 'failure'
-        timeout-minutes: 5
-        shell: bash
-        run: |
-          set -uo pipefail
-          python -m evals.rehearsal.scan --out "$RUNNER_TEMP/rehearsal-directed" \
-            --env NUNCHI_ATTENTION_API_KEY --env REHEARSAL_CANARY
-      - name: Keep the failed scene runs' records
-        if: failure() && steps.discord_claude_scenes_scan.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: rehearsal-discord-claude-code-scenes-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/rehearsal-directed/
-          if-no-files-found: ignore

@@ -1,12 +1,4 @@
-"""The director, the grader and the scene script (rehearsal PR 4a, `evals/rehearsal/directed.py`).
-
-The lane itself runs the reference as a process at Discord's real names, so it
-needs the launcher and runs in CI's scripted lane. What is tested here needs
-neither: which behavior scenes the director can play and why not the others,
-how a played scene is graded (both ways, from the scene's own expectations),
-the script attention and the agent follow, what the director posts to the
-stand-in (on plain loopback, as `test_rehearsal_discord_room.py` drives it),
-and the hard check that holds the script to the scene.
+"""Offline tests for directing and checking legacy scenes with the reference participant.
 """
 
 from __future__ import annotations
@@ -949,11 +941,11 @@ class SettledTest(unittest.TestCase):
 
     def test_the_summary_flags_it_for_a_live_run_and_says_it_fails_a_scripted_one(self):
         moment = {"name": "direct-question", "expect": "post", "unsettled": ["q"], "posts": []}
-        live = record.summary_markdown({"harness": "codex", "mode": "live", "status": "pass", "checks": [], "moments": [moment]})
+        live = record.summary_markdown({"harness": "reference", "mode": "live", "status": "pass", "checks": [], "moments": [moment]})
         self.assertIn("- Not settled (flagged, not failed): direct-question: the wait after q timed out", live)
-        scripted = record.summary_markdown({"harness": "codex", "mode": "scripted", "status": "fail", "checks": [], "moments": [moment]})
+        scripted = record.summary_markdown({"harness": "reference", "mode": "scripted", "status": "fail", "checks": [], "moments": [moment]})
         self.assertIn("- Not settled (fails the run): direct-question", scripted)
-        quiet = record.summary_markdown({"harness": "codex", "mode": "live", "status": "pass", "checks": [], "moments": [{"name": "m", "expect": "post"}]})
+        quiet = record.summary_markdown({"harness": "reference", "mode": "live", "status": "pass", "checks": [], "moments": [{"name": "m", "expect": "post"}]})
         self.assertNotIn("Not settled", quiet)
 
 
@@ -1003,7 +995,7 @@ class DirectorTest(_StandIn, unittest.TestCase):
         item = directed.plan(scene)
         self.assertIsNone(item.unplayable)
         spec = directed.DirectedSpec(item, directed.script_for(item))
-        world, members = discord_room.world_spec("codex", [scene], agent="Vigil")
+        world, members = discord_room.world_spec("reference", [scene], agent="Vigil")
         fd = self.start(world)
         base = Path(tempfile.mkdtemp(prefix="director-"))
         self.addCleanup(shutil.rmtree, base, True)
@@ -1029,7 +1021,7 @@ class DirectorTest(_StandIn, unittest.TestCase):
         ids = [int(delivery["message_id"]) for delivery in played["deliveries"]]
         self.assertEqual(sorted(ids), ids, "the room's ids only go up")
         self.assertEqual([], [record for record in fd.wire.records if record.get("kind") == "raise"])
-        self.assertAlmostEqual(0.0, fd.state()["channels"]["codex"]["lag"], delta=0.5, msg="the room's clock was moved to the wall")
+        self.assertAlmostEqual(0.0, fd.state()["channels"]["reference"]["lag"], delta=0.5, msg="the room's clock was moved to the wall")
         # One settle after the history, one after each live message.
         self.assertEqual([5.0] * 4, leg.settled)
         self.assertTrue(played["reached"])
@@ -1082,7 +1074,7 @@ class DirectorTest(_StandIn, unittest.TestCase):
     def test_the_moments_delivery_records_carry_no_meant_pings_and_are_as_they_were(self):
         moment = next(spec for spec in discord_room.MOMENTS if spec.name == "direct-question")
         scene = load_scene(moment.scene)
-        world, members = discord_room.world_spec("codex", [scene], agent="Vigil")
+        world, members = discord_room.world_spec("reference", [scene], agent="Vigil")
         fd = self.start(world)
         base = Path(tempfile.mkdtemp(prefix="director-"))
         self.addCleanup(shutil.rmtree, base, True)
@@ -1099,7 +1091,7 @@ class DirectorTest(_StandIn, unittest.TestCase):
         self.assertTrue(all(delivery["settled"] for delivery in played["deliveries"]))
         item = directed.plan(scene)
         spec = directed.DirectedSpec(item, directed.script_for(item))
-        world, members = discord_room.world_spec("codex", [scene], agent="Vigil")
+        world, members = discord_room.world_spec("reference", [scene], agent="Vigil")
         fd = self.start(world)
         base = Path(tempfile.mkdtemp(prefix="director-"))
         self.addCleanup(shutil.rmtree, base, True)
@@ -1227,19 +1219,6 @@ class CommandTest(unittest.TestCase):
             self.assertEqual([], list(Path(directory).iterdir()), "a refused command starts and writes nothing")
         return code, error.getvalue()
 
-    def test_a_scene_is_played_in_the_discord_room_scripted_and_by_no_column_but_the_reference_claude_code_and_codex(self):
-        # Hermes is parked (AGENTS.md); Claude Code and Codex play scenes since PR 4b (test_rehearsal_directed_harness).
-        base = ["--scripted", "--room", "discord", "--scene", "story-across-messages"]
-        code, error = self.run_main("--harness", "hermes", *base)
-        self.assertEqual(probe.EXIT_USAGE, code)
-        self.assertIn("--harness reference or claude-code or codex with --room discord (Hermes is parked)", error)
-        # Without --scripted a scene is live (PR 4d): refused off a CI runner (test_rehearsal_live_scene has the whole of it).
-        with mock.patch.dict(os.environ):
-            os.environ.pop("CI", None)
-            code, error = self.run_main("--harness", "reference", "--room", "discord", "--scene", "story-across-messages")
-        self.assertEqual(probe.EXIT_USAGE, code)
-        self.assertIn("only on a CI runner", error)
-        self.assertEqual(probe.EXIT_USAGE, self.run_main("--harness", "reference", "--scripted", "--scene", "story-across-messages")[0])
 
     def test_a_scene_that_does_not_exist_or_cannot_be_played_is_refused_with_the_reason(self):
         code, error = self.run_main("--harness", "reference", "--scripted", "--room", "discord", "--scene", "quiet-for-hours")
@@ -1257,7 +1236,7 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(["bot-status-report"], [item.name for item in specs])
         self.assertIsInstance(specs[0], directed.DirectedSpec)
         self.assertEqual(discord_room.MOMENTS, probe._room_parts(probe.Options(harness="reference", out=Path("x"), scripted=True, room="discord"))[1])
-        with self.assertRaisesRegex(ValueError, "played in the Discord room by reference or claude-code or codex"):
+        with self.assertRaisesRegex(ValueError, "unknown harness"):
             probe.run_probe(probe.Options(harness="hermes", out=Path("x"), scripted=True, room="discord", scene="bot-status-report"))
         with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop(discord_room.NET_ENV, None)
@@ -1280,15 +1259,6 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(["alice", "sam"], spec["people"])
         self.assertEqual({"CI": {"harness": False}, "Vigil": {}}, spec["bots"])
         self.assertEqual({"vigil": "Vigil", "alice": "alice", "sam": "sam", "ci": "CI"}, members)
-
-    def test_hermes_and_the_moments_are_as_they_were(self):
-        self.assertEqual(
-            ["first-message", "bot-status-report", "direct-question", "reply", "reaction", "thread", "thread-question"],
-            [spec.name for spec in discord_room.MOMENTS],
-        )
-        hermes = discord_room.HermesGatewayLeg
-        self.assertFalse(hasattr(hermes, "directed"), "Hermes runs no scenes")
-        self.assertIsNone(inspect.signature(discord_room.DiscordRoom.start).parameters["scenes"].default)
 
 
 class SummaryTest(unittest.TestCase):
@@ -1317,21 +1287,6 @@ class SummaryTest(unittest.TestCase):
                                          "moments": [{"name": "direct-question", "expect": "post", "posts": [{"delivered": True}]}]})
         self.assertNotIn("Grade matrix", plain)
         self.assertIn("**Passed:**", plain)
-
-
-class CiTest(unittest.TestCase):
-    def test_ci_plays_each_playable_scene_in_the_launcher_with_the_same_scan_and_upload_as_the_room_lane(self):
-        text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-        job = text[text.index("  discord-standin:"):text.index("  hermes-plugin:")]
-        for scene in PLAYABLE:
-            self.assertIn(scene, job)
-        self.assertEqual(2, job.count("--scene"), "each playable scene in the loop, and the story once more with a word first")
-        self.assertEqual(1, job.count("--nod-with-a-word-first"))
-        self.assertIn("--scene story-across-messages --nod-with-a-word-first", job)
-        self.assertIn("discord_net --offline --", job)
-        self.assertIn("steps.discord_scenes_lane.outcome == 'failure'", job)
-        self.assertIn("rehearsal-directed", job)
-        self.assertIn("rehearsal-discord-scenes-", job)
 
 
 if __name__ == "__main__":

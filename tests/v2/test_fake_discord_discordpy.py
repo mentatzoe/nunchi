@@ -13,8 +13,8 @@ its message; raw reaction events; the bot's own echo with its nonce; a
 reply; a resume; and a session Discord would end, which starts afresh.
 
 Skipped where discord.py is not installed. CI runs it with discord.py 2.7.1
-in the ``discord-standin`` job (Python 3.12, ``zlib-stream``) and the
-``hermes-plugin`` job (3.14, ``zstd-stream``).
+in the ``discord-standin`` job (Python 3.12, ``zlib-stream``; Python 3.14,
+``zstd-stream``).
 """
 
 from __future__ import annotations
@@ -170,8 +170,8 @@ class DiscordPyTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(forbidden.exception.code, 50013)
         self.assertClean()
 
-    async def test_the_routes_hermes_calls_are_read_by_discord_py(self):
-        """History, one message, a reaction read back, the slash-command sync and the application's flags: what `hermes gateway run` asks of Discord."""
+    async def test_history_reaction_and_application_routes_are_read_by_discord_py(self):
+        """History, one message, a reaction read back, the slash-command sync and the application's flags: the native Discord client routes."""
         room = self.channel("room")
         ids = [int(self.fd.post("alice", "room", f"message {number}")["id"]) for number in range(3)]
         found = [m async for m in room.history(limit=2, before=discord.Object(ids[2]))]

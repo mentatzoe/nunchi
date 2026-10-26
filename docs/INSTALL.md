@@ -1,140 +1,82 @@
-# Install and operate Nunchi V2
+# Install and configure Nunchi
 
-**Current implementation:** these commands install and operate today's
-Nunchi runtime. Its agent startup and required channel connections are under
-[architecture review](../AGENTS.md#architecture-goal-and-current-gap). They
-are not prerequisites the intended library should impose.
+**The package currently supplies no agent harness integrations.** These
+instructions cover the remaining library, reference adapters and operator
+tools. Their configuration and runtime ownership are under
+[architecture review](../AGENTS.md#architecture-goal-and-current-gap).
 
-## Artifact installation
+## Build and inspect a package
 
-Build and install the revision being checked into a new environment:
+Use a clean checkout and environment to check a particular revision. Old
+`build/` output can otherwise carry deleted modules into a wheel:
 
 ```sh
 python3 -m pip install build
 python3 -m build
-python3 -m venv /tmp/nunchi-v2-clean
-/tmp/nunchi-v2-clean/bin/python -m pip install --no-deps \
-  dist/nunchi-2.0.0-py3-none-any.whl
-/tmp/nunchi-v2-clean/bin/nunchi probe
-/tmp/nunchi-v2-clean/bin/nunchi-install probe
+python3 -m venv /tmp/nunchi-clean
+/tmp/nunchi-clean/bin/python -m pip install --no-deps dist/nunchi-2.0.0-py3-none-any.whl
+/tmp/nunchi-clean/bin/nunchi probe
+/tmp/nunchi-clean/bin/nunchi-install probe
+source /tmp/nunchi-clean/bin/activate
 ```
 
-The wheel is the review subject. A source checkout on `PYTHONPATH` is not
-installed-artifact evidence.
+Use the wheel filename produced by the build. Record its version, the source
+revision and the commands when reporting results. A source checkout on
+`PYTHONPATH` does not prove that an installed package works.
 
-## Unified operator setup
+## Configure the existing runtime
 
-Use the installed `nunchi` command for normal setup. It initializes private
-operator roots and commits one validated shared-schema envelope with its
-automatic integrity pin; no hand-written JSON, manual digest, separate
-dashboard installation, or runner supervision is required.
+The operator CLI manages profiles for the existing runtime. It does not
+install or configure an agent harness.
 
 ```sh
-/tmp/nunchi-v2-clean/bin/nunchi setup \
-  --profile vigil \
-  --participant-id vigil \
+nunchi setup \
+  --profile example \
+  --participant-id example \
   --actor-id discord:bot:9 \
-  --display-name Vigil \
-  --instructions 'Contribute carefully.' \
+  --display-name Example \
+  --instructions 'Take part in the conversation.' \
   --platform discord \
   --room-id 42 \
-  --room-name delivery \
+  --room-name lounge \
   --continuity-scope-id discord:channel:42 \
   --attention-model provider/attention-model \
   --participant-model provider/participant-model
-
-/tmp/nunchi-v2-clean/bin/nunchi config show --profile vigil
-/tmp/nunchi-v2-clean/bin/nunchi diagnose --profile vigil
-/tmp/nunchi-v2-clean/bin/nunchi dashboard --profile vigil
+nunchi config show --profile example
+nunchi diagnose --profile example
+nunchi dashboard --profile example
 ```
 
-`--platform` takes any chat platform name. A platform without registered
-capabilities is accepted with a warning; see
-[platform capabilities](adapters.md#platform-capabilities-in-the-operator-surface).
+Replace the example identity, room and models with your own values. Setup
+validates the configuration and records integrity hashes automatically.
+`--platform` accepts any platform name; unknown platforms produce a
+[capability warning](adapters.md#platform-capabilities-in-the-operator-surface).
 
-The operator configuration stores only credential environment-variable names.
-Set those credentials outside the dashboard. Each model's `credential_env` is
-optional, for a host-served model that needs no credential; `nunchi setup`
-fills in `NUNCHI_ATTENTION_API_KEY` and `NUNCHI_PARTICIPANT_API_KEY`. A model
-entry also accepts optional `kind` and `base_url`. A persistent-service install
-resolves its declared environment sources into a private owner-only state file;
-the generated launchd/systemd definition and dashboard never contain or return
-the values. Re-run `nunchi service install` after rotating one of those values.
-The dashboard and CLI expose the same
-identity, rooms, models, attention policy, capabilities, compatibility,
-health, services, and receipts. Dashboard mutations and service operations
-require the current profile revision.
+The configuration records credential **environment-variable names**, not their
+values. Set values outside the dashboard. Each model can specify `kind`,
+`base_url` and an optional `credential_env`; setup defaults the credential names
+to `NUNCHI_ATTENTION_API_KEY` and `NUNCHI_PARTICIPANT_API_KEY`. The CLI and
+dashboard show the same configuration, health, service and receipt data.
+Changes require the current profile revision.
 
-Declare supervised runners with repeated `--service NAME='COMMAND ...'` setup
-arguments. Then use `nunchi service start|stop|restart|status|logs|reset`
-or install and activate the generated launchd/systemd user definition with
-`nunchi service install`. The worker, rather than the outer service manager,
-enforces the configured restart policy. Profile reset preserves durable
-receipt journals. `nunchi uninstall --profile NAME` stops its services,
-deactivates installed definitions, and removes only that profile; package-level
-state purge remains an explicit `nunchi-install uninstall --purge-state`
-operation.
-
-See [`v2-shared-foundation.md`](v2-shared-foundation.md) for the schema,
-service, compatibility, and authority boundaries.
-
-Hermes has no supported install path from this package. The old Hermes
-integration was removed on 2026-10-11 (for now): it patched
-Hermes at runtime, which breaks the rule that an integration follows each
-harness's own plugin rules and never patches or reimplements the harness. The
-wheel no longer registers a `hermes_agent.plugins` entry point or ships the
-`nunchi-hermes-dashboard` and `nunchi-hermes-lifecycle` commands. The Hermes
-plugin is parked (2026-10-10) and is installed by hand, as
-[`../integrations/hermes-plugin/README.md`](../integrations/hermes-plugin/README.md#install)
-says; Hermes has no supported path until it is unparked.
-
-Initialize stable operator-owned directories:
+Private configuration and state roots can also be created explicitly:
 
 ```sh
-nunchi-install init \
-  --config-root "$NUNCHI_CONFIG_ROOT" \
-  --state-root "$NUNCHI_STATE_ROOT"
+nunchi-install init --config-root "$NUNCHI_CONFIG_ROOT" --state-root "$NUNCHI_STATE_ROOT"
 nunchi-install verify --config-root "$NUNCHI_CONFIG_ROOT"
 ```
 
-Both roots must be private to the operator (`0700`). Runtime journals and
-markers are created `0600`. `nunchi-install` has no repository discovery and
-no host-artifact operations. Claude Code installation and
-supervision are not built yet
-([#58](https://github.com/mentatzoe/nunchi/issues/58)).
+Directories must be private to the operator (`0700`); journals use `0600`.
 
-## Trusted configuration
+## Reference adapter configuration
 
-Every configured adapter uses a JSON file whose exact bytes are pinned by
-`--config-sha256` or `NUNCHI_ADAPTER_CONFIG_SHA256`. The Codex runner uses
-`NUNCHI_CODEX_CONFIG_SHA256`; the Claude Code runner uses
-`NUNCHI_CLAUDE_CODE_CONFIG_SHA256`. The profile entry contains its own exact
-`path`/`sha256` pin.
+Reference adapters use a JSON file pinned by `--config-sha256` or
+`NUNCHI_ADAPTER_CONFIG_SHA256`. Its profile entry has its own `path` and
+`sha256`. Trusted configuration defines the identity and room, models,
+context limits, state location, transport endpoint and optional authorization
+policy. Room messages cannot override these settings.
 
-Trusted configuration owns:
-
-- exact participant, native self actor, platform, room, and continuity scope;
-- participant profile and delegated attention model. The attention model's
-  `kind` selects its implementation (default `openai-compatible`). The
-  `openai-compatible` attention model and the reference adapters'
-  participant model each require an explicit `base_url`; there is no default
-  endpoint, and a configuration without one fails validation. Credentials
-  come from `api_key_env` (defaults `NUNCHI_ATTENTION_API_KEY` and
-  `NUNCHI_PARTICIPANT_API_KEY`);
-- attention suppression/recovery/margin/error policy;
-- bounded retention, snapshot, age, continuation-page, continuation-handle,
-  and expiry limits; every byte bound includes the referenced actor IDs and
-  metadata as well as events;
-- participant model, or fixed Codex or Claude Code model/session settings;
-- Hermes keeps its own participant model and prompt, while Nunchi keeps the
-  shared attention prompt, model selection, and lifecycle behavior;
-- for Claude Code, the transport output-key variable name; the gate keeps
-  that variable, and every `NUNCHI_*` variable, out of the session's
-  environment;
-- stable state directory and optional pinned privileged-action policy;
-- native transport endpoint and credential environment-variable names.
-
-An attention model block in an adapter or runner configuration looks like:
+An attention model block looks like:
 
 ```json
 {
@@ -145,42 +87,21 @@ An attention model block in an adapter or runner configuration looks like:
 }
 ```
 
-The reference adapters, the Claude Code runner and the Codex runner also
-accept a typed decision model, which answers the attention questions
-natively and much faster than a chat model:
+OpenAI-compatible attention and participant models require an explicit
+`base_url`. Other reference-adapter attention routes are `decisions-api`,
+`messages-api` and `responses-api`. Messages and Responses routes require
+an explicit endpoint and accept `temperature`, `effort`, `max_tokens` and
+`extra_body`; the Messages route also accepts `auth: "x-api-key"` or
+`"bearer"`. The Decisions route has its own default endpoint and accepts an
+explicit `url`. See [model connections](platform.md#model-connections).
 
-```json
-{
-  "kind": "decisions-api",
-  "model": "typesafe/jev-1.13",
-  "api_key_env": "NUNCHI_ATTENTION_API_KEY"
-}
-```
+The reference adapters create a plain model participant. They do not attach
+to an existing agent, and their results do not establish harness compatibility.
 
-`url` defaults to OpenRouter's Decisions API endpoint.
+## Optional Discord transport
 
-They also accept attention through the Anthropic Messages API or the OpenAI
-Responses API, with an explicit endpoint:
-
-```json
-{
-  "kind": "messages-api",
-  "base_url": "https://llm.example/v1",
-  "model": "provider/attention-model",
-  "api_key_env": "NUNCHI_ATTENTION_API_KEY",
-  "auth": "x-api-key"
-}
-```
-
-`kind: "responses-api"` takes the same fields without `auth`. Set `auth` to
-`bearer` when a router takes the key as a bearer token. Both take optional
-`temperature`, `effort` and `max_tokens`.
-
-Room text cannot supply or override any of these values.
-
-## Shared Discord transport
-
-Install `nunchi[mcp-discord]`, then set:
+Install the extra with `python3 -m pip install '.[mcp-discord]'`. The transport
+uses these environment variables:
 
 ```text
 NUNCHI_DISCORD_TOKEN
@@ -189,76 +110,41 @@ NUNCHI_DISCORD_OUTPUT_HMAC_KEY
 NUNCHI_DISCORD_STATE_DIRECTORY
 ```
 
-`NUNCHI_DISCORD_PARTICIPANT_ROUTES` is a closed JSON object such as
-`{"codex":["123456789"]}`. It defines exact participant/room pairs, never a
-participant-by-room cross product.
+Routes name exact participant/room pairs, for example
+`{"example":["123456789"]}`. The output key must be at least 32 bytes and
+shared only with the authorized consumer. Each MCP session authenticates one
+route; output and history calls require a short-lived signature for that
+operation. Consumed nonces remain blocked after restart.
 
-Every message reaches the participant, or the participant is told with a
-continuity gap that something may have been missed. A thread under a routed
-channel is part of the room unless the participant's `binding` says
-`"threads_in_room": false` (the same key in every harness; the
-[harness guide](harness-guide.md), step 1, says which honor it), and the agent
-answers in the thread. A participant's runner opens its notification stream before it
-registers. See
-[What reaches the participant](../integrations/mcp-discord/README.md#what-reaches-the-participant).
+The [transport guide](../integrations/mcp-discord/README.md) covers setup,
+thread handling, notification gaps, identity checks and output receipts. This
+transport is optional; it is not a requirement for the intended library.
 
-`NUNCHI_DISCORD_OUTPUT_HMAC_KEY` must be at least 32 bytes and shared only
-between the host-owned participant runner and transport. Output/history tool
-calls require a short-lived, exact-operation HMAC. Accepted nonces are fsynced
-before native dispatch and remain replay-blocked across restart.
+## Service tools
 
-The transport requests message, reaction, membership, and message-content
-gateway intents. Each MCP session must authenticate one exact route before it
-can receive notifications or invoke tools. Notifications carry the
-gateway-attested bot actor and exact target participant. The bounded queue
-never replaces an accepted event. If an event or one participant delivery is
-lost, a durable per-route audit is written; after restart, that route receives
-an explicit continuity gap before any later event. Because gateway resume
-credentials are intentionally process-local, every fresh shared or standalone
-Discord process declares a source gap before it accepts post-start facts;
-within-process resumable reconnects preserve their narrower attested
-continuity.
+Existing service tools supervise arbitrary configured commands. Their presence
+does not give Nunchi ownership of agents in the target architecture.
 
-Output success is target-attested. Message results must include a non-empty
-native message identity for the exact room and authenticated bot and must echo
-the exact submitted content plus the exact reply target or absence of one.
-Reaction results must echo the exact room, target, operation, and reaction.
-The Codex consumer independently rechecks those facts, JSON-RPC request
-correlation, and the single MCP text result. Empty, stale, cross-bot,
-wrong-content, wrong-reply, mismatched, or malformed acknowledgements are
-recorded as unknown rather than sent.
+Declare commands with repeated `--service NAME='COMMAND ...'` arguments to
+setup. Use `nunchi service start|stop|restart|status|logs|reset`, or
+`nunchi service install` for a launchd/systemd user definition. The worker
+enforces the configured restart policy.
 
-`participant_timeout_seconds` is the host's total opportunity deadline despite
-the compatibility name: observation packet construction, delegated attention,
-the participant turn, expansion, privileged authorization, and native
-transport acknowledgement all consume the same budget. A stage timeout may be
-narrower, but no provider or network wait may extend the total deadline; a
-late native result is recorded as `unknown` and cannot revive the opportunity.
-Before any native effect, the shared host persists a participant-host
-`unknown` handoff receipt. The separately owned transport stage alone may
-later attest `sent`; if receipt persistence consumes the remaining deadline,
-the host makes zero native calls and records a failed transport stage.
+Service installation copies declared environment values into a private state
+file. Generated service definitions and the dashboard do not expose those
+values. Reinstall the service after rotating them. Profile reset preserves
+receipts; `nunchi uninstall --profile NAME` stops and removes that profile.
+Deleting package state requires the separate
+`nunchi-install uninstall --purge-state` command.
 
-## Restart and recovery
+## Recovery and rollback
 
-Restart:
+The current runtime cancels active work and pending approvals on restart.
+It retains observations as context but does not replay them as new turns.
+Continuation handles are discarded. Uncertain or corrupt state stops the
+affected operation; it is not silently rewritten.
 
-1. cancels active and pending conversation opportunities;
-2. discards continuation handles and pending approvals;
-3. retains bounded canonical observations as context only;
-4. retains content-free replay reservations plus observation, receipt,
-   authorization, output-nonce, and transport audits;
-5. never promotes retained events into new wake work.
-
-Corrupt or uncertain observation, receipt, authorization, nonce, session, or
-continuity state fails closed. Operator recovery uses a new state directory or
-an evidence-backed repair; the runtime never silently rewrites untrusted state.
-Canonical delivery and event identities are fsynced to a content-free replay
-reservation before mutable observation content. If the content or final audit
-commit is uncertain, the event cannot wake again and coverage becomes unknown.
-
-## Rollback
-
-Stop V2 processes before changing artifacts. Rollback is an atomic deployment
-choice: do not run V1 and V2 participants in one room/session. Retain the V2
-state directory for audit, but do not feed V2 journals to a V1 runtime.
+Stop affected processes before changing installed artifacts. Keep state with
+the version that wrote it unless compatibility is documented. Do not feed
+current journals into the retired V1 runtime. See
+[commands and compatibility](STABILITY.md).

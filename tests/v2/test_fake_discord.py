@@ -496,8 +496,8 @@ class PreflightRouteTest(StandIn, unittest.TestCase):
         self.assertNotEqual(FakeDiscord(WORLD).preflight_nonce, FakeDiscord(WORLD).preflight_nonce)
 
 
-class HermesRoutesTest(StandIn, unittest.TestCase):
-    """The routes `hermes gateway run` is shown to call that no other column does (docs/rehearsal.md, the Hermes column)."""
+class DiscordClientRoutesTest(StandIn, unittest.TestCase):
+    """Discord history, reaction, application and command routes."""
 
     COMMAND = {"name": "status", "description": "Show the session", "type": 1, "options": [], "nsfw": False, "dm_permission": True,
                "default_member_permissions": None, "contexts": None, "integration_types": None}
@@ -596,7 +596,7 @@ class HermesRoutesTest(StandIn, unittest.TestCase):
         self.assertEqual([m["id"] for m in self.history(channel=thread["id"])[2]], [inside], "a thread has its own messages")
         self.assertEqual(self.history(f"?before={inside}", channel=thread["id"])[2], [])
 
-    def test_history_asks_only_for_what_hermes_asked(self):
+    def test_history_respects_the_requested_limit_and_bounds(self):
         self.fd.post("alice", "room", "one")
         for query in ("?limit=0", "?limit=101", "?limit=many", "?before=soon"):
             with self.subTest(query=query):

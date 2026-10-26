@@ -38,7 +38,7 @@ python3 -m evals.verdict_suite.runner
 ```
 
 For downstream platform requirements and additional native checks, see
-[`../platform-v2.md`](../platform-v2.md).
+[`../platform.md`](../platform.md).
 
 Provider-backed and real-room runs are separate, attributable evidence. They
 must identify the exact installed artifact, participant, route, model, and

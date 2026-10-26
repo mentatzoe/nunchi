@@ -1,25 +1,7 @@
-"""The run record AGENTS.md asks for, and the harnesses' own transcripts (step 9f, PR 1).
+"""Reference rehearsal records: versions, configuration, commands and results.
 
-Every live run records the installed version, identity, configuration,
-command, and complete result. The probe writes, under ``<out>/<harness>/``:
-
-- ``run.json``: the commit, the Nunchi wheel's sha256, the harness, mod and
-  plugin versions and package lists, the binding, the requested models and
-  the providers that served them, every config written with its sha256 (the
-  configs name variables, never their values), every command the probe and
-  the integrations ran with the names of its environment's variables, the
-  variable names of the harness's other processes (Hermes's own, and what
-  its builders give the agent's commands), the spend readings against the
-  budget (the last one reads the lagging usage figure up to a bound and keeps
-  each read), each moment, and the checks;
-- ``checks.json`` and ``summary.md`` (written even when the run fails), and
-  ``scan.json``, the key and canary scan over all of it (`scan.enforce`);
-- the participant's receipts, the stand-in's wire log, and the harness's own
-  transcript.
-
-Transcripts are recorded by thin subclasses of the integrations' own process
-wrappers (`recording_app_server`, `recording_claude_session`): they copy each
-line the harness reads and writes, and change nothing else.
+Records describe the standalone participant and Discord stand-in. They are not
+installed-agent evidence. Secret values must be scanned before publication.
 """
 
 from __future__ import annotations
@@ -137,49 +119,8 @@ def python_packages() -> list[str]:
     return [seen[key] for key in sorted(seen)]
 
 
-def npm_packages(executable: str | None) -> dict[str, Any] | None:
-    """``npm ls --all --json`` for the npm prefix an executable was installed into, when there is one."""
-
-    if not executable:
-        return None
-    path = Path(executable).resolve()
-    prefix = next((parent.parent for parent in path.parents if parent.name == "node_modules"), None)
-    if prefix is None or shutil.which("npm") is None:
-        return None
-    argv = ["npm", "ls", "--all", "--json", "--prefix", str(prefix)]
-    env = {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", ""), "npm_config_update_notifier": "false"}
-    # The command it ran, for the record's ``commands``.
-    entry: dict[str, Any] = {"prefix": str(prefix), "command": {"argv": argv, "env": env}}
-    try:
-        done = subprocess.run(argv, capture_output=True, text=True, timeout=120, check=False, env=env)
-        entry["tree"] = json.loads(done.stdout or "{}")
-    except (OSError, subprocess.SubprocessError, ValueError) as exc:
-        entry["error"] = type(exc).__name__
-    return entry
-
-
 def python_identity() -> dict[str, Any]:
     return {"version": sys.version.split()[0], "executable": sys.executable}
-
-
-def home_snapshot(path: Path) -> dict[str, Any]:
-    """Whether a directory exists, and a digest of its listing (names, sizes, times)."""
-
-    if not path.exists():
-        return {"path": str(path), "exists": False}
-    lines = []
-    for item in sorted(path.rglob("*")):
-        try:
-            stat = item.lstat()
-        except OSError:
-            continue
-        lines.append(f"{item.relative_to(path)} {stat.st_size} {stat.st_mtime_ns}")
-    return {
-        "path": str(path),
-        "exists": True,
-        "entries": len(lines),
-        "listing_sha256": hashlib.sha256("\n".join(lines).encode()).hexdigest(),
-    }
 
 
 def tree_sizes(path: Path) -> dict[str, Any]:
@@ -192,121 +133,6 @@ def tree_sizes(path: Path) -> dict[str, Any]:
 
 
 # -- the harnesses' own transcripts --------------------------------------------------------------
-
-
-class _TeeLines:
-    """A text stream's lines, each also written to a transcript."""
-
-    def __init__(self, stream: Any, record: Callable[[str], None]) -> None:
-        self._stream = stream
-        self._record = record
-
-    def __iter__(self):
-        for line in self._stream:
-            self._record(line)
-            yield line
-
-    def close(self) -> None:
-        self._stream.close()
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._stream, name)
-
-
-def _parsed(line: str) -> Any:
-    try:
-        return json.loads(line)
-    except ValueError:
-        return {"text": line.rstrip("\n")}
-
-
-def recording_app_server(transcript: JsonLines, launched: list[dict[str, Any]]) -> type:
-    """`codex_app_server.client.AppServer`, also writing every JSON-RPC message both ways to ``transcript``.
-
-    ``launched`` gets each app-server it starts: argv, cwd and environment
-    (kept in memory; the record keeps only the variable names).
-    """
-
-    from nunchi.integrations.codex_app_server.client import AppServer
-
-    class RecordingAppServer(AppServer):
-        def start(self) -> None:
-            launched.append(
-                {"argv": self.command(), "cwd": self.working_directory, "environment": dict(self.environment)}
-            )
-            super().start()
-
-        def _write(self, message: Mapping[str, Any]) -> None:
-            transcript.write({"direction": "to-codex", "message": dict(message)})
-            super()._write(message)
-
-        def _read_stdout(self, process: Any) -> None:
-            process.stdout = _TeeLines(
-                process.stdout, lambda line: transcript.write({"direction": "from-codex", "message": _parsed(line)})
-            )
-            super()._read_stdout(process)
-
-        def _read_stderr(self, process: Any) -> None:
-            process.stderr = _TeeLines(
-                process.stderr, lambda line: transcript.write({"direction": "codex-stderr", "message": line.rstrip("\n")})
-            )
-            super()._read_stderr(process)
-
-    return RecordingAppServer
-
-
-def recording_claude_session(
-    transcript: JsonLines, launched: list[dict[str, Any]], environment: Mapping[str, str] | None = None
-) -> type:
-    """`ClaudeCodeSession`, also writing its stream-json both ways and its stderr to ``transcript``.
-
-    ``environment`` is merged into the session's own before each launch: a
-    scripted run's proxy settings, which only Claude Code's processes get.
-    ``launched`` gets each process the session starts: argv, cwd and
-    environment (kept in memory; the record keeps only the variable names).
-    """
-
-    from nunchi.integrations.claude_code_gate import ClaudeCodeSession
-
-    extra = dict(environment or {})
-
-    class RecordingClaudeSession(ClaudeCodeSession):
-        _starting = False
-
-        def start(self) -> None:
-            self.environment.update(extra)
-            self._starting = True
-            try:
-                super().start()
-            finally:
-                self._starting = False
-
-        def command(self, resume: str | None) -> list[str]:
-            command = super().command(resume)
-            if self._starting:
-                # Only start() launches; any other caller only asks what the command would be.
-                launched.append(
-                    {"argv": list(command), "cwd": str(self.working_directory), "environment": dict(self.environment)}
-                )
-            return command
-
-        def _write(self, message: Mapping[str, Any]) -> None:
-            transcript.write({"direction": "to-claude", "message": dict(message)})
-            super()._write(message)
-
-        def _read_stdout(self, process: Any) -> None:
-            process.stdout = _TeeLines(
-                process.stdout, lambda line: transcript.write({"direction": "from-claude", "message": _parsed(line)})
-            )
-            super()._read_stdout(process)
-
-        def _read_stderr(self, process: Any) -> None:
-            process.stderr = _TeeLines(
-                process.stderr, lambda line: transcript.write({"direction": "claude-stderr", "message": line.rstrip("\n")})
-            )
-            super()._read_stderr(process)
-
-    return RecordingClaudeSession
 
 
 def copy_tree(source: Path, target: Path, *, patterns: Iterable[str] = ("*",)) -> list[str]:
@@ -328,26 +154,6 @@ def copy_tree(source: Path, target: Path, *, patterns: Iterable[str] = ("*",)) -
                 continue
             copied.append(str(relative))
     return sorted(set(copied))
-
-
-def sqlite_tables(path: Path, tables: Sequence[str]) -> dict[str, list[dict[str, Any]]]:
-    """Every row of ``tables`` in a SQLite file, opened read-only; a table it lacks is left out."""
-
-    import sqlite3
-
-    if not path.exists():
-        return {}
-    found: dict[str, list[dict[str, Any]]] = {}
-    with contextlib.closing(sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)) as db:
-        db.row_factory = sqlite3.Row
-        present = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-        for table in tables:
-            if table in present:
-                rows = db.execute(f'SELECT * FROM "{table}"')
-                found[table] = [
-                    {key: value.hex() if isinstance(value, bytes) else value for key, value in dict(row).items()} for row in rows
-                ]
-    return found
 
 
 def served_providers(document: Any) -> list[dict[str, Any]]:
@@ -679,7 +485,7 @@ def summary_markdown(run: Mapping[str, Any]) -> str:
         )
     elif status == "pass":
         headline = (
-            "**Passed:** every hard check held: the harness reached its model and took part in the room "
+            "**Passed:** every hard check held: the reference participant reached its model and took part in the room "
             "through Nunchi, with attention judging."
         )
     elif status == "fail":
@@ -724,16 +530,6 @@ def summary_markdown(run: Mapping[str, Any]) -> str:
         if isinstance(sandbox, Mapping) and "on" in sandbox:
             state = {True: "on", False: "off"}.get(sandbox["on"], "not known")
             lines.append(f"- {key} sandbox: {state} ({sandbox.get('detail')})")
-    for key, value in reports.items():
-        # Where a scripted harness reached, and what else it tried to (Claude Code's refusing proxy).
-        network = value.get("network") if isinstance(value, Mapping) else None
-        if isinstance(network, Mapping) and network.get("detail"):
-            lines.append(f"- {key} network: {network['detail']}")
-    for key, value in reports.items():
-        # A credential the harness reads from a fixed path, whatever HOME says (Claude Code in a cloud container).
-        credentials = value.get("fixed_credentials") if isinstance(value, Mapping) else None
-        if isinstance(credentials, Mapping) and credentials.get("readable"):
-            lines.append(f"- {key} credential files: {credentials.get('detail')}")
     lines.append("")
     moments = run.get("moments", ())
     if moments:

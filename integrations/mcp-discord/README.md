@@ -1,13 +1,53 @@
-# Shared Discord V2 MCP transport
+# Shared Discord MCP transport
 
-The transport owns Discord gateway/REST facts only. It never makes a social
-judgment.
+This optional transport supplies Discord events and authenticated tools for
+reading and acting in a room. It makes no social judgments. There are currently
+no supplied agent harness integrations; the standalone Discord reference adapter
+uses this transport's shared helpers.
 
-## Inbound notification
+The protocol below describes the current implementation. It does not require
+future library consumers to use this connector or give Nunchi control of an
+agent's turns. See the [architecture goal](../../AGENTS.md#architecture-goal-and-current-gap).
 
-Method: `notifications/nunchi/v2/discord-event`
+## Configuration
 
-Closed params:
+Install the `mcp-discord` extra, configure the environment, then run
+`nunchi-mcp-discord`. Required environment variables:
+
+```text
+NUNCHI_DISCORD_TOKEN
+NUNCHI_DISCORD_PARTICIPANT_ROUTES
+NUNCHI_DISCORD_OUTPUT_HMAC_KEY
+NUNCHI_DISCORD_STATE_DIRECTORY
+```
+
+Routes are a JSON object, such as `{"example":["123456789"]}`. The gateway
+accepts events from those channels; delivery and tool authorization remain
+bound to each participant and channel pair. Enable Discord message content
+and member privileged intents for the configured bot.
+
+Optional settings:
+
+| Environment variable | Default |
+|---|---|
+| `NUNCHI_MCP_DISCORD_HOST` | `127.0.0.1` |
+| `NUNCHI_MCP_DISCORD_PORT` | `3993` |
+| `NUNCHI_MCP_DISCORD_QUEUE_MAXSIZE` | `256` notifications |
+| `NUNCHI_MCP_DISCORD_BACKSTOP_MAX_SENDS` | `5` sends per channel per window |
+| `NUNCHI_MCP_DISCORD_BACKSTOP_WINDOW_SECONDS` | `10` seconds |
+| `NUNCHI_MCP_DISCORD_DRAIN_TIMEOUT_SECONDS` | `10` seconds |
+| `NUNCHI_DISCORD_MEMBERSHIP_ROOM_IDS` | All routed channels; otherwise a comma-separated subset |
+
+One bot account uses one gateway, REST client, authorization secret, bounded
+notification queue and durable state directory. The endpoint binds locally by
+default. Exposing it requires an operator-managed network and authentication
+boundary; the protocol assumes a trusted local caller plus authorization for
+each operation.
+
+## Events and missing context
+
+The notification method is `notifications/nunchi/v2/discord-event`. Its params
+are a closed object:
 
 ```json
 {
@@ -26,195 +66,104 @@ Closed params:
     "discord:actor:789": {"display_name": "Alice", "kind": "human"}
   },
   "continuity_gap": false,
-  "target_participant_id": "codex",
+  "target_participant_id": "example",
   "transport_self_actor_id": "discord:actor:999"
 }
 ```
 
-Message, reaction add/remove, and membership events use the canonical V2 event
-shapes. Exact self messages are delivered; participant-specific observation
-retains them as context without self-waking.
+Messages, reaction additions and removals, and membership events use the
+[canonical event shapes](../../docs/contracts/nunchi.md). The transport delivers
+self-authored messages too; observation retains them as context without waking
+that same participant.
 
-A gap notification has `event: null`, `actors: {}`, and
-`continuity_gap: true`. It tells the participant that something before the
-next event may be missing, so it can read history. Gaps make subsequent
-coverage continuity `unknown`.
+When events may be missing, the next delivered event is preceded by a gap
+notification: `event: null`, `actors: {}`, `continuity_gap: true`. This happens
+after queue overflow, failed client delivery, a non-resumable gateway session,
+or restart with unconfirmed deliveries. If the gap itself cannot be delivered,
+the event behind it is recorded as lost and the gap remains pending. A fresh
+process has no persisted gateway resume session, so it starts with a gap.
 
-## What reaches the participant
+Clients must open their notification stream before registering:
 
-Every message reaches the participant, or the participant is told plainly
-that something may have been missed. The rules, and what pins each:
+1. Connect and open `GET /mcp`.
+2. Mark a gap in local observation state.
+3. Register the participant and begin reading notifications.
 
-- **A gap goes ahead of the next event, and the event follows it.** After a
-  queue rejection, a lost delivery, a stream that ended, a source gap (a
-  non-resumable gateway session marks every configured route uncertain, so a
-  fresh process always starts with one), or a restart with unconfirmed
-  deliveries in the journal, the next event for that exact route is queued
-  behind a gap notification. The event is rejected (`queue-rejected`) only
-  when the queue has no slot left, and then the gap that stands for it is
-  still pending. An event queued behind a gap whose delivery failed is not
-  delivered without it: it is recorded lost, and the next event queues a
-  fresh gap. (Before 2026-10-10 the event itself was dropped and only the gap
-  was delivered, so a person's first message after the transport started never
-  reached the agent.) Tests: `tests/v2/test_runtime_hardening.py`
-  (`TransportGapTests`) and `tests/v2/test_mcp_discord_gaps.py`.
-- **The stream first, then registration.** The MCP SDK keeps no event store
-  here: a notification sent to a session whose notification stream
-  (`GET /mcp`) is not open is dropped, with no error
-  (`SdkDropTests` pins that behavior for the pinned `mcp` version). A client
-  must connect, open the stream, mark a gap of its own, register, and only
-  then read (`StreamableMCPClient.open_stream`, `DiscordRoomConnection.serve`;
-  [harness guide](../../docs/harness-guide.md), "Room events in"). The
-  transport does not rely on the client alone: it sees each `GET /mcp` begin
-  and end (`nunchi.mcp_discord._binding.track_streams`, standard ASGI, no SDK
-  internals) and records a notification as delivered only while the session's
-  stream is open. A notification for a session whose stream is not open, a
-  client that registers first, or a runner whose stream has died while its
-  session stays registered, is a failed delivery (`client-delivery-lost`),
-  and a stream that ends marks its route uncertain. The next listener on the
-  route is told with a gap. Before 2026-10-10 such messages were journaled as
-  delivered and never arrived.
-- **Threads are part of the room, by default.** A message or reaction in a
-  thread under a routed channel carries the thread's own id as its channel.
-  The transport asks Discord once for each channel that is not routed
-  (`GET /channels/{id}`, remembered; `nunchi.mcp_discord.threads`) and, when it
-  is a thread of a routed channel, delivers the event with `room_id` set to
-  the routed channel and, for a message, `thread_root_event_id` set to
-  `discord:message:<thread id>`. The first message of a forum post, whose id is
-  the thread's own, starts the thread and names no other. When Discord cannot
-  say what a channel is, the transport declares a source gap instead of
-  dropping the event quietly. A reply, a post or a reaction about a message in
-  a thread goes to the thread (`nunchi.integrations.discord_participant_transport.thread_of`),
-  whichever way the agent saw the message: the host gives the transport the
-  wake's events and every message the turn showed (a look-again, a steering
-  or history page; a message its memory points at is read from the room's
-  log), so the message's `thread_root_event_id` is there when the move goes
-  out. The host's authorization for a room covers the threads under it
-  (`ToolAuthorizer`). The setting is below.
+The MCP SDK does not retain notifications for clients without an open stream.
+The server tracks stream requests and records delivery as failed when no stream
+is open. A disconnected connection may only be detected on the next write; the
+following event then carries the gap. The shared client implements this order
+in `StreamableMCPClient.open_stream` and `DiscordRoomConnection.serve`.
 
-Limits that remain:
+## Tools and authorization
 
-- The transport knows a stream ended when its HTTP request ends, which for a
-  connection that dies without a close (a network partition) is when the next
-  write to it fails, not at once. Anything sent in between is covered by the
-  gap the transport then marks, so the participant learns of it on its next
-  event, not before.
-- Each thread's parent comes from a REST lookup, once per channel that is not
-  routed. The gateway's read loop waits for it at most 3 seconds
-  (`ThreadDirectory.parent_within`): while Discord's REST API is slow or down,
-  a late or failed lookup declares a gap (one record while the route is already
-  pending) and the next message from that channel does not wait again. Taking
-  the parents from the gateway's own events (`THREAD_CREATE`,
-  `THREAD_LIST_SYNC` and the guild's thread list, which need the `GUILDS`
-  intent) would spare the lookup and its wait. That is a follow-up, not done.
-- The extra needs `mcp>=1.10,<2`. CI runs this transport's gap tests on 1.10.0
-  and on the pinned newest release.
-- Reaction capability is measured on the room channel, not on a thread.
-- The probe's Discord room pins these (`evals/rehearsal/discord_room.py`,
-  [docs/rehearsal.md](../../docs/rehearsal.md)): the first message and a
-  thread remark read `reached` on every column, and a question asked in a
-  thread must be answered there.
-
-## Tools
+The transport exposes:
 
 - `register_participant`
-- `send_message`
-- `reply_message`
-- `add_reaction`
-- `reaction_capability`
-- `remove_reaction`
+- `send_message`, `reply_message`
+- `add_reaction`, `remove_reaction`, `reaction_capability`
 - `read_history`
 
-These are the transport's tools: the participant host calls them to carry out
-an action it has committed, each with a one-use authorization, and the agent
-never sees them. The agent's own room tools (`room_send`, `room_react`,
-`room_quiet`, ...) belong to its integration. The `quiet` role posts nothing
-and is not a platform action, so the transport has no tool for it and nothing
-about it reaches Discord: the agent's silence, and its reason, live in the
-participant's memory.
+Registration is required before notifications or other tools. Every call needs
+`_nunchi_authorization`: a one-use HMAC covering the request, participant, room,
+tool, exact arguments, issue time and nonce. Checks include the configured and
+authenticated session routes, expiry, future timestamps, argument mutation,
+MAC and replay. Nonce consumption is durably written before REST dispatch and
+reloaded after restart. Rate limits provide an additional bound on sends; they
+do not replace authorization.
 
-The registration call is mandatory before notifications or any other tool.
-It takes the participant, its channel and, optionally, `threads_in_room` (a
-boolean; see "Threads" below).
-Every call requires `_nunchi_authorization`: a one-use HMAC over request,
-participant, room, tool, exact argument digest, issue time, and nonce. The
-transport checks the exact configured participant/room route, authenticated
-session route, expiry, future time, operation mutation, MAC, and replay. It
-fsyncs nonce consumption before REST dispatch and reloads the journal after
-restart.
+The remaining shared participant host calls these tools after committing an
+action. That host's ownership of sending is under architecture review. Silence
+is not a Discord operation and has no transport tool.
 
-`reaction_capability` is a read-only, exact-route probe. It authenticates the
-registered bot identity, reads the configured guild channel, member roles, and
-permission overwrites, and returns only the effective add-reaction capability
-plus a non-secret permission revision. Missing, denied, malformed, or
-mismatched facts fail closed: the participant's turn offers no reaction.
+`reaction_capability` is a read-only probe for the registered bot and room. It
+reads guild membership, roles and channel overwrites. Missing, denied, malformed
+or mismatched facts report reactions as unsupported. The probe does not fully
+model guild owners, member timeouts or thread permissions; see
+[reference adapter limits](../../docs/adapters.md#errors).
 
 ## Threads
 
-Whether a thread opened under a routed channel is part of the room is one
-setting, the same in every harness: `threads_in_room` in the participant's
-`binding` ([harness guide](../../docs/harness-guide.md), step 1). It is `true`
-unless the config says `false`.
+`threads_in_room` is a participant binding setting and registration argument.
+It defaults to `true`:
 
-- **`true` (the default).** The participant hears the thread (a message
-  carries `thread_root_event_id`), and its reply, post or reaction about a
-  message in a thread lands in the thread.
-- **`false`.** Thread messages are not part of the room: the participant
-  neither hears them nor acts in them. The runner tells the transport at
-  registration (`register_participant` with `threads_in_room: false`, inside
-  the authorized arguments), so the transport sends that participant nothing
-  from threads, and asks Discord about no channel at all while every route
-  has said so. The library also refuses a thread message, which the transport
-  marks with its thread (`thread_root_event_id`), in the participant's
-  observation (`route-rejected`) whichever way a harness delivered it
-  (`ParticipantBinding.threads_in_room`), so a harness that never tells the
-  transport still gets the setting.
+- When enabled, a thread under a routed channel is part of that room. Message
+  events carry `thread_root_event_id`; replies and reactions to thread messages
+  are routed back to the thread.
+- When disabled, the transport omits thread events for that participant.
+  Observation also rejects events marked with a thread root, even if another
+  caller supplies them. Participants sharing a transport can choose differently.
 
-The transport's own configuration (below) has no such setting: one transport
-can serve participants whose rooms differ. A participant that has not
-registered yet counts as `true`, since leaving a message out is the worse
-mistake.
+The transport looks up and caches the parent of an unfamiliar channel through
+Discord REST. The gateway loop waits at most three seconds. A failed or late
+lookup records a gap, and later messages from that channel do not wait again.
+It does not yet use gateway thread-list events to avoid this lookup. Reaction
+capability is measured on the room channel, not separately on each thread.
 
-## Configuration
+## Credentials and records
 
-Required:
+The transport audit records participant, delivery and room IDs, not message
+content or bot tokens. Token redaction is installed before network startup.
 
-```text
-NUNCHI_DISCORD_TOKEN
-NUNCHI_DISCORD_PARTICIPANT_ROUTES
-NUNCHI_DISCORD_OUTPUT_HMAC_KEY
-NUNCHI_DISCORD_STATE_DIRECTORY
+On Linux, startup calls `nunchi.private_process.keep_private` to prevent other
+processes of the same OS user from reading its `/proc` environment and memory.
+That protection begins after Python starts and imports Nunchi. It does not
+protect the initial environment, other processes given the same keys, credential
+files, or access by root. An unsandboxed agent of the same OS user can also
+signal the server and trigger a supervised restart.
+
+A consumer must account for those limits in its credential and sandbox setup.
+A separate process alone does not establish credential isolation. No retired
+harness integration's sandbox claim establishes protection for a new consumer.
+
+## Verification
+
+The `mcp-discord` extra requires `mcp>=1.10,<2`. CI runs transport gap tests with MCP 1.10.0 and 1.28.1, covering stream
+ordering, queue loss and restart behavior. The
+[reference rehearsal](../../docs/rehearsal.md) checks the installed plain-model
+adapter against a Discord stand-in. Neither proves a working agent harness
+integration or social behavior on a live platform.
+
+```sh
+python3 -m unittest tests.v2.test_mcp_discord_gaps tests.v2.test_runtime_hardening
 ```
-
-Routes are a JSON object, for example `{"codex":["123456789"]}`. The union of
-those numeric channels is the gateway allowlist, while authorization and
-delivery remain bound to each exact pair.
-
-Optional queue, backstop, host, port, and drain settings are documented by
-`nunchi-mcp-discord --help`. Enable Discord message content and member
-privileged intents for the configured bot.
-
-The transport audit contains participant, delivery, and room IDs, never room
-content or bot tokens. Logging installs token redaction before network startup.
-
-On Linux the server makes its own process private first thing in `main`
-(`nunchi.private_process.keep_private`). From then on another process of the
-same OS user, such as an agent's shell command, gets `PermissionError` on its
-`/proc/<pid>/environ` and `/proc/<pid>/mem`.
-
-That does not make the token and the HMAC key safe from an agent of the same
-OS user:
-
-- At every start, any process of that user can read them in the server's
-  starting environment for about a tenth of a second (Python's start-up and
-  Nunchi's imports, before the call).
-- An agent with an unsandboxed shell can leave a reader running and force a
-  start: a signal needs only the same user, so it can kill the supervised
-  server, and the supervisor starts it again.
-- Other programs started with the same variables, environment files and
-  root are not covered.
-
-What closes the first two is a separation the agent cannot cross: Claude
-Code's Bash sandbox (a fresh `/proc`), Codex's `workspace-write` or
-`read-only` sandbox (its own process namespace), or running the agent as its
-own OS user, which is not supported yet.

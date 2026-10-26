@@ -76,7 +76,7 @@ class StreamableMCPClient:
                 "params": {
                     "protocolVersion": "2025-03-26",
                     "capabilities": {},
-                    "clientInfo": {"name": "nunchi-codex-v2", "version": "2.0.0"},
+                    "clientInfo": {"name": "nunchi", "version": "2.0.0"},
                 },
             },
             session=False,

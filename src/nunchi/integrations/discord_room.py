@@ -1,12 +1,10 @@
-"""The room connection every library-hosted integration shares (#94 step 9e).
+"""Connection to the optional shared Discord transport.
 
-A library-hosted harness (Claude Code, Codex) leaves the room to Nunchi: the
-shared Discord transport (`nunchi.mcp_discord`) delivers each event, and Nunchi
-posts through it. This module is that connection, once: it registers the
-participant with the transport and checks its attestation, validates each
-notification, hands events to the `Room`, marks a continuity gap when the
-stream is uncertain, and reconnects. An integration builds its `Room` with
-`DiscordRoomConnection.transport`, attaches the room, and calls `serve`.
+This implementation registers a participant with the transport and checks
+its attestation, validates notifications, hands events to a `Room`, marks
+continuity gaps and reconnects. It remains available for transport checks
+after the agent-harness integrations were retired. Its coupling to `Room`
+and the current action protocol is under architecture review.
 """
 
 from __future__ import annotations
@@ -196,7 +194,7 @@ class DiscordRoomConnection:
     ) -> None:
         """Connect, open the stream, register, and hand every event to the room; reconnect on errors.
 
-        The order is the client rule (``docs/harness-guide.md``): open the
+        The order follows ``integrations/mcp-discord/README.md``: open the
         notification stream before registering, never the other way round.
         Runs until ``stop`` is set (checked between connections), or forever.
         """

@@ -10,11 +10,7 @@ if str(SRC) not in sys.path:
 
 
 def load_tests(loader, _standard_tests, pattern):
-    """Load the V2 suite under ``tests/v2``.
-
-    The V1 test corpus was removed on 2026-10-04; ``tests/V1-REPLACEMENT.md``
-    maps each retired V1 concern to its V2 coverage.
-    """
+    """Load the test suite under ``tests/v2``."""
     return loader.discover(
         str(ROOT / "tests" / "v2"),
         pattern=pattern or "test*.py",
