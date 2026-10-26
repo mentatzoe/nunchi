@@ -180,11 +180,9 @@ floor.
   library packages are not protagonist runs or evidence of passing scenes.
   Running and scoring the collection belong to a separate evaluation-design
   session.
-- **Earlier fixtures retain their historical role.** The litmus corpus in
-  `evals/verdict_suite/fixtures/` and the older-format suite in
-  [`evals/behavior/`](../evals/behavior/README.md) document earlier experiments.
-  Their expected moves and review metadata do not define the published
-  scenes' purposes or approval.
+- **Old conversation fixtures are not evaluation criteria.** The retired
+  behavior runner's expectations remain in Git history. They do not define
+  the published scenes' purposes or approval.
 - **Deterministic tests prove plumbing only.**
 
 ## Fast decisions

@@ -67,10 +67,9 @@ context fetch is not required when the full update was already delivered.
 
 Evaluation design must establish how to run the installed library and production
 participants, observe activations and later updates, judge behavior, and report
-uncertainty and failures. The repository's existing behavioral runners and
-fixtures predate these approved specifications. They remain historical and
-implementation evidence; their schemas, fixed move expectations and rubrics do
-not decide the new design.
+uncertainty and failures. The earlier conversation runners, fixtures and scoring have been removed;
+Git retains them. Their fixed move expectations and rubrics do not decide the
+new design. Isolated component tests remain, but do not execute this collection.
 
 Keep scene purpose separate from measurement choices. The scene-spec question
 about when context-delivery assertions belong in ordinary tests remains open;

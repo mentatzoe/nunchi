@@ -32,14 +32,10 @@ jobs:
       - name: Verdict-suite CLI loads the corpus (smoke)
         run: python3 -m evals.verdict_suite.runner --list
 
-  discord-standin:
-    # The rehearsals' Discord stand-in (docs/rehearsal.md) through real
-    # discord.py; the test job drives it through Nunchi's Discord clients.
-    # Python 3.12 exercises zlib-stream; Python 3.14 exercises zstd-stream.
-    # The pin check prevents missing dependencies from silently skipping tests.
-    # The reference runner then exercises legacy scripted fixtures. These
-    # check mechanics, not social quality or the approved scene collection.
-    name: Discord stand-in (py${{ matrix.python-version }}, discord.py 2.7.1)
+  discord-transport:
+    # Isolated protocol checks with the actual Discord client. No conversation
+    # runner or model responses: Python 3.12 checks zlib, 3.14 checks zstd.
+    name: Discord transport (py${{ matrix.python-version }}, discord.py 2.7.1)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -50,118 +46,12 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install the pinned discord.py
+      - name: Install the pinned Discord client
         run: python -m pip install 'discord.py==2.7.1' 'aiohttp==3.14.3'
-      - name: The vendored shape pin matches discord.py 2.7.1
-        run: python -m evals.rehearsal.fake_discord.shapes --check
-      - name: The stand-in through discord.py
+      - name: Check the test server's payload shapes
+        run: python -m tests.support.fake_discord.shapes --check
+      - name: Check transport behavior through discord.py
         run: python -m unittest tests.v2.test_fake_discord_discordpy -v
-      - name: Make the canary for the Discord room lane's scan
-        # A random value the probe puts in the process environment, where no
-        # key variable names it: only the scan can find it in an output.
-        shell: bash
-        run: |
-          set -euo pipefail
-          canary="canary-$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
-          echo "::add-mask::$canary"
-          echo "REHEARSAL_CANARY=$canary" >> "$GITHUB_ENV"
-      - name: The reference in the Discord room, scripted (docs/rehearsal.md)
-        # nunchi-discord from Nunchi's wheel, on the pinned discord.py, in a
-        # clean virtualenv, with a scripted participant and scripted
-        # attention, no key. The launcher (root, hence sudo -E) maps
-        # Discord's real names to the stand-in in a private namespace with
-        # only loopback (--offline) and runs the probe as the runner user.
-        # Each moment's outcome and the seven discord-*
-        # checks are hard checks.
-        id: discord_reference_lane
-        timeout-minutes: 15
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          python -m pip wheel --no-deps . --wheel-dir "$RUNNER_TEMP/nunchi-wheels"
-          python -m venv "$RUNNER_TEMP/reference-env"
-          PY="$RUNNER_TEMP/reference-env/bin/python"
-          "$PY" -m pip install --upgrade pip
-          "$PY" -m pip install 'discord.py==2.7.1' 'aiohttp==3.14.3'
-          "$PY" -m pip install --no-deps "$RUNNER_TEMP"/nunchi-wheels/*.whl
-          "$PY" -m pip freeze
-          LANE_HOME="$(mktemp -d)"
-          LANE_TMP="$(mktemp -d)"
-          sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline -- \
-            /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness reference --scripted --room discord \
-            --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-discord-out"
-      - name: Scan the failed Discord room lane's record for the key and the canary
-        # Only after a failure of the lane above: this repository is public,
-        # so the record is uploaded only when
-        # the scan passes. The lane's keys are per-run placeholders the probe
-        # scans for itself; the canary is the value made above. A hit deletes
-        # the record and fails this step.
-        id: discord_reference_scan
-        if: failure() && steps.discord_reference_lane.outcome == 'failure'
-        timeout-minutes: 5
-        shell: bash
-        run: |
-          set -uo pipefail
-          python -m evals.rehearsal.scan --out "$RUNNER_TEMP/rehearsal-discord-out" \
-            --env NUNCHI_ATTENTION_API_KEY --env REHEARSAL_CANARY
-      - name: Keep the failed Discord room lane's record
-        if: failure() && steps.discord_reference_scan.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: rehearsal-discord-reference-py${{ matrix.python-version }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/rehearsal-discord-out/
-          if-no-files-found: ignore
-      - name: Legacy scripted scene mechanics (docs/rehearsal.md)
-        # Eleven legacy fixtures exercise delivery, history and turn timing
-        # with scripted attention and participant responses. Expectations are
-        # fixture checks, not approved-scene evaluation or live behavior proof.
-        # Each run uses an offline namespace and fresh HOME and TMPDIR. Run all
-        # fixtures and fail the step if any fails.
-        id: discord_scenes_lane
-        timeout-minutes: 20
-        shell: bash
-        run: |
-          set -uo pipefail
-          PY="$RUNNER_TEMP/reference-env/bin/python"
-          failed=0
-          for scene in bot-status-report story-across-messages said-it-would-check mention-in-busy-room \
-            asked-while-busy answered-while-composing never-mind-while-composing build-finishes-after-promise \
-            build-finishes-long-after-promise did-you-see addressee-never-answers; do
-            LANE_HOME="$(mktemp -d)"
-            LANE_TMP="$(mktemp -d)"
-            sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline -- \
-              /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness reference --scripted --room discord \
-              --scene "$scene" --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" --out "$RUNNER_TEMP/rehearsal-directed/$scene" \
-              || { echo "::error::the scene $scene failed"; failed=1; }
-          done
-          # Also check that a refused word reaction can be retried as an emoji.
-          LANE_HOME="$(mktemp -d)"
-          LANE_TMP="$(mktemp -d)"
-          sudo -E env HOME="$LANE_HOME" TMPDIR="$LANE_TMP" "$PY" -m evals.rehearsal.discord_net --offline -- \
-            /usr/bin/env PATH="$PATH" "$PY" -m evals.rehearsal.probe --harness reference --scripted --room discord \
-            --scene story-across-messages --nod-with-a-word-first --wheel "$(ls "$RUNNER_TEMP"/nunchi-wheels/*.whl)" \
-            --out "$RUNNER_TEMP/rehearsal-directed/story-across-messages-word-first" \
-            || { echo "::error::the scene story-across-messages with a word first failed"; failed=1; }
-          exit "$failed"
-      - name: Scan the failed scene runs' records for the key and the canary
-        # As for the lane above: only after a failure, and the record is uploaded
-        # only when the scan passes. It covers every scene's output.
-        id: discord_scenes_scan
-        if: failure() && steps.discord_scenes_lane.outcome == 'failure'
-        timeout-minutes: 5
-        shell: bash
-        run: |
-          set -uo pipefail
-          python -m evals.rehearsal.scan --out "$RUNNER_TEMP/rehearsal-directed" \
-            --env NUNCHI_ATTENTION_API_KEY --env REHEARSAL_CANARY
-      - name: Keep the failed scene runs' records
-        if: failure() && steps.discord_scenes_scan.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: rehearsal-discord-scenes-py${{ matrix.python-version }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/rehearsal-directed/
-          if-no-files-found: ignore
 
   mcp-discord:
     # Preserve the shared transport's SDK compatibility checks independently

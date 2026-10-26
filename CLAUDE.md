@@ -63,7 +63,6 @@ every affected integration, not only the harness you run in.
 ```sh
 python3 -m unittest
 python3 -m evals.verdict_suite.runner --list
-python3 -m evals.behavior.run --dry-run
 ```
 
 The core is Python 3.11+ and standard-library only. Live runs follow

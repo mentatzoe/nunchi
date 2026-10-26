@@ -158,12 +158,12 @@ harness integration's sandbox claim establishes protection for a new consumer.
 
 ## Verification
 
-The `mcp-discord` extra requires `mcp>=1.10,<2`. CI runs transport gap tests with MCP 1.10.0 and 1.28.1, covering stream
-ordering, queue loss and restart behavior. The
-[reference rehearsal](../../docs/rehearsal.md) checks the installed plain-model
-adapter against a Discord stand-in. Neither proves a working agent harness
-integration or social behavior on a live platform.
+The `mcp-discord` extra requires `mcp>=1.10,<2`. CI runs transport gap tests
+with MCP 1.10.0 and 1.28.1, covering stream ordering, queue loss and restart
+behavior. Isolated channel tests check messages, replies, reactions and gateway
+reconnects against a local test server. They do not run conversations or measure
+social behavior.
 
 ```sh
-python3 -m unittest tests.v2.test_mcp_discord_gaps tests.v2.test_runtime_hardening
+python3 -m unittest tests.v2.test_mcp_discord_gaps tests.v2.test_discord_wire
 ```

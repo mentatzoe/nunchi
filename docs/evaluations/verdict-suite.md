@@ -1,14 +1,13 @@
 # V2 lifecycle conformance
 
-The repository-owned evaluation entry point exercises the installed V2
-lifecycle plumbing. It does not judge social quality: whether an agent reads
-the room well needs behavioral evaluation across realistic multi-turn
-conversations ([#86](https://github.com/mentatzoe/nunchi/issues/86)). The
-[approved scene specifications](scenes/README.md) are published separately;
-their execution and assessment remain evaluation-design work. The V1 fixtures
-under `evals/verdict_suite/fixtures/` are historical material, not that approved
-collection. They are not an executable product path and this runner does not
-use them.
+This entry point calls `nunchi.conformance` to check the current core pipeline
+with fixed inputs and model results. It does not run a conversation or measure
+social behavior. The pipeline itself remains under
+[architecture review](../../AGENTS.md#architecture-goal-and-current-gap).
+
+The [approved scenes](scenes/README.md) await evaluation design. The unrelated
+V1 fixture corpus and old conversation runners have been removed; Git retains
+them.
 
 ## Run
 
@@ -18,12 +17,10 @@ python3 -m evals.verdict_suite.runner
 python3 -m evals.verdict_suite.runner --format jsonl
 ```
 
-The eleven deterministic scenarios cover SUPPRESS; ACK, plus disabled and
-unsupported ACK widening to DEFER; WAKE with contribution; WAKE with silence;
-classifier DEFER; margin DEFER; trusted bypass; wake-on-error; and explicit
-no-wake error handling. `--list` prints the authoritative set. They use the
-same public V2 pipeline as installed adapters, with a scripted model, and
-require no provider or network.
+The nine checks cover suppression, a nod recommendation, wake with
+contribution or silence, model defer, margin defer, trusted bypass, wake on
+error and no-wake error handling. `--list` prints the current set. These checks
+need no provider or network.
 
 Exit code `0` means every scenario passed. JSONL output is one object per
 scenario with `scenario`, `status`, `expected`, and `observed`; there is no
@@ -37,8 +34,7 @@ python3 -m evals.verdict_suite.runner --list
 python3 -m evals.verdict_suite.runner
 ```
 
-For downstream platform requirements and additional native checks, see
-[`../platform.md`](../platform.md).
+See [current runtime components](../platform.md) for implementation details.
 
 Provider-backed and real-room runs are separate, attributable evidence. They
 must identify the exact installed artifact, participant, route, model, and

@@ -47,7 +47,7 @@ import time
 import unittest
 from unittest import mock
 
-from evals.rehearsal.fake_discord.control import FakeDiscord
+from tests.support.fake_discord.control import FakeDiscord
 from nunchi.adapters.discord import DiscordPyTransport
 from nunchi.integrations.discord_participant_transport import MCPDiscordTransport, thread_of
 from nunchi.integrations.discord_room import DiscordRoomConnection

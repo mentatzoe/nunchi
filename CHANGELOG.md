@@ -13,6 +13,10 @@ have not established the intended library architecture or live agent behavior.
 
 ### Removed
 
+- Old conversation rehearsal runners, scripts, scoring, CI jobs and instructions,
+  including the manual behavior-eval workflow. Isolated core, provider and channel
+  tests remain; the approved scenes await a new evaluation design.
+
 - Claude Code, both Codex and Hermes plugin implementations, bundled plugins,
   runner commands, integration-only tests and harness CI/rehearsal jobs.
   They took control of agents' turns or lifecycle. Git retains the code;

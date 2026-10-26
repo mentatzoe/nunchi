@@ -63,14 +63,12 @@ the package does not add Nunchi to Claude Code, Codex or Hermes.
 .venv/bin/python -m unittest
 .venv/bin/python -m evals.verdict_suite.runner --list
 .venv/bin/python -m evals.verdict_suite.runner
-.venv/bin/python -m evals.behavior.run --dry-run
 ```
 
-CI runs the full offline suite on Linux. Some network-namespace tests require
-Linux tools such as `unshare`; they are not portable local checks on macOS.
-The dry run uses [legacy evaluation fixtures](evals/behavior/README.md), not the
-approved scene collection. Realistic evaluation with pinned library releases
-and real agent integrations remains a separate design task.
+CI checks retained core and channel functions, data contracts and packaging.
+The old conversation rehearsals and behavior runner have been removed.
+Realistic evaluation with pinned library releases and real agent integrations
+remains a separate design task. The approved scenes have not been executed.
 
 ## Read next
 

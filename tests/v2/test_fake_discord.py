@@ -1,10 +1,10 @@
-"""The Discord stand-in (step 9f, PR 3a): Nunchi's own Discord clients against it, and its social facts with Discord's codes.
+"""The local Discord fixture and Nunchi's transport clients.
 
 Nunchi's transport drives it through hooks it already has:
 `DiscordRestClient(base_url=...)`, `GatewayRunner(connect=...)` and the
 `ToolExecutor`, so each room action passes the same checks as in a real run,
 the acknowledgement attestation included. The tables pin each social fact a
-column reads the room from (the time of a message, who it addresses, what
+client reads the channel from (the time of a message, who it addresses, what
 it replies to, who wrote it, who may see, post or react, and the limits on
 the agent's own moves) with Discord's own status and error codes. Plain
 loopback and the standard library only; real discord.py drives the
@@ -38,9 +38,9 @@ from nunchi.mcp_discord.runner import GatewayFatalError, GatewayRunner
 from nunchi.mcp_discord.tools import ToolExecutor
 from nunchi.mcp_discord.ws import WSClient, WSClosed
 
-from evals.rehearsal.fake_discord import payloads, shapes
-from evals.rehearsal.fake_discord.control import FakeDiscord
-from evals.rehearsal.fake_discord.world import INTENTS, PERMISSIONS, DiscordError, World, id_ms, iso
+from tests.support.fake_discord import payloads, shapes
+from tests.support.fake_discord.control import FakeDiscord
+from tests.support.fake_discord.world import INTENTS, PERMISSIONS, DiscordError, World, id_ms, iso
 
 WORLD = {
     "people": ["alice", "kim"],
@@ -871,11 +871,11 @@ class ShapePinTest(unittest.TestCase):
                 self.assertIn(nested.removesuffix("[]"), pin["types"])
 
     def test_the_pin_check_starts_from_a_checkout_with_nothing_installed(self):
-        # CI runs `python -m evals.rehearsal.fake_discord.shapes --check` from the checkout with no Nunchi installed, and
+        # CI runs `python -m tests.support.fake_discord.shapes --check` from the checkout with no Nunchi installed, and
         # the stand-in takes its emoji rule from the core. -S keeps an installed Nunchi out of sys.path.
         root = Path(__file__).resolve().parents[2]
         env = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
-        run = subprocess.run([sys.executable, "-S", "-m", "evals.rehearsal.fake_discord.shapes", "--help"],
+        run = subprocess.run([sys.executable, "-S", "-m", "tests.support.fake_discord.shapes", "--help"],
                              cwd=root, env=env, capture_output=True, text=True, timeout=60)
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertIn("--check", run.stdout)

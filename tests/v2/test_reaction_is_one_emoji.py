@@ -285,14 +285,14 @@ class EveryAdapterTakesWhatTheRulePassesTests(unittest.TestCase):
 
 
 class TheStandInHoldsTheCoresRuleTests(unittest.TestCase):
-    """The Discord stand-in (evals/rehearsal/fake_discord) refuses what the core refuses and nothing more.
+    """The Discord stand-in (tests/support/fake_discord) refuses what the core refuses and nothing more.
 
     One stricter than the core would lose the nod of a live run (the core commits, the stand-in refuses) and read it as the
     agent's fault: on Python 3.12 the old approximation refused 12 RGI emoji that Unicode 15.1 added.
     """
 
     def test_it_takes_every_emoji_of_unicode_16_0_and_every_shape_the_core_takes_and_refuses_the_rest(self):
-        from evals.rehearsal.fake_discord.world import emoji_ok
+        from tests.support.fake_discord.world import emoji_ok
 
         found = json.loads((Path(__file__).parent / "data" / "rgi-emoji.json").read_text(encoding="utf-8"))
         self.assertEqual([], [emoji for emoji in found["emoji"] if not emoji_ok(emoji)])

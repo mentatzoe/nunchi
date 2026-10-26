@@ -34,6 +34,12 @@ review. Reference adapters run plain model participants; they do not integrate
 with existing agent harnesses. Retiring harness code does not approve the
 library-owned turns that remain in shared code.
 
+**Conversation rehearsal retirement, decided 2026-10-26.** Remove the old
+conversation runners, their scripted and live rehearsal paths, active CI jobs
+and instructions. Their scenarios and scoring do not implement the approved
+scenes. Keep isolated checks of retained core, provider and channel functions.
+End-to-end evaluation follows the architecture and evaluation design discussion.
+
 Current work is architecture review with the maintainer. Implementation of
 replacement interfaces and evaluation design follow that discussion. Current
 contracts describe code, not product intent or a mandate to resume old plans.
@@ -295,7 +301,6 @@ depend on one.
 ```sh
 python3 -m unittest
 python3 -m evals.verdict_suite.runner --list
-python3 -m evals.behavior.run --dry-run
 ```
 
 Deterministic tests are offline and prove deterministic behavior only. Whether
@@ -309,20 +314,18 @@ library packages record preparation, not protagonist runs or passing scores.
 Execution and scoring of this collection belong to a separate evaluation-design
 session.
 
-`evals/behavior/` and the manual `behavior-eval` workflow still use legacy
-fixtures. Their move ranges and review metadata do not define approval or
-required responses for the published scenes. Evaluation is moving to an
-existing framework such as DeepEval, and to tests of the installed library
-and its command line, not only its Python
-code (agreed, 2026-10-19;
-[#174](https://github.com/mentatzoe/nunchi/issues/174);
-[`evals/behavior/README.md`](evals/behavior/README.md#where-evaluation-is-going)).
+The legacy behavior runner and its manual workflow have been removed with the
+conversation rehearsals. Their fixtures and scoring remain in Git history.
+Evaluation is moving to an existing framework such as DeepEval and to tests of
+the installed library with real, pinned agents and integrations (agreed,
+2026-10-19; [#174](https://github.com/mentatzoe/nunchi/issues/174)). That design
+has not yet been agreed or implemented.
 Live provider and platform runs need explicit credentials and must record the
 installed version, identity, configuration, command, and complete result.
 
 Records of test runs on the maintainer's test server, which carries test talk only, may
 be published in this repository, which is public, once a scan finds none of
 the run's keys in them (agreed, 2026-10-18). Run
-`python3 -m evals.rehearsal.scan --out <records> --env
+`python3 -m evals.scan_records --out <records> --env
 <variable>`, with one `--env` for each key the run used. A hit deletes the
 records.

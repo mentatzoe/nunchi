@@ -3,8 +3,8 @@
 These tests prove the request the adapter sends to a Decisions API endpoint,
 how the typed answers come back in the core's shape, and that the engine
 decides and writes the reading from them exactly as it does for a chat model.
-Whether a typed decision model reads the room well is measured by live
-behavior runs, not here.
+Whether a typed decision model reads the room well needs separate behavioral
+evaluation.
 """
 
 from __future__ import annotations
@@ -16,8 +16,6 @@ import unittest
 from unittest import mock
 import urllib.error
 
-from evals.behavior import run
-from evals.behavior.scene import load_scenes
 from nunchi.adapters import decisions_api
 from nunchi.adapters.decisions_api import ATTENTION_KINDS, DecisionsAttentionModel
 from nunchi.attention import AttentionError, attention_model_from_config
@@ -238,46 +236,6 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(("decisions-api", "typesafe/jev-1.13"), (model.provider, model.model_id))
         with self.assertRaisesRegex(Exception, "unexpected fields"):
             DecisionsAttentionModel.from_trusted_config({"model": "m", "base_url": "x"})
-
-
-class RunnerTests(unittest.TestCase):
-    def test_typesafe_models_go_to_the_typed_route(self):
-        factory = run.openai_compatible_factory(api_key="k", base_url=run.DEFAULT_BASE_URL, temperature=0)
-        self.assertIsInstance(factory("typesafe/jev-1.13"), DecisionsAttentionModel)
-        self.assertIsInstance(factory("~typesafe/jev-latest"), DecisionsAttentionModel)
-        self.assertNotIsInstance(factory("google/gemini-3.8-flash"), DecisionsAttentionModel)
-        self.assertIn("typesafe/jev-1.13", run.DEFAULT_MODELS)
-
-    def test_a_moment_judged_by_a_typed_model_records_its_answers(self):
-        scene = next(scene for scene in load_scenes() if scene.id == "story-across-messages")
-        endpoint = Endpoint(
-            {"model": "typesafe/jev-1.13-20260917", "answers": answers({"wait": 0.8, "speak": 0.2}, mid_thought=0.9), "usage": {"cost": 0.00002}}
-        )
-        factory = run.openai_compatible_factory(api_key="k", base_url=run.DEFAULT_BASE_URL, temperature=0)
-        with mock.patch("urllib.request.urlopen", endpoint):
-            record = run.judge_moment(run.Job(scene, 0, "vigil", "typesafe/jev-1.13", 0), factory, timeout_seconds=5)
-        self.assertEqual("DEFER", record["decision"]["effective_disposition"])
-        self.assertEqual("typesafe/jev-1.13-20260917", record["model_response"]["model"])
-        self.assertEqual(0.9, record["decision"]["answers"]["mid_thought"])
-        state = json.loads(endpoint.requests[0][0].data)["state"]
-        self.assertEqual(scene.profiles["vigil"]["instructions"], state["participant"]["instructions"])
-
-    def test_a_shorter_reading_keeps_the_kinds_of_response(self):
-        scene = next(scene for scene in load_scenes() if scene.id == "story-across-messages")
-        endpoint = Endpoint({"answers": answers({"speak": 0.9, "wait": 0.1}, answered=0.8, mid_thought=0.8)})
-        factory = run.openai_compatible_factory(api_key="k", base_url=run.DEFAULT_BASE_URL, temperature=0)
-        with mock.patch("urllib.request.urlopen", endpoint):
-            record = run.judge_moment(
-                run.Job(scene, 2, "vigil", "typesafe/jev-1.13", 0),
-                factory,
-                timeout_seconds=5,
-                reading_items=2,
-                reading_chars=120,
-            )
-        notes = [item["note"] for item in record["decision"]["attention_advice"]]
-        self.assertEqual(2, len(notes))
-        self.assertTrue(notes[-1].startswith("Kinds of response that could fit"))
-        self.assertTrue(all(len(note) <= 120 for note in notes))
 
 
 if __name__ == "__main__":  # pragma: no cover
