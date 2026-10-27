@@ -1,6 +1,6 @@
 # Nunchi contributor guidance
 
-## Architecture goal and current gap
+## Architecture goal
 
 **Agreed, 2026-10-25.** Nunchi is a library that gives existing agents social
 attention and room context through the channels people already use.
@@ -17,37 +17,7 @@ attention and room context through the channels people already use.
   Nunchi's adapters and MCP tools are optional examples, not prerequisites.
   Explain actual compatibility limits so users can choose the tradeoff.
 
-**The implementation does not yet meet this goal.** Shared code still hosts
-participant turns, controls sending and limits each turn to one room action.
-Context CRUD and prompt configuration are incomplete. Keeping context and
-history in core is intentional; the ownership of agents and sending is not.
-
-**Integration retirement, decided 2026-10-26.** Remove the Claude Code, both
-Codex and Hermes plugin implementations, their launchers and integration-only
-checks. Offering a misleading integration is worse than offering none. There
-are no supplied harness integrations until replacements are designed. Git
-retains the old code. This supersedes the earlier Hermes parking decision and
-instructions to keep old integrations until replacements pass their checks.
-
-Core, provider connections and optional channel capabilities remain for
-review. Reference adapters run plain model participants; they do not integrate
-with existing agent harnesses. Retiring harness code does not approve the
-library-owned turns that remain in shared code.
-
-**Conversation rehearsal retirement, decided 2026-10-26.** Remove the old
-conversation runners, their scripted and live rehearsal paths, active CI jobs
-and instructions. Their scenarios and scoring do not implement the approved
-scenes. Keep isolated checks of retained core, provider and channel functions.
-End-to-end evaluation follows the architecture and evaluation design discussion.
-
-Current work is architecture review with the maintainer. Implementation of
-replacement interfaces and evaluation design follow that discussion.
-
-**The current code follows the design this review replaces.** Its modules,
-schemas, interface names and tests describe that design, not requirements.
-Modules that run the agent's turn or send for it are marked obsolete at the
-top of the file. When guidance, docs or code disagree with the goal above,
-the goal wins. Reuse a part only where it fits the goal.
+Where code, tests or other documents disagree with this goal, the goal wins.
 
 ## What Nunchi is for
 
@@ -138,24 +108,18 @@ give the unagreed parts of a draft authority over code or other documents.
   and settings protect what its commands can read. Consumers must document
   the relevant sandbox and credential settings.
 - **Channel limitations must be visible.** Document actual connector limits
-  so users can choose their channels. The inspected Claude Discord plugin's
-  bot filtering and history limits are recorded under
-  [channel compatibility](docs/adapters.md#channel-compatibility). They do not
-  justify requiring Nunchi's connector or taking control of an agent.
+  so users can choose their channels. Limits do not justify requiring
+  Nunchi's connector or taking control of an agent.
 
 ## Read first
 
-1. This file: architecture goal, social behavior and draft status.
-2. `README.md`: current implementation, available capabilities and gaps.
-3. `docs/behavior.md` when discussing proposed behavior, using the draft
-   status above.
-4. For work on existing code: `docs/platform.md`, `docs/contracts/nunchi.md`
-   or `docs/adapters.md`, then the source and tests. They describe what the
-   code does, not what the design should be.
+- `docs/behavior.md` for the social behaviors under discussion, using the
+  draft status above.
+- For existing code, the source and tests show what the code does. They do
+  not decide product intent.
 
 Re-read this file after context compaction. Recover the maintainer's current
-goal and decisions before continuing. Code and reproducible behavior
-determine implementation truth; they do not decide product intent.
+goal and decisions before continuing.
 
 ## Working with the maintainer (agreed, 2026-10-20)
 
@@ -176,24 +140,6 @@ Work as a thinking partner, not an executor.
 7. Keep a short running list of what is decided and what is open, in plain
    words, where the maintainer can see it, so nothing is lost if context
    resets.
-
-## How we work (agreed, 2026-10-04)
-
-- `main` is the working branch. Work merges into `main` as it lands, before
-  live proof. A current `main` is not a claim that the work is complete.
-- Work on a short-lived branch from current `main`, open a PR, merge when CI is
-  green, and delete the branch. Do not keep long-lived side branches. Always
-  merge: work left on a branch never lands (agreed, 2026-10-19). When the
-  maintainer asks for a PR for review, leave it open for that review.
-- Scale review to the size and risk of the change. A self-review with
-  subagents is acceptable; say plainly that it is one. Cross-family
-  independent review is not required for day-to-day delivery.
-- The maintainer decides release readiness. Report deterministic,
-  installed-runtime and live checks separately, with pinned inputs and
-  reproducible results. A green CI run is not release acceptance.
-- Committed documentation must be enough to understand, build, test and
-  install Nunchi without private conversations or hidden product logic.
-  Document external runtime, account and configuration prerequisites.
 
 ## Working style
 
@@ -222,73 +168,3 @@ Work as a thinking partner, not an executor.
   doublespeak, inflated severity, and process theatre.
 - Prefer simple systems over clever ones, and consider edge cases from the
   start.
-
-## Delivery rules
-
-- When a shared interface changes, run every consumer's tests in the same PR
-  and fix or flag what breaks.
-- A stale assignment, previous session owner, missing process artifact,
-  pending review, or unfinished delegated task is not by itself a blocker.
-  Resolve, reassign, replace, or finish it. If one path is externally blocked,
-  continue other unblocked product work. Stop only when no safe in-scope work
-  remains, and state the concrete dependency.
-- Do not narrow supported behavior or redefine completion without the
-  maintainer's explicit decision. Apply the draft status above and the
-  current request when deciding what work is authorized. Ask the maintainer
-  when a choice materially changes product behavior and no decision covers
-  it, or when it touches security boundaries or requires an irreversible
-  external action.
-- Plans, labels, reviews, and evidence files do not substitute for working
-  behavior.
-- Preserve user changes and avoid destructive operations outside the requested
-  scope.
-
-Status words: **missing**, **implemented, unverified**, **merged, unverified**,
-and **verified** (passed its tests, installed-runtime checks, and live checks).
-Say which checks have passed.
-
-## Ownership
-
-The maintainer owns product scope and the final completion decision. Engineering work is
-not divided by agent, model family, or harness, and anyone may change any
-part of this repository. Review each other's work on its merits.
-
-Each person's or agent's own installation of a harness or of Nunchi (Aleph's
-Hermes, for example) belongs to them. Nunchi's code and its evidence never
-depend on one.
-
-## Verification
-
-```sh
-python3 -m unittest
-python3 -m evals.verdict_suite.runner --list
-```
-
-Most tests check the current code, which follows the design under review;
-they are not requirements for the new design. Deterministic tests are
-offline and prove deterministic behavior only. Whether
-an agent reads the room well is a behavioral question; it needs behavioral
-evaluation across realistic multi-turn conversations
-([#86](https://github.com/mentatzoe/nunchi/issues/86)). The approved scene
-specifications are in
-[`docs/evaluations/scenes/`](docs/evaluations/scenes/README.md) and follow
-[`docs/evaluations/scene-spec.md`](docs/evaluations/scene-spec.md). Their saved
-attention captures record preparation, not protagonist runs or passing scores.
-Execution and scoring of this collection belong to a separate evaluation-design
-session.
-
-The legacy behavior runner and its manual workflow have been removed with the
-conversation rehearsals. Their fixtures and scoring remain in Git history.
-Evaluation is moving to an existing framework such as DeepEval and to tests of
-the installed library with real, pinned agents and integrations (agreed,
-2026-10-19; [#174](https://github.com/mentatzoe/nunchi/issues/174)). That design
-has not yet been agreed or implemented.
-Live provider and platform runs need explicit credentials and must record the
-installed version, identity, configuration, command, and complete result.
-
-Records of test runs on the maintainer's test server, which carries test talk only, may
-be published in this repository, which is public, once a scan finds none of
-the run's keys in them (agreed, 2026-10-18). Run
-`python3 -m evals.scan_records --out <records> --env
-<variable>`, with one `--env` for each key the run used. A hit deletes the
-records.
