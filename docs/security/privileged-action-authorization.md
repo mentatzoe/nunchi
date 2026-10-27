@@ -4,8 +4,8 @@
 in `src/nunchi/authorization.py` checks `I-010F PrivilegedActionAuthorizationV2@1`
 before dispatching an effect. The reference adapters supply no executors, there
 is no shipped authenticated approval surface, and no live run has verified a
-privileged effect. The shared host and its ownership of turns remain under
-[architecture review](../../AGENTS.md#architecture-goal-and-current-gap).
+privileged effect. The shared host and its ownership of turns are being
+[redesigned](../../AGENTS.md#architecture-goal-and-current-gap).
 
 ## What is protected
 

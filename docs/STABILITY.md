@@ -1,8 +1,9 @@
 # Commands and compatibility
 
-These are the current interfaces, under [architecture review](../AGENTS.md#architecture-goal-and-current-gap).
-They are not a promise that the replacement library will retain today's turn
-ownership or API shapes. Document names stay stable as the library changes;
+These are the current interfaces, which are being
+[redesigned](../AGENTS.md#architecture-goal-and-current-gap). They are not a
+promise that the replacement library will retain today's turn ownership or API
+shapes. Document names stay stable as the library changes;
 wire formats and executable interfaces retain explicit versions.
 
 ## Installed commands
@@ -45,8 +46,7 @@ and validation rules. In the existing implementation:
 - Missing platform capabilities are reported as limits rather than inferred.
 
 Older receipt journals containing `ACK` records remain readable. An old `ack`
-configuration setting is ignored. Executable V1 requests, commands and hooks
-have been removed; old state is not migrated into new conversation turns.
+configuration setting is ignored.
 
 Changes to a public data shape or accepted behavior need an interface-version
 review, updated validation and checks of affected consumers. A library release

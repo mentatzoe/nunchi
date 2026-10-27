@@ -58,18 +58,10 @@ asserts that parsed semantic field values survive the load pipeline —
 strings compare as exact strings, numbers by exact decimal token (``1``
 and ``1.0`` are distinct), and event-array order is preserved. Raw-byte
 serialization (key order, whitespace, unicode escapes) is out of scope.
-
-Evidence writer: ``python -m tests.v2.contract.schema_helpers
---write-evidence`` re-runs the corpus through both validators and writes
-the aggregate JSONL evidence records (mandatory ``scene_id``, stable
-``case_id``, validator identity, expected result, observed result). The
-writer requires the pinned oracle so evidence always reflects the complete
-dual run.
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import math
 import re
@@ -81,11 +73,8 @@ from typing import Any, Callable
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCHEMAS_DIR = REPO_ROOT / "schemas" / "v2"
 EVALS_DIR = REPO_ROOT / "evals" / "v2" / "contract"
-EVIDENCE_DIR = REPO_ROOT / "evidence" / "v2" / "contract"
 
 ORACLE_PIN = "4.26.0"
-ORACLE_VALIDATOR_ID = f"jsonschema=={ORACLE_PIN} Draft202012Validator"
-ADAPTER_VALIDATOR_ID = "stdlib-runtime-adapter tests/v2/contract/schema_helpers.py"
 
 SCHEMA_FILES = {
     "attention-request": "attention-request.schema.json",
@@ -2944,10 +2933,6 @@ def adapter_errors(case: CorpusCase) -> list[str]:
     return errors
 
 
-def adapter_verdict(case: CorpusCase) -> str:
-    return "invalid" if adapter_errors(case) else "valid"
-
-
 def oracle_expectation(case: CorpusCase) -> str:
     """The fixed per-class oracle treatment (FR-012).
 
@@ -2978,144 +2963,6 @@ def case_payload_for_preservation(case: CorpusCase) -> tuple[Any, Any] | None:
     envelope_tokens = token_parse(case.raw_line)
     raw_tokens = decode_non_finite_tokens(envelope_tokens["document"])
     return raw_tokens, case.document
-
-
-# ---------------------------------------------------------------------------
-# Evidence writer (aggregate JSONL records; requires the pinned oracle)
-# ---------------------------------------------------------------------------
-
-EVIDENCE_FILES = {
-    "attention-request": "attention-request.jsonl",
-    "attention-decision": "attention-decision.jsonl",
-    "downstream": "downstream.jsonl",
-    "privileged-action-authorization": "privileged-action-authorization.jsonl",
-}
-
-# The five mandatory aggregate-record fields (plan §Acceptance Scenes and
-# Evidence; CHK070): scene_id, stable case_id, validator identity, expected
-# result, and observed result. The writer refuses any record missing one.
-MANDATORY_EVIDENCE_FIELDS = ("scene_id", "case_id", "validator", "expected", "observed")
-
-
-class EvidenceError(AssertionError):
-    """An aggregate evidence record violates the mandatory-field shape."""
-
-
-def enforce_evidence_record(record: Any, context: str) -> None:
-    """Refuse any aggregate evidence record missing a mandatory field."""
-    if not isinstance(record, dict):
-        raise EvidenceError(f"{context}: evidence record must be an object")
-    missing = [
-        field
-        for field in MANDATORY_EVIDENCE_FIELDS
-        if not isinstance(record.get(field), str) or not record.get(field)
-    ]
-    if missing:
-        raise EvidenceError(
-            f"{context}: evidence record is missing mandatory field(s) "
-            f"{missing}; every aggregate JSONL record must carry all of "
-            f"{list(MANDATORY_EVIDENCE_FIELDS)}"
-        )
-
-
-def verify_evidence_file(path: Path) -> int:
-    """Enforce the mandatory shape on every record of one landed evidence
-    file, returning the number of records verified."""
-    count = 0
-    with path.open(encoding="utf-8") as handle:
-        for line_number, raw_line in enumerate(handle, start=1):
-            raw_line = raw_line.strip()
-            if not raw_line:
-                continue
-            record = json.loads(raw_line)
-            enforce_evidence_record(record, f"{path.name}:{line_number}")
-            count += 1
-    if count == 0:
-        raise EvidenceError(f"{path.name}: evidence file contains no records")
-    return count
-
-
-def verify_evidence() -> int:
-    """Re-verify every landed aggregate evidence file (T021)."""
-    status = 0
-    for filename in EVIDENCE_FILES.values():
-        path = EVIDENCE_DIR / filename
-        try:
-            count = verify_evidence_file(path)
-        except (OSError, ValueError, EvidenceError) as failure:
-            print(f"{filename}: FAIL — {failure}", file=sys.stderr)
-            status = 1
-        else:
-            print(f"{filename}: {count} records carry all mandatory fields")
-    return status
-
-
-def evidence_records(corpus: str, oracle_validators: dict[str, Any]) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    for case in load_corpus(corpus):
-        observed_oracle = oracle_verdict(case, oracle_validators)
-        expected_oracle = oracle_expectation(case)
-        observed_adapter = adapter_verdict(case)
-        records.append(
-            {
-                "case_id": case.case_id,
-                "scene_id": case.scene_id,
-                "title": case.title,
-                "partition": case.partition,
-                "validator": ORACLE_VALIDATOR_ID,
-                "expected": expected_oracle,
-                "observed": observed_oracle,
-                "match": observed_oracle == expected_oracle,
-            }
-        )
-        records.append(
-            {
-                "case_id": case.case_id,
-                "scene_id": case.scene_id,
-                "title": case.title,
-                "partition": case.partition,
-                "validator": ADAPTER_VALIDATOR_ID,
-                "expected": case.expected,
-                "observed": observed_adapter,
-                "match": observed_adapter == case.expected,
-            }
-        )
-    return records
-
-
-def write_evidence() -> int:
-    available, detail = oracle_status()
-    if not available:
-        print(
-            "evidence writer requires the pinned oracle; run it through the "
-            f"pinned offline command ({detail})",
-            file=sys.stderr,
-        )
-        return 1
-    oracle_validators = build_oracle_validators()
-    EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
-    failures = 0
-    for corpus, filename in EVIDENCE_FILES.items():
-        records = evidence_records(corpus, oracle_validators)
-        for record in records:
-            enforce_evidence_record(record, f"{filename} ({record.get('case_id')})")
-        path = EVIDENCE_DIR / filename
-        with path.open("w", encoding="utf-8") as handle:
-            for record in records:
-                handle.write(json.dumps(record, sort_keys=True) + "\n")
-        mismatched = [record for record in records if not record["match"]]
-        failures += len(mismatched)
-        print(
-            f"{path.relative_to(REPO_ROOT)}: {len(records)} records "
-            f"({len(mismatched)} mismatched)"
-        )
-        for record in mismatched:
-            print(
-                f"  MISMATCH {record['case_id']} [{record['validator']}] "
-                f"expected={record['expected']} observed={record['observed']}",
-                file=sys.stderr,
-            )
-    return 1 if failures else 0
 
 
 # ---------------------------------------------------------------------------
@@ -3746,30 +3593,3 @@ class ContractCorpusMixin:
                 baseline_absence_skips,
                 f"{BASELINE_ORACLE_ABSENCE} must count every oracle-visible check",
             )
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument(
-        "--write-evidence",
-        action="store_true",
-        help="run the corpus through both validators and write the aggregate "
-        "JSONL evidence records under evidence/v2/contract/",
-    )
-    parser.add_argument(
-        "--verify-evidence",
-        action="store_true",
-        help="re-verify every landed aggregate evidence file against the "
-        "mandatory five-field record shape (T021/CHK070)",
-    )
-    args = parser.parse_args(argv)
-    if args.write_evidence:
-        return write_evidence()
-    if args.verify_evidence:
-        return verify_evidence()
-    parser.print_help()
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

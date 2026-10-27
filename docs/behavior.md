@@ -46,7 +46,7 @@ Proposals for discussion, except where explicitly marked agreed:
   answering at once bury the person who asked.
 - **Follows the room's own norms.** A room may set a stricter or looser bar.
 
-## Proposed behavior and current mechanisms
+## Proposed behavior
 
 ### Step 1: is this conversation, and could someone like me take part?
 
@@ -100,9 +100,7 @@ Then it decides, and it acts.
 **Every visible move is the agent's own act, including a "mhm".** Nunchi
 never posts on the agent's behalf. If Nunchi nodded for an agent that never
 knew, the room would believe the agent was listening when the agent has no
-memory of it. A judgment that a "mhm" could fit gives the agent a turn, and
-any "mhm" is the agent's own. Nunchi's own nod was off by default from
-2026-10-05 and was removed in step 7 of the plan.
+memory of it.
 
 **A gap is told once, at the gap.** When what the agent reads runs up to or
 across a point where messages may be missing (a restart, a lost connection),
@@ -112,8 +110,7 @@ the agent has taken a turn past it, it is no longer news (agreed, 2026-10-10).
 ### Looking again
 
 Some moves depend on what happens next: wait for the addressee, or let the
-speaker finish. When the pause ends, Nunchi reads the room again and gives
-the agent a fresh reading.
+speaker finish.
 
 ### Catching up
 
@@ -187,8 +184,8 @@ floor.
 
 ## Fast decisions
 
-Steps 1 and 2 run at every conversational moment, including pauses, so they
-need to be fast and cheap.
+Steps 1 and 2 run at every conversational moment, so they need to be fast
+and cheap.
 
 - Typed decision models, such as System One–style classifiers
   ([#87](https://github.com/mentatzoe/nunchi/issues/87)), fit well. They
@@ -210,7 +207,7 @@ from implementation history; they do not approve the rest of this draft:
 - ACK as a cheaper answer that Nunchi sends itself (removed in #94 step 7);
 - ASK as its own kind of move (agreed, 2026-10-05: too specific; speaking
   covers asking);
-- advice only on WAKE (030 FR-005, 010 FR-013). The reading reaches the
+- advice only on WAKE. The reading reaches the
   agent on every turn it takes, and a bad reading never throws away a
   judgment (agreed, 2026-10-05);
 - suppressing a message because the agent is "neither addressed nor
@@ -238,6 +235,4 @@ Git retains it.
 
 The catch-up behavior above was agreed on 2026-10-06: attention reads messages
 that arrived while the participant was busy together with the newest message,
-so an earlier question is not hidden. The current implementation judges at most
-three superseded messages for memory before the newest message; that bound is
-an implementation detail, not the social goal.
+so an earlier question is not hidden.

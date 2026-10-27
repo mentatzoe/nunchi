@@ -20,7 +20,6 @@ from tests.v2.contract import schema_helpers as helpers
 from tests.v2.contract.schema_helpers import (
     ContractCorpusMixin,
     CorpusError,
-    EvidenceError,
     NumberToken,
     assert_corpus_inventory,
     assert_schema_verdict,
@@ -28,7 +27,6 @@ from tests.v2.contract.schema_helpers import (
     check_id_uniqueness,
     check_timestamp_order,
     check_trigger_membership,
-    enforce_evidence_record,
     make_request,
     preservation_failure,
     scan_control_plane_references,
@@ -539,44 +537,6 @@ class CorpusInventoryCases(unittest.TestCase):
             (root / "attention-decision" / "expected-counts.json").unlink()
             with self.assertRaisesRegex(CorpusError, "expected-counts.json"):
                 assert_corpus_inventory(root)
-
-
-class EvidenceRecordShapeCases(unittest.TestCase):
-    """T021/CHK070: the shared evidence writer refuses any aggregate record
-    missing one of the five mandatory fields."""
-
-    COMPLETE = {
-        "scene_id": "S01",
-        "case_id": "REQ-S01-001",
-        "validator": helpers.ADAPTER_VALIDATOR_ID,
-        "expected": "valid",
-        "observed": "valid",
-    }
-
-    def test_complete_record_is_accepted(self):
-        enforce_evidence_record(dict(self.COMPLETE), "test")
-
-    def test_each_missing_mandatory_field_is_refused(self):
-        for field in helpers.MANDATORY_EVIDENCE_FIELDS:
-            with self.subTest(field=field):
-                record = dict(self.COMPLETE)
-                del record[field]
-                with self.assertRaisesRegex(EvidenceError, field):
-                    enforce_evidence_record(record, "test")
-
-    def test_empty_mandatory_field_is_refused(self):
-        record = dict(self.COMPLETE)
-        record["scene_id"] = ""
-        with self.assertRaises(EvidenceError):
-            enforce_evidence_record(record, "test")
-
-    def test_landed_evidence_files_carry_all_mandatory_fields(self):
-        for filename in helpers.EVIDENCE_FILES.values():
-            path = helpers.EVIDENCE_DIR / filename
-            if not path.is_file():
-                continue
-            with self.subTest(evidence=filename):
-                self.assertGreater(helpers.verify_evidence_file(path), 0)
 
 
 class ControlPlaneReadBoundaryCases(unittest.TestCase):

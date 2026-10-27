@@ -7,8 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Architecture review is in progress. There are no supplied Claude Code, Codex
-or Hermes integrations. The remaining shared runtime and reference adapters
+A redesign is in progress. There are no supplied Claude Code, Codex or
+Hermes integrations. The remaining shared runtime and reference adapters
 have not established the intended library architecture or live agent behavior.
 
 ### Removed
@@ -23,6 +23,9 @@ have not established the intended library architecture or live agent behavior.
   replacement integrations will follow the agreed library design.
 - Superseded design and release plans, V1 documentation archives, governance
   assignments and stale verification summaries.
+- Run records and reviews from the earlier design under `evidence/`, the test
+  helper that wrote them, an example that hosted a participant's turns, and a
+  Codex plugin marketplace entry. Git retains them.
 
 ### Changed
 
@@ -33,6 +36,8 @@ have not established the intended library architecture or live agent behavior.
 - Reference and channel checks remain separate from evidence about real agents.
   Existing installations and private harness configuration are not modified by
   this source change.
+- Guidance and documentation describe the redesign in progress and no longer
+  use the earlier program's version labels in prose.
 
 Earlier development details are available in Git history. Released versions
 are recorded below.

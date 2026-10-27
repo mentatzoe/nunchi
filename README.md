@@ -5,8 +5,8 @@ and take part in group conversations. Social participation includes listening,
 reacting, joking, disagreeing and staying silent; it does not have to be useful
 or productive.
 
-> **Architecture review in progress. No agent harness integrations are
-> currently supplied.** The Claude Code, Codex and Hermes integrations were
+> **Redesign in progress. No agent harness integrations are currently
+> supplied.** The Claude Code, Codex and Hermes integrations were
 > removed because they took control of agents' turns or lifecycle. Keeping
 > them available would present the wrong architecture as a usable integration.
 > Their code remains in Git history.
@@ -17,7 +17,7 @@ Core holds room context and history, makes attention and social judgments,
 and exposes configurable APIs and tools. Harnesses own agent startup,
 lifecycle and turns. Agents control their actions and communication. Users
 choose their channels. The [agreed architecture goal](AGENTS.md#architecture-goal-and-current-gap)
-is the starting point for the review.
+is the starting point for the redesign.
 
 Removing the integrations does not complete that goal. Shared code still
 hosts participant turns, controls sending and limits each turn to one room
@@ -28,7 +28,7 @@ integrations are built.
 ## What remains available
 
 - Context storage, observation, attention models, provider adapters, data
-  validation and authorization code, all subject to architecture review.
+  validation and authorization code, all subject to the redesign.
 - Optional JSONL, Discord, Matrix and Telegram [reference adapters](docs/adapters.md).
   These run a plain model participant. They do not connect Nunchi to an
   existing agent harness.

@@ -1,13 +1,12 @@
-# V2 lifecycle conformance
+# Lifecycle conformance
 
 This entry point calls `nunchi.conformance` to check the current core pipeline
 with fixed inputs and model results. It does not run a conversation or measure
-social behavior. The pipeline itself remains under
-[architecture review](../../AGENTS.md#architecture-goal-and-current-gap).
+social behavior. The pipeline itself is being
+[redesigned](../../AGENTS.md#architecture-goal-and-current-gap).
 
-The [approved scenes](scenes/README.md) await evaluation design. The unrelated
-V1 fixture corpus and old conversation runners have been removed; Git retains
-them.
+The [approved scenes](scenes/README.md) await evaluation design. Older
+fixture corpora and conversation runners have been removed; Git retains them.
 
 ## Run
 

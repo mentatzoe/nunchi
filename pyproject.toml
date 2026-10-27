@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nunchi"
 version = "2.0.0"
-description = "Participant-shaped pre-attention for secure shared conversations"
+description = "Helps AI agents read the room in group conversations"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT OR Apache-2.0" }
@@ -18,10 +18,7 @@ keywords = [
   "agents",
   "llm",
   "pre-attention",
-  "turn-taking",
   "read-the-room",
-  "moderation",
-  "openrouter",
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
