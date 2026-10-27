@@ -32,15 +32,15 @@ where the scene observes what emerges; they do not invite invented ideal replies
 ## Preparation is not evaluation
 
 All scenes pin Nunchi 2.0.0 at
-`365c0d966019c29f601362e62aec9e20f0beea50`. The 180 JSON files retain the actual
+`365c0d966019c29f601362e62aec9e20f0beea50`. The 136 JSON files retain the actual
 configuration and preparation results from the installed library. There are 44
 attention captures, five later room-update artifacts and one older-context
-artifact. No protagonist was run, and these outputs are neither reference answers
+artifact. The participant turn requests produced by the obsolete turn code
+have been removed; Git retains them. No protagonist was run, and these outputs are neither reference answers
 nor proof that the library works socially.
 
-Attention decisions, including failures, are preserved. A `null` participant
-request means the saved decision suppressed activation. DEFER still supplies a
-participant turn in this pinned library; it is not interchangeable with SUPPRESS.
+Attention decisions, including failures, are preserved. DEFER is not
+interchangeable with SUPPRESS.
 Continuation artifacts keep later messages outside the opening snapshot. See the
 [handoff](../eval-design-handoff.md) for known findings and runtime limitations.
 
