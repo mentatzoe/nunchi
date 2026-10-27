@@ -204,7 +204,7 @@ class RoomTests(unittest.TestCase):
             self.assertEqual(0o700, state.stat().st_mode & 0o777)
 
     def test_a_gap_declared_at_the_start_is_told_in_the_first_turn_and_not_in_the_next(self) -> None:
-        """Current Room startup and context behavior (`docs/platform.md`)."""
+        """Current Room startup and context behavior."""
         with tempfile.TemporaryDirectory() as directory:
             texts: list[str] = []
             driver = _Driver(lambda participant: None)

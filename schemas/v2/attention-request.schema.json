@@ -231,7 +231,7 @@
     "continuation": {"$ref": "#/$defs/continuation"},
     "pace": {"$ref": "#/$defs/pace"},
     "occasion": {"$ref": "#/$defs/occasion"},
-    "memory": {"$ref": "https://nunchi.invalid/schemas/v2/participant-wake.schema.json#/$defs/memory"},
-    "unattended_event_ids": {"$ref": "https://nunchi.invalid/schemas/v2/participant-wake.schema.json#/$defs/unattendedEventIds"}
+    "memory": {"$ref": "https://nunchi.invalid/schemas/obsolete/participant-wake.schema.json#/$defs/memory"},
+    "unattended_event_ids": {"$ref": "https://nunchi.invalid/schemas/obsolete/participant-wake.schema.json#/$defs/unattendedEventIds"}
   }
 }

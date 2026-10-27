@@ -2,8 +2,7 @@
 
 **42 approved specifications, published 2026-10-23.** This is the reviewed scene
 collection for the next evaluation-design session. It supersedes the raw scene
-ideas and earlier generated drafts as the authoring baseline. The older runnable
-fixtures remain in `evals/`; they have not been converted into this collection.
+ideas and earlier generated drafts as the authoring baseline.
 
 Start with [Social behavior](../../../AGENTS.md#social-behavior), the
 [scene spec](../scene-spec.md), and the [evaluation-design handoff](../eval-design-handoff.md).

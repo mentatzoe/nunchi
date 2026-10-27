@@ -5,40 +5,23 @@ Red cases cover exact identity (S01), actor mentions versus
 (duplicate event IDs, timestamp-versus-order disagreement, trigger
 membership), the classifier-safe continuation projection and bounded tail
 (S03), non-positive budgets (S15), and V1-envelope / reply-bearing /
-social-ledger rejection (S16, 010-V1). The corpus suite runs the
-``evals/v2/contract/attention-request`` corpus through both validators.
+social-ledger rejection (S16, 010-V1).
 """
 
 from __future__ import annotations
 
-import json
-import tempfile
 import unittest
-from pathlib import Path
 
-from tests.v2.contract import schema_helpers as helpers
 from tests.v2.contract.schema_helpers import (
-    ContractCorpusMixin,
-    CorpusError,
-    NumberToken,
-    assert_corpus_inventory,
     assert_schema_verdict,
     check_actor_reference_integrity,
     check_id_uniqueness,
     check_timestamp_order,
     check_trigger_membership,
     make_request,
-    preservation_failure,
     scan_control_plane_references,
-    semantic_equal,
-    token_parse,
     validate_attention_request,
 )
-
-
-class AttentionRequestCorpusSuite(ContractCorpusMixin, unittest.TestCase):
-    CORPUS = "attention-request"
-    REQUIRED_SCENES = frozenset({"S01", "S02", "S03", "S15", "S16", "010-V1"})
 
 
 class PaceCases(unittest.TestCase):
@@ -451,98 +434,9 @@ class LedgerAndV1RejectionCases(unittest.TestCase):
         assert_schema_verdict(self, "attention-request", doc, "invalid")
 
 
-class PreservationHelperCases(unittest.TestCase):
-    """SC-002 comparator semantics: exact tokens, exact order."""
-
-    def test_int_and_float_tokens_are_distinct(self):
-        self.assertFalse(semantic_equal(token_parse("1"), token_parse("1.0")))
-        self.assertTrue(semantic_equal(token_parse("1.0"), token_parse("1.0")))
-
-    def test_number_token_never_equals_plain_string(self):
-        self.assertFalse(semantic_equal(NumberToken("1"), "1"))
-
-    def test_array_order_is_semantic(self):
-        self.assertFalse(semantic_equal(token_parse('["a","b"]'), token_parse('["b","a"]')))
-
-    def test_key_order_and_whitespace_are_out_of_scope(self):
-        left = token_parse('{"a": 1, "b": 2}')
-        right = token_parse('{ "b":2,"a":1 }')
-        self.assertTrue(semantic_equal(left, right))
-
-    def test_pipeline_preservation_detects_reordering(self):
-        doc = make_request()
-        raw_tokens = token_parse(json.dumps(doc))
-        reordered = make_request()
-        reordered["events"].reverse()
-        self.assertIsNotNone(preservation_failure(raw_tokens, reordered))
-        self.assertIsNone(preservation_failure(raw_tokens, doc))
-
-    def test_non_canonical_number_token_is_detected(self):
-        raw_tokens = token_parse('{"latency": 1.50}')
-        loaded = json.loads('{"latency": 1.50}')
-        self.assertIsNotNone(preservation_failure(raw_tokens, loaded))
-
-
-class SentinelDecodeCases(unittest.TestCase):
-    """The reserved non-finite sentinel vocabulary decodes exactly once."""
-
-    def test_all_three_sentinels_decode(self):
-        decoded = helpers.decode_non_finite({"values": ["NaN", "Infinity", "-Infinity", "text"]})
-        values = decoded["values"]
-        self.assertTrue(values[0] != values[0])  # NaN
-        self.assertEqual(float("inf"), values[1])
-        self.assertEqual(float("-inf"), values[2])
-        self.assertEqual("text", values[3])
-
-
-class CorpusInventoryCases(unittest.TestCase):
-    """T020/CHK067: the on-disk corpus inventory is closed and asserted at
-    load time, so a wholly missing or unregistered corpus directory fails
-    loudly rather than passing vacuously."""
-
-    @staticmethod
-    def _stage_registered_corpora(root: Path) -> None:
-        for name in helpers.CORPUS_NAMES:
-            directory = root / name
-            directory.mkdir()
-            (directory / "cases.jsonl").write_text("", encoding="utf-8")
-            (directory / "expected-counts.json").write_text("{}", encoding="utf-8")
-
-    def test_real_inventory_is_exactly_the_registered_set(self):
-        assert_corpus_inventory()
-
-    def test_wholly_missing_corpus_directory_fails_loudly(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._stage_registered_corpora(root)
-            downstream = root / "downstream"
-            for child in downstream.iterdir():
-                child.unlink()
-            downstream.rmdir()
-            with self.assertRaisesRegex(CorpusError, "missing: \\['downstream'\\]"):
-                assert_corpus_inventory(root)
-
-    def test_unregistered_corpus_directory_fails_loudly(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._stage_registered_corpora(root)
-            (root / "orphan-corpus").mkdir()
-            with self.assertRaisesRegex(CorpusError, "unregistered: \\['orphan-corpus'\\]"):
-                assert_corpus_inventory(root)
-
-    def test_registered_corpus_missing_counts_file_fails_loudly(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self._stage_registered_corpora(root)
-            (root / "attention-decision" / "expected-counts.json").unlink()
-            with self.assertRaisesRegex(CorpusError, "expected-counts.json"):
-                assert_corpus_inventory(root)
-
-
 class ControlPlaneReadBoundaryCases(unittest.TestCase):
-    """T023/CHK076: no file under the test or corpus trees references a
-    SpecKit-managed control-plane path; the suite embeds its own copy of the
-    FR-012 class vocabulary and no build or test path reads a SpecKit file."""
+    """T023/CHK076: no file under the contract test tree references a
+    SpecKit-managed control-plane path."""
 
     # The forbidden prefixes are owned here, joined at compile time so this
     # declaration is never itself a contiguous control-plane token (the
@@ -556,17 +450,8 @@ class ControlPlaneReadBoundaryCases(unittest.TestCase):
         self.assertEqual(
             [],
             hits,
-            "tests/v2/contract/ and evals/v2/contract/ must not reference "
+            "tests/v2/contract/ must not reference "
             "SpecKit-managed control-plane paths",
-        )
-
-    def test_partition_vocabulary_is_embedded_not_read(self):
-        # The closed FR-012 vocabulary lives in the harness itself.
-        self.assertEqual(
-            ("schema-expressible", "id-uniqueness", "timestamp-order",
-             "advice-citation", "trigger-membership", "actor-reference-integrity",
-             "binding-expiry", "receipt-sequence"),
-            helpers.ALL_CLASSES,
         )
 
 

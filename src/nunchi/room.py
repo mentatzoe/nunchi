@@ -5,7 +5,7 @@ Current shared room runtime, under architecture review.
 Room assembles observation, attention, scheduling, the participant host and
 its delivery lane. It still owns turns and sending; these are implementation
 gaps against the library goal, not requirements for a harness integration.
-See docs/platform.md and AGENTS.md.
+See AGENTS.md.
 
 room_guard builds the secret guard checked before output leaves this runtime.
 """
@@ -364,7 +364,7 @@ class Room:
         It also drops the agent's remembered silences and reasons and the
         judgments made about messages, and it declares no gap. For a lost
         room connection, call ``cancel()`` and declare a gap instead; that
-        preserves the retained conversation state (`docs/platform.md`).
+        preserves the retained conversation state.
         """
 
         self.lane.restart()

@@ -4,7 +4,7 @@ Current participant turn implementation, under architecture review.
 
 This module still constrains actions and sending. Those ownership choices are
 gaps against the library goal, not requirements for new harness integrations.
-See AGENTS.md and docs/platform.md. Current behavior includes:
+See AGENTS.md. Current behavior includes:
 
 - one room action per turn;
 - staying quiet is a choice the agent can name: the quiet tool ends the turn
@@ -98,8 +98,8 @@ class TurnError(NunchiError):
 # -- what the room never reads: wake markers, and the thinking the turn teaches -----
 
 # The marker an integration puts at the start of the turn's text when its
-# harness binds a model run by the text the run starts with
-# (`docs/platform.md`). The agent reads it; the room never does.
+# harness binds a model run by the text the run starts with.
+# The agent reads it; the room never does.
 WAKE_MARKER = '<nunchi_wake id="{}"/>'
 # A whole wake marker on one line: this turn's, or an older one the agent
 # echoes from its history. "<nunchi_wake" named in prose, with no ">" after it
@@ -206,7 +206,7 @@ def split_private(text: str | None, *, final_answer: bool = False) -> tuple[str,
 # -- what names Nunchi's machinery, for measuring leaks ------------------------------
 
 # Every field name in the wake, the turn's facts, as
-# schemas/v2/participant-wake.schema.json defines it (with what it takes from
+# schemas/obsolete/participant-wake.schema.json defines it (with what it takes from
 # the attention request and decision schemas). tests/v2/test_turn.py keeps
 # this list in step with the schema.
 WAKE_FIELDS = frozenset(

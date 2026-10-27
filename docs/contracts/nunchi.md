@@ -3,7 +3,7 @@
 **Current implementation, under architecture review.** This page explains the
 data today's code accepts and produces. It does not make the library-owned
 turn or sending path a requirement for the replacement design. Start that
-review from the [agreed goal](../../AGENTS.md#architecture-goal-and-current-gap).
+review from the [agreed goal](../../AGENTS.md#architecture-goal).
 
 The JSON schemas define field shapes and limits. Runtime validators also
 check relationships between records and current state. Unknown fields are
@@ -18,10 +18,10 @@ library's release number. `nunchi probe` reports installed revisions.
 |---|---|---|
 | `I-010A AttentionRequestV2` | `@9` | [Attention request schema](../../schemas/v2/attention-request.schema.json) |
 | `I-010B AttentionDecisionV2` | `@10` | [Attention decision schema](../../schemas/v2/attention-decision.schema.json) |
-| `I-010C ParticipantWakeV2` | `@16` | [Participant context schema](../../schemas/v2/participant-wake.schema.json) |
+| `I-010C ParticipantWakeV2` | `@16` | Obsolete: [participant context schema](../../schemas/obsolete/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@2` | [Context fetch schema](../../schemas/v2/context-continuation.schema.json) |
-| `I-010E AttentionReceiptV2` | `@6` | [Receipt schema](../../schemas/v2/attention-receipt.schema.json) |
-| `I-010F PrivilegedActionAuthorizationV2` | `@1` | [Authorization schema](../../schemas/v2/privileged-action-authorization.schema.json) |
+| `I-010E AttentionReceiptV2` | `@6` | Partly obsolete: [receipt schema](../../schemas/obsolete/attention-receipt.schema.json) |
+| `I-010F PrivilegedActionAuthorizationV2` | `@1` | Obsolete: [authorization schema](../../schemas/obsolete/privileged-action-authorization.schema.json) |
 | `I-030A AttentionEngineV2` | `@3` | [Attention engine](../../src/nunchi/attention.py) |
 | `I-040A ParticipantTurnHostV2` | `@5` | Obsolete: [participant host](../../src/nunchi/participant.py) |
 | `I-040D LocalTurnProtocolV2` | `@3` | Obsolete: [local turn protocol](../../src/nunchi/turn_server.py) |
@@ -165,7 +165,10 @@ not as a social suppression judgment.
 Older journals containing `ACK` remain readable. Current decisions, wakes and
 new receipts do not use it.
 
-## Privileged actions
+## Privileged actions (obsolete)
+
+This is part of the obsolete turn design, in which Nunchi authorizes and runs
+effects for the agent.
 
 `PrivilegedActionAuthorizationV2` represents a request, decision, approval
 challenge or approval completion. Each record binds one participant and origin
@@ -179,16 +182,11 @@ and consumes permission for one effect. An approval message in room text is
 not authenticated approval. The schema alone cannot establish identity,
 current permission or successful execution.
 
-See [privileged-action authorization](../security/privileged-action-authorization.md)
-for the full policy and execution boundary.
-
 ## Validate the contracts
 
 The shipped validators in [`v2_contracts.py`](../../src/nunchi/v2_contracts.py)
-use the Python standard library. Tests also run JSON Schema validation with
-`jsonschema==4.26.0`, against the same
-[contract corpus](../../evals/v2/contract/). Expected case counts prevent a
-fixture class from silently disappearing.
+use the Python standard library. The contract tests also validate their
+documents with `jsonschema==4.26.0` when it is installed.
 
 ```sh
 python3 -m pip install '.[test]'
@@ -199,8 +197,8 @@ Both validators check schema-expressible rules. Runtime validation additionally
 checks event uniqueness and ordering, actor references, trigger membership,
 advice citations, continuation binding/expiry, and receipt sequences.
 Relational cases can be valid JSON documents but invalid together. Stateful
-cases cannot be decided by validating a single document. Missing schema-test
-dependencies are reported as skips, not passes.
+cases cannot be decided by validating a single document. Without `jsonschema`,
+the contract tests run the standard-library validators only.
 
 `I-040A@5` and `I-040D@3` are the obsolete turn interfaces. They are listed
 so the table matches `nunchi probe`, not because consumers should build on

@@ -1,7 +1,7 @@
 # Commands
 
 These commands come from the code under
-[architecture review](../AGENTS.md#architecture-goal-and-current-gap). None
+[architecture review](../AGENTS.md#architecture-goal). None
 of them is a compatibility promise for the replacement library.
 
 | Command | Purpose |
@@ -12,7 +12,7 @@ of them is a compatibility promise for the replacement library.
 | `nunchi-install` | Manage private configuration and state directories |
 | `nunchi-conformance` | Run deterministic lifecycle scenarios (obsolete) |
 | `nunchi-turn-conformance` | Check the existing turn protocol (obsolete) |
-| `nunchi-channel`, `nunchi-discord`, `nunchi-matrix`, `nunchi-telegram` | Run the optional plain-model reference adapters |
+| `nunchi-channel`, `nunchi-discord`, `nunchi-matrix`, `nunchi-telegram` | Run the plain-model reference adapters (obsolete) |
 | `nunchi-mcp-discord` | Run the shared Discord transport |
 | `nunchi-service-worker` | Internal process used by `nunchi service` |
 

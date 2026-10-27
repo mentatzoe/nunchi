@@ -2084,13 +2084,13 @@ class PrivateTextTests(unittest.TestCase):
 
 
 def _schema_names(name):
-    """Every property name a schema in schemas/v2 defines, following its references across files."""
+    """Every property name a schema in schemas/ defines, following its references across files."""
 
     import json
     from pathlib import Path
 
     schemas = {}
-    for path in (Path(__file__).resolve().parents[2] / "schemas" / "v2").glob("*.schema.json"):
+    for path in (Path(__file__).resolve().parents[2] / "schemas").glob("*/*.schema.json"):
         schema = json.loads(path.read_text(encoding="utf-8"))
         schemas[schema["$id"]] = schema
     names, seen = set(), set()
@@ -2128,7 +2128,7 @@ def _object_names(owner):
     from pathlib import Path
 
     schemas = {}
-    for path in (Path(__file__).resolve().parents[2] / "schemas" / "v2").glob("*.schema.json"):
+    for path in (Path(__file__).resolve().parents[2] / "schemas").glob("*/*.schema.json"):
         schema = json.loads(path.read_text(encoding="utf-8"))
         schemas[schema["$id"]] = schema
     wake = next(schema for url, schema in schemas.items() if url.endswith("/participant-wake.schema.json"))

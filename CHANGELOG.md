@@ -28,9 +28,15 @@ have not established the intended library architecture or live agent behavior.
   Codex plugin marketplace entry, and the scenes' saved participant turn
   requests. Git retains them.
 - Guidance that pulled new work toward the old design: a list of rules in
-  AGENTS.md written around it, the shared-core definition and same-behavior
-  rule from "One library, every harness", and setup instructions for the
-  runtime in which Nunchi runs a participant model.
+  AGENTS.md written around it, and the shared-core definition and
+  same-behavior rule from "One library, every harness".
+- AGENTS.md's notes on the current workstream and its sections on how we
+  work, delivery, ownership and verification; CLAUDE.md to match.
+- The installation, runtime platform, reference adapter, privileged-action
+  security and verdict-suite docs.
+- Everything under `evals/`: the lifecycle runner, the run-record scanner
+  and its test, and the old plan's contract corpus with the test code that
+  loaded it. The inline contract tests remain.
 
 ### Changed
 
@@ -44,6 +50,10 @@ have not established the intended library architecture or live agent behavior.
 - Code, schemas, tests and docs that belong to the old design are marked
   obsolete. The earlier program's V1/V2 labels are gone from prose; interface
   names in code are unchanged until the review settles the design.
+- Wholly or partly obsolete schemas moved to `schemas/obsolete/`.
+- `docs/behavior.md` lists the kinds of social behavior the library should
+  enable, without mechanism notes or decision history.
+- The reference adapters are marked obsolete as a whole.
 
 Earlier development details are available in Git history. Released versions
 are recorded below.
