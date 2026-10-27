@@ -26,6 +26,7 @@ have not established the intended library architecture or live agent behavior.
 - Run records and reviews from the earlier design under `evidence/`, the test
   helper that wrote them, an example that hosted a participant's turns, and a
   Codex plugin marketplace entry. Git retains them.
+- The product invariants list in AGENTS.md. Git retains it.
 
 ### Changed
 

@@ -271,31 +271,6 @@ Each person's or agent's own installation of a harness or of Nunchi (Aleph's
 Hermes, for example) belongs to them. Nunchi's code and its evidence never
 depend on one.
 
-## Product invariants
-
-- Only the exact participant's delegated model may make a social suppression
-  judgment.
-- Deterministic code handles transport-proven non-events, lifecycle, and
-  authority, never conversational meaning.
-- Uncertainty wakes or defers.
-- Trusted pre-attention bypass wakes directly, without a fabricated model
-  result.
-- Exact self binding is separate from names, aliases, and roles.
-- Context is bounded, structured, honest about coverage, and optionally
-  expandable; continuation authority stays host-only.
-- Observation, attention, participant-host, and transport receipts are
-  immutable, request-correlated, and written only by their owning stage.
-- Conversation memory records facts with pointers to messages and never
-  obliges a reply. There is no obligation queue, inferred roster, or send-time
-  social reclassification.
-- A woken participant contributes directly or sends nothing.
-- Privileged effects require current, provenance-bound authorization for the
-  exact action immediately before dispatch.
-- The shared core names no agent host, chat platform, or model vendor.
-- Social behavior lives in the shared core; integrations only adapt a harness
-  to it.
-- No executable V1 path remains.
-
 ## Verification
 
 ```sh
