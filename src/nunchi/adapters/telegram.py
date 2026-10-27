@@ -1,4 +1,4 @@
-"""Partly obsolete: the parts that run the agent's turn or send for it belong to the design under architecture review. Do not extend them.
+"""Obsolete: part of the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Do not extend it or build on it.
 
 Installed Telegram V2 adapter with bounded long-poll ingress."""
 
