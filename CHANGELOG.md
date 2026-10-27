@@ -27,10 +27,10 @@ have not established the intended library architecture or live agent behavior.
   helper that wrote them, an example that hosted a participant's turns, a
   Codex plugin marketplace entry, and the scenes' saved participant turn
   requests. Git retains them.
-- Guidance that pulled new work toward the old design: the product invariants,
-  and the shared-core definition and same-behavior rule from "One library,
-  every harness" in AGENTS.md; setup instructions for the runtime in which
-  Nunchi runs a participant model.
+- Guidance that pulled new work toward the old design: a list of rules in
+  AGENTS.md written around it, the shared-core definition and same-behavior
+  rule from "One library, every harness", and setup instructions for the
+  runtime in which Nunchi runs a participant model.
 
 ### Changed
 
