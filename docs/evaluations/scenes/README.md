@@ -41,6 +41,13 @@ nor proof that the library works socially.
 
 Attention decisions, including failures, are preserved. DEFER is not
 interchangeable with SUPPRESS.
+
+The `Update delivery` field in five scenes (06, 13, 24, 48 and 50) describes
+how the retired integrations and the obsolete turn code would deliver new
+messages: tool-boundary delivery, the `room_context` tool and holding a post
+for reconsideration. Those mechanisms are not requirements. The social
+situations and what each view contains remain approved; how updates reach
+the agent is open for the architecture and evaluation design.
 Continuation artifacts keep later messages outside the opening snapshot. See the
 [handoff](../eval-design-handoff.md) for known findings and runtime limitations.
 

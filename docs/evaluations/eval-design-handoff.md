@@ -61,7 +61,9 @@ context fetch is not required when the full update was already delivered.
   Codex and Claude Code runtime/version fields also describe approved scene
   targets, not verified execution support. All supplied harness integrations
   have since been retired, and the `Nunchi integration` field names those
-  retired integrations. Preserve the approved casting while resolving
+  retired integrations. The `Update delivery` field in scenes 06, 13, 24, 48
+  and 50 describes their delivery mechanisms and the obsolete turn code's;
+  those are not requirements. Preserve the approved casting while resolving
   execution support explicitly.
 
 ## What remains for the separate session

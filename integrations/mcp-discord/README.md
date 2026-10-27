@@ -21,6 +21,9 @@ NUNCHI_DISCORD_OUTPUT_HMAC_KEY
 NUNCHI_DISCORD_STATE_DIRECTORY
 ```
 
+`NUNCHI_DISCORD_OUTPUT_HMAC_KEY` must be at least 32 bytes. Share it only with
+authorized consumers of this transport.
+
 Routes are a JSON object, such as `{"example":["123456789"]}`. The gateway
 accepts events from those channels; delivery and tool authorization remain
 bound to each participant and channel pair. Enable Discord message content
