@@ -1,4 +1,6 @@
-"""Conversation-opportunity scheduling and the participant act-or-silence host."""
+"""Obsolete: part of the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Do not extend it or build on it.
+
+Conversation-opportunity scheduling and the participant act-or-silence host."""
 
 from __future__ import annotations
 

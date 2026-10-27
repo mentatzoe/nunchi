@@ -29,8 +29,9 @@ publication; the authority order in `AGENTS.md` still applies.
 All 42 scenes pin Nunchi 2.0.0 at
 `365c0d966019c29f601362e62aec9e20f0beea50`. Their JSON was prepared using a
 noneditable installed copy and `gpt-6-luna` at low reasoning through
-`HostTextAttentionModel`. The JSON retains configuration, model-visible inputs,
-actual attention output and the resulting participant request, where one exists.
+`HostTextAttentionModel`. The JSON retains configuration, model-visible
+inputs and actual attention output. The participant turn requests the
+obsolete turn code produced have been removed; Git retains them.
 
 There are 44 saved attention decisions: 21 WAKE, 22 DEFER and one SUPPRESS.
 These are preparation observations, not expected labels, scores, or measurements
@@ -49,8 +50,8 @@ context fetch is not required when the full update was already delivered.
 
 - [Issue #218](https://github.com/mentatzoe/nunchi/issues/218) records scene 46's
   SUPPRESS result. The model described an absent-person exchange as unkind and
-  private-feeling and rated it low as conversation. The saved participant request
-  is `null`. This is one observed gate failure, not proof of a categorical code
+  private-feeling and rated it low as conversation, so no participant request
+  was produced. This is one observed gate failure, not proof of a categorical code
   rule or a requirement that the protagonist defend someone.
 - In [scene 32](scenes/32-receiving-familiar-teasing/scene.md), attention assigns
   the teasing remark to `someone_else` with probability 0.9 even though Hermes
@@ -59,9 +60,11 @@ context fetch is not required when the full update was already delivered.
 - Fifteen scenes designate Hermes as protagonist with integration `TBD`.
   Codex and Claude Code runtime/version fields also describe approved scene
   targets, not verified execution support. All supplied harness integrations
-  have since been retired. Preserve the approved casting while resolving
-  execution support explicitly. The saved preparation and continuation tabs
-  do not prove live update delivery or protagonist use.
+  have since been retired, and the `Nunchi integration` field names those
+  retired integrations. The `Update delivery` field in scenes 06, 13, 24, 48
+  and 50 describes their delivery mechanisms and the obsolete turn code's;
+  those are not requirements. Preserve the approved casting while resolving
+  execution support explicitly.
 
 ## What remains for the separate session
 

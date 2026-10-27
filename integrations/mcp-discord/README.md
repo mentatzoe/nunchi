@@ -7,7 +7,7 @@ uses this transport's shared helpers.
 
 The protocol below describes the current implementation. It does not require
 future library consumers to use this connector or give Nunchi control of an
-agent's turns. See the [architecture goal](../../AGENTS.md#architecture-goal-and-current-gap).
+agent's turns. See the [architecture goal](../../AGENTS.md#architecture-goal).
 
 ## Configuration
 
@@ -20,6 +20,9 @@ NUNCHI_DISCORD_PARTICIPANT_ROUTES
 NUNCHI_DISCORD_OUTPUT_HMAC_KEY
 NUNCHI_DISCORD_STATE_DIRECTORY
 ```
+
+`NUNCHI_DISCORD_OUTPUT_HMAC_KEY` must be at least 32 bytes. Share it only with
+authorized consumers of this transport.
 
 Routes are a JSON object, such as `{"example":["123456789"]}`. The gateway
 accepts events from those channels; delivery and tool authorization remain
@@ -73,8 +76,7 @@ are a closed object:
 
 Messages, reaction additions and removals, and membership events use the
 [canonical event shapes](../../docs/contracts/nunchi.md). The transport delivers
-self-authored messages too; observation retains them as context without waking
-that same participant.
+self-authored messages too; observation retains them as context.
 
 When events may be missing, the next delivered event is preceded by a gap
 notification: `event: null`, `actors: {}`, `continuity_gap: true`. This happens
@@ -112,15 +114,24 @@ MAC and replay. Nonce consumption is durably written before REST dispatch and
 reloaded after restart. Rate limits provide an additional bound on sends; they
 do not replace authorization.
 
-The remaining shared participant host calls these tools after committing an
-action. That host's ownership of sending is under architecture review. Silence
-is not a Discord operation and has no transport tool.
+In the current code, the obsolete participant host calls the send tools for
+the agent. Silence is not a Discord operation and has no transport tool.
 
 `reaction_capability` is a read-only probe for the registered bot and room. It
 reads guild membership, roles and channel overwrites. Missing, denied, malformed
-or mismatched facts report reactions as unsupported. The probe does not fully
-model guild owners, member timeouts or thread permissions; see
-[reference adapter limits](../../docs/adapters.md#errors).
+or mismatched facts report reactions as unsupported. The probe
+(`src/nunchi/mcp_discord/rest.py`) models guild text channels only. It does
+not model three cases:
+
+- **Guild owner.** Discord grants the owner every permission; the probe does
+  not read `owner_id`, so an owning bot behind a restrictive `@everyone` is
+  reported unable to react.
+- **Member timeout.** The probe ignores `communication_disabled_until`, so a
+  timed-out bot can be reported able to react, and the reaction then fails
+  at dispatch.
+- **Threads.** A thread payload carries no `permission_overwrites`, so the
+  probe errors and the participant cannot react there. This has not been
+  checked against live Discord.
 
 ## Threads
 

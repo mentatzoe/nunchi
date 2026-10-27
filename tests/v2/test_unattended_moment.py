@@ -1,4 +1,6 @@
-"""Messages that arrive mid-turn are read with the newest, as one moment.
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+Messages that arrive mid-turn are read with the newest, as one moment.
 
 Agreed, 2026-10-06 (#94 step 6): a person catching up reads the newest message
 and glances back at what they missed. Run 45 showed why: Sam asked Vigil a

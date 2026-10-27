@@ -1,4 +1,6 @@
-"""The one versioned participant-turn protocol used by Nunchi-owned hosts.
+"""Obsolete: part of the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Do not extend it or build on it.
+
+The one versioned participant-turn protocol used by Nunchi-owned hosts.
 
 Platform integrations invoke native model processes.  They do not define what
 the participant sees, what it may return, how expansion works, or which

@@ -1,4 +1,6 @@
-"""`Room`: the library's side for one participant, assembled once (#94 step 9d)."""
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+`Room`: the library's side for one participant, assembled once (#94 step 9d)."""
 
 from __future__ import annotations
 
@@ -202,7 +204,7 @@ class RoomTests(unittest.TestCase):
             self.assertEqual(0o700, state.stat().st_mode & 0o777)
 
     def test_a_gap_declared_at_the_start_is_told_in_the_first_turn_and_not_in_the_next(self) -> None:
-        """Current Room startup and context behavior (`docs/platform.md`)."""
+        """Current Room startup and context behavior."""
         with tempfile.TemporaryDirectory() as directory:
             texts: list[str] = []
             driver = _Driver(lambda participant: None)

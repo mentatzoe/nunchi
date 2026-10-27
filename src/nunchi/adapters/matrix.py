@@ -1,4 +1,6 @@
-"""Installed Matrix V2 adapter with reactive `/sync` ingress."""
+"""Obsolete: part of the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Do not extend it or build on it.
+
+Installed Matrix V2 adapter with reactive `/sync` ingress."""
 
 from __future__ import annotations
 

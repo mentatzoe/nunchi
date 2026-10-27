@@ -1,4 +1,6 @@
-"""Installed Telegram V2 adapter with bounded long-poll ingress."""
+"""Obsolete: part of the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Do not extend it or build on it.
+
+Installed Telegram V2 adapter with bounded long-poll ingress."""
 
 from __future__ import annotations
 

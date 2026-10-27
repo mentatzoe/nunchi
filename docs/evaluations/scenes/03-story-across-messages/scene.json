@@ -94,13 +94,6 @@
       "at": "At 2 seconds · after message e2"
     },
     {
-      "label": "Participant turn request",
-      "path": "capture-01-participant-request.json",
-      "sha256": "ba4bab61513ce84e4d23ba531ca18db3701dc08dbe7574cc3b06728892635940",
-      "capture": 1,
-      "at": "At 2 seconds · after message e2"
-    },
-    {
       "label": "Attention model context",
       "path": "capture-02-attention-context.json",
       "sha256": "40e3c305e4c5e586e40eac51858fd5765a181289505e1f74c65b3997e27a1daf",
@@ -115,13 +108,6 @@
       "at": "At 6 seconds · after message e4"
     },
     {
-      "label": "Participant turn request",
-      "path": "capture-02-participant-request.json",
-      "sha256": "7bf94c50ece6c6c5a6135d666aae3451f1c3caed78aed2e411d217a4e01da4f8",
-      "capture": 2,
-      "at": "At 6 seconds · after message e4"
-    },
-    {
       "label": "Attention model context",
       "path": "capture-03-attention-context.json",
       "sha256": "6bbf1296425b404401fda9d350c22ac43d78ef110709d5d8f47fe676995d23a4",
@@ -132,13 +118,6 @@
       "label": "Attention decision",
       "path": "capture-03-attention-decision.json",
       "sha256": "52638db89bff37343e00cd4a9beffa0de33dc98fd776b70e40fed9e9a25a00df",
-      "capture": 3,
-      "at": "At 9 seconds · after message e5"
-    },
-    {
-      "label": "Participant turn request",
-      "path": "capture-03-participant-request.json",
-      "sha256": "6eb5fca3e91adf57316af2345d79d8fb24f28752d1d4e8841e887fa55ba63b2c",
       "capture": 3,
       "at": "At 9 seconds · after message e5"
     }

@@ -15,8 +15,7 @@ margin applied, trusted margin source only on a margin-applied decision),
 the sibling ok-branch ``reasons`` placement, the forbidden classifier fields
 on the ``preattention-disabled`` bypass branch (the full FR-005 exclusion
 set), and the reading rules (advice citing nonexistent event IDs is
-runtime-adapter-only). The corpus suite runs the
-``evals/v2/contract/attention-decision`` corpus through both validators.
+runtime-adapter-only).
 """
 
 from __future__ import annotations
@@ -24,7 +23,6 @@ from __future__ import annotations
 import unittest
 
 from tests.v2.contract.schema_helpers import (
-    ContractCorpusMixin,
     assert_schema_verdict,
     check_advice_citations,
     decode_non_finite,
@@ -36,11 +34,6 @@ from tests.v2.contract.schema_helpers import (
     make_request,
     make_routing,
 )
-
-
-class AttentionDecisionCorpusSuite(ContractCorpusMixin, unittest.TestCase):
-    CORPUS = "attention-decision"
-    REQUIRED_SCENES = frozenset({"S05", "S08", "S09", "S16", "010-Preattention-bypass"})
 
 
 class TransitionMatrixCases(unittest.TestCase):
@@ -283,9 +276,8 @@ class TypedAnswerCases(unittest.TestCase):
         assert_schema_verdict(self, "attention-decision", doc, "valid")
 
     def test_sentinel_decoded_non_finite_values_reject(self):
-        # Strict JSON cannot carry non-finite literals; the corpus loader
-        # decodes the reserved sentinel strings once, and both validators
-        # must reject the decoded value.
+        # Strict JSON cannot carry non-finite literals, so the test decodes
+        # the reserved sentinel strings; both validators must reject them.
         for sentinel in ("NaN", "Infinity", "-Infinity"):
             with self.subTest(sentinel=sentinel):
                 doc = make_decision_ok("SUPPRESS", "SUPPRESS", "none")

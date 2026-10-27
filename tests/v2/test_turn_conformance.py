@@ -1,4 +1,6 @@
-"""The turn conformance kit (#94 step 9d): its checks catch broken rules."""
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+The turn conformance kit (#94 step 9d): its checks catch broken rules."""
 
 from __future__ import annotations
 

@@ -1,4 +1,6 @@
-"""Shared configuration, diagnostics, and persistent-service primitives.
+"""Partly obsolete: the parts that run the agent's turn or send for it belong to the design under architecture review. Do not extend them.
+
+Shared configuration, diagnostics, and persistent-service primitives.
 
 The CLI and dashboard both call this module.  Platform integrations register
 native capability facts here; they never add social routing semantics.

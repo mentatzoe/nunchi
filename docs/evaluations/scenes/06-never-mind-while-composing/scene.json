@@ -112,13 +112,6 @@
       "at": "At 0 seconds · after message e7"
     },
     {
-      "label": "Participant turn request",
-      "path": "capture-01-participant-request.json",
-      "sha256": "1fa0ee2bdd9725f8bb7be2fbadcac6d191984ffa9b3c6e6a9e78ce66afe6d6c8",
-      "capture": 1,
-      "at": "At 0 seconds · after message e7"
-    },
-    {
       "label": "Room update available during the turn",
       "path": "room-update.json",
       "sha256": "ceccf461371d05290123feb9b2b56460b6b9251cc38bd7870641711dfd63bfd7"

@@ -1,4 +1,6 @@
-"""Dependency-free runtime validation for the public Nunchi V2 seam.
+"""Partly obsolete: the parts that run the agent's turn or send for it belong to the design under architecture review. Do not extend them.
+
+Dependency-free runtime validation for the public Nunchi V2 seam.
 
 The JSON schemas remain the portable oracle.  This module enforces the same
 closed-document boundary on installed runtimes and adds the relational checks

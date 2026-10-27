@@ -1,4 +1,6 @@
-"""Installed deterministic conformance for the shared V2 lifecycle."""
+"""Obsolete: part of the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Do not extend it or build on it.
+
+Installed deterministic conformance for the shared V2 lifecycle."""
 
 from __future__ import annotations
 
