@@ -40,11 +40,9 @@ and instructions. Their scenarios and scoring do not implement the approved
 scenes. Keep isolated checks of retained core, provider and channel functions.
 End-to-end evaluation follows the architecture and evaluation design discussion.
 
-**Redesign, decided 2026-10-27.** The current code has the wrong shape. Design
-the replacement from the goal above, not from the existing code, then reuse
-the existing parts that fit it. Implementation and evaluation design follow
-that design work. Current contracts describe code, not product intent or a
-mandate to resume old plans.
+Current work is architecture review with the maintainer. Implementation of
+replacement interfaces and evaluation design follow that discussion. Current
+contracts describe code, not product intent or a mandate to resume old plans.
 
 ## What Nunchi is for
 
@@ -156,9 +154,9 @@ If an integration needs a missing core capability, expose a neutral interface.
 
 1. This file: architecture goal, social behavior and draft status.
 2. `README.md`: current implementation, available capabilities and gaps.
-3. For work on existing code, the relevant implementation reference:
-   `docs/contracts/nunchi.md`, `docs/platform.md`, or `docs/adapters.md`.
-   They describe code that is being redesigned, not the design to follow.
+3. The relevant implementation reference: `docs/contracts/nunchi.md`,
+   `docs/platform.md`, or `docs/adapters.md`. Their current turn and sending
+   ownership is under architecture review.
 4. Source, schemas, tests, evaluations and installed runtimes for what
    actually exists and works.
 5. `docs/behavior.md` when discussing proposed behavior, using the draft
@@ -190,8 +188,9 @@ Work as a thinking partner, not an executor.
 
 ## How we work (agreed, 2026-10-04)
 
-- `main` is the working branch. Work merges into `main` as it lands, before
-  live proof. A current `main` is not a claim that the work is complete.
+- `main` is the working branch and holds V2. `integration/v2` is retired. Work
+  merges into `main` as it lands, before live proof. A current `main` is not a
+  claim that V2 is complete.
 - Work on a short-lived branch from current `main`, open a PR, merge when CI is
   green, and delete the branch. Do not keep long-lived side branches. Always
   merge: work left on a branch never lands (agreed, 2026-10-19). When the
@@ -276,23 +275,26 @@ depend on one.
 
 - Only the exact participant's delegated model may make a social suppression
   judgment.
-- Deterministic code handles transport-proven non-events and authority,
-  never conversational meaning.
-- An uncertain judgment never suppresses.
-- A trusted pre-attention bypass returns a wake without a fabricated model
+- Deterministic code handles transport-proven non-events, lifecycle, and
+  authority, never conversational meaning.
+- Uncertainty wakes or defers.
+- Trusted pre-attention bypass wakes directly, without a fabricated model
   result.
 - Exact self binding is separate from names, aliases, and roles.
 - Context is bounded, structured, honest about coverage, and optionally
-  expandable; continuation handles never enter model input.
-- Observation and attention receipts are immutable, request-correlated, and
-  written only by their owning stage.
+  expandable; continuation authority stays host-only.
+- Observation, attention, participant-host, and transport receipts are
+  immutable, request-correlated, and written only by their owning stage.
 - Conversation memory records facts with pointers to messages and never
-  obliges a reply. There is no obligation queue or inferred roster.
+  obliges a reply. There is no obligation queue, inferred roster, or send-time
+  social reclassification.
+- A woken participant contributes directly or sends nothing.
 - Privileged effects require current, provenance-bound authorization for the
-  exact action immediately before they run.
+  exact action immediately before dispatch.
 - The shared core names no agent host, chat platform, or model vendor.
 - Social behavior lives in the shared core; integrations only adapt a harness
   to it.
+- No executable V1 path remains.
 
 ## Verification
 

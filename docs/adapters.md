@@ -7,7 +7,7 @@ channel choice is part of the
 
 All reference adapters share `ReferenceAdapterRuntime`. Native payloads are
 normalized before attention and cannot alter trusted binding or policy.
-The runtime still owns turns and sending; the redesign removes that ownership.
+The runtime still owns turns and sending; that ownership is under review.
 
 | Surface | Ingress | Output | Retained context | Explicit native limits |
 |---|---|---|---|---|

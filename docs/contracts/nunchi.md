@@ -1,6 +1,6 @@
 # Data contracts
 
-**Current implementation, being redesigned.** This page explains the
+**Current implementation, under architecture review.** This page explains the
 data today's code accepts and produces. It does not make the library-owned
 turn or sending path a requirement for the replacement design. Start that
 review from the [agreed goal](../../AGENTS.md#architecture-goal-and-current-gap).
@@ -121,8 +121,8 @@ Proposal memory exposes status, not the operation or approval credentials.
 
 Memory limits and reconstruction are implemented in
 [`memory.py`](../../src/nunchi/memory.py).
-They are current implementation choices, not a complete context CRUD API.
-Restart does not turn retained history into new work.
+They are current implementation choices under review, not a complete context
+CRUD API. Restart does not turn retained history into new work.
 
 ## More context
 
@@ -141,7 +141,7 @@ handle alone is insufficient. Handles and cursors never enter model input.
 
 The current turn implementation reads the live retained log through `RoomView`
 instead. See [room context](../platform.md#room-context). These are distinct
-interfaces; their future relationship belongs to the redesign.
+interfaces; their future relationship belongs to the architecture review.
 
 ## Receipts
 

@@ -7,8 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-A redesign is in progress. There are no supplied Claude Code, Codex or
-Hermes integrations. The remaining shared runtime and reference adapters
+Architecture review is in progress. There are no supplied Claude Code, Codex
+or Hermes integrations. The remaining shared runtime and reference adapters
 have not established the intended library architecture or live agent behavior.
 
 ### Removed
@@ -36,8 +36,8 @@ have not established the intended library architecture or live agent behavior.
 - Reference and channel checks remain separate from evidence about real agents.
   Existing installations and private harness configuration are not modified by
   this source change.
-- Guidance and documentation describe the redesign in progress and no longer
-  use the earlier program's version labels in prose.
+- The lifecycle conformance page and CI step names no longer use the earlier
+  program's V1/V2 labels.
 
 Earlier development details are available in Git history. Released versions
 are recorded below.

@@ -12,8 +12,9 @@ contributing or being helpful. The full statement, with examples, is Social
 behavior at the top of `AGENTS.md`.
 
 Claude sessions have put the usefulness bar back again and again: in
-`docs/behavior.md`'s yardstick, an attention question and a scene's expected
-moves. Before you write any of those, check your words against that section.
+`docs/behavior.md`'s yardstick, the turn prompt, an attention question, the
+eval profiles and a scene's expected moves. Before you write any of those,
+check your words against that section.
 
 Use the [draft-status guidance](AGENTS.md#draft-status) when reading
 `docs/behavior.md` or other proposed designs.

@@ -113,8 +113,8 @@ reloaded after restart. Rate limits provide an additional bound on sends; they
 do not replace authorization.
 
 The remaining shared participant host calls these tools after committing an
-action. The redesign removes that host's ownership of sending. Silence is not
-a Discord operation and has no transport tool.
+action. That host's ownership of sending is under architecture review. Silence
+is not a Discord operation and has no transport tool.
 
 `reaction_capability` is a read-only probe for the registered bot and room. It
 reads guild membership, roles and channel overwrites. Missing, denied, malformed

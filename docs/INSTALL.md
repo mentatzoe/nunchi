@@ -2,8 +2,8 @@
 
 **The package currently supplies no agent harness integrations.** These
 instructions cover the remaining library, reference adapters and operator
-tools, which are being
-[redesigned](../AGENTS.md#architecture-goal-and-current-gap).
+tools. Their configuration and runtime ownership are under
+[architecture review](../AGENTS.md#architecture-goal-and-current-gap).
 
 ## Build and inspect a package
 
@@ -145,5 +145,6 @@ Continuation handles are discarded. Uncertain or corrupt state stops the
 affected operation; it is not silently rewritten.
 
 Stop affected processes before changing installed artifacts. Keep state with
-the version that wrote it unless compatibility is documented. See
+the version that wrote it unless compatibility is documented. Do not feed
+current journals into the retired V1 runtime. See
 [commands and compatibility](STABILITY.md).

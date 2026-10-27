@@ -1,6 +1,6 @@
 # Current runtime components
 
-**Implementation reference for code being redesigned.** No Claude Code,
+**Implementation reference, under architecture review.** No Claude Code,
 Codex or Hermes integration is currently supplied. This page describes the
 shared code that remains, including the turn ownership that still needs to
 change. It is not a recipe for rebuilding the removed integrations.
@@ -38,9 +38,9 @@ is trusted input; room content cannot replace identity, provider routes,
 credentials or policy. See [installation](INSTALL.md) for configuration tools
 and [data contracts](contracts/nunchi.md) for the field definitions.
 
-There is no implemented replacement harness interface yet. The redesign
-decides which current capabilities can be consumed independently without
-taking over the agent.
+There is no implemented replacement harness interface yet. The architecture
+review must decide which current capabilities can be consumed independently
+without taking over the agent.
 
 ## Model connections
 
@@ -84,7 +84,7 @@ a note rather than silently pretending the room is complete.
 Current turn code reads `new` before the first post or reaction. If messages
 arrived meanwhile, it shows them to the participant before accepting an action.
 A separate host-only `news` read supports steering during a turn. These methods
-and their coupling to dispatch are part of the redesign.
+and their coupling to dispatch are under review.
 
 A continuation handle is a separate host-only capability for bounded context
 fetches. It is bound to a participant, room, scope and trigger, expires, and is
