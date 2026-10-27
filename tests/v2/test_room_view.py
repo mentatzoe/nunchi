@@ -1,4 +1,6 @@
-"""The participant sees the room as it is now, and looks again before speaking.
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+The participant sees the room as it is now, and looks again before speaking.
 
 Agreed, 2026-10-05 (#94, plan step 3): the context the gate reads to decide and
 the history the agent reads during its own turn are separate things. The

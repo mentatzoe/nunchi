@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Stable repository entry point for installed V2 lifecycle conformance."""
+"""Obsolete: part of the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Do not extend it or build on it.
+
+Stable repository entry point for installed V2 lifecycle conformance."""
 
 from __future__ import annotations
 

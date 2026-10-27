@@ -1,4 +1,6 @@
-"""Installed Matrix V2 adapter with reactive `/sync` ingress."""
+"""Partly obsolete: the parts that run the agent's turn or send for it belong to the design under architecture review. Do not extend them.
+
+Installed Matrix V2 adapter with reactive `/sync` ingress."""
 
 from __future__ import annotations
 

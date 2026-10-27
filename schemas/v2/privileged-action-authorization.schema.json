@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://nunchi.invalid/schemas/v2/privileged-action-authorization.schema.json",
+  "$comment": "Obsolete as a design: Nunchi authorizes and runs privileged effects for the agent here. Where privileged actions belong is under architecture review. Do not build on it.",
   "title": "PrivilegedActionAuthorizationV2",
   "description": "I-010F PrivilegedActionAuthorizationV2@1. A closed host-facing union for a non-secret privileged-action request, its immutable policy decision, a host-only approval challenge, and an authenticated approval completion. It records the exact digest-bound proposal and decision facts; it does not carry an operation body, credential, policy file, bearer grant, or execution result. Slice 040 owns execution-time recheck, persistence, one-use consumption, and effects.",
   "oneOf": [

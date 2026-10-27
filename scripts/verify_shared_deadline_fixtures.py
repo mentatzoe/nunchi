@@ -1,4 +1,6 @@
-"""Regression and in-memory mutation proof for reconstructed deadline fixtures."""
+"""Obsolete: part of the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Do not extend it or build on it.
+
+Regression and in-memory mutation proof for reconstructed deadline fixtures."""
 import inspect
 import io
 from pathlib import Path

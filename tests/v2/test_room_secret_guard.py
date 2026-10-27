@@ -1,4 +1,6 @@
-"""Reference adapters share the room's secret guard with their participants."""
+"""Partly obsolete: tests that exercise the turn host or sending check the design under architecture review. They are not requirements for the new design.
+
+Reference adapters share the room's secret guard with their participants."""
 
 from __future__ import annotations
 

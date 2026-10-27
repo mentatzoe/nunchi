@@ -1,4 +1,6 @@
-"""Current shared room runtime, under architecture review.
+"""Obsolete: part of the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Do not extend it or build on it.
+
+Current shared room runtime, under architecture review.
 
 Room assembles observation, attention, scheduling, the participant host and
 its delivery lane. It still owns turns and sending; these are implementation

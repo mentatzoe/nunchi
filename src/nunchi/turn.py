@@ -1,4 +1,6 @@
-"""Current participant turn implementation, under architecture review.
+"""Obsolete: part of the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Do not extend it or build on it.
+
+Current participant turn implementation, under architecture review.
 
 This module still constrains actions and sending. Those ownership choices are
 gaps against the library goal, not requirements for new harness integrations.

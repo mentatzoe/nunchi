@@ -1,4 +1,6 @@
-"""A continuity gap is a point in the room's timeline, told once in one plain sentence.
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+A continuity gap is a point in the room's timeline, told once in one plain sentence.
 
 Agreed, 2026-10-10: "A plain sentence at the gap." When what the agent reads runs
 up to or across a gap it has not been told about, the turn says so, attention's

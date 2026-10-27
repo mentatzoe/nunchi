@@ -1,4 +1,6 @@
-"""Shared installed runtime for generic, Discord, Matrix, and Telegram adapters."""
+"""Obsolete: part of the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Do not extend it or build on it.
+
+Shared installed runtime for generic, Discord, Matrix, and Telegram adapters."""
 
 from __future__ import annotations
 

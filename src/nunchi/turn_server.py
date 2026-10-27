@@ -1,4 +1,6 @@
-"""The turn as versioned JSON over a private local socket (#94 step 9c).
+"""Obsolete: part of the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Do not extend it or build on it.
+
+The turn as versioned JSON over a private local socket (#94 step 9c).
 
 For harnesses outside Python, the same calls a Python integration makes on a
 `TurnParticipant` (`nunchi.turn`), as HTTP over a Unix socket only the

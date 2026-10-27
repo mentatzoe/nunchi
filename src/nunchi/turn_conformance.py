@@ -1,4 +1,6 @@
-"""Checks for the current shared turn implementation.
+"""Obsolete: part of the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Do not extend it or build on it.
+
+Checks for the current shared turn implementation.
 
 The supplied harness integrations were retired. By default this kit checks
 the reference implementation directly; callers can supply an external

@@ -1,4 +1,6 @@
-"""`Room`: the library's side for one participant, assembled once (#94 step 9d)."""
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+`Room`: the library's side for one participant, assembled once (#94 step 9d)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,6 @@
-"""Installed standalone Discord V2 adapter using reactive gateway events."""
+"""Partly obsolete: the parts that run the agent's turn or send for it belong to the design under architecture review. Do not extend them.
+
+Installed standalone Discord V2 adapter using reactive gateway events."""
 
 from __future__ import annotations
 

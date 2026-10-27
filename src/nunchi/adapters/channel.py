@@ -1,4 +1,6 @@
-"""Installed generic V2 JSONL host adapter."""
+"""Partly obsolete: the parts that run the agent's turn or send for it belong to the design under architecture review. Do not extend them.
+
+Installed generic V2 JSONL host adapter."""
 
 from __future__ import annotations
 

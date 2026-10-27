@@ -1,4 +1,6 @@
-"""A reaction is exactly one emoji, and a word is refused before anything is committed.
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+A reaction is exactly one emoji, and a word is refused before anything is committed.
 
 Run 38135715452: on the fourth message of a story the agent nodded with the
 reaction "yikes". The react tool asked for "for example one emoji", the core

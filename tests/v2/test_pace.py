@@ -1,4 +1,6 @@
-"""The room's pace reaches the judgment and the turn (#94, plan step 6).
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+The room's pace reaches the judgment and the turn (#94, plan step 6).
 
 `docs/behavior.md`: a socially aware participant notices the pace: a burst
 of messages, someone mid-thought, a pause, a room quiet for hours, and its

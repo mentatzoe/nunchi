@@ -23,6 +23,14 @@ have not established the intended library architecture or live agent behavior.
   replacement integrations will follow the agreed library design.
 - Superseded design and release plans, V1 documentation archives, governance
   assignments and stale verification summaries.
+- Run records and reviews from the earlier design under `evidence/`, the test
+  helper that wrote them, an example that hosted a participant's turns, a
+  Codex plugin marketplace entry, and the scenes' saved participant turn
+  requests. Git retains them.
+- Guidance that pulled new work toward the old design: the product invariants,
+  and the shared-core definition and same-behavior rule from "One library,
+  every harness" in AGENTS.md; setup instructions for the runtime in which
+  Nunchi runs a participant model.
 
 ### Changed
 
@@ -33,6 +41,9 @@ have not established the intended library architecture or live agent behavior.
 - Reference and channel checks remain separate from evidence about real agents.
   Existing installations and private harness configuration are not modified by
   this source change.
+- Code, schemas, tests and docs that belong to the old design are marked
+  obsolete. The earlier program's V1/V2 labels are gone from prose; interface
+  names in code are unchanged until the review settles the design.
 
 Earlier development details are available in Git history. Released versions
 are recorded below.

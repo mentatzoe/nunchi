@@ -1,4 +1,6 @@
-"""Execution-time authorization for exact privileged actions."""
+"""Obsolete: part of the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Do not extend it or build on it.
+
+Execution-time authorization for exact privileged actions."""
 
 from __future__ import annotations
 

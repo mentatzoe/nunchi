@@ -1,4 +1,6 @@
-"""The turn's rules live in the core, the same for every harness (#94 step 9c).
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+The turn's rules live in the core, the same for every harness (#94 step 9c).
 
 These tests drive `nunchi.turn` through a driver that is no particular
 harness, with tool names of its own choosing.

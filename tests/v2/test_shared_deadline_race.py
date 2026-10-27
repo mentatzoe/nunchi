@@ -1,4 +1,6 @@
-"""Deterministic shared-host deadlines, independent of waiter scheduling."""
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+Deterministic shared-host deadlines, independent of waiter scheduling."""
 
 from dataclasses import replace
 import queue
