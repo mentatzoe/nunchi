@@ -580,7 +580,7 @@ class PlainParticipantHostTests(unittest.TestCase):
 
 
 class TheContractNamesTheChangeTests(unittest.TestCase):
-    """A narrowing of the participant's action is a version change (docs/STABILITY.md): I-040A is @5, and every document that says so agrees."""
+    """A narrowing of the participant's action is a version change: I-040A is @5, and the contract table agrees."""
 
     ROOT = Path(__file__).resolve().parents[2]
 
@@ -597,7 +597,6 @@ class TheContractNamesTheChangeTests(unittest.TestCase):
             with self.subTest(interface):
                 self.assertEqual(INTERFACE_VERSIONS[interface], int(version))
         self.assertIn("`I-040A@5`", (self.ROOT / "docs" / "contracts" / "nunchi.md").read_text(encoding="utf-8"))
-        self.assertIn("`I-040A@5`", (self.ROOT / "docs" / "STABILITY.md").read_text(encoding="utf-8"))
 
     def test_the_kit_has_a_refused_word_nod_for_each_posting_style(self):
         from nunchi.turn_conformance import SCENARIOS

@@ -73,8 +73,7 @@ are a closed object:
 
 Messages, reaction additions and removals, and membership events use the
 [canonical event shapes](../../docs/contracts/nunchi.md). The transport delivers
-self-authored messages too; observation retains them as context without waking
-that same participant.
+self-authored messages too; observation retains them as context.
 
 When events may be missing, the next delivered event is preceded by a gap
 notification: `event: null`, `actors: {}`, `continuity_gap: true`. This happens
@@ -112,9 +111,8 @@ MAC and replay. Nonce consumption is durably written before REST dispatch and
 reloaded after restart. Rate limits provide an additional bound on sends; they
 do not replace authorization.
 
-The remaining shared participant host calls these tools after committing an
-action. That host's ownership of sending is under architecture review. Silence
-is not a Discord operation and has no transport tool.
+In the current code, the obsolete participant host calls the send tools for
+the agent. Silence is not a Discord operation and has no transport tool.
 
 `reaction_capability` is a read-only probe for the registered bot and room. It
 reads guild membership, roles and channel overwrites. Missing, denied, malformed

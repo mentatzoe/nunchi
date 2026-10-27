@@ -22,8 +22,8 @@ is the starting point for the review.
 Removing the integrations does not complete that goal. Shared code still
 hosts participant turns, controls sending and limits each turn to one room
 action. Context create/read/update/delete APIs and prompt configuration are
-incomplete. The replacement design must address these gaps before new harness
-integrations are built.
+incomplete. The code that runs turns and sends is marked obsolete; it stays
+only until the review decides what replaces it.
 
 ## What remains available
 
@@ -33,11 +33,11 @@ integrations are built.
   These run a plain model participant. They do not connect Nunchi to an
   existing agent harness.
 - A shared [Discord MCP transport](integrations/mcp-discord/README.md).
-- Configuration, diagnostics, a local dashboard and service tools for the
-  existing runtime.
-- Deterministic tests and evaluation tooling. The [approved social scenes](docs/evaluations/scenes/README.md)
-  are specifications and preparation artifacts; they have not been executed
-  or scored as a collection.
+- Operator tools (`nunchi setup`, `config`, `diagnose`, `dashboard`,
+  `service`) for the existing runtime, which configure a participant model
+  that Nunchi runs.
+- Deterministic tests. The [approved social scenes](docs/evaluations/scenes/README.md)
+  are specifications; they have not been executed or scored.
 
 The implementation is incomplete and has no current end-to-end proof of the
 intended library architecture. Check [CI](https://github.com/mentatzoe/nunchi/actions/workflows/ci.yml)
@@ -50,12 +50,11 @@ that an agent reads a live room well.
 python3 -m venv .venv
 .venv/bin/python -m pip install '.[test]'
 .venv/bin/nunchi probe
-.venv/bin/nunchi-install probe
 ```
 
-See [installation and configuration](docs/INSTALL.md) for the existing runtime
-and [command compatibility](docs/STABILITY.md) for its interfaces. Installing
-the package does not add Nunchi to Claude Code, Codex or Hermes.
+See [installation](docs/INSTALL.md) and the
+[current runtime components](docs/platform.md). Installing the package does
+not add Nunchi to Claude Code, Codex or Hermes.
 
 ## Check the implementation
 
@@ -77,5 +76,4 @@ remains a separate design task. The approved scenes have not been executed.
 - [Data contracts](docs/contracts/nunchi.md)
 - [Current runtime components](docs/platform.md)
 - [Reference adapters and their limits](docs/adapters.md)
-- [Privileged-action authorization](docs/security/privileged-action-authorization.md)
 - [Scene specification](docs/evaluations/scene-spec.md) and [evaluation handoff](docs/evaluations/eval-design-handoff.md)

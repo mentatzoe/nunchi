@@ -1,9 +1,10 @@
 # Reference adapters and channel limits
 
-These optional examples run a plain model participant on a channel. There are
-currently no supplied integrations with existing agent harnesses. Independent
-channel choice is part of the
-[architecture goal](../AGENTS.md#architecture-goal-and-current-gap).
+These optional examples run a plain model participant on a channel, through
+the obsolete turn code. Their channel code (normalizing native events and
+reporting capabilities) is what fits the
+[architecture goal](../AGENTS.md#architecture-goal-and-current-gap), where
+channel integrations supply context and run no agent.
 
 All reference adapters share `ReferenceAdapterRuntime`. Native payloads are
 normalized before attention and cannot alter trusted binding or policy.
@@ -81,9 +82,6 @@ Input is one closed object per line:
 }
 ```
 
-The current runtime writes a JSONL action only after a participant contributes.
-Silence produces no transport line.
-
 ## Backfill
 
 Matrix records its first `/sync` batch as context without waking participants.
@@ -113,8 +111,7 @@ which reactions the participant may use. The
 shared Discord MCP transport measures the authenticated bot's effective guild
 roles and channel overwrites. Matrix binds `whoami` to the configured actor and
 compares that user with the room's `m.reaction` power level. A denial, missing
-state, identity mismatch, or malformed response is unsupported: the turn
-offers the participant no reaction, and it still takes its turn.
+state, identity mismatch, or malformed response counts as unsupported.
 
 The shared Discord MCP transport's probe (`src/nunchi/mcp_discord/rest.py`)
 models guild text channels only. It does not model three cases:

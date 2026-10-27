@@ -1,11 +1,12 @@
 # Privileged action authorization boundary
 
-**Status: implemented; deterministic checks only.** `AuthorizationCoordinator`
-in `src/nunchi/authorization.py` checks `I-010F PrivilegedActionAuthorizationV2@1`
-before dispatching an effect. The reference adapters supply no executors, there
-is no shipped authenticated approval surface, and no live run has verified a
-privileged effect. The shared host and its ownership of turns remain under
-[architecture review](../../AGENTS.md#architecture-goal-and-current-gap).
+**Obsolete as a design; the code is under architecture review.** In the
+current code, the participant host proposes an action, Nunchi authorizes it
+and Nunchi runs it. That conflicts with the
+[architecture goal](../../AGENTS.md#architecture-goal-and-current-gap), where
+the agent acts with its own tools. Where privileged actions belong is open.
+This page describes what `src/nunchi/authorization.py` does today; it is not
+a design to keep.
 
 ## What is protected
 
@@ -106,18 +107,6 @@ and the allow cannot outlive the expiry that recheck set.
 
 The host executes nothing when any fact is missing, ambiguous, expired,
 revoked, mismatched, replayed, or not durably persisted.
-
-## What is still missing
-
-- **Executors.** Reference adapters can wire the coordinator with an
-  `authorization` policy, but supply no executors. They deny privileged
-  proposals. The retired Claude Code gate was the only supplied harness
-  executor; it is no longer available.
-- **Authenticated operator approval surface.** `pending_for_operator()` and
-  `complete_authenticated_approval()` are library methods. No shipped command,
-  dashboard, or transport calls them, so an `APPROVAL_REQUIRED` proposal
-  returns `unavailable` and expires.
-- **Live evidence.** No real-platform run has exercised a privileged effect.
 
 ## Tests
 

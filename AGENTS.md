@@ -41,8 +41,13 @@ scenes. Keep isolated checks of retained core, provider and channel functions.
 End-to-end evaluation follows the architecture and evaluation design discussion.
 
 Current work is architecture review with the maintainer. Implementation of
-replacement interfaces and evaluation design follow that discussion. Current
-contracts describe code, not product intent or a mandate to resume old plans.
+replacement interfaces and evaluation design follow that discussion.
+
+**The current code follows the design this review replaces.** Its modules,
+schemas, interface names and tests describe that design, not requirements.
+Modules that run the agent's turn or send for it are marked obsolete at the
+top of the file. When guidance, docs or code disagree with the goal above,
+the goal wins. Reuse a part only where it fits the goal.
 
 ## What Nunchi is for
 
@@ -105,26 +110,14 @@ Judge designs by the conversations they produce. Earlier rules give way
 where they block agreed social behavior (agreed, 2026-10-04). This does not
 give the unagreed parts of a draft authority over code or other documents.
 
-## One library, every harness
+## Integrations and channels
 
-The goal is a library any agent harness can use. Agreed Nunchi behavior
-belongs in the shared core and reaches harnesses through shared interfaces.
-A harness should not need its own copy of a behavior to get it
-(agreed, 2026-10-07).
-
-The shared core is `src/nunchi` outside `integrations/` and `adapters/`, plus
-`schemas/` and `docs/contracts/`. It must not know about any specific agent
-host (Hermes, Codex, Claude Code), chat platform, or model vendor.
-
-An integration connects a harness to core through the harness's public
-extension points, preserving its lifecycle, settings and native message flow.
-It does not duplicate Nunchi's social judgments or take control of the agent.
-If an integration needs a missing core capability, expose a neutral interface.
-
-- **Same behavior everywhere.** Building and testing a behavior through one
-  harness first is fine. Until every supported harness has it, record the gap
-  where users will see it, and treat closing it as library work, not that
-  harness's backlog.
+- Core must not know about any specific agent host (Hermes, Codex, Claude
+  Code), chat platform, or model vendor.
+- An integration connects a harness to core through the harness's public
+  extension points, preserving its lifecycle, settings and native message
+  flow. It does not duplicate Nunchi's social judgments or take control of
+  the agent.
 - **Stock harnesses.** Integrations use each harness's public extension
   points (plugins, hooks, configuration, protocols) and work with a stock
   install of a supported version. They do not patch the harness. Users keep
@@ -133,8 +126,8 @@ If an integration needs a missing core capability, expose a neutral interface.
   pointing users to the harness's own settings; they never reimplement it
   (agreed, 2026-10-10).
 - **Missing extension points.** When a harness lacks one we need, open an
-  issue here first, with the gap and the alternatives considered. The maintainer decides
-  whether to ask the harness's maintainers.
+  issue here first, with the gap and the alternatives considered. The
+  maintainer decides whether to ask the harness's maintainers.
 - **Independent evidence.** Tests, evaluations, and benchmarks run on clean,
   pinned installs of each harness, never on anyone's own setup.
 - **D2, decided** (2026-10-11): keys the agent can reach are the harness's to
@@ -154,13 +147,11 @@ If an integration needs a missing core capability, expose a neutral interface.
 
 1. This file: architecture goal, social behavior and draft status.
 2. `README.md`: current implementation, available capabilities and gaps.
-3. The relevant implementation reference: `docs/contracts/nunchi.md`,
-   `docs/platform.md`, or `docs/adapters.md`. Their current turn and sending
-   ownership is under architecture review.
-4. Source, schemas, tests, evaluations and installed runtimes for what
-   actually exists and works.
-5. `docs/behavior.md` when discussing proposed behavior, using the draft
+3. `docs/behavior.md` when discussing proposed behavior, using the draft
    status above.
+4. For work on existing code: `docs/platform.md`, `docs/contracts/nunchi.md`
+   or `docs/adapters.md`, then the source and tests. They describe what the
+   code does, not what the design should be.
 
 Re-read this file after context compaction. Recover the maintainer's current
 goal and decisions before continuing. Code and reproducible behavior
@@ -188,9 +179,8 @@ Work as a thinking partner, not an executor.
 
 ## How we work (agreed, 2026-10-04)
 
-- `main` is the working branch and holds V2. `integration/v2` is retired. Work
-  merges into `main` as it lands, before live proof. A current `main` is not a
-  claim that V2 is complete.
+- `main` is the working branch. Work merges into `main` as it lands, before
+  live proof. A current `main` is not a claim that the work is complete.
 - Work on a short-lived branch from current `main`, open a PR, merge when CI is
   green, and delete the branch. Do not keep long-lived side branches. Always
   merge: work left on a branch never lands (agreed, 2026-10-19). When the
@@ -211,8 +201,8 @@ Work as a thinking partner, not an executor.
   process choices as changeable unless they are marked agreed.
 - Check each change against three questions. Does it help the agent read a
   live room of several people and agents? Does it follow each harness's own
-  plugin rules and settings? Does every harness get it once, from the core,
-  through the same interfaces?
+  plugin rules and settings? Does it keep the agent in control of its own
+  actions and communication?
 - Bugs in an implementation are bugs to repair, not proof that the approach
   cannot work. Test practical repairs and alternatives before declaring a
   fundamental blocker.
@@ -235,8 +225,6 @@ Work as a thinking partner, not an executor.
 
 ## Delivery rules
 
-- Work on the earliest missing behavior the product needs, and build only
-  what the library needs for it.
 - When a shared interface changes, run every consumer's tests in the same PR
   and fix or flag what breaks.
 - A stale assignment, previous session owner, missing process artifact,
@@ -244,12 +232,11 @@ Work as a thinking partner, not an executor.
   Resolve, reassign, replace, or finish it. If one path is externally blocked,
   continue other unblocked product work. Stop only when no safe in-scope work
   remains, and state the concrete dependency.
-- Do not narrow supported behavior, redefine completion, or drop a required
-  surface without the maintainer's explicit decision. Apply the draft status
-  above and the current request when deciding what work is authorized.
-  Ask the maintainer only when a choice materially changes product behavior
-  or supported surfaces and no decision covers it,
-  or when it touches security boundaries or requires an irreversible
+- Do not narrow supported behavior or redefine completion without the
+  maintainer's explicit decision. Apply the draft status above and the
+  current request when deciding what work is authorized. Ask the maintainer
+  when a choice materially changes product behavior and no decision covers
+  it, or when it touches security boundaries or requires an irreversible
   external action.
 - Plans, labels, reviews, and evidence files do not substitute for working
   behavior.
@@ -263,9 +250,8 @@ Say which checks have passed.
 ## Ownership
 
 The maintainer owns product scope and the final completion decision. Engineering work is
-not divided by agent, model family, or harness: whoever takes a task carries
-it through the core and every integration it affects, and anyone may change
-any part of this repository. Review each other's work on its merits.
+not divided by agent, model family, or harness, and anyone may change any
+part of this repository. Review each other's work on its merits.
 
 Each person's or agent's own installation of a harness or of Nunchi (Aleph's
 Hermes, for example) belongs to them. Nunchi's code and its evidence never
@@ -278,14 +264,16 @@ python3 -m unittest
 python3 -m evals.verdict_suite.runner --list
 ```
 
-Deterministic tests are offline and prove deterministic behavior only. Whether
+Most tests check the current code, which follows the design under review;
+they are not requirements for the new design. Deterministic tests are
+offline and prove deterministic behavior only. Whether
 an agent reads the room well is a behavioral question; it needs behavioral
 evaluation across realistic multi-turn conversations
 ([#86](https://github.com/mentatzoe/nunchi/issues/86)). The approved scene
 specifications are in
 [`docs/evaluations/scenes/`](docs/evaluations/scenes/README.md) and follow
 [`docs/evaluations/scene-spec.md`](docs/evaluations/scene-spec.md). Their saved
-library packages record preparation, not protagonist runs or passing scores.
+attention captures record preparation, not protagonist runs or passing scores.
 Execution and scoring of this collection belong to a separate evaluation-design
 session.
 

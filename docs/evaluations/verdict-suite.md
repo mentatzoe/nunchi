@@ -1,12 +1,11 @@
-# Lifecycle conformance
+# Lifecycle conformance (obsolete)
 
-This entry point calls `nunchi.conformance` to check the current core pipeline
-with fixed inputs and model results. It does not run a conversation or measure
-social behavior. The pipeline itself remains under
-[architecture review](../../AGENTS.md#architecture-goal-and-current-gap).
+This entry point calls `nunchi.conformance`, which checks the obsolete
+pipeline that runs participant turns, with fixed inputs and model results. It
+does not run a conversation or measure social behavior, and its scenarios
+are not requirements for the new design.
 
-The [approved scenes](scenes/README.md) await evaluation design. Older
-fixture corpora and conversation runners have been removed; Git retains them.
+The [approved scenes](scenes/README.md) await evaluation design.
 
 ## Run
 
@@ -16,9 +15,7 @@ python3 -m evals.verdict_suite.runner
 python3 -m evals.verdict_suite.runner --format jsonl
 ```
 
-The nine checks cover suppression, a nod recommendation, wake with
-contribution or silence, model defer, margin defer, trusted bypass, wake on
-error and no-wake error handling. `--list` prints the current set. These checks
+`--list` prints the current set. These checks
 need no provider or network.
 
 Exit code `0` means every scenario passed. JSONL output is one object per

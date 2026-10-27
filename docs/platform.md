@@ -16,14 +16,13 @@ channel choice with the user. Context and social attention belong in core.
 | Observation | Retain events and actor facts; build bounded context with honest coverage | [`observation.py`](../src/nunchi/observation.py) |
 | Attention | Ask the participant's delegated model to read the room; validate its answers | [`attention.py`](../src/nunchi/attention.py) |
 | Conversation memory | Record moves and message relationships | [`memory.py`](../src/nunchi/memory.py) |
-| Room | Assemble observation, attention, scheduling, authorization and a participant host | [`room.py`](../src/nunchi/room.py) |
-| Participant host and turn | Invoke a participant, mediate room actions and record the outcome | [`participant.py`](../src/nunchi/participant.py), [`turn.py`](../src/nunchi/turn.py) |
-| Transport | Supply authenticated events and return native delivery results | [Reference adapters](adapters.md), [Discord MCP](../integrations/mcp-discord/README.md) |
+| Room (obsolete) | Assemble observation, attention, scheduling, authorization and a participant host | [`room.py`](../src/nunchi/room.py) |
+| Participant host and turn (obsolete) | Invoke a participant, mediate room actions and record the outcome | [`participant.py`](../src/nunchi/participant.py), [`turn.py`](../src/nunchi/turn.py) |
+| Transport | Supply authenticated events; in the obsolete design, also send for the participant | [Reference adapters](adapters.md), [Discord MCP](../integrations/mcp-discord/README.md) |
 
-`Room`, the participant host and the turn protocol remain coupled to
-library-owned execution. Reference adapters still construct a plain model
-participant through this machinery. Its one-action limit and sending controls
-are current behavior, not accepted constraints on the future library.
+`Room`, the participant host and the turn protocol are coupled to
+library-owned execution. Reference adapters construct a plain model
+participant through this machinery.
 
 ## Inputs and configuration
 
@@ -35,8 +34,8 @@ transport, state paths and optional authorization policy.
 `RoomSettings` reads the shared configuration sections: `binding`, `profile`,
 `attention`, limits, state directory and optional authorization. Configuration
 is trusted input; room content cannot replace identity, provider routes,
-credentials or policy. See [installation](INSTALL.md) for configuration tools
-and [data contracts](contracts/nunchi.md) for the field definitions.
+credentials or policy. See [data contracts](contracts/nunchi.md) for the field
+definitions.
 
 There is no implemented replacement harness interface yet. The architecture
 review must decide which current capabilities can be consumed independently
@@ -81,55 +80,20 @@ The existing `RoomView` reads retained messages in four directions:
 state their limits and identify missing history. Reaching a page limit returns
 a note rather than silently pretending the room is complete.
 
-Current turn code reads `new` before the first post or reaction. If messages
-arrived meanwhile, it shows them to the participant before accepting an action.
-A separate host-only `news` read supports steering during a turn. These methods
-and their coupling to dispatch are under review.
-
 A continuation handle is a separate host-only capability for bounded context
 fetches. It is bound to a participant, room, scope and trigger, expires, and is
 discarded on restart. The [contract reference](contracts/nunchi.md#more-context)
 describes its validation.
 
-## Existing turn protocol
+## Code that runs the agent's turn
 
-`nunchi.participant-turn` version 1 supplies a prompt, bounded context,
-permissions and action schema to a plain model participant. The result names
-the protocol and request, then returns an action or silence. Any supplied
-binding fields must match the request. Unknown versions, stale work,
-invisible targets and unavailable capabilities are rejected.
-
-`Turn` supports room tools and final-answer posting. It currently allows one
-room action, checks for new messages before sending, handles quiet/context
-calls and checks output against withheld secrets. Reasons recorded with a move
-are private conversation memory, not room output. A reaction must be one emoji.
-
-`turn_server.py` exposes these methods over a private authenticated local
-socket (`nunchi.turn-session`, version 3). `nunchi-turn-conformance` checks the
-reference implementation. Passing those tests establishes behavior of this
-protocol; it does not approve the protocol as the future harness interface.
-
-## Scheduling and recovery
-
-The current delivery lane runs one opportunity and retains the newest pending
-anchor. Replaced anchors remain in history; up to three can be read for memory
-before the next opportunity. A single deadline covers attention, participant
-execution, expansion, authorization and transport acknowledgement. Late results
-cannot revive expired work.
-
-The runtime can revisit a paused conversation and can deliver an approved
-action's outcome to a participant. Those mechanisms still start turns through
-the shared host and need review along with ordinary turns.
-
-Restart and continuity loss cancel active work and pending approvals. Retained
-observations remain context, not queued replies. Replay reservations prevent
-uncertain processing from waking the same event again. Corrupt state stops the
-affected operation rather than silently repairing it.
-
-Before dispatch, the host records an `unknown` handoff. The transport alone
-records whether delivery succeeded. An empty or mismatched acknowledgement
-stays `unknown`. Privileged effects also need current authorization; see the
-[security reference](security/privileged-action-authorization.md).
+`room.py`, `pipeline.py`, `participant.py`, `participant_model.py`,
+`turn.py`, `turn_server.py`, `turn_conformance.py`, `reactions.py` and
+`conformance.py` schedule turns, start the participant, give it room tools,
+send for it, and check that behavior. They are marked obsolete: the
+architecture goal leaves turns and sending with the agent and its harness.
+They stay until the review decides what replaces them; do not extend them
+or treat their protocols as interfaces to keep.
 
 ## Check these components
 
@@ -137,7 +101,6 @@ stays `unknown`. Privileged effects also need current authorization; see the
 python3 -m unittest discover -s tests/v2/contract -p 'test_*.py'
 python3 -m unittest tests.v2.test_shared_foundation tests.v2.test_runtime_hardening tests.v2.test_agnostic_core
 python3 -m evals.verdict_suite.runner
-nunchi-turn-conformance --integration reference
 ```
 
 These are implementation checks. Installed-package checks and realistic

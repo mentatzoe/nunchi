@@ -46,7 +46,7 @@ Proposals for discussion, except where explicitly marked agreed:
   answering at once bury the person who asked.
 - **Follows the room's own norms.** A room may set a stricter or looser bar.
 
-## Proposed behavior and current mechanisms
+## Proposed behavior
 
 ### Step 1: is this conversation, and could someone like me take part?
 
@@ -100,26 +100,24 @@ Then it decides, and it acts.
 **Every visible move is the agent's own act, including a "mhm".** Nunchi
 never posts on the agent's behalf. If Nunchi nodded for an agent that never
 knew, the room would believe the agent was listening when the agent has no
-memory of it. A judgment that a "mhm" could fit gives the agent a turn, and
-any "mhm" is the agent's own. Nunchi's own nod was off by default from
-2026-10-05 and was removed in step 7 of the plan.
+memory of it.
 
 **A gap is told once, at the gap.** When what the agent reads runs up to or
 across a point where messages may be missing (a restart, a lost connection),
-the turn says so in one plain sentence and attention sees the same fact; once
-the agent has taken a turn past it, it is no longer news (agreed, 2026-10-10).
+the agent is told so in one plain sentence and attention sees the same fact;
+once the agent has acted past it, it is no longer news (agreed, 2026-10-10).
 
 ### Looking again
 
 Some moves depend on what happens next: wait for the addressee, or let the
-speaker finish. When the pause ends, Nunchi reads the room again and gives
-the agent a fresh reading.
+speaker finish. Who arranges a later look at the room is an open design
+question.
 
 ### Catching up
 
 While the agent is busy answering one person, others keep talking. When it
 is free again, it catches up the way a person does: it reads the newest
-message, then glances back at what it missed. Nunchi reads those messages
+message, then glances back at what it missed. Attention reads those messages
 together as one moment, so a question Bob asked meanwhile is not lost
 behind Alice's "thanks". An agent that can take news while it works hears of
 new messages as they come, as a person glances up from what they are
@@ -187,8 +185,8 @@ floor.
 
 ## Fast decisions
 
-Steps 1 and 2 run at every conversational moment, including pauses, so they
-need to be fast and cheap.
+Steps 1 and 2 run at every conversational moment, so they need to be fast
+and cheap.
 
 - Typed decision models, such as System One–style classifiers
   ([#87](https://github.com/mentatzoe/nunchi/issues/87)), fit well. They
@@ -229,15 +227,8 @@ from implementation history; they do not approve the rest of this draft:
   nobody has said" as an example of the reading. They don't fit Social
   behavior at the top of `AGENTS.md` (agreed, 2026-10-19).
 
-## Implementation references
-
-The [runtime guide](platform.md) describes the remaining code and its gaps.
-There are no supplied harness integrations. The former implementation table
-mixed dated observations with this draft's proposals and has been removed;
-Git retains it.
+## Agreed behavior notes
 
 The catch-up behavior above was agreed on 2026-10-06: attention reads messages
 that arrived while the participant was busy together with the newest message,
-so an earlier question is not hidden. The current implementation judges at most
-three superseded messages for memory before the newest message; that bound is
-an implementation detail, not the social goal.
+so an earlier question is not hidden.

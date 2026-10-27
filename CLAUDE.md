@@ -12,9 +12,8 @@ contributing or being helpful. The full statement, with examples, is Social
 behavior at the top of `AGENTS.md`.
 
 Claude sessions have put the usefulness bar back again and again: in
-`docs/behavior.md`'s yardstick, the turn prompt, an attention question, the
-eval profiles and a scene's expected moves. Before you write any of those,
-check your words against that section.
+`docs/behavior.md`'s yardstick, an attention question and a scene's expected
+moves. Before you write any of those, check your words against that section.
 
 Use the [draft-status guidance](AGENTS.md#draft-status) when reading
 `docs/behavior.md` or other proposed designs.
@@ -23,8 +22,8 @@ The [approved scene specifications](docs/evaluations/scenes/README.md) follow
 the [scene spec](docs/evaluations/scene-spec.md). Use the
 [scene skill](skills/nunchi-scenes/SKILL.md) for scene work. Older fixtures'
 expected moves and review labels do not define these scenes' purposes or
-approval. Saved library packages record preparation; running and scoring the
-approved collection are separate evaluation-design work.
+approval. Running and scoring the approved collection are separate
+evaluation-design work.
 
 ## Discuss before writing
 
@@ -38,14 +37,13 @@ nothing written until it is decided.
 ## Ownership
 
 Follow the ownership and architecture goal in `AGENTS.md`. Work is not divided
-by model family or harness. Review other agents' work on its merits and check
-every affected integration, not only the harness you run in.
+by model family or harness. Review other agents' work on its merits.
 
 ## Habits
 
 - If you catch yourself preferring an option because it is smaller or fits
-  today's contract, check it against Social behavior at the top of
-  `AGENTS.md` first. The rule for recommending is in `AGENTS.md`, Working
+  today's code, check it against the architecture goal and Social behavior
+  at the top of `AGENTS.md` first. The rule for recommending is in `AGENTS.md`, Working
   style.
 - Before asking the maintainer, check what is already decided: lines marked agreed or
   decided, with a date, in `AGENTS.md` and `docs/behavior.md`. Anything else

@@ -23,10 +23,6 @@ have not established the intended library architecture or live agent behavior.
   replacement integrations will follow the agreed library design.
 - Superseded design and release plans, V1 documentation archives, governance
   assignments and stale verification summaries.
-- Run records and reviews from the earlier design under `evidence/`, the test
-  helper that wrote them, an example that hosted a participant's turns, and a
-  Codex plugin marketplace entry. Git retains them.
-- The product invariants list in AGENTS.md. Git retains it.
 
 ### Changed
 
@@ -37,8 +33,6 @@ have not established the intended library architecture or live agent behavior.
 - Reference and channel checks remain separate from evidence about real agents.
   Existing installations and private harness configuration are not modified by
   this source change.
-- The lifecycle conformance page and CI step names no longer use the earlier
-  program's V1/V2 labels.
 
 Earlier development details are available in Git history. Released versions
 are recorded below.

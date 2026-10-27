@@ -23,8 +23,8 @@ library's release number. `nunchi probe` reports installed revisions.
 | `I-010E AttentionReceiptV2` | `@6` | [Receipt schema](../../schemas/v2/attention-receipt.schema.json) |
 | `I-010F PrivilegedActionAuthorizationV2` | `@1` | [Authorization schema](../../schemas/v2/privileged-action-authorization.schema.json) |
 | `I-030A AttentionEngineV2` | `@3` | [Attention engine](../../src/nunchi/attention.py) |
-| `I-040A ParticipantTurnHostV2` | `@5` | [Current participant host](../../src/nunchi/participant.py) |
-| `I-040D LocalTurnProtocolV2` | `@3` | [Current local turn protocol](../../src/nunchi/turn_server.py) |
+| `I-040A ParticipantTurnHostV2` | `@5` | Obsolete: [participant host](../../src/nunchi/participant.py) |
+| `I-040D LocalTurnProtocolV2` | `@3` | Obsolete: [local turn protocol](../../src/nunchi/turn_server.py) |
 
 The attention request has `schema_version: 2`. The attention documents do not
 use an extra `interface`/`version` envelope. A nonempty `request_id` links the
@@ -102,7 +102,9 @@ reading can accompany both wake and defer. Malformed notes and unknown
 message pointers are dropped individually by the engine; malformed answers
 fail the judgment. Audit `reasons` stay outside the participant's turn.
 
-## Participant context
+## Participant context (obsolete)
+
+This document is the turn request the obsolete participant host sends.
 
 `ParticipantWakeV2` contains a fresh `self`, `room`, `actors`, `events`,
 `trigger_event_id` and `coverage`, plus optional memory, pace and continuation.
@@ -139,9 +141,8 @@ match the issued handle. The direction must be allowed, limits must fit the
 issued bounds, and a cursor must belong to that handle. A known, unexpired
 handle alone is insufficient. Handles and cursors never enter model input.
 
-The current turn implementation reads the live retained log through `RoomView`
-instead. See [room context](../platform.md#room-context). These are distinct
-interfaces; their future relationship belongs to the architecture review.
+The obsolete turn implementation reads the live retained log through
+`RoomView` instead.
 
 ## Receipts
 
@@ -152,8 +153,8 @@ record; earlier records are not rewritten by a later stage.
 |---|---|---|
 | `observation` | `observation-provider` | Included events, coverage and sizes |
 | `attention` | `attention-engine` | Model result or bypass/error, policy and adjustments |
-| `participant-host` | `participant-host` | Whether a participant ran, what it received, expansion and outcome |
-| `transport` | `transport` | Delivery result: `sent`, `failed`, `unknown` or `unavailable` |
+| `participant-host` | `participant-host` | Obsolete: whether a participant ran, what it received, expansion and outcome |
+| `transport` | `transport` | Obsolete: delivery result, `sent`, `failed`, `unknown` or `unavailable` |
 
 A receipt stream uses one request ID, follows that order, and contains each
 stage at most once. A prefix is valid while work is incomplete or ends early.
@@ -201,7 +202,6 @@ Relational cases can be valid JSON documents but invalid together. Stateful
 cases cannot be decided by validating a single document. Missing schema-test
 dependencies are reported as skips, not passes.
 
-For `I-040A@5`, the existing participant host also rejects a reaction unless
-it is exactly one emoji. The local turn protocol is `I-040D@3`. These runtime
-interfaces are listed here because their revisions matter to consumers, even
-though they do not have separate JSON Schema documents.
+`I-040A@5` and `I-040D@3` are the obsolete turn interfaces. They are listed
+so the table matches `nunchi probe`, not because consumers should build on
+them.
