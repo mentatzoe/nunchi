@@ -1,4 +1,6 @@
-"""The participant remembers the room (#94, plan step 5).
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+The participant remembers the room (#94, plan step 5).
 
 `docs/behavior.md`: the agent's turn carries its conversation memory and its
 own recent moves. These tests cover both parts: what the participant itself

@@ -1,4 +1,6 @@
-"""What becomes of a proposal reaches the agent, and the agent can withdraw it.
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+What becomes of a proposal reaches the agent, and the agent can withdraw it.
 
 Agreed, 2026-10-04 (#90 on #94): an approval for a privileged action outlives
 the agent's turn, so the conversation memory gains two things tested here.

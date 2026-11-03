@@ -70,4 +70,3 @@
 
 - [Attention model context](capture-01-attention-context.json)
 - [Attention decision](capture-01-attention-decision.json)
-- [Participant turn request](capture-01-participant-request.json)

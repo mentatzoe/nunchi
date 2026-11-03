@@ -68,16 +68,13 @@
 
 - [Attention model context](capture-01-attention-context.json)
 - [Attention decision](capture-01-attention-decision.json)
-- [Participant turn request](capture-01-participant-request.json)
 
 ### At 6 seconds · after message e4
 
 - [Attention model context](capture-02-attention-context.json)
 - [Attention decision](capture-02-attention-decision.json)
-- [Participant turn request](capture-02-participant-request.json)
 
 ### At 9 seconds · after message e5
 
 - [Attention model context](capture-03-attention-context.json)
 - [Attention decision](capture-03-attention-decision.json)
-- [Participant turn request](capture-03-participant-request.json)

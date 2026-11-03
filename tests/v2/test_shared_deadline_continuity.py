@@ -1,4 +1,6 @@
-"""Deadlines end one opportunity without losing the conversation around it.
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+Deadlines end one opportunity without losing the conversation around it.
 
 Post-merge review of PR #83 (issue #85):
 

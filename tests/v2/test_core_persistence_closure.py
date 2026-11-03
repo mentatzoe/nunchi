@@ -1,4 +1,6 @@
-"""Shared journals stay truthful when work stops between commit and effect.
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+Shared journals stay truthful when work stops between commit and effect.
 
 Covers the post-merge review of PR #83 (issue #85):
 

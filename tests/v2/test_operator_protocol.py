@@ -1,3 +1,5 @@
+"""Partly obsolete: tests that exercise the turn host or sending check the design under architecture review. They are not requirements for the new design."""
+
 from __future__ import annotations
 
 from contextlib import redirect_stdout

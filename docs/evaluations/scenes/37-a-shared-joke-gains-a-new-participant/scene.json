@@ -114,13 +114,6 @@
       "sha256": "c1df3a213ede122125415d531a511f97e7fdd7ac6cd15a0f653308f9bc4edbe3",
       "capture": 1,
       "at": "At 0 seconds · after message e10"
-    },
-    {
-      "label": "Participant turn request",
-      "path": "capture-01-participant-request.json",
-      "sha256": "61742d7b491b8b3a379499e988caf5d65b031cb45eef0dc9a6070344430b2c5f",
-      "capture": 1,
-      "at": "At 0 seconds · after message e10"
     }
   ]
 }

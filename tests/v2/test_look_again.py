@@ -1,4 +1,6 @@
-"""Nunchi looks again at a moment after the room stays quiet (#94 step 6).
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+Nunchi looks again at a moment after the room stays quiet (#94 step 6).
 
 `docs/behavior.md`: a participant who waits for the addressee, or for the
 speaker to finish, also notices when nobody answers. When a judgment's most

@@ -25,7 +25,7 @@ import sys
 from typing import Any
 
 # The stand-in takes its emoji rule from the core (`world.emoji_ok`), so run from a checkout, as the lines
-# above are, it needs the checkout's `src` (as `evals.verdict_suite.runner` does).
+# above are, it needs the checkout's `src`.
 _SRC = Path(__file__).resolve().parents[3] / "src"
 if _SRC.is_dir() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))

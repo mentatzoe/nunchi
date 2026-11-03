@@ -8,8 +8,7 @@ runtime-adapter-only), the continuity-scope duplicate-ID collision between
 a continuation page and its originating request (FR-003/FR-009,
 runtime-adapter-only), immutable-stage and writer-ownership receipt
 sequence rules (runtime-adapter-only), and explicit unknown/unavailable
-outcomes. This file also runs the ``evals/v2/contract/downstream`` corpus
-(wake, continuation, and receipt cases) through both validators.
+outcomes.
 """
 
 from __future__ import annotations
@@ -22,7 +21,6 @@ from tests.v2.contract import schema_helpers as helpers
 from tests.v2.contract.schema_helpers import (
     RECEIPT_STAGES,
     RECEIPT_WRITER_MAP,
-    ContractCorpusMixin,
     assert_schema_verdict,
     check_cross_document_id_uniqueness,
     make_fetch_page,
@@ -35,13 +33,6 @@ from tests.v2.contract.schema_helpers import (
     validate_continuation_fetch,
     validate_receipt_stream,
 )
-
-
-class DownstreamCorpusSuite(ContractCorpusMixin, unittest.TestCase):
-    CORPUS = "downstream"
-    REQUIRED_SCENES = frozenset(
-        {"S03", "S06", "S07", "S15", "S16", "010-Preattention-bypass", "010-V1"}
-    )
 
 
 class InterfaceVersionCases(unittest.TestCase):
@@ -529,8 +520,7 @@ class ReceiptWriterBindingCases(unittest.TestCase):
     """FR-010 per-record stage-to-writer binding (rejection R3, CHK082/CHK087):
     a record attributing one stage to another stage's owner is invalid as a
     single document in both validators — schema-expressible enforcement,
-    reclassified from the stream-only receipt-sequence coverage (the moved
-    corpus case is DWN-S06-306)."""
+    reclassified from the stream-only receipt-sequence coverage."""
 
     def test_the_reviews_forged_record_rejects_as_a_single_document(self):
         # The exact rejected probe: stage observation written by transport.

@@ -1,4 +1,6 @@
-"""The agent reports an approved action's outcome itself (#94 step 6).
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+The agent reports an approved action's outcome itself (#94 step 6).
 
 #90, decision 2 on #94: when an approved action completes after the
 agent's turn has ended, the agent is the one who says so in the room;

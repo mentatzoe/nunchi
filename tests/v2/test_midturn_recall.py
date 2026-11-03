@@ -1,4 +1,6 @@
-"""Messages that arrive mid-turn are judged for the memory (#94 step 6).
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+Messages that arrive mid-turn are judged for the memory (#94 step 6).
 
 `docs/behavior.md` listed it as not yet: a message that arrived while the
 participant was mid-turn was never judged, so it started no thread. Only the

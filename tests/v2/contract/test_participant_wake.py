@@ -3,8 +3,6 @@
 Red cases cover the wake sources, advice-free ``PREATTENTION_BYPASS``
 (010-Preattention-bypass), the FR-013 advice-source violations (advice on
 any non-``WAKE`` ``source``), and non-positive participant budgets (S15).
-The downstream corpus containing the wake cases is run by
-``test_context_and_receipt.py``.
 """
 
 from __future__ import annotations

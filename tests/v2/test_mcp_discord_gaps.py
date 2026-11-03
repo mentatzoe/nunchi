@@ -1,4 +1,6 @@
-"""The shared Discord transport hides no person's message from the agent (#94 step 9f).
+"""Partly obsolete: tests that exercise the turn host or sending check the design under architecture review. They are not requirements for the new design.
+
+The shared Discord transport hides no person's message from the agent (#94 step 9f).
 
 Every message reaches the agent, or the agent is told plainly that something
 was missed. Three ways the transport used to break that:

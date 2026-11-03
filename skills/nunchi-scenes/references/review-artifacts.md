@@ -18,7 +18,7 @@ When authorized to reply under the user's identity, identify Codex and the actua
 
 When requested, prepare artifacts with a noneditable installed copy of the selected Nunchi version in an isolated environment. Record the exact revision, model/configuration, inputs and outputs. Use the authorized model and execution route, not a silently changed baseline or presumed current installation.
 
-Show complete JSON inline when that is the requested review surface: actual configuration, attention context, attention result and participant request where produced. Do not replace it with a path, uploaded archive, summary, unexecuted input snapshot or invented response. Keep preparation problems and evaluation caveats in the work report rather than padding the scene spec.
+Show complete JSON inline when that is the requested review surface: actual configuration, attention context and attention result. Do not replace it with a path, uploaded archive, summary, unexecuted input snapshot or invented response. Keep preparation problems and evaluation caveats in the work report rather than padding the scene spec.
 
 Refresh affected artifacts when model-visible inputs change. If only human-facing wording changes and inputs are identical, preserve the exact result and record reuse in provenance. If only later events change, determine which opening capture can be retained and which later pages must be regenerated. Do not rerun everything merely to update metadata.
 
@@ -32,7 +32,7 @@ Distinguish authored prior conversation, the opening capture, messages arriving 
 
 Keep later messages out of the opening view. Retain older history when the scene depends on retrieving it, with honest coverage and the same text throughout. A callback must refer to something that exists in the available conversation; a historical claim cannot depend on text that appears only later.
 
-Where the user wants delivery details, state what the selected integration actually provides and what remains unknown: automatic delivery, tool-boundary delivery and requested context are different. Prepared update/history pages do not prove an agent received or used them. Keep a missing integration in the relevant configuration field rather than making its implementation status part of the social premise.
+Where the user wants delivery details, state what the selected integration actually provides and what remains unknown. Prepared update/history pages do not prove an agent received or used them. Keep a missing integration in the relevant configuration field rather than making its implementation status part of the social premise.
 
 ## Publishing approved scenes
 

@@ -1,4 +1,6 @@
-"""Connection to the optional shared Discord transport.
+"""Partly obsolete: the parts that run the agent's turn or send for it belong to the design under architecture review. Do not extend them.
+
+Connection to the optional shared Discord transport.
 
 This implementation registers a participant with the transport and checks
 its attestation, validates notifications, hands events to a `Room`, marks

@@ -1,4 +1,6 @@
-"""Shared primitives native-host integrations build on (issue #85).
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+Shared primitives native-host integrations build on (issue #85).
 
 These were covered only through the Hermes harness; native hosts such as a
 Claude Code mod rely on the same guarantees.

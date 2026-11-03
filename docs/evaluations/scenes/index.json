@@ -2,7 +2,7 @@
   "status": "Approved",
   "published_date": "2026-10-23",
   "scene_count": 42,
-  "artifact_count": 180,
+  "artifact_count": 136,
   "protagonists_run": false,
   "scenes": [
     {
@@ -12,7 +12,7 @@
       "revision": "0.4",
       "path": "03-story-across-messages/scene.md",
       "data": "03-story-across-messages/scene.json",
-      "artifact_count": 10,
+      "artifact_count": 7,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -22,7 +22,7 @@
       "revision": "0.2",
       "path": "06-never-mind-while-composing/scene.md",
       "data": "06-never-mind-while-composing/scene.json",
-      "artifact_count": 5,
+      "artifact_count": 4,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -32,7 +32,7 @@
       "revision": "0.6",
       "path": "07-addressed-but-a-peer-answers/scene.md",
       "data": "07-addressed-but-a-peer-answers/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -42,7 +42,7 @@
       "revision": "0.4",
       "path": "08-a-complaint-reopens-an-unanswered-question/scene.md",
       "data": "08-a-complaint-reopens-an-unanswered-question/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -52,7 +52,7 @@
       "revision": "0.2",
       "path": "13-another-question-while-answering/scene.md",
       "data": "13-another-question-while-answering/scene.json",
-      "artifact_count": 5,
+      "artifact_count": 4,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -62,7 +62,7 @@
       "revision": "0.3",
       "path": "14-venting-without-wanting-solutions/scene.md",
       "data": "14-venting-without-wanting-solutions/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -72,7 +72,7 @@
       "revision": "0.4",
       "path": "15-technical-thinking-aloud-no-solutions-yet/scene.md",
       "data": "15-technical-thinking-aloud-no-solutions-yet/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -82,7 +82,7 @@
       "revision": "0.7",
       "path": "16-a-peer-fulfils-your-commitment/scene.md",
       "data": "16-a-peer-fulfils-your-commitment/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -92,7 +92,7 @@
       "revision": "0.4",
       "path": "17-a-nod-leaves-a-complaint-unsettled/scene.md",
       "data": "17-a-nod-leaves-a-complaint-unsettled/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -102,7 +102,7 @@
       "revision": "0.1",
       "path": "18-a-complaint-about-not-being-heard/scene.md",
       "data": "18-a-complaint-about-not-being-heard/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -112,7 +112,7 @@
       "revision": "0.2",
       "path": "21-a-matter-of-taste-treated-as-settled/scene.md",
       "data": "21-a-matter-of-taste-treated-as-settled/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -122,7 +122,7 @@
       "revision": "0.1",
       "path": "22-an-announcement-that-shares-relief/scene.md",
       "data": "22-an-announcement-that-shares-relief/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -132,7 +132,7 @@
       "revision": "0.1",
       "path": "23-someone-else-explains-the-protagonist-s-choice/scene.md",
       "data": "23-someone-else-explains-the-protagonist-s-choice/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -142,7 +142,7 @@
       "revision": "0.3",
       "path": "24-teasing-or-a-hint-to-be-brief/scene.md",
       "data": "24-teasing-or-a-hint-to-be-brief/scene.json",
-      "artifact_count": 6,
+      "artifact_count": 5,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -152,7 +152,7 @@
       "revision": "0.3",
       "path": "25-enthusiasm-taken-as-volunteering/scene.md",
       "data": "25-enthusiasm-taken-as-volunteering/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -162,7 +162,7 @@
       "revision": "0.3",
       "path": "26-a-joke-about-uneven-praise/scene.md",
       "data": "26-a-joke-about-uneven-praise/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -172,7 +172,7 @@
       "revision": "0.3",
       "path": "27-a-request-interrupts-a-personal-disclosure/scene.md",
       "data": "27-a-request-interrupts-a-personal-disclosure/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -182,7 +182,7 @@
       "revision": "0.2",
       "path": "29-a-confident-wrong-answer/scene.md",
       "data": "29-a-confident-wrong-answer/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -192,7 +192,7 @@
       "revision": "0.4",
       "path": "30-returning-without-the-joke-s-context/scene.md",
       "data": "30-returning-without-the-joke-s-context/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -202,7 +202,7 @@
       "revision": "0.3",
       "path": "31-asked-to-take-a-side/scene.md",
       "data": "31-asked-to-take-a-side/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -212,7 +212,7 @@
       "revision": "0.5",
       "path": "32-receiving-familiar-teasing/scene.md",
       "data": "32-receiving-familiar-teasing/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -222,7 +222,7 @@
       "revision": "0.3",
       "path": "33-asked-to-interpret-someone-who-is-present/scene.md",
       "data": "33-asked-to-interpret-someone-who-is-present/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -232,7 +232,7 @@
       "revision": "0.3",
       "path": "34-a-newcomer-asks-whether-they-are-interrupting/scene.md",
       "data": "34-a-newcomer-asks-whether-they-are-interrupting/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -242,7 +242,7 @@
       "revision": "0.3",
       "path": "35-opening-up-then-changing-the-subject/scene.md",
       "data": "35-opening-up-then-changing-the-subject/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -252,7 +252,7 @@
       "revision": "0.4",
       "path": "36-seeking-support-through-an-explanation/scene.md",
       "data": "36-seeking-support-through-an-explanation/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -262,7 +262,7 @@
       "revision": "0.1",
       "path": "37-a-shared-joke-gains-a-new-participant/scene.md",
       "data": "37-a-shared-joke-gains-a-new-participant/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -272,7 +272,7 @@
       "revision": "0.3",
       "path": "38-a-peer-starts-judging-shared-play/scene.md",
       "data": "38-a-peer-starts-judging-shared-play/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -282,7 +282,7 @@
       "revision": "0.4",
       "path": "39-a-peer-invites-teasing-about-someone-present/scene.md",
       "data": "39-a-peer-invites-teasing-about-someone-present/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -292,7 +292,7 @@
       "revision": "0.2",
       "path": "40-a-disagreement-becomes-a-personal-dismissal/scene.md",
       "data": "40-a-disagreement-becomes-a-personal-dismissal/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -302,7 +302,7 @@
       "revision": "0.3",
       "path": "42-conceding-to-leave-an-argument/scene.md",
       "data": "42-conceding-to-leave-an-argument/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -312,7 +312,7 @@
       "revision": "0.3",
       "path": "43-playful-appreciation-lands-as-dismissal/scene.md",
       "data": "43-playful-appreciation-lands-as-dismissal/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -322,7 +322,7 @@
       "revision": "0.2",
       "path": "44-bystander-asked-to-confirm-victory/scene.md",
       "data": "44-bystander-asked-to-confirm-victory/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -332,7 +332,7 @@
       "revision": "0.4",
       "path": "45-claiming-another-s-consent-through-familiarity/scene.md",
       "data": "45-claiming-another-s-consent-through-familiarity/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -342,7 +342,7 @@
       "revision": "0.3",
       "path": "46-an-absent-person-becomes-the-target/scene.md",
       "data": "46-an-absent-person-becomes-the-target/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -352,7 +352,7 @@
       "revision": "0.7",
       "path": "47-pressed-to-take-the-prank-public/scene.md",
       "data": "47-pressed-to-take-the-prank-public/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -362,7 +362,7 @@
       "revision": "0.3",
       "path": "48-a-boss-claim-interrupts-your-turn/scene.md",
       "data": "48-a-boss-claim-interrupts-your-turn/scene.json",
-      "artifact_count": 5,
+      "artifact_count": 4,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -372,7 +372,7 @@
       "revision": "0.2",
       "path": "49-a-newcomer-adds-an-insult-to-teasing/scene.md",
       "data": "49-a-newcomer-adds-an-insult-to-teasing/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -382,7 +382,7 @@
       "revision": "0.4",
       "path": "50-a-peer-fulfils-your-commitment-during-your-turn/scene.md",
       "data": "50-a-peer-fulfils-your-commitment-during-your-turn/scene.json",
-      "artifact_count": 5,
+      "artifact_count": 4,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -392,7 +392,7 @@
       "revision": "0.1",
       "path": "52-a-bystander-hears-a-concession/scene.md",
       "data": "52-a-bystander-hears-a-concession/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -402,7 +402,7 @@
       "revision": "0.2",
       "path": "53-a-newcomer-is-talked-past/scene.md",
       "data": "53-a-newcomer-is-talked-past/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -412,7 +412,7 @@
       "revision": "0.2",
       "path": "54-a-newcomer-responds-to-silence/scene.md",
       "data": "54-a-newcomer-responds-to-silence/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     },
     {
@@ -422,7 +422,7 @@
       "revision": "0.1",
       "path": "55-an-authority-claim-is-already-contested/scene.md",
       "data": "55-an-authority-claim-is-already-contested/scene.json",
-      "artifact_count": 4,
+      "artifact_count": 3,
       "library_commit": "365c0d966019c29f601362e62aec9e20f0beea50"
     }
   ],

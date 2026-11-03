@@ -1,4 +1,6 @@
-"""Authenticated native reaction capability, for the participant's own reactions.
+"""Obsolete: part of the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Do not extend it or build on it.
+
+Authenticated native reaction capability, for the participant's own reactions.
 
 Nunchi never reacts on the participant's behalf (#94 step 7): a mhm is the
 participant's own move, and an adapter's attested capability decides whether

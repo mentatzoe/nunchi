@@ -1,75 +1,26 @@
-"""Shared dual-validator harness for the V2 contract corpus (slice 010).
+"""Shared dual-validator helpers for the contract tests.
 
-One deterministic conformance corpus (``evals/v2/contract/*/cases.jsonl``)
-exercises two validators:
+Each test document runs through two validators:
 
-* the portable JSON Schema Draft 2020-12 oracle — dev/test-only
-  ``jsonschema==4.26.0`` — over the machine-readable contracts in
-  ``schemas/v2/``; and
+* the portable JSON Schema Draft 2020-12 oracle, dev/test-only
+  ``jsonschema==4.26.0``, over the machine-readable contracts in
+  ``schemas/``; and
 * the explicit Python-stdlib runtime-validation adapter in this module,
-  which mirrors every schema constraint and additionally owns the
-  semantic/relational rules that Draft 2020-12 cannot express.
+  which mirrors every schema constraint and also checks the relational
+  rules that Draft 2020-12 cannot express (event ID uniqueness, timestamp
+  order, trigger membership, actor references, advice citations,
+  continuation binding and receipt sequences).
 
-FR-012 expressiveness partition (the class vocabulary is spec-owned; case
-membership and per-class counts live only in ordinary paths):
+When ``jsonschema`` is absent, or is not the pinned version, only the stdlib
+adapter runs.
 
-* ``schema-expressible`` — identical expected results from both validators.
-* Document-shaped relational classes — ``id-uniqueness``,
-  ``timestamp-order``, ``advice-citation``, ``trigger-membership``,
-  ``actor-reference-integrity`` — are runtime-adapter-only; the oracle
-  validates each document in isolation and expects it valid, because each
-  document is schema-valid on its own.
-* Behavioral/sequence classes — ``binding-expiry``, ``receipt-sequence`` —
-  are runtime-adapter-only and oracle-class-skipped, because there is no
-  single document for the oracle to validate.
-
-Two skip regimes are named and counted separately so one regime's expected
-skips cannot mask the other's missing cases:
-
-* ``baseline-oracle-absence`` — under the repository baseline
-  (``python3 -m unittest``) the oracle is absent; every oracle-side check
-  for the six oracle-visible classes is skipped with an explicit count.
-  The stdlib adapter still runs the full corpus and must pass.
-* ``oracle-class-skip`` — under the pinned dual-validator command the
-  oracle explicitly skips the two behavioral classes, by class, with an
-  explicit count.
-
-The sole complete dual-validator run is the exact offline command:
-
-    uv run --offline --with 'jsonschema==4.26.0' \
-        python -m unittest discover -s tests/v2/contract -p 'test_*.py'
-
-``--offline`` MUST fail rather than access the network; a missing oracle
-therefore fails loudly at the ``uv`` layer under the pinned command, while
-the baseline run records counted oracle-absence skips instead. A
-``jsonschema`` import with any version other than the pin is treated as an
-absent oracle (named in the skip message) so an unpinned oracle can never
-masquerade as the complete run.
-
-Non-finite sentinel decoding: strict JSON forbids non-finite literals, so
-red cases encode them as the reserved strings ``"NaN"``, ``"Infinity"``,
-and ``"-Infinity"`` anywhere inside a case payload. The corpus loader
-decodes them exactly once, so both validators receive identical decoded
-cases. That sentinel vocabulary is reserved across every corpus payload
-string position and must not be used as literal content.
-
-SC-002 preservation: for every valid single-document case the harness
-asserts that parsed semantic field values survive the load pipeline —
-strings compare as exact strings, numbers by exact decimal token (``1``
-and ``1.0`` are distinct), and event-array order is preserved. Raw-byte
-serialization (key order, whitespace, unicode escapes) is out of scope.
-
-Evidence writer: ``python -m tests.v2.contract.schema_helpers
---write-evidence`` re-runs the corpus through both validators and writes
-the aggregate JSONL evidence records (mandatory ``scene_id``, stable
-``case_id``, validator identity, expected result, observed result). The
-writer requires the pinned oracle so evidence always reflects the complete
-dual run.
+Strict JSON forbids non-finite literals, so tests write them as the reserved
+strings ``"NaN"``, ``"Infinity"`` and ``"-Infinity"`` and decode them with
+``decode_non_finite`` before validation.
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import math
 import re
@@ -79,21 +30,17 @@ from pathlib import Path
 from typing import Any, Callable
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SCHEMAS_DIR = REPO_ROOT / "schemas" / "v2"
-EVALS_DIR = REPO_ROOT / "evals" / "v2" / "contract"
-EVIDENCE_DIR = REPO_ROOT / "evidence" / "v2" / "contract"
+SCHEMAS_DIR = REPO_ROOT / "schemas"
 
 ORACLE_PIN = "4.26.0"
-ORACLE_VALIDATOR_ID = f"jsonschema=={ORACLE_PIN} Draft202012Validator"
-ADAPTER_VALIDATOR_ID = "stdlib-runtime-adapter tests/v2/contract/schema_helpers.py"
 
 SCHEMA_FILES = {
-    "attention-request": "attention-request.schema.json",
-    "attention-decision": "attention-decision.schema.json",
-    "participant-wake": "participant-wake.schema.json",
-    "context-continuation": "context-continuation.schema.json",
-    "attention-receipt": "attention-receipt.schema.json",
-    "privileged-action-authorization": "privileged-action-authorization.schema.json",
+    "attention-request": "v2/attention-request.schema.json",
+    "attention-decision": "v2/attention-decision.schema.json",
+    "participant-wake": "obsolete/participant-wake.schema.json",
+    "context-continuation": "v2/context-continuation.schema.json",
+    "attention-receipt": "obsolete/attention-receipt.schema.json",
+    "privileged-action-authorization": "obsolete/privileged-action-authorization.schema.json",
 }
 
 INTERFACE_VERSIONS = {
@@ -108,30 +55,6 @@ INTERFACE_VERSIONS = {
         1,
     ),
 }
-
-# FR-012 partition classes. The vocabulary is owned by the slice spec;
-# membership and counts are owned here and in evals/v2/contract/.
-SCHEMA_EXPRESSIBLE = "schema-expressible"
-ORACLE_VALID_CLASSES = (
-    "id-uniqueness",
-    "timestamp-order",
-    "advice-citation",
-    "trigger-membership",
-    "actor-reference-integrity",
-)
-ORACLE_SKIP_CLASSES = ("binding-expiry", "receipt-sequence")
-ALL_CLASSES = (SCHEMA_EXPRESSIBLE,) + ORACLE_VALID_CLASSES + ORACLE_SKIP_CLASSES
-
-# The two named skip regimes (kept distinct; see module docstring).
-BASELINE_ORACLE_ABSENCE = "baseline-oracle-absence"
-ORACLE_CLASS_SKIP = "oracle-class-skip"
-
-CORPUS_NAMES = (
-    "attention-request",
-    "attention-decision",
-    "downstream",
-    "privileged-action-authorization",
-)
 
 NON_FINITE_SENTINELS = {
     "NaN": float("nan"),
@@ -304,37 +227,12 @@ def decode_non_finite(value: Any) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# SC-002 semantic-field preservation
+# Exact JSON token comparison
 # ---------------------------------------------------------------------------
 
 
 class NumberToken(str):
     """The exact decimal token of a JSON number (``1`` != ``1.0``)."""
-
-
-def token_parse(text: str) -> Any:
-    """Parse JSON keeping every number as its exact decimal token."""
-    return json.loads(
-        text,
-        parse_int=NumberToken,
-        parse_float=NumberToken,
-        parse_constant=NumberToken,
-    )
-
-
-def decode_non_finite_tokens(value: Any) -> Any:
-    """Sentinel decode over a token tree: reserved strings become tokens."""
-    if isinstance(value, NumberToken):
-        return value
-    if isinstance(value, str):
-        if value in NON_FINITE_SENTINELS:
-            return NumberToken(value)
-        return value
-    if isinstance(value, list):
-        return [decode_non_finite_tokens(item) for item in value]
-    if isinstance(value, dict):
-        return {key: decode_non_finite_tokens(item) for key, item in value.items()}
-    return value
 
 
 def semantic_equal(left: Any, right: Any) -> bool:
@@ -369,237 +267,10 @@ def semantic_equal(left: Any, right: Any) -> bool:
     return left == right
 
 
-def preservation_failure(raw_payload_tokens: Any, loaded_payload: Any) -> str | None:
-    """Return a failure description if the load pipeline broke SC-002.
-
-    ``raw_payload_tokens`` is the token-preserving parse of the payload as
-    it appears on the corpus line (sentinels decoded to tokens);
-    ``loaded_payload`` is the decoded object handed to both validators.
-    The loaded side is re-serialized (``allow_nan=True`` keeps decoded
-    sentinels representable) and both sides are compared as token trees,
-    which also forces corpus numbers to be written in their canonical
-    shortest decimal token.
-    """
-    round_trip = token_parse(json.dumps(loaded_payload, allow_nan=True))
-    if not semantic_equal(raw_payload_tokens, round_trip):
-        return (
-            "semantic fields were not preserved through the corpus load "
-            "pipeline (SC-002): exact string/number-token equality or "
-            "event-array order was lost"
-        )
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Corpus loading with loud per-class count assertions
-# ---------------------------------------------------------------------------
-
-_PAYLOAD_KEYS = ("document", "documents", "fetch", "stream")
-
-
-class CorpusError(AssertionError):
-    """A corpus integrity failure (malformed envelope or count mismatch)."""
-
-
-class CorpusCase:
-    def __init__(self, corpus: str, line_number: int, raw_line: str, data: dict[str, Any]):
-        self.corpus = corpus
-        self.line_number = line_number
-        self.raw_line = raw_line
-        self.case_id = data["case_id"]
-        self.scene_id = data["scene_id"]
-        self.title = data["title"]
-        self.partition = data["partition"]
-        self.expected = data["expected"]
-        self.schema = data.get("schema")
-        self.document = data.get("document")
-        self.documents = data.get("documents")
-        self.fetch = data.get("fetch")
-        self.stream = data.get("stream")
-
-    @property
-    def payload_kind(self) -> str:
-        for key in _PAYLOAD_KEYS:
-            if getattr(self, key.replace("-", "_")) is not None:
-                return key
-        raise CorpusError(f"{self.corpus}:{self.case_id} has no payload")
-
-    def oracle_documents(self) -> list[tuple[str, Any]]:
-        """The (schema, document) pairs the oracle validates in isolation."""
-        if self.document is not None:
-            return [(self.schema, self.document)]
-        if self.documents is not None:
-            return [(entry["schema"], entry["document"]) for entry in self.documents]
-        return []
-
-
-def _validate_envelope(corpus: str, line_number: int, data: Any) -> None:
-    if not isinstance(data, dict):
-        raise CorpusError(f"{corpus} line {line_number}: envelope must be an object")
-    for field in ("case_id", "scene_id", "title", "partition", "expected"):
-        value = data.get(field)
-        if not isinstance(value, str) or not value:
-            raise CorpusError(
-                f"{corpus} line {line_number}: envelope field {field!r} must be a "
-                "non-empty string"
-            )
-    if data["partition"] not in ALL_CLASSES:
-        raise CorpusError(
-            f"{corpus} line {line_number}: unknown partition class "
-            f"{data['partition']!r}; the closed FR-012 set is {ALL_CLASSES}"
-        )
-    if data["expected"] not in ("valid", "invalid"):
-        raise CorpusError(
-            f"{corpus} line {line_number}: expected must be 'valid' or 'invalid'"
-        )
-    present = [key for key in _PAYLOAD_KEYS if key in data]
-    if len(present) != 1:
-        raise CorpusError(
-            f"{corpus} line {line_number}: exactly one payload of {_PAYLOAD_KEYS} "
-            f"is required, found {present or 'none'}"
-        )
-    if "document" in data and data.get("schema") not in SCHEMA_FILES:
-        raise CorpusError(
-            f"{corpus} line {line_number}: single-document cases require a "
-            f"'schema' naming one of {sorted(SCHEMA_FILES)}"
-        )
-    if "documents" in data:
-        entries = data["documents"]
-        if not isinstance(entries, list) or len(entries) < 2:
-            raise CorpusError(
-                f"{corpus} line {line_number}: 'documents' must list at least two entries"
-            )
-        for entry in entries:
-            if (
-                not isinstance(entry, dict)
-                or entry.get("schema") not in SCHEMA_FILES
-                or "document" not in entry
-            ):
-                raise CorpusError(
-                    f"{corpus} line {line_number}: each documents[] entry needs "
-                    "'schema' and 'document'"
-                )
-
-
-def load_expected_counts(corpus: str) -> dict[str, dict[str, int]]:
-    path = EVALS_DIR / corpus / "expected-counts.json"
-    with path.open(encoding="utf-8") as handle:
-        counts = json.load(handle)
-    for klass in ALL_CLASSES:
-        entry = counts.get(klass)
-        if (
-            not isinstance(entry, dict)
-            or set(entry) != {"valid", "invalid"}
-            or not all(isinstance(entry[key], int) for key in entry)
-        ):
-            raise CorpusError(
-                f"{corpus}/expected-counts.json must pin {{'valid', 'invalid'}} "
-                f"integers for every class; {klass!r} is missing or malformed"
-            )
-    extra = set(counts) - set(ALL_CLASSES)
-    if extra:
-        raise CorpusError(
-            f"{corpus}/expected-counts.json names unknown classes: {sorted(extra)}"
-        )
-    return counts
-
-
-def assert_corpus_inventory(evals_dir: Path = EVALS_DIR) -> None:
-    """Assert the closed on-disk corpus inventory (CHK067).
-
-    The set of subdirectories of ``evals/v2/contract/`` must equal exactly
-    the registered ``CORPUS_NAMES``, and each registered directory must hold
-    ``cases.jsonl`` and its authoritative ``expected-counts.json``. A wholly
-    missing or unregistered corpus directory therefore fails loudly here —
-    on every corpus load — rather than passing vacuously under per-directory
-    count assertions that iterate only over directories found.
-    """
-    if not evals_dir.is_dir():
-        raise CorpusError(f"corpus root {evals_dir} is not a directory")
-    observed = sorted(entry.name for entry in evals_dir.iterdir() if entry.is_dir())
-    registered = sorted(CORPUS_NAMES)
-    if observed != registered:
-        missing = sorted(set(registered) - set(observed))
-        unregistered = sorted(set(observed) - set(registered))
-        raise CorpusError(
-            "the on-disk corpus inventory must equal exactly the registered "
-            f"corpus set {registered}; missing: {missing or 'none'}, "
-            f"unregistered: {unregistered or 'none'}"
-        )
-    for name in registered:
-        for filename in ("cases.jsonl", "expected-counts.json"):
-            if not (evals_dir / name / filename).is_file():
-                raise CorpusError(
-                    f"registered corpus {name!r} is missing its required "
-                    f"{filename}; each corpus directory must hold cases.jsonl "
-                    "and its authoritative expected-counts.json"
-                )
-
-
-def load_corpus(corpus: str) -> list[CorpusCase]:
-    """Load one corpus directory, decode sentinels once, and assert counts.
-
-    The full on-disk inventory is asserted closed first (CHK067), then the
-    per-class counts in ``expected-counts.json`` are authoritative and
-    must be updated in the same change as any corpus edit; a mismatch fails
-    loudly here, naming the corpus, class, and both counts, so neither
-    partition can silently shrink.
-    """
-    assert_corpus_inventory()
-    path = EVALS_DIR / corpus / "cases.jsonl"
-    expected_counts = load_expected_counts(corpus)
-    cases: list[CorpusCase] = []
-    seen_ids: set[str] = set()
-    with path.open(encoding="utf-8") as handle:
-        for line_number, raw_line in enumerate(handle, start=1):
-            raw_line = raw_line.strip()
-            if not raw_line:
-                continue
-            data = json.loads(raw_line)
-            _validate_envelope(corpus, line_number, data)
-            for key in _PAYLOAD_KEYS:
-                if key in data:
-                    data[key] = decode_non_finite(data[key])
-            case = CorpusCase(corpus, line_number, raw_line, data)
-            if case.case_id in seen_ids:
-                raise CorpusError(f"{corpus}: duplicate case_id {case.case_id!r}")
-            seen_ids.add(case.case_id)
-            cases.append(case)
-
-    observed: dict[str, dict[str, int]] = {
-        klass: {"valid": 0, "invalid": 0} for klass in ALL_CLASSES
-    }
-    for case in cases:
-        observed[case.partition][case.expected] += 1
-    for klass in ALL_CLASSES:
-        for verdict in ("valid", "invalid"):
-            want = expected_counts[klass][verdict]
-            got = observed[klass][verdict]
-            if want != got:
-                raise CorpusError(
-                    f"corpus {corpus!r} class {klass!r} expected {want} "
-                    f"{verdict} case(s) per its authoritative "
-                    "expected-counts.json but the corpus contains "
-                    f"{got}; update the counts file in the same change as "
-                    "any corpus edit"
-                )
-    return cases
-
-
-def class_skip_count(cases: list[CorpusCase]) -> int:
-    """Cases the oracle skips by explicit class in every regime."""
-    return sum(1 for case in cases if case.partition in ORACLE_SKIP_CLASSES)
-
-
-def oracle_visible_count(cases: list[CorpusCase]) -> int:
-    """Cases with an oracle-side check under the pinned command."""
-    return len(cases) - class_skip_count(cases)
-
-
 # ---------------------------------------------------------------------------
 # Stdlib runtime-validation adapter: schema-constraint mirrors
 #
-# Each function mirrors the corresponding schemas/v2/*.schema.json exactly,
+# Each function mirrors the corresponding schemas/*/*.schema.json exactly,
 # keyword for keyword, so schema-expressible cases yield identical results
 # from both validators. Comparison semantics intentionally follow JSON
 # Schema (for example ``5.0`` satisfies ``"type": "integer"``).
@@ -1384,7 +1055,7 @@ def _check_wake_memory(errors: "_Errors", path: str, value: Any) -> None:
 
 
 def validate_participant_wake(doc: Any) -> list[str]:
-    """Mirror of schemas/v2/participant-wake.schema.json (I-010C)."""
+    """Mirror of schemas/obsolete/participant-wake.schema.json (I-010C)."""
     errors = _Errors()
     required = ("request_id", "self", "room", "actors", "events", "trigger_event_id", "coverage", "attention")
     allowed = required + ("continuation", "memory", "pace", "occasion", "unattended_event_ids")
@@ -1733,7 +1404,7 @@ _STAGE_BODY_CHECKS: dict[str, Callable[[_Errors, str, Any], None]] = {
 
 
 def validate_attention_receipt(doc: Any) -> list[str]:
-    """Mirror of schemas/v2/attention-receipt.schema.json (I-010E).
+    """Mirror of schemas/obsolete/attention-receipt.schema.json (I-010E).
 
     The FR-010 stage-to-writer binding is part of the public per-record
     contract (rejection R3): each stage names its single directly
@@ -2893,234 +2564,8 @@ def validate_receipt_stream(records: Any) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Case runner: adapter and oracle verdicts plus fixed oracle expectations
-# ---------------------------------------------------------------------------
-
-
-def adapter_errors(case: CorpusCase) -> list[str]:
-    """Full stdlib-adapter validation for one corpus case."""
-    errors: list[str] = []
-    for schema_name, document in case.oracle_documents():
-        errors.extend(DOCUMENT_VALIDATORS[schema_name](document))
-    if case.partition == SCHEMA_EXPRESSIBLE:
-        return errors
-    if case.partition == "id-uniqueness":
-        if case.document is not None:
-            errors.extend(check_id_uniqueness(case.document))
-        else:
-            docs = {entry["schema"]: entry["document"] for entry in case.documents}
-            errors.extend(
-                check_cross_document_id_uniqueness(
-                    docs["attention-request"], docs["context-continuation"]
-                )
-            )
-    elif case.partition == "timestamp-order":
-        errors.extend(check_timestamp_order(case.document))
-    elif case.partition == "trigger-membership":
-        errors.extend(check_trigger_membership(case.document))
-    elif case.partition == "actor-reference-integrity":
-        errors.extend(check_actor_reference_integrity(case.document))
-    elif case.partition == "advice-citation":
-        if case.document is not None:
-            # A wake packet materializes its own events, so the citation
-            # rule is checked against its own top-level event array.
-            errors.extend(check_advice_citations(case.document, case.document))
-        else:
-            docs = {entry["schema"]: entry["document"] for entry in case.documents}
-            errors.extend(
-                check_advice_citations(docs["attention-decision"], docs["attention-request"])
-            )
-    elif case.partition == "binding-expiry":
-        if case.corpus == "privileged-action-authorization":
-            errors.extend(
-                validate_privileged_action_authorization_flow(
-                    [entry["document"] for entry in case.documents]
-                )
-            )
-        else:
-            errors.extend(validate_continuation_fetch(case.fetch))
-    elif case.partition == "receipt-sequence":
-        errors.extend(validate_receipt_stream(case.stream))
-    return errors
-
-
-def adapter_verdict(case: CorpusCase) -> str:
-    return "invalid" if adapter_errors(case) else "valid"
-
-
-def oracle_expectation(case: CorpusCase) -> str:
-    """The fixed per-class oracle treatment (FR-012).
-
-    Schema-expressible cases expect the case verdict; document-shaped
-    relational classes expect valid (each document is schema-valid in
-    isolation); behavioral classes are skipped by explicit class.
-    """
-    if case.partition == SCHEMA_EXPRESSIBLE:
-        return case.expected
-    if case.partition in ORACLE_VALID_CLASSES:
-        return "valid"
-    return ORACLE_CLASS_SKIP
-
-
-def oracle_verdict(case: CorpusCase, oracle_validators: dict[str, Any]) -> str:
-    if case.partition in ORACLE_SKIP_CLASSES:
-        return ORACLE_CLASS_SKIP
-    for schema_name, document in case.oracle_documents():
-        if not oracle_validators[schema_name].is_valid(document):
-            return "invalid"
-    return "valid"
-
-
-def case_payload_for_preservation(case: CorpusCase) -> tuple[Any, Any] | None:
-    """Raw payload tokens and loaded payload for valid single-document cases."""
-    if case.document is None or case.expected != "valid":
-        return None
-    envelope_tokens = token_parse(case.raw_line)
-    raw_tokens = decode_non_finite_tokens(envelope_tokens["document"])
-    return raw_tokens, case.document
-
-
-# ---------------------------------------------------------------------------
-# Evidence writer (aggregate JSONL records; requires the pinned oracle)
-# ---------------------------------------------------------------------------
-
-EVIDENCE_FILES = {
-    "attention-request": "attention-request.jsonl",
-    "attention-decision": "attention-decision.jsonl",
-    "downstream": "downstream.jsonl",
-    "privileged-action-authorization": "privileged-action-authorization.jsonl",
-}
-
-# The five mandatory aggregate-record fields (plan §Acceptance Scenes and
-# Evidence; CHK070): scene_id, stable case_id, validator identity, expected
-# result, and observed result. The writer refuses any record missing one.
-MANDATORY_EVIDENCE_FIELDS = ("scene_id", "case_id", "validator", "expected", "observed")
-
-
-class EvidenceError(AssertionError):
-    """An aggregate evidence record violates the mandatory-field shape."""
-
-
-def enforce_evidence_record(record: Any, context: str) -> None:
-    """Refuse any aggregate evidence record missing a mandatory field."""
-    if not isinstance(record, dict):
-        raise EvidenceError(f"{context}: evidence record must be an object")
-    missing = [
-        field
-        for field in MANDATORY_EVIDENCE_FIELDS
-        if not isinstance(record.get(field), str) or not record.get(field)
-    ]
-    if missing:
-        raise EvidenceError(
-            f"{context}: evidence record is missing mandatory field(s) "
-            f"{missing}; every aggregate JSONL record must carry all of "
-            f"{list(MANDATORY_EVIDENCE_FIELDS)}"
-        )
-
-
-def verify_evidence_file(path: Path) -> int:
-    """Enforce the mandatory shape on every record of one landed evidence
-    file, returning the number of records verified."""
-    count = 0
-    with path.open(encoding="utf-8") as handle:
-        for line_number, raw_line in enumerate(handle, start=1):
-            raw_line = raw_line.strip()
-            if not raw_line:
-                continue
-            record = json.loads(raw_line)
-            enforce_evidence_record(record, f"{path.name}:{line_number}")
-            count += 1
-    if count == 0:
-        raise EvidenceError(f"{path.name}: evidence file contains no records")
-    return count
-
-
-def verify_evidence() -> int:
-    """Re-verify every landed aggregate evidence file (T021)."""
-    status = 0
-    for filename in EVIDENCE_FILES.values():
-        path = EVIDENCE_DIR / filename
-        try:
-            count = verify_evidence_file(path)
-        except (OSError, ValueError, EvidenceError) as failure:
-            print(f"{filename}: FAIL — {failure}", file=sys.stderr)
-            status = 1
-        else:
-            print(f"{filename}: {count} records carry all mandatory fields")
-    return status
-
-
-def evidence_records(corpus: str, oracle_validators: dict[str, Any]) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    for case in load_corpus(corpus):
-        observed_oracle = oracle_verdict(case, oracle_validators)
-        expected_oracle = oracle_expectation(case)
-        observed_adapter = adapter_verdict(case)
-        records.append(
-            {
-                "case_id": case.case_id,
-                "scene_id": case.scene_id,
-                "title": case.title,
-                "partition": case.partition,
-                "validator": ORACLE_VALIDATOR_ID,
-                "expected": expected_oracle,
-                "observed": observed_oracle,
-                "match": observed_oracle == expected_oracle,
-            }
-        )
-        records.append(
-            {
-                "case_id": case.case_id,
-                "scene_id": case.scene_id,
-                "title": case.title,
-                "partition": case.partition,
-                "validator": ADAPTER_VALIDATOR_ID,
-                "expected": case.expected,
-                "observed": observed_adapter,
-                "match": observed_adapter == case.expected,
-            }
-        )
-    return records
-
-
-def write_evidence() -> int:
-    available, detail = oracle_status()
-    if not available:
-        print(
-            "evidence writer requires the pinned oracle; run it through the "
-            f"pinned offline command ({detail})",
-            file=sys.stderr,
-        )
-        return 1
-    oracle_validators = build_oracle_validators()
-    EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
-    failures = 0
-    for corpus, filename in EVIDENCE_FILES.items():
-        records = evidence_records(corpus, oracle_validators)
-        for record in records:
-            enforce_evidence_record(record, f"{filename} ({record.get('case_id')})")
-        path = EVIDENCE_DIR / filename
-        with path.open("w", encoding="utf-8") as handle:
-            for record in records:
-                handle.write(json.dumps(record, sort_keys=True) + "\n")
-        mismatched = [record for record in records if not record["match"]]
-        failures += len(mismatched)
-        print(
-            f"{path.relative_to(REPO_ROOT)}: {len(records)} records "
-            f"({len(mismatched)} mismatched)"
-        )
-        for record in mismatched:
-            print(
-                f"  MISMATCH {record['case_id']} [{record['validator']}] "
-                f"expected={record['expected']} observed={record['observed']}",
-                file=sys.stderr,
-            )
-    return 1 if failures else 0
-
-
-# ---------------------------------------------------------------------------
-# Control-plane read boundary (CHK076): the suite and corpus embed their own
-# copy of the FR-012 class vocabulary and never read a SpecKit-managed file
+# Control-plane read boundary (CHK076): the contract tests never read a
+# SpecKit-managed file
 # ---------------------------------------------------------------------------
 
 TESTS_DIR = REPO_ROOT / "tests" / "v2" / "contract"
@@ -3128,9 +2573,9 @@ TESTS_DIR = REPO_ROOT / "tests" / "v2" / "contract"
 
 def scan_control_plane_references(
     prefixes: tuple[str, ...],
-    roots: tuple[Path, ...] = (TESTS_DIR, EVALS_DIR),
+    roots: tuple[Path, ...] = (TESTS_DIR,),
 ) -> list[str]:
-    """Scan the test and corpus trees for control-plane path references.
+    """Scan the contract test tree for control-plane path references.
 
     Returns ``path:line: content`` for every line under ``roots`` whose
     text contains one of the forbidden ``prefixes``. The covering test owns
@@ -3154,8 +2599,8 @@ def scan_control_plane_references(
 
 
 # ---------------------------------------------------------------------------
-# Deterministic fixture factories (used by the inline red/green tests and by
-# corpus authoring; every factory returns a fresh deep copy)
+# Deterministic fixture factories (used by the inline red/green tests; every
+# factory returns a fresh deep copy)
 # ---------------------------------------------------------------------------
 
 _BASE_REQUEST = {
@@ -3619,8 +3064,7 @@ def make_receipt_stream(upto: int = 4) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# unittest support: shared oracle cache, dual-verdict assertion, and the
-# corpus-runner mixin used by the four contract suites
+# unittest support: shared oracle cache and the dual-verdict assertion
 # ---------------------------------------------------------------------------
 
 _SHARED_ORACLE: dict[str, Any] | None = None
@@ -3638,8 +3082,7 @@ def assert_schema_verdict(testcase: Any, schema_name: str, doc: Any, expected: s
     """Assert one schema-expressible document verdict on both validators.
 
     The stdlib adapter always runs; the oracle side runs only when the
-    pinned oracle is available (its absence is the counted
-    baseline-oracle-absence regime, surfaced by the corpus suites).
+    pinned oracle is available.
     """
     errors = DOCUMENT_VALIDATORS[schema_name](doc)
     verdict = "invalid" if errors else "valid"
@@ -3656,120 +3099,3 @@ def assert_schema_verdict(testcase: Any, schema_name: str, doc: Any, expected: s
             oracle_ok,
             f"Draft 2020-12 oracle disagrees with expected {expected!r} for {schema_name}",
         )
-
-
-class ContractCorpusMixin:
-    """The corpus runner: mixed into one unittest.TestCase per corpus."""
-
-    CORPUS = ""
-    REQUIRED_SCENES: frozenset[str] = frozenset()
-
-    @classmethod
-    def setUpClass(cls) -> None:  # noqa: N802 (unittest API)
-        cls.cases = load_corpus(cls.CORPUS)
-        cls.oracle_available, cls.oracle_detail = oracle_status()
-
-    def test_corpus_covers_its_required_scenes(self):
-        scenes = {case.scene_id for case in self.cases}
-        missing = self.REQUIRED_SCENES - scenes
-        self.assertFalse(
-            missing,
-            f"corpus {self.CORPUS!r} is missing required scene coverage: {sorted(missing)}",
-        )
-
-    def test_runtime_adapter_matches_expected_verdicts(self):
-        for case in self.cases:
-            with self.subTest(case_id=case.case_id, scene=case.scene_id, partition=case.partition):
-                errors = adapter_errors(case)
-                verdict = "invalid" if errors else "valid"
-                self.assertEqual(
-                    case.expected,
-                    verdict,
-                    f"stdlib adapter: {errors or 'no errors'} — {case.title}",
-                )
-
-    def test_oracle_matches_fixed_partition_expectations(self):
-        if not self.oracle_available:
-            skipped = oracle_visible_count(self.cases)
-            self.skipTest(
-                f"{BASELINE_ORACLE_ABSENCE}: {skipped} oracle-side check(s) "
-                f"skipped ({self.oracle_detail}); the pinned offline command "
-                "is the sole complete dual-validator run"
-            )
-        validators = shared_oracle_validators()
-        for case in self.cases:
-            with self.subTest(case_id=case.case_id, scene=case.scene_id, partition=case.partition):
-                self.assertEqual(
-                    oracle_expectation(case),
-                    oracle_verdict(case, validators),
-                    f"Draft 2020-12 oracle verdict diverged — {case.title}",
-                )
-
-    def test_valid_documents_preserve_semantic_fields(self):
-        checked = 0
-        for case in self.cases:
-            payload = case_payload_for_preservation(case)
-            if payload is None:
-                continue
-            checked += 1
-            with self.subTest(case_id=case.case_id):
-                self.assertIsNone(preservation_failure(*payload), case.title)
-        self.assertGreater(checked, 0, "no valid single-document case exercised SC-002")
-
-    def test_skip_regimes_are_separately_named_and_counted(self):
-        counts = load_expected_counts(self.CORPUS)
-        pinned_class_skips = sum(
-            counts[klass]["valid"] + counts[klass]["invalid"] for klass in ORACLE_SKIP_CLASSES
-        )
-        observed_class_skips = class_skip_count(self.cases)
-        self.assertEqual(
-            pinned_class_skips,
-            observed_class_skips,
-            f"{ORACLE_CLASS_SKIP} count must match the authoritative per-class counts",
-        )
-        oracle_side = oracle_visible_count(self.cases)
-        self.assertEqual(
-            len(self.cases),
-            observed_class_skips + oracle_side,
-            "every case is either oracle-visible or an explicit class skip",
-        )
-        baseline_absence_skips = 0 if self.oracle_available else oracle_side
-        if self.oracle_available:
-            self.assertEqual(
-                0,
-                baseline_absence_skips,
-                f"{BASELINE_ORACLE_ABSENCE} skips must be zero under the pinned command",
-            )
-        else:
-            self.assertEqual(
-                oracle_side,
-                baseline_absence_skips,
-                f"{BASELINE_ORACLE_ABSENCE} must count every oracle-visible check",
-            )
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument(
-        "--write-evidence",
-        action="store_true",
-        help="run the corpus through both validators and write the aggregate "
-        "JSONL evidence records under evidence/v2/contract/",
-    )
-    parser.add_argument(
-        "--verify-evidence",
-        action="store_true",
-        help="re-verify every landed aggregate evidence file against the "
-        "mandatory five-field record shape (T021/CHK070)",
-    )
-    args = parser.parse_args(argv)
-    if args.write_evidence:
-        return write_evidence()
-    if args.verify_evidence:
-        return verify_evidence()
-    parser.print_help()
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

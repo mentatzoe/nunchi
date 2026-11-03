@@ -14,7 +14,6 @@ from copy import deepcopy
 import unittest
 
 from tests.v2.contract.schema_helpers import (
-    ContractCorpusMixin,
     assert_schema_verdict,
     make_approval_challenge,
     make_approval_completion,
@@ -23,11 +22,6 @@ from tests.v2.contract.schema_helpers import (
     make_authorization_request,
     validate_privileged_action_authorization_flow,
 )
-
-
-class PrivilegedActionAuthorizationCorpusSuite(ContractCorpusMixin, unittest.TestCase):
-    CORPUS = "privileged-action-authorization"
-    REQUIRED_SCENES = frozenset({"S18"})
 
 
 class AuthorizationShapeCases(unittest.TestCase):

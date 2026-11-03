@@ -1,4 +1,6 @@
-"""Shared Discord transport helpers for current library consumers.
+"""Obsolete: part of the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Do not extend it or build on it.
+
+Shared Discord transport helpers for current library consumers.
 
 `integrations/mcp-discord/README.md` describes the current transport: verify
 the pinned binding, submit through the authenticated session, and report `sent`

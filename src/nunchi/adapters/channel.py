@@ -1,4 +1,6 @@
-"""Installed generic V2 JSONL host adapter."""
+"""Obsolete: part of the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Do not extend it or build on it.
+
+Installed generic V2 JSONL host adapter."""
 
 from __future__ import annotations
 

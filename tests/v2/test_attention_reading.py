@@ -1,4 +1,6 @@
-"""Attention's reading of the room reaches the agent on every turn it takes.
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+Attention's reading of the room reaches the agent on every turn it takes.
 
 Agreed, 2026-10-05 (#94, plan step 2): the reading goes with WAKE and DEFER
 turns, it describes rather than orders, and a bad or empty reading never

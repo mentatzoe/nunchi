@@ -1,4 +1,6 @@
-"""The participant-turn protocol for hosts whose participant acts through tools.
+"""Obsolete: tests the design under architecture review, in which Nunchi runs the agent's turn and sends for it. Not a requirement for the new design.
+
+The participant-turn protocol for hosts whose participant acts through tools.
 
 What the participant sees, which actions exist, and how one tool call becomes
 one core action belong to the core.  A host only chooses the names its tools
